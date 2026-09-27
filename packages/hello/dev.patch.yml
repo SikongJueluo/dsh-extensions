@@ -1,5 +1,0 @@
-# Development overlay (see README "开发循环"): loads the locally built plugin
-# entry by absolute path. Rebuild first (`pnpm build`) so lib/ is current.
-- insert:
-    - id: hello
-      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/hello/lib/index.js'
