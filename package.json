@@ -1,0 +1,19 @@
+{
+  "name": "dsh-extensions",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Out-of-tree DeepSeek Harness plugin bundles",
+  "packageManager": "pnpm@12.3.4",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "check": "pnpm run typecheck && pnpm run build",
+    "clean": "pnpm -r run clean"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsdown": "^0.23.0",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+lib/
+*.tsbuildinfo
+
+# pack output
+*.tgz
+
+# local smoke-test harness home (see README "验证安装")
+.smoke-dsh-home/
+
+# editor / OS
+.DS_Store

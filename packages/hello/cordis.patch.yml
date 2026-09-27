@@ -1,0 +1,11 @@
+# dsh-hello bundle layer.
+#
+# One insert over whatever earlier layers defined. `name` is the npm package
+# name, so Node module resolution finds the installed code in the booted
+# profile's node_modules (or the linked checkout during development).
+# Users can override this row later (by id `hello`) in their profile's own
+# cordis.patch.yml — a patch replaces the row's whole `config`, so an
+# override must restate every key it needs.
+- insert:
+    - id: hello
+      name: dsh-hello
