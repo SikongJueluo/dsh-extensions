@@ -41,16 +41,30 @@ dsh plugin --profile <你的profile> add ./packages/oauth-providers
 凭据不落 settings 文档、不进仓库；凭据商店文件（默认
 `$DSH_HOME/.credentials.yaml`）请勿提交。
 
-## 配置（每厂商一个 settings 命名空间，如 `oauth-providers-chatgpt`）
+## 配置
+
+设置页的卡片刻意极简：状态、登录/退出、模型列表，没有配置表单。出站网络
+直接走 dsh 进程的网络（标准 env/系统代理自动探测仍生效，无需配置）；
+reasoning 档位在模型选择器里按请求选择。
+
+模型列表**全程联网、零手工维护**：每次都从 ChatGPT 后端 `/models` 实时拉取
+（2 小时缓存）。后端按上报的客户端版本放行新模型（如 GPT-6 需要新版），因此
+上报的 client version 也从网络解析：npm registry 上最新发布的
+`@openai/codex`（同样 2 小时缓存，版本变化立即失效模型缓存），离线时回退内置
+快照 `0.157.1`。新模型上线后最多 2 小时自动出现，点「刷新模型」立即拉取。
+
+每厂商仍保留一个 settings 命名空间（如 `oauth-providers-chatgpt`），供组合层
+（cordis patch 的行 config）覆盖内部默认，无 UI：
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `baseURL` | `https://chatgpt.com/backend-api/codex` | ChatGPT 后端（Responses API）地址 |
-| `clientVersion` | `0.146.0` | `/models` 端点上报的客户端版本 |
-| `proxyUrl` | 自动探测（env / 系统代理） | 出站代理 |
-| `defaultReasoningEffort` | `high` | 请求未指定时的 reasoning 档位 |
+| `clientVersion` | 自动（npm 最新 `@openai/codex`） | 上报给后端的客户端版本；仅需要钉版时设置 |
 | `refreshMarginMs` | `86400000`（24h） | 距过期多久时刷新令牌 |
 | `defaultContextWindow` | `272000` | 后端未披露时的回退上下文窗口 |
+
+登录记录的写入/删除会以 `llm/adapters-updated` 通知所有已打开的模型选择器
+刷新目录（stock 界面只监听 API-key 引用更新，不覆盖授权记录）。
 
 ## 架构
 

@@ -38,22 +38,15 @@ window.__ModuleLoader__.load({
       statusHttpError: "Backend error: {detail}",
       statusModelsError: "Cannot load the model catalog: {detail}",
       statusCheckError: "Status check failed: {detail}",
-      checkStatus: "Check status",
+      refresh: "Refresh",
       signIn: "Sign in",
       signOut: "Sign out",
       openBrowser: "Open browser",
-      refreshModels: "Refresh models",
       working: "Working…",
       signinTitle: "Sign in",
       pasteLabel: "If the browser cannot redirect back, paste the redirected URL or the code here:",
       submit: "Submit",
       abandon: "Cancel sign-in",
-      config: "Configuration",
-      save: "Save configuration",
-      saving: "Saving…",
-      saved: "Saved.",
-      saveFailed: "Save failed: {detail}",
-      signinAuthorized: "Signed in. Refreshing models…",
       signinCancelled: "Sign-in cancelled.",
       signinFailed: "Sign-in failed: {detail}"
     };
@@ -75,33 +68,17 @@ window.__ModuleLoader__.load({
       statusHttpError: "后端返回错误：{detail}",
       statusModelsError: "无法读取模型目录：{detail}",
       statusCheckError: "状态检测失败：{detail}",
-      checkStatus: "检测状态",
+      refresh: "刷新",
       signIn: "登录",
       signOut: "退出登录",
       openBrowser: "打开浏览器",
-      refreshModels: "刷新模型",
       working: "进行中…",
       signinTitle: "登录",
       pasteLabel: "若浏览器无法重定向回本机，请把跳转后的 URL 或授权码粘贴到这里：",
       submit: "提交",
       abandon: "取消登录",
-      config: "配置",
-      save: "保存配置",
-      saving: "保存中…",
-      saved: "已保存。",
-      saveFailed: "保存失败：{detail}",
-      signinAuthorized: "登录成功，正在刷新模型…",
       signinCancelled: "已取消登录。",
       signinFailed: "登录失败：{detail}"
-    };
-
-    // The config form's fields, per provider id. A new provider module adds
-    // its entry here (its settings namespace carries the values).
-    var FIELDS = {
-      chatgpt: [
-        { key: "proxyUrl", label: "proxyUrl", type: "text", placeholder: "" },
-        { key: "defaultReasoningEffort", label: "defaultReasoningEffort", type: "select", options: ["low", "medium", "high", "xhigh", "max", "ultra", "off"] }
-      ]
     };
 
     // Classify a wire/error message into an i18n key (+ params) or raw text.
@@ -232,19 +209,9 @@ window.__ModuleLoader__.load({
       var _m = React.useState([]);
       var models = _m[0];
       var setModels = _m[1];
-      var _c = React.useState({});
-      var draft = _c[0];
-      var setDraft = _c[1];
-      var revisionRef = React.useRef(undefined);
       var _b = React.useState(false);
       var busy = _b[0];
       var setBusy = _b[1];
-      var _sv = React.useState(false);
-      var saving = _sv[0];
-      var setSaving = _sv[1];
-      var _msg = React.useState(null);
-      var saveMsg = _msg[0];
-      var setSaveMsg = _msg[1];
       var _au = React.useState(null);
       var auth = _au[0];
       var setAuth = _au[1];
@@ -252,26 +219,6 @@ window.__ModuleLoader__.load({
       var paste = _pa[0];
       var setPaste = _pa[1];
       var aliveRef = React.useRef(true);
-
-      var fields = FIELDS[id] || [];
-
-      function loadConfig() {
-        return operations.describeSettings().then(function (result) {
-          if (!result.ok) return;
-          var namespaces = (result.value && result.value.namespaces) || [];
-          for (var i = 0; i < namespaces.length; i++) {
-            var ns = namespaces[i];
-            if (ns.ns === provider.settingsNs) {
-              revisionRef.current = ns.revision;
-              var value = ns.value || {};
-              var next = {};
-              for (var j = 0; j < fields.length; j++) next[fields[j].key] = typeof value[fields[j].key] === "string" ? value[fields[j].key] : "";
-              setDraft(next);
-              break;
-            }
-          }
-        });
-      }
 
       // Passive status from the shared catalog: groups carry models, failures carry reasons.
       function checkStatus() {
@@ -304,7 +251,6 @@ window.__ModuleLoader__.load({
       // Active refresh: llm.discoverModels probes the sign-in and force-fetches models.
       function discover() {
         setBusy(true);
-        setSaveMsg(null);
         setStatus({ kind: "loading" });
         return operations.discoverModels(provider.settingsNs, id).then(function (result) {
           if (result.ok) {
@@ -337,7 +283,6 @@ window.__ModuleLoader__.load({
               return;
             }
             if (v.done && v.done.status === "authorized") {
-              setSaveMsg({ key: "signinAuthorized" });
               discover();
               props.refreshProviders();
             }
@@ -382,40 +327,9 @@ window.__ModuleLoader__.load({
         });
       }
 
-      function save() {
-        setSaving(true);
-        setSaveMsg(null);
-        var patch = {};
-        for (var i = 0; i < fields.length; i++) {
-          var raw = draft[fields[i].key];
-          if (raw !== "" && raw != null) patch[fields[i].key] = raw;
-        }
-        return operations.updateSettings(provider.settingsNs, patch, revisionRef.current).then(function (result) {
-          if (result.ok) {
-            var view = result.value;
-            if (view && typeof view.revision === "number") revisionRef.current = view.revision;
-            setSaveMsg({ key: "saved" });
-          } else {
-            setSaveMsg({ key: "saveFailed", params: { detail: result.error ? result.error.message : "" } });
-          }
-        }).catch(function (err) {
-          setSaveMsg({ key: "saveFailed", params: { detail: err && err.message ? err.message : err } });
-        }).finally(function () {
-          setSaving(false);
-        });
-      }
-
-      function setField(key, value) {
-        setDraft(function (prev) {
-          var next = Object.assign({}, prev);
-          next[key] = value;
-          return next;
-        });
-      }
-
       React.useEffect(function () {
         aliveRef.current = true;
-        loadConfig().then(checkStatus);
+        checkStatus();
         return function () {
           aliveRef.current = false;
         };
@@ -429,11 +343,14 @@ window.__ModuleLoader__.load({
       var notice = auth && auth.notice;
       var prompt = auth && auth.prompt;
 
+      var refreshButton = running
+        ? null
+        : React.createElement("button", { type: "button", onClick: discover, disabled: busy, style: btnStyle(provider.signedIn || status.kind === "ok") }, busy ? t("working") : t("refresh"));
       var primaryButton;
       if (running) {
         primaryButton = React.createElement("button", { type: "button", disabled: true, style: btnStyle(true) }, t("working"));
       } else if (provider.signedIn || status.kind === "ok") {
-        primaryButton = React.createElement("button", { type: "button", onClick: discover, disabled: busy, style: btnStyle(true) }, busy ? t("working") : t("refreshModels"));
+        primaryButton = refreshButton;
       } else {
         primaryButton = React.createElement("button", { type: "button", onClick: startSignIn, style: btnStyle(true) }, t("signIn"));
       }
@@ -445,7 +362,7 @@ window.__ModuleLoader__.load({
           React.createElement("span", { style: cssDot(dotColor) }),
           React.createElement("span", { style: { flex: 1, fontSize: 13, lineHeight: "20px", color: "var(--dsw-alias-label-secondary)" } }, statusText(t, status)),
           provider.signedIn ? React.createElement("button", { type: "button", onClick: signOut, style: btnStyle(false) }, t("signOut")) : null,
-          React.createElement("button", { type: "button", onClick: checkStatus, style: btnStyle(false) }, t("checkStatus")),
+          primaryButton === refreshButton ? null : refreshButton,
           primaryButton
         ),
 
@@ -470,7 +387,7 @@ window.__ModuleLoader__.load({
           )
         ) : null,
 
-        React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: fields.length > 0 ? 12 : 0 } },
+        React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 0 } },
           models.map(function (m) {
             return React.createElement("span", {
               key: m.id,
@@ -479,29 +396,6 @@ window.__ModuleLoader__.load({
           })
         ),
 
-        fields.length > 0 ? React.createElement("div", null,
-          React.createElement("div", { style: { fontSize: 12, fontWeight: 600, lineHeight: "18px", marginBottom: 8, color: "var(--dsw-alias-label-secondary)" } }, t("config")),
-          React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
-            fields.map(function (f) {
-              var input;
-              if (f.type === "select") {
-                input = React.createElement("select", { value: draft[f.key] || "", onChange: function (e) { setField(f.key, e.target.value); }, style: inputStyle() },
-                  (f.options || []).map(function (o) { return React.createElement("option", { key: o, value: o }, o); })
-                );
-              } else {
-                input = React.createElement("input", { type: f.type, value: draft[f.key] || "", placeholder: f.placeholder || "", onChange: function (e) { setField(f.key, e.target.value); }, style: inputStyle() });
-              }
-              return React.createElement("div", { key: f.key, style: { display: "flex", flexDirection: "column", gap: 4 } },
-                React.createElement("span", { style: { fontSize: 12, lineHeight: "18px", color: "var(--dsw-alias-label-secondary)" } }, f.label),
-                input
-              );
-            })
-          ),
-          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginTop: 12 } },
-            React.createElement("button", { type: "button", onClick: save, disabled: saving, style: btnStyle(true) }, saving ? t("saving") : t("save")),
-            saveMsg ? React.createElement("span", { style: { fontSize: 12, lineHeight: "18px", color: saveMsg.key === "saveFailed" ? "var(--dsw-alias-state-error-primary)" : "var(--dsw-alias-state-success-primary)" } }, t(saveMsg.key, saveMsg.params || {})) : null
-          )
-        ) : null
       );
     }
 
@@ -541,10 +435,8 @@ window.__ModuleLoader__.load({
       // Host operations stay in the apply world; the section and its cards only
       // receive these bound callbacks plus the localized string binder.
       var operations = {
-        describeSettings: function () { return ctx.remote.settings.describe(); },
         modelCatalog: function () { return ctx.remote.session.modelCatalog(); },
-        discoverModels: function (ns, provider) { return ctx.remote.llm.discoverModels(ns, { provider: provider }); },
-        updateSettings: function (ns, patch, expectedRevision) { return ctx.remote.settings.update(ns, patch, expectedRevision); }
+        discoverModels: function (ns, provider) { return ctx.remote.llm.discoverModels(ns, { provider: provider }); }
       };
       ctx.slots.inject("settings.section", function () {
         return ctx.slots.register({
@@ -560,7 +452,7 @@ window.__ModuleLoader__.load({
     }
 
     exports.apply = apply;
-    exports.inject = ["slots", "locale", "remote", "remote.llm", "remote.session", "remote.settings"];
+    exports.inject = ["slots", "locale", "remote", "remote.llm", "remote.session"];
     return module.exports;
   }
 });

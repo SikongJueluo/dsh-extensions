@@ -25,8 +25,9 @@ import type {
   AuthorizationNotice,
   AuthorizationPrompt,
 } from '@deepseek-ai/dsh-authorization'
+import { credentialKeyScope } from '@deepseek-ai/dsh-credentials'
 import type { CredentialKey } from '@deepseek-ai/dsh-credentials'
-import { RPC_CHANNEL } from './identity.js'
+import { PLUGIN_NAME, RPC_CHANNEL } from './identity.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 /** One endpoint segment of the channel (same grammar as connection RPC). */
@@ -96,6 +97,16 @@ function field(payload: unknown, name: string): string | undefined {
  */
 export function registerAuthChannel(ctx: Context): AuthChannel {
   const providers = new Map<string, ProviderEntry>()
+
+  // A sign-in record changing flips what listModels returns for its provider
+  // (failure ↔ models), which is exactly the provider-topology fact every
+  // open selector refreshes on. The stock surfaces listen for adapter and
+  // API-key-reference updates only, so a record committed by an authorization
+  // flow would otherwise leave a stale failure in each already-open model
+  // picker until a full page reload.
+  ctx.on('credentials/record-updated', (key: CredentialKey) => {
+    if (credentialKeyScope(key) === PLUGIN_NAME) ctx.emit('llm/adapters-updated')
+  })
 
   const interactionOf = (entry: ProviderEntry): AuthorizationInteraction => ({
     notify: (notice) => {

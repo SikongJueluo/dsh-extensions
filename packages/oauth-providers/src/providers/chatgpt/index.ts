@@ -29,25 +29,23 @@ export const CREDENTIAL_KEY = credentialKey(PLUGIN_NAME, CREDENTIAL_ID)
 
 /** ChatGPT codex backend base URL (Responses API). */
 export const DEFAULT_BASE_URL = 'https://chatgpt.com/backend-api/codex'
-export const DEFAULT_CLIENT_VERSION = '0.146.0'
 export const DEFAULT_CONTEXT_WINDOW = 272000
 
-/** Reasoning effort vocabulary shared by the ChatGPT backend. */
+/** Reasoning effort vocabulary shared by the ChatGPT backend (selectable per request). */
 export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'off'] as const
 
-/** One entry of {@link REASONING_EFFORTS}. */
-export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
-
-/** Config shape validated by the {@link ChatGptConfig} schema (row config and settings section). */
+/**
+ * Config shape validated by the {@link ChatGptConfig} schema (row config and
+ * settings section). Deliberately minimal: outbound networking rides the
+ * process network with standard proxy auto-detection, and the default
+ * reasoning effort is fixed — per-request effort stays selectable in the
+ * model picker.
+ */
 export interface ChatGptConfig {
   /** ChatGPT backend base URL for the Responses API. */
   baseURL?: string
-  /** Client version sent to the /models endpoint. */
+  /** Client version reported to the backend; absent = latest from npm. */
   clientVersion?: string
-  /** Outbound proxy URL (empty = auto-detect). */
-  proxyUrl?: string
-  /** Reasoning effort applied when a request does not name one. */
-  defaultReasoningEffort?: ReasoningEffort
   /** Refresh the OAuth grant when it is this close to expiry (ms). */
   refreshMarginMs?: number
   /** Fallback context window for models the backend does not describe. */
@@ -58,20 +56,14 @@ export interface ChatGptConfig {
 export interface ResolvedChatGptConfig {
   baseURL?: string
   clientVersion?: string
-  proxyUrl?: string
-  defaultReasoningEffort?: string
   refreshMarginMs?: number
   defaultContextWindow?: number
 }
 
 export const ChatGptConfig: Schema<ChatGptConfig> = Schema.object({
   baseURL: Schema.string().description('ChatGPT backend base URL for the Responses API.'),
-  clientVersion: Schema.string().description('Client version sent to the /models endpoint.'),
-  proxyUrl: Schema.string().description(
-    'Outbound proxy URL (empty = auto-detect from env / macOS, Windows, or Linux system proxy).',
-  ),
-  defaultReasoningEffort: Schema.union([...REASONING_EFFORTS]).description(
-    'Reasoning effort applied when a request does not name one.',
+  clientVersion: Schema.string().description(
+    'Client version reported to the backend (empty = latest published @openai/codex, fetched from npm).',
   ),
   refreshMarginMs: Schema.number().step(1).min(1).description(
     'Refresh the OAuth grant when it is this close to expiry (ms).',
@@ -84,11 +76,11 @@ export const ChatGptConfig: Schema<ChatGptConfig> = Schema.object({
 /** Fully-resolved connection facts (defaults applied and validated). */
 export interface ResolvedOptions {
   baseURL: string
-  clientVersion: string
-  proxyUrl?: string
-  defaultReasoningEffort: string
+  /** Explicit client-version override; undefined = derive from npm. */
+  clientVersion?: string
   refreshMarginMs: number
   defaultContextWindow: number
+  defaultReasoningEffort: string
   defaultReasoningEfforts: string[]
 }
 
@@ -97,7 +89,6 @@ export interface ResolvedOptions {
  * and bound is re-judged here so a settings edit fails loudly at first use.
  */
 export function resolveAdapterOptions(config: ResolvedChatGptConfig = {}): ResolvedOptions {
-  const defaultReasoningEffort = config.defaultReasoningEffort ?? 'high'
   const refreshMarginMs = config.refreshMarginMs ?? DEFAULT_REFRESH_MARGIN_MS
   if (!Number.isFinite(refreshMarginMs) || refreshMarginMs <= 0) {
     throw new Error(`${PACKAGE_NAME}/chatgpt: refreshMarginMs must be a positive number`)
@@ -106,16 +97,12 @@ export function resolveAdapterOptions(config: ResolvedChatGptConfig = {}): Resol
   if (!Number.isInteger(defaultContextWindow) || defaultContextWindow <= 0) {
     throw new Error(`${PACKAGE_NAME}/chatgpt: defaultContextWindow must be a positive integer`)
   }
-  if (!(REASONING_EFFORTS as readonly string[]).includes(defaultReasoningEffort)) {
-    throw new Error(`${PACKAGE_NAME}/chatgpt: unknown defaultReasoningEffort "${defaultReasoningEffort}"`)
-  }
   return {
     baseURL: (config.baseURL ?? DEFAULT_BASE_URL).replace(/\/+$/, ''),
-    clientVersion: config.clientVersion ?? DEFAULT_CLIENT_VERSION,
-    proxyUrl: config.proxyUrl || undefined,
-    defaultReasoningEffort,
+    clientVersion: config.clientVersion || undefined,
     refreshMarginMs,
     defaultContextWindow,
+    defaultReasoningEffort: 'high',
     defaultReasoningEfforts: [...DEFAULT_REASONING_EFFORTS],
   }
 }
@@ -153,9 +140,10 @@ export function registerChatGpt(ctx: Context, { channel, base = {} }: RegisterCh
 
   log.info('loaded (provider=%s, baseURL=%s)', PROVIDER, options().baseURL)
 
-  // Proxy-aware fetch, resolved once on first use.
+  // Proxy-aware fetch, resolved once on first use: explicit config is gone,
+  // standard environment / system-proxy detection still applies.
   let fetchPromise: Promise<FetchLike> | undefined
-  const getFetch = (): Promise<FetchLike> => (fetchPromise ??= createFetch(options().proxyUrl))
+  const getFetch = (): Promise<FetchLike> => (fetchPromise ??= createFetch())
   const fetchVia: FetchLike = async (url, init) => (await getFetch())(url, init)
 
   const tokenStore = new TokenStore({
