@@ -22,11 +22,14 @@ import type {} from '@deepseek-ai/dsh-authorization'
 import type {} from '@deepseek-ai/dsh-credentials'
 import Schema from '@deepseek-ai/schemastery'
 import { registerAuthChannel } from './channel.js'
+import { OAuthProvidersService } from './service.js'
 import { ChatGptConfig, registerChatGpt } from './providers/chatgpt/index.js'
 import type { ChatGptConfig as ChatGptConfigShape } from './providers/chatgpt/index.js'
 import { PACKAGE_NAME, PLUGIN_NAME, RPC_CHANNEL } from './identity.js'
 
 export { PACKAGE_NAME, PLUGIN_NAME, RPC_CHANNEL } from './identity.js'
+export { OAuthProvidersService } from './service.js'
+export type { OAuthToken, TokenResolver } from './service.js'
 export {
   PROVIDER as CHATGPT_PROVIDER,
   SETTINGS_NAMESPACE as CHATGPT_SETTINGS_NAMESPACE,
@@ -52,5 +55,6 @@ export const Config: Schema<Config> = Schema.object({
 export function apply(ctx: Context, config: Config): void {
   ctx.logger(PACKAGE_NAME).info('loaded')
   const channel = registerAuthChannel(ctx)
-  registerChatGpt(ctx, { channel, base: config.chatgpt ?? {} })
+  const tokens = new OAuthProvidersService(ctx)
+  registerChatGpt(ctx, { channel, tokens, base: config.chatgpt ?? {} })
 }

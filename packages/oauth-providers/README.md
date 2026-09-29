@@ -10,6 +10,11 @@
 厂商账号授权后自动回调；回调不可达（远程主机等）时把跳转 URL 或授权码粘贴回
 设置页即可。**无需 API Key，无需任何厂商 CLI。**
 
+v0.4 起插件额外提供 **`oauthProviders` 宿主服务**：`ctx.get('oauthProviders')`
+→ `token(provider)` 返回带自动刷新轮换的可用 access token（当前支持
+`chatgpt`）。供其他插件调用厂商自有后端 API——如 dsh-plan-usage 的 OpenAI
+用量查询；未登录/刷新失败返回 `undefined`，不抛错。
+
 命名保持通用（包 `dsh-oauth-providers`、插件行 `oauth-providers`）：将来 DSH
 内置了对应的官方 provider，删掉对应厂商模块（或整个包）即可，不留残留。
 `chatgpt` 这个路由名同样中性——`openai` / `openai-codex` 已被 DSH 自带的

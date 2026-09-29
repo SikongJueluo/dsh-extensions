@@ -15,6 +15,7 @@ import { DEFAULT_REFRESH_MARGIN_MS, TokenStore } from './auth.js'
 import { DEFAULT_REASONING_EFFORTS, ModelCatalog } from './catalog.js'
 import { createDiscovery } from './discovery.js'
 import { registerChatGptSignIn } from './login.js'
+import type { OAuthProvidersService } from '../../service.js'
 import { PACKAGE_NAME, PLUGIN_NAME } from '../../identity.js'
 import { CREDENTIAL_ID, DISPLAY_NAME, PROVIDER, SETTINGS_NAMESPACE } from './identity.js'
 import type { AuthChannel } from '../../channel.js'
@@ -111,10 +112,12 @@ export interface RegisterChatGptDeps {
   channel: AuthChannel
   /** Composition-entry base layer for the settings namespace. */
   base?: ResolvedChatGptConfig
+  /** Shared OAuth token service this module registers its resolver into. */
+  tokens?: OAuthProvidersService
 }
 
 /** Wire the ChatGPT provider: LLM route, catalog, token store, settings, sign-in. */
-export function registerChatGpt(ctx: Context, { channel, base = {} }: RegisterChatGptDeps): void {
+export function registerChatGpt(ctx: Context, { channel, tokens, base = {} }: RegisterChatGptDeps): void {
   const log = ctx.logger(`${PACKAGE_NAME}/chatgpt`)
   let current: () => ResolvedChatGptConfig = () => base
   let lastRaw: ResolvedChatGptConfig | undefined
@@ -152,6 +155,9 @@ export function registerChatGpt(ctx: Context, { channel, base = {} }: RegisterCh
     fetch: fetchVia,
     logger: ctx.logger,
   })
+  // Hand out fresh (refresh-rotated) tokens to host consumers that call the
+  // ChatGPT backend directly — quota monitors today.
+  tokens?.register(PROVIDER, () => tokenStore.resolve())
   const catalog = new ModelCatalog({ fetch: fetchVia, options })
   const adapter = new OpenAiOauthAdapter({ options, tokenStore, catalog, getFetch })
 
