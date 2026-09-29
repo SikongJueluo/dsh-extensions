@@ -18,6 +18,7 @@ import type {} from '@deepseek-ai/dsh-commands'
 import Schema from '@deepseek-ai/schemastery'
 import { COMMAND_NAME, DEFAULT_BRIEF_DIR, PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
 import { handoffCommandDefinition } from './command.js'
+import { registerHandoffChannel } from './channel.js'
 import type { HandoffRuntime } from './brief.js'
 
 export { PACKAGE_NAME, PLUGIN_NAME, COMMAND_NAME } from './identity.js'
@@ -37,6 +38,10 @@ export interface Config {
   pollMs?: number
   /** Ask the preset/model question before starting the handoff. */
   confirm?: boolean
+  /** Enumerate every provider/model route in the dialog (slow providers degrade to base options + custom input). */
+  modelMenu?: boolean
+  /** How long the browser model picker may stay open before the command gives up. */
+  pickTimeoutMs?: number
   /** On failure, queue a visible notice turn on the origin session. */
   notifyFailure?: boolean
   /** Brief truncation guard for the first prompt (chars). */
@@ -55,7 +60,13 @@ export const Config: Schema<Config> = Schema.object({
     .description('Brief file poll interval (ms).'),
   confirm: Schema.boolean()
     .default(true)
-    .description('Ask the preset/model question (and allow cancelling) before starting the handoff.'),
+    .description('Ask the model question (and allow cancelling) before starting the handoff.'),
+  modelMenu: Schema.boolean()
+    .default(true)
+    .description('Enumerate every provider/model route in the dialog; slow providers degrade to base options + custom input.'),
+  pickTimeoutMs: Schema.number().step(1).min(5000)
+    .default(120_000)
+    .description('How long the browser model picker may stay open before the command gives up (ms).'),
   notifyFailure: Schema.boolean()
     .default(true)
     .description('On failure, queue a visible notice turn on the origin session.'),
@@ -71,8 +82,10 @@ export function apply(ctx: Context, config: Config): void {
     maxBriefChars: config.maxBriefChars ?? 65_536,
     timeoutMs: config.timeoutMs ?? 300_000,
     pollMs: config.pollMs ?? 1000,
+    pickTimeoutMs: config.pickTimeoutMs ?? 120_000,
     notifyFailure: config.notifyFailure !== false,
     pending: new Map(),
+    channel: registerHandoffChannel(ctx),
   }
   ctx.commands.register(handoffCommandDefinition(rt))
   ctx.logger(PACKAGE_NAME).info('loaded', { dir: rt.config.dir })

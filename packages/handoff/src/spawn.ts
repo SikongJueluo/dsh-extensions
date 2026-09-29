@@ -36,7 +36,12 @@ function inheritAgentOptions(agent: Agent): AgentOptions | undefined {
 
 /** Resolve the agent options for the fresh session per the confirmed choice. */
 function resolveAgentOptions(ctx: Context, agent: Agent, choice: PendingHandoff['choice']): AgentOptions | undefined {
-  if (choice === 'default') {
+  if (choice.kind === 'model') {
+    // An explicit route switches the brain; effort/maxTokens stay with the
+    // target model's own defaults rather than the origin's.
+    return { provider: choice.provider, model: choice.model }
+  }
+  if (choice.kind === 'default') {
     const selection = ctx.get('agentDefaultModel')?.currentSelection()
     return selection === undefined ? undefined : { provider: selection.provider, model: selection.model }
   }
@@ -56,7 +61,10 @@ async function resolvePreset(
   const presets = ctx.get('agentPresets')
   if (presets === undefined) return {}
   try {
-    const from = choice === 'inherit' ? presets.composedPreset(agent.ctx) : undefined
+    // An explicit model switch keeps the current session's preset (same
+    // persona, different brain); only the global-default choice mounts the
+    // deployment default preset.
+    const from = choice.kind === 'default' ? undefined : presets.composedPreset(agent.ctx)
     const resolved = await presets.resolve(from)
     return {
       id: resolved.id,

@@ -22,3 +22,6 @@ export const COMPLETE_MARKER = '<!-- handoff:complete -->'
 
 /** Default brief directory, relative to the session's workspace cwd. */
 export const DEFAULT_BRIEF_DIR = '.dsh/handoff'
+
+/** This package's browser channel prefix (same envelope as the connection RPC carriers). */
+export const RPC_CHANNEL = '/dsh-handoff'

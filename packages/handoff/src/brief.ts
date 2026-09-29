@@ -10,10 +10,14 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Config } from './index.js'
 import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
+import type { HandoffChannel } from './channel.js'
 import { spawnHandoff } from './spawn.js'
 
-/** Which preset/model the fresh session should use. */
-export type PresetChoice = 'inherit' | 'default'
+/** Which model route the fresh session should use. */
+export type ModelChoice =
+  | { kind: 'inherit' }
+  | { kind: 'default' }
+  | { kind: 'model'; provider: string; model: string }
 
 /** One in-flight handoff, keyed by the origin agent's session id. */
 export interface PendingHandoff {
@@ -25,8 +29,8 @@ export interface PendingHandoff {
   readonly briefPath: string
   /** The verbatim task description from the command line. */
   readonly task: string
-  /** Preset/model resolution chosen in the confirmation dialog. */
-  readonly choice: PresetChoice
+  /** Model route chosen in the dialog or via --model; preset inheritance follows it. */
+  readonly choice: ModelChoice
   /** Epoch milliseconds when the command ran. */
   readonly startedAt: number
   /** Stops the watch (idempotent). Assigned by {@link startHandoffWatch}. */
@@ -43,9 +47,13 @@ export interface HandoffRuntime {
   readonly timeoutMs: number
   /** Resolved config derived once, in ms. */
   readonly pollMs: number
+  /** How long the browser's model picker may stay open before the command gives up (ms). */
+  readonly pickTimeoutMs: number
   readonly notifyFailure: boolean
   /** In-flight handoffs keyed by origin session id. */
   readonly pending: Map<string, PendingHandoff>
+  /** Browser pick channel; absent only when the composition has no connection/web server. */
+  readonly channel?: HandoffChannel
 }
 
 /** `20260928-153012` style slug for brief file names. */

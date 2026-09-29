@@ -1,5 +1,8 @@
 # Development overlay: the locally built plugin entry, by absolute path.
-# Rebuild first (`pnpm build`) so lib/ is current. Use with the global flag, e.g.
+# Rebuild first (`pnpm build`) so lib/ is current, then restart dsh and refresh
+# the page: the host half's client graph is built at boot, and the client
+# module scanner finds this package's `dsh.client` by walking up from the entry
+# file to packages/handoff/package.json. Use with the global flag, e.g.
 #   dsh --profile web --patch ./packages/handoff/dev.patch.yml --no-open --port <port>
 # (the `web` subcommand takes no parent flags; `--profile web` does).
 - insert:

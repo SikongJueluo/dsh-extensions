@@ -5,7 +5,7 @@ Out-of-tree [DeepSeek Harness](https://www.deepseek.com/harness/en/) 插件库 �
 当前包含四个 bundle：
 
 - `packages/oauth-providers`（`dsh-oauth-providers`）：**OAuth 认证的 LLM 厂商集合**——每厂商一个模块（当前：ChatGPT 订阅，路由 `chatgpt`），共享同一套 pi 风格登录（链接 → 浏览器授权 → 自动回调 / 粘贴回退），无需 API Key、无需任何厂商 CLI —— 覆盖了插件开发的完整要素（`name` / `inject` / Schemastery `Config` / `ctx.llm` 注册 provider/adapter/discovery / `ctx.settings` 设置节 / `ctx.authorization` 授权流 + `ctx.credentials` 凭据记录 / `ctx.webServer` 自有浏览器↔宿主通道 / `dsh.client` 浏览器半插件 + `settings.section` Slot UI / `ctx.logger`）；v0.4 起提供 `oauthProviders` 宿主服务（`token(provider)` 自动刷新，供 plan-usage 查 OpenAI 用量）。详见[包内 README](./packages/oauth-providers/README.md)。
-- `packages/handoff`（`dsh-handoff`）：**一条命令的会话交接**——`/handoff <任务>` 让当前会话写自包含简报（`.dsh/handoff/`），插件检测完成标记后经 `ctx.agents.create`（与 Web 新建会话同一工厂链路）起 session 并 `attachSession` 归入原 workspace 分组，简报即首条 prompt；`ctx.commands` 注册命令、`ctx.userQuestions` 确认卡片、`ctx.agentPresets`/`agentDefaultModel` 预设继承、`ctx.sessionTitle` 命名。详见[包内 README](./packages/handoff/README.md)。
+- `packages/handoff`（`dsh-handoff`）：**一条命令的会话交接**——`/handoff <任务>` 让当前会话写自包含简报（`.dsh/handoff/`），插件检测完成标记后经 `ctx.agents.create`（与 Web 新建会话同一工厂链路）起 session 并 `attachSession` 归入原 workspace 分组，简报即首条 prompt；模型经浏览器下拉选择（`shell.overlay` + `ctx.remote.session.modelCatalog()` 同 `/model` 数据源，`/dsh-handoff` 通道回传；无 Web half 时降级为 `ctx.userQuestions` 卡片）。`ctx.commands` 注册命令、`ctx.agentPresets`/`agentDefaultModel` 预设继承、`ctx.sessionTitle` 命名。详见[包内 README](./packages/handoff/README.md)。
 - `packages/plan-usage`（`dsh-plan-usage`）：**Coding 套餐配额查询（三源聚合）**——GLM（z.ai/bigmodel 监控 API）、OpenAI Codex（`wham/usage`，经 `oauthProviders` 服务取 OAuth token）、MiniMax（`token_plan/remains`，2049 自动翻区）三家的 5h/周窗口归一为 `planUsage` 宿主服务（统一消耗% + epoch 毫秒重置时间 + 窗口大小），**只显示本进程实际注册的路由**（GLM 别名家族收敛为一张卡），附设置页「Coding 套餐用量」分区（进度条 + 重置倒计时 + 实际窗口大小）；独立可用。详见[包内 README](./packages/plan-usage/README.md)。
 - `packages/auto-continue`（`dsh-auto-continue`）：**限额后自动续跑**——模型请求因套餐限额失败（`QUOTA`）时，在 `agent/request-error` waterfall 上接管恢复：经 `planUsage` 服务读重置点，睡到重置后**同 turn 原样重试失败的 step**（无 "continue" 消息、无额外 prompt token）；服务缺席则退化为阶梯探测。等待写 `llm/retry` 事件（Web 原生渲染倒计时）并持久化到 spool——**跨进程重启**：新实例认领记录，到点经 sessionController 冷启动会话发送续跑消息（护栏：预算过期清理/用户已接管放弃/忙碌重试）。详见[包内 README](./packages/auto-continue/README.md)。
 
@@ -40,18 +40,20 @@ dsh-extensions/
     │           ├── catalog.ts  # ChatGPT /models 模型目录（TTL 缓存）
     │           ├── discovery.ts # registerModelDiscovery 处理器
     │           └── serialize.ts # 会话消息 → Responses API input
-    └── handoff/                # dsh-handoff（host-only：/handoff 会话交接）
-        ├── package.json         # dsh.bundle.patch；peer 仅 cordis/dsh-llm/schemastery
+    └── handoff/                # dsh-handoff（/handoff 会话交接 + 浏览器模型下拉）
+        ├── package.json         # dsh.bundle.patch + dsh.client；peer 仅 cordis/dsh-llm/schemastery
         ├── cordis.patch.yml     # 单行插件 handoff → dsh-handoff
-        ├── dev.patch.yml        # 开发期 --patch overlay（指向本地 lib/index.js）
-        ├── smoke.mjs            # 运行时冒烟测试（node smoke.mjs）
+        ├── dev.patch.yml        # 开发期 --patch overlay（绝对路径 entry，宿主+浏览器半插件都会接线）
+        ├── smoke.mjs            # 冒烟 + 全链路流程测试（node smoke.mjs）
+        ├── client/client.js     # 浏览器半插件：shell.overlay 模型下拉（纯 JS + createElement）
         └── src/                 # 宿主半插件：apply(ctx, config)
-            ├── index.ts         # 入口：Config schema + HandoffRuntime + 注册命令
-            ├── identity.ts      # 包名 / 命令名 / 完成标记 / 默认目录
+            ├── index.ts         # 入口：Config schema + HandoffRuntime + 注册命令/通道
+            ├── identity.ts      # 包名 / 命令名 / 完成标记 / 默认目录 / 通道前缀
             ├── shims.d.ts       # agentPresets / agentDefaultModel 最小类型 shim
-            ├── command.ts       # /handoff handler：确认卡片 + brief 指令 + 防重入
+            ├── channel.ts       # /dsh-handoff 通道：待选请求 + 浏览器回传
+            ├── command.ts       # /handoff handler：模型选择 + brief 指令 + 防重入
             ├── brief.ts         # 简报模板 / 完成检测 watcher / 失败通知
-            └── spawn.ts         # agents.create + preset 挂载 + 首条 prompt + 标题
+            └── spawn.ts         # agents.create + preset 挂载 + workspace 归组 + 首条 prompt
 ```
 
 ## 前置条件
