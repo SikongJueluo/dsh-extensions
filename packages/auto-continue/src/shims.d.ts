@@ -19,6 +19,8 @@
  * @module dsh-auto-continue/shims
  */
 import type { LlmFailure } from '@deepseek-ai/dsh-llm'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 
 /** Quota window facts as dsh-plan-usage reports them. */
 export interface PlanUsageWindow {
@@ -64,10 +66,19 @@ export interface LlmRetryStartedEventData {
   retry: number
 }
 
+/** Minimal `ctx.sessionController` surface consumed by the resumption adopter. */
+export interface SessionControllerShim {
+  agents: {
+    resolveAgent(sessionId: SessionId): Promise<{ agent: Agent } | { error: unknown }>
+  }
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Present when the dsh-plan-usage plugin is mounted. */
     planUsage?: PlanUsageServiceShim
+    /** Present when the stock Web session controller is mounted. */
+    sessionController?: SessionControllerShim
   }
 }
 

@@ -23,6 +23,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from './shims.js'
 import type { ScheduleOptions, WaitPlan } from './schedule.js'
 import { planProbeWait, planResetWait } from './schedule.js'
+import type { WaitSpool } from './spool.js'
 
 /** Failure codes this plugin owns. */
 const OWNED_CODES = new Set(['QUOTA', 'RATE_LIMIT'])
@@ -34,7 +35,10 @@ interface WaitState {
   probes: number
 }
 
-export interface RecoveryConfig extends ScheduleOptions {}
+export interface RecoveryConfig extends ScheduleOptions {
+  /** Durable wait records; `undefined` disables persistence entirely. */
+  spool?: WaitSpool
+}
 
 /** Hard cap on tracked turn states; the map is pruned to its first entries. */
 const MAX_TRACKED_STATES = 64
@@ -77,6 +81,7 @@ export function cancellableSleep(delayMs: number, signal: AbortSignal): Promise<
  * disposal.
  */
 export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
+  const spool = config.spool
   const lifetime = new AbortController()
   const states = new Map<string, WaitState>()
   const active = new Set<Promise<unknown>>()
@@ -129,12 +134,13 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
       if (wait.kind === 'give-up') {
         ctx.logger.warn(`auto-continue: giving up on ${failure.code} from "${provider}" — ${wait.reason}`)
         dropState(agent.session.id, turn)
+        await spool?.delete(agent.session.id)
         return next()
       }
 
       state.attempts += 1
       const retryId = randomUUID()
-      agent.session.append('llm/retry', {
+      const recorded = agent.session.append('llm/retry', {
         retryId,
         turn,
         step,
@@ -154,11 +160,29 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
         wait.retryAt === undefined ? ' (probe)' : ` (until ${new Date(wait.retryAt).toISOString()})`,
       )
 
+      // Persist before sleeping: a process restart (or plugin update) during
+      // the wait leaves this record for the resumption adopter to pick up.
+      await spool?.set({
+        sessionId: agent.session.id,
+        provider,
+        code: failure.code,
+        turn,
+        lastSeq: recorded.seq,
+        firstFailureAt: state.firstFailureAt,
+        attempts: state.attempts,
+        probes: state.probes,
+        retryAt: Date.now() + wait.delayMs,
+      })
+
       const slept = await cancellableSleep(wait.delayMs, fused)
       if (!slept) {
         dropState(agent.session.id, turn)
+        // Plugin disposal keeps the record (a fresh instance adopts it);
+        // only a user/turn cancellation means the wait is truly gone.
+        if (!lifetime.signal.aborted) await spool?.delete(agent.session.id)
         return undefined
       }
+      await spool?.delete(agent.session.id)
       agent.session.append('llm/retry-started', { retryId, turn, step, retry: state.attempts })
       return { kind: 'retry' as const }
     })()

@@ -24,11 +24,16 @@ import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
 import { registerRecovery } from './recovery.js'
+import { registerResume } from './resume.js'
+import { WaitSpool } from './spool.js'
 import { DEFAULT_MAX_WAIT_MS, DEFAULT_RESET_MARGIN_MS } from './schedule.js'
 
 export { PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
 export { planResetWait, planProbeWait } from './schedule.js'
-export { cancellableSleep } from './recovery.js'
+export { cancellableSleep, registerRecovery } from './recovery.js'
+export { WaitSpool, defaultSpoolPath } from './spool.js'
+export type { PendingWait } from './spool.js'
+export { registerResume, resumeMessage, RETRY_LATER_MS } from './resume.js'
 export { PROBE_SCHEDULE_MS, PROBE_TIGHTEN_AFTER_MS, PROBE_TIGHT_DELAY_MS, DEFAULT_MAX_WAIT_MS, DEFAULT_RESET_MARGIN_MS } from './schedule.js'
 export type { ScheduleOptions, WaitPlan } from './schedule.js'
 
@@ -38,6 +43,8 @@ export interface Config {
   maxWaitMs: number
   /** Extra slack after a reported reset before retrying (ms). */
   resetMarginMs: number
+  /** Persist in-flight waits so they survive harness restarts (default on). */
+  persist: boolean
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -47,14 +54,20 @@ export const Config: Schema<Config> = Schema.object({
   resetMarginMs: Schema.number().step(1).min(0)
     .default(DEFAULT_RESET_MARGIN_MS)
     .description('Extra slack after the reported window reset before retrying (ms).'),
+  persist: Schema.boolean()
+    .default(true)
+    .description('Persist in-flight waits so a harness restart still resumes the session at the quota reset.'),
 })
 
 export const name = PLUGIN_NAME
 export const inject: string[] = []
 
 export function apply(ctx: Context, config: Config): void {
+  const spool = config.persist ? new WaitSpool() : undefined
   registerRecovery(ctx, {
     maxWaitMs: config.maxWaitMs,
     resetMarginMs: config.resetMarginMs,
+    spool,
   })
+  if (spool !== undefined) registerResume(ctx, { maxWaitMs: config.maxWaitMs }, spool)
 }
