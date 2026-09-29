@@ -1,0 +1,17 @@
+# dsh-plan-usage bundle layer: a single host plugin row providing the
+# `planUsage` service (plus its Settings-page channel once connection +
+# webServer exist). Host consumers read it with ctx.get('planUsage') and
+# treat absence as "no quota data" — notably dsh-auto-continue, which then
+# falls back to staged probing.
+#
+# Users can override the row later (by id) in a later patch layer — a patch
+# replaces the row's whole `config`.
+- insert:
+    - id: plan-usage
+      name: dsh-plan-usage
+      config:
+        # quotaCacheMs: 60000
+        # providers:
+        #   zai-coding-cn:
+        #     monitorBaseUrl: https://open.bigmodel.cn
+        #     apiKeyEnv: ZAI_CODING_CN_API_KEY

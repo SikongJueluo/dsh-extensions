@@ -1,0 +1,54 @@
+{
+  "name": "dsh-plan-usage",
+  "version": "0.1.0",
+  "description": "DSH plan-usage plugin: a planUsage host service reading GLM coding-plan quota windows (5h / weekly / monthly MCP) from the z.ai / bigmodel subscription monitor API, plus a Settings section showing the bars with reset countdowns",
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": "./client/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client",
+    "cordis.patch.yml",
+    "dev.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf lib",
+    "prepare": "tsdown",
+    "smoke": "node smoke.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-client-connection": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.1.5-rc.2",
+    "@deepseek-ai/schemastery": "3.18.2"
+  }
+}
