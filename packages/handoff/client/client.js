@@ -84,6 +84,13 @@ window.__ModuleLoader__.load({
       color: "inherit", font: "inherit"
     };
     var rowLabel = { fontSize: "14px", lineHeight: "22px", fontWeight: 500 };
+    var rowLine = { display: "flex", alignItems: "center", gap: "6px", minWidth: "0" };
+    var badge = {
+      flexShrink: "0", fontSize: "11px", lineHeight: "18px", fontWeight: 600,
+      padding: "0 6px", borderRadius: "6px",
+      color: "var(--dsw-alias-button-info-fill, #8ab4ff)",
+      background: "var(--dsw-specific-sidebar-nav-item-active-accent, rgba(138,180,255,.16))"
+    };
     var rowDesc = {
       fontSize: "12px", lineHeight: "18px",
       color: "var(--dsw-alias-label-tertiary, #9a9aa2)",
@@ -101,12 +108,16 @@ window.__ModuleLoader__.load({
       padding: "12px 10px", fontSize: "13px",
       color: "var(--dsw-alias-label-tertiary, #9a9aa2)"
     };
+    var errorLine = {
+      padding: "0 20px", fontSize: "12px",
+      color: "var(--dsw-alias-state-error-primary, #f2727a)"
+    };
 
     function hoverStyle(active) {
       return active ? { background: "var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.06))" } : null;
     }
 
-    /** One clickable entry. */
+    /** One clickable entry, optionally carrying a small badge beside its label. */
     function Entry(props) {
       var hovered = React.useState(false);
       var isHovered = hovered[0];
@@ -120,7 +131,12 @@ window.__ModuleLoader__.load({
         onMouseLeave: function () { setHovered(false); },
         onClick: props.onPick
       }, [
-        React.createElement("span", { key: "label", style: rowLabel }, props.label),
+        React.createElement("span", { key: "line", style: rowLine }, [
+          React.createElement("span", { key: "label", style: rowLabel }, props.label),
+          props.badge
+            ? React.createElement("span", { key: "badge", style: badge }, props.badge)
+            : null
+        ]),
         props.description
           ? React.createElement("span", { key: "desc", style: rowDesc }, props.description)
           : null
@@ -144,11 +160,16 @@ window.__ModuleLoader__.load({
       var errorState = React.useState(null);
       var error = errorState[0];
       var setError = errorState[1];
+      // Non-null while the second step (reasoning effort) is showing.
+      var effortState = React.useState(null);
+      var effortFor = effortState[0];
+      var setEffortFor = effortState[1];
 
       React.useEffect(function () {
         if (request === null) return undefined;
         setQuery("");
         setError(null);
+        setEffortFor(null);
         var alive = true;
         // `ctx.remote.*` answers with the connection result envelope
         // ({ok:true, value} | {ok:false, error}); the catalog is inside `value`.
@@ -190,11 +211,14 @@ window.__ModuleLoader__.load({
 
       React.useEffect(function () {
         function onKey(event) {
-          if (event.key === "Escape") cancel();
+          if (event.key !== "Escape") return;
+          // Escape steps back out of the effort step, then cancels.
+          if (effortFor !== null) setEffortFor(null);
+          else cancel();
         }
         window.addEventListener("keydown", onKey);
         return function () { window.removeEventListener("keydown", onKey); };
-      }, [request.id, busy]);
+      }, [request.id, busy, effortFor === null ? "" : effortFor.model]);
 
       var needle = query.trim().toLowerCase();
       var groups = [];
@@ -226,6 +250,77 @@ window.__ModuleLoader__.load({
           }
         }
         return route.provider + "/" + route.model;
+      }
+
+      /** One model row: pick it, or step into its reasoning-effort choices. */
+      function chooseModel(provider, model) {
+        var reasoning = model.reasoning;
+        var efforts = reasoning && reasoning.efforts ? reasoning.efforts : [];
+        if (efforts.length === 0) {
+          submit({ kind: "model", provider: provider, model: model.id });
+          return;
+        }
+        // Picking the origin's own route preselects the effort it already runs.
+        var inherited = request.inherited;
+        var preferred = inherited && inherited.provider === provider && inherited.model === model.id
+          ? inherited.reasoningEffort
+          : undefined;
+        setEffortFor({
+          provider: provider,
+          model: model.id,
+          name: model.name,
+          efforts: efforts,
+          defaultEffort: reasoning.defaultEffort,
+          preferred: preferred
+        });
+      }
+
+      // Second step: the model advertises reasoning efforts, so ask which one.
+      if (effortFor !== null) {
+        var effortRows = effortFor.efforts.map(function (effort) {
+          var marker = effort.id === effortFor.preferred
+            ? "当前会话"
+            : effort.id === effortFor.defaultEffort
+              ? "默认"
+              : undefined;
+          return React.createElement(Entry, {
+            key: "e:" + effort.id,
+            label: effort.name,
+            description: effort.description || undefined,
+            badge: marker,
+            busy: busy,
+            onPick: function () {
+              submit({
+                kind: "model",
+                provider: effortFor.provider,
+                model: effortFor.model,
+                reasoningEffort: effort.id
+              });
+            }
+          });
+        });
+        return React.createElement("div", {
+          style: backdrop,
+          onMouseDown: function (event) { if (event.target === event.currentTarget) cancel(); }
+        }, React.createElement("div", { style: card }, [
+          React.createElement("div", { key: "header", style: header }, [
+            React.createElement("div", { key: "title", style: title }, effortFor.name + " · 思考强度"),
+            React.createElement("div", { key: "task", style: subtitle }, "选择新会话的 reasoning effort")
+          ]),
+          React.createElement("div", { key: "body", style: body }, effortRows),
+          error !== null
+            ? React.createElement("div", { key: "error", style: errorLine }, error)
+            : null,
+          React.createElement("div", { key: "footer", style: footer }, [
+            React.createElement("button", {
+              key: "back", type: "button", style: button, disabled: busy,
+              onClick: function () { setEffortFor(null); }
+            }, "返回"),
+            React.createElement("button", {
+              key: "cancel", type: "button", style: button, disabled: busy, onClick: cancel
+            }, "取消")
+          ])
+        ]));
       }
 
       var children = [
@@ -269,12 +364,22 @@ window.__ModuleLoader__.load({
                     var description = [];
                     if (model.name !== model.id) description.push(model.id);
                     if (model.description) description.push(model.description);
+                    if (model.reasoning && model.reasoning.defaultEffort) {
+                      var defaultName = model.reasoning.defaultEffort;
+                      for (var e = 0; e < model.reasoning.efforts.length; e += 1) {
+                        if (model.reasoning.efforts[e].id === model.reasoning.defaultEffort) {
+                          defaultName = model.reasoning.efforts[e].name;
+                          break;
+                        }
+                      }
+                      description.push("默认强度 " + defaultName);
+                    }
                     return React.createElement(Entry, {
                       key: "m:" + group.id + "/" + model.id,
                       label: model.name,
                       description: description.join(" · ") || undefined,
                       busy: busy,
-                      onPick: function () { submit({ kind: "model", provider: group.id, model: model.id }); }
+                      onPick: function () { chooseModel(group.id, model); }
                     });
                   })));
                 }).concat(
@@ -294,7 +399,7 @@ window.__ModuleLoader__.load({
                 )
         )),
         error !== null
-          ? React.createElement("div", { key: "error", style: { padding: "0 20px", fontSize: "12px", color: "var(--dsw-alias-state-error-primary, #f2727a)" } }, error)
+          ? React.createElement("div", { key: "error", style: errorLine }, error)
           : null,
         React.createElement("div", { key: "footer", style: footer },
           React.createElement("button", { type: "button", style: button, disabled: busy, onClick: cancel }, "取消")

@@ -37,9 +37,16 @@ function inheritAgentOptions(agent: Agent): AgentOptions | undefined {
 /** Resolve the agent options for the fresh session per the confirmed choice. */
 function resolveAgentOptions(ctx: Context, agent: Agent, choice: PendingHandoff['choice']): AgentOptions | undefined {
   if (choice.kind === 'model') {
-    // An explicit route switches the brain; effort/maxTokens stay with the
-    // target model's own defaults rather than the origin's.
-    return { provider: choice.provider, model: choice.model }
+    // An explicit route switches the brain. The effort is whatever the picker
+    // chose; without one the target model's own default applies, and the
+    // origin's maxTokens never carries over.
+    return {
+      provider: choice.provider,
+      model: choice.model,
+      ...(choice.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: choice.reasoningEffort as AgentOptions['reasoningEffort'] }),
+    }
   }
   if (choice.kind === 'default') {
     const selection = ctx.get('agentDefaultModel')?.currentSelection()

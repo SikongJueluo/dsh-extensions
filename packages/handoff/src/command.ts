@@ -54,16 +54,18 @@ interface MenuEntry {
   readonly route: ModelRoute
 }
 
-/** A provider/model pair as the UI describes it. */
+/** A provider/model pair (plus the effort in force) as the UI describes it. */
 interface RouteSummary {
   readonly provider: string
   readonly model: string
+  readonly reasoningEffort?: string
 }
 
 /** The origin agent's own route, when it has one. */
 function inheritedRoute(agent: Agent): RouteSummary | undefined {
-  const { provider, model } = agent.options
-  return provider === undefined || model === undefined ? undefined : { provider, model }
+  const { provider, model, reasoningEffort } = agent.options
+  if (provider === undefined || model === undefined) return undefined
+  return { provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }
 }
 
 function menuDescription(route: ModelRoute): string | undefined {
@@ -270,7 +272,10 @@ function describeChoice(
   inherited: RouteSummary | undefined,
   fallback: RouteSummary | undefined,
 ): string {
-  if (choice.kind === 'model') return `${choice.provider}/${choice.model}`
+  if (choice.kind === 'model') {
+    const route = `${choice.provider}/${choice.model}`
+    return choice.reasoningEffort === undefined ? route : `${route}（强度 ${choice.reasoningEffort}）`
+  }
   if (choice.kind === 'default') {
     return fallback === undefined ? LABEL_DEFAULT : `${LABEL_DEFAULT}（${fallback.provider}/${fallback.model}）`
   }

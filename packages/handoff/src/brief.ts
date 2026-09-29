@@ -17,7 +17,7 @@ import { spawnHandoff } from './spawn.js'
 export type ModelChoice =
   | { kind: 'inherit' }
   | { kind: 'default' }
-  | { kind: 'model'; provider: string; model: string }
+  | { kind: 'model'; provider: string; model: string; reasoningEffort?: string }
 
 /** One in-flight handoff, keyed by the origin agent's session id. */
 export interface PendingHandoff {

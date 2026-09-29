@@ -154,7 +154,7 @@ console.log('pending pick:', JSON.stringify(pending))
 
 const chosen = await channel('choose', {
   requestId: pending.id,
-  choice: { kind: 'model', provider: 'picked-provider', model: 'picked-model' },
+  choice: { kind: 'model', provider: 'picked-provider', model: 'picked-model', reasoningEffort: 'high' },
 })
 if (chosen.ok !== true) throw new Error(`choose rejected: ${JSON.stringify(chosen)}`)
 
@@ -163,6 +163,7 @@ console.log('command result:', JSON.stringify(answer))
 if (answer.kind !== 'success' || !answer.text.includes('picked-provider/picked-model')) {
   throw new Error('command result does not name the picked route')
 }
+if (!answer.text.includes('强度 high')) throw new Error('command result does not name the picked effort')
 if (followups.length !== 1) throw new Error('expected exactly one briefing turn on the origin agent')
 
 // Simulate the origin agent writing the brief it was asked for.
@@ -176,6 +177,9 @@ for (let i = 0; i < 200 && created === null; i += 1) await new Promise(resolve =
 if (created === null) throw new Error('the watcher never spawned the fresh session')
 if (created.agentOptions.provider !== 'picked-provider' || created.agentOptions.model !== 'picked-model') {
   throw new Error(`fresh session used the wrong route: ${JSON.stringify(created.agentOptions)}`)
+}
+if (created.agentOptions.reasoningEffort !== 'high') {
+  throw new Error(`fresh session dropped the picked effort: ${JSON.stringify(created.agentOptions)}`)
 }
 if (created.meta.cwd !== cwd) throw new Error('fresh session did not inherit the workspace cwd')
 if (spawnedFollowups.length !== 1 || !spawnedFollowups[0].content[0].text.includes('smoke')) {

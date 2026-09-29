@@ -11,7 +11,8 @@ agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文
 /handoff 修复 README 的安装一节
   │
   ├─ 浏览器模态下拉：搜索 + 按厂商分组的模型列表（数据同 /model 弹窗）
-  │    首两项 = 继承当前会话 / 全局默认；Esc 或「取消」= 取消整个 handoff
+  │    首两项 = 继承当前会话 / 全局默认；选中带 reasoning 的模型再选「思考强度」
+  │    Esc 退回上一步、再按取消整个 handoff
   │    （无浏览器 half 的部署回退到问题卡片；--model 参数直接跳过选择）
   ├─ 当前 agent 排队一个 turn：按六节模板写简报 + 末尾完成标记
   │    Goal / Current state / Key decisions / Files / Next steps / Open questions
@@ -20,20 +21,24 @@ agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文
      → followup(简报) → 侧边栏出现 "Handoff: 修复 README …" 新会话并开始执行
 ```
 
-## 选择新会话的模型
+## 选择新会话的模型与思考强度
 
 1. **浏览器下拉（默认路径）**：Web half 在 `shell.overlay` 注册模态选择器——搜索框、按厂商分组的
-   模型列表（显示名 + 描述，数据来自 `ctx.remote.session.modelCatalog()`，与 `/model` 弹窗同源），
-   首两项为「继承当前会话」「全局默认」。host 通过 `/dsh-handoff` 通道把待选请求发给浏览器，
-   浏览器轮询取件并回传选择（`oauth-providers` 同款通道模式）。
-2. **问题卡片（降级路径）**：部署里没有浏览器 half（TUI/headless），或浏览器在 `pickTimeoutMs` 内
+   模型列表（显示名 + 描述 + 「默认强度 X」，数据来自 `ctx.remote.session.modelCatalog()`，与
+   `/model` 弹窗同源），首两项为「继承当前会话」「全局默认」。host 通过 `/dsh-handoff` 通道把待选
+   请求发给浏览器，浏览器轮询取件并回传选择（`oauth-providers` 同款通道模式）。
+2. **第二步：思考强度**。选中的模型若声明了 `reasoning.efforts`，同一模态切到强度列表（每档显示名 +
+   描述，标注「默认」；若所选正是当前会话的模型，则预标注该会话正在用的档位为「当前会话」）。
+   选完即提交 `{provider, model, reasoningEffort}`；模型没有 reasoning 档位时跳过这一步。
+   `Esc`／「返回」回模型列表，「取消」结束整个 handoff。
+3. **问题卡片（降级路径）**：部署里没有浏览器 half（TUI/headless），或浏览器在 `pickTimeoutMs` 内
    没有应答时，改用 `ctx.userQuestions` 卡片：可点选项 + "Other" 自由输入。选项 label 用模型
-   **显示名**（重名时附 `provider`），description 显示 `厂商 · model id`。
-3. **命令直达**：`/handoff --model provider/model <任务>` 跳过选择，适合脚本与 `confirm: false`；
-   拼写只做形状校验，路由合法性由首次请求验证。
+   **显示名**（重名时附 `provider`），description 显示 `厂商 · model id`；该路径不下发强度，用模型默认。
+4. **命令直达**：`/handoff --model provider/model <任务>` 跳过选择，适合脚本与 `confirm: false`；
+   拼写只做形状校验，路由合法性由首次请求验证（强度用模型默认）。
 
-显式切换模型时**保留当前会话的 preset**（同一人设、不同大脑），`reasoningEffort`/`maxTokens`
-不从原会话继承，交由目标模型默认值。
+显式切换模型时**保留当前会话的 preset**（同一人设、不同大脑）；选了强度就按选的强度，没选则用目标
+模型自己的默认值；`maxTokens` 不从原会话继承。
 
 要点：
 

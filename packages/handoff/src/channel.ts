@@ -26,13 +26,20 @@ const MAX_BODY_BYTES = 64 * 1024
 /** A browser that polled this recently counts as attached to this command surface. */
 const ATTACHED_WINDOW_MS = 8_000
 
+/** One route the browser may show as a base option, with the effort in force. */
+export interface RouteWire {
+  readonly provider: string
+  readonly model: string
+  readonly reasoningEffort?: string
+}
+
 /** What the browser learns about one pending pick. */
 export interface ChoiceRequestWire {
   readonly id: string
   readonly sessionId: string
   readonly task: string
-  readonly inherited?: { provider: string; model: string }
-  readonly fallback?: { provider: string; model: string }
+  readonly inherited?: RouteWire
+  readonly fallback?: RouteWire
 }
 
 /** The user's verdict on one pending pick. */
@@ -64,7 +71,9 @@ function parseChoice(value: unknown): ModelChoice | undefined {
     const model = record.model
     if (typeof provider !== 'string' || provider.length === 0) return undefined
     if (typeof model !== 'string' || model.length === 0) return undefined
-    return { kind: 'model', provider, model }
+    const effort = record.reasoningEffort
+    if (effort !== undefined && (typeof effort !== 'string' || effort.length === 0)) return undefined
+    return { kind: 'model', provider, model, ...(effort === undefined ? {} : { reasoningEffort: effort }) }
   }
   return undefined
 }
