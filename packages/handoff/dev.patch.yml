@@ -1,0 +1,7 @@
+# Development overlay: the locally built plugin entry, by absolute path.
+# Rebuild first (`pnpm build`) so lib/ is current. Use with the global flag, e.g.
+#   dsh --profile web --patch ./packages/handoff/dev.patch.yml --no-open --port <port>
+# (the `web` subcommand takes no parent flags; `--profile web` does).
+- insert:
+    - id: handoff
+      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/handoff/lib/index.js'

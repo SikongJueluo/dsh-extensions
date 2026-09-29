@@ -1,0 +1,13 @@
+# dsh-handoff bundle layer: a single host plugin row.
+#
+# The plugin publishes no service of its own — it consumes the host `commands`
+# and `agents` registries (hard-injected) and optionally `userQuestions`,
+# `agentPresets`, `agentDefaultModel`, and `sessionTitle` via ctx.get() — so it
+# needs no isolate realm and mounts cleanly beside any composition that
+# provides those core services (the stock `web` profile does).
+#
+# Users can override the row later (by id) in a later patch layer — a patch
+# replaces the row's whole `config`.
+- insert:
+    - id: handoff
+      name: dsh-handoff
