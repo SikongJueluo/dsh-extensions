@@ -2,7 +2,12 @@
 
 Out-of-tree [DeepSeek Harness](https://www.deepseek.com/harness/en/) 插件库 —— 一个 pnpm workspace monorepo，每个 `packages/*` 目录都是一个可独立安装的 **bundle**（内含 Cordis plugin）。
 
-当前包含 `packages/oauth-providers`（`dsh-oauth-providers`）：**OAuth 认证的 LLM 厂商集合**——每厂商一个模块（当前：ChatGPT 订阅，路由 `chatgpt`），共享同一套 pi 风格登录（链接 → 浏览器授权 → 自动回调 / 粘贴回退），无需 API Key、无需任何厂商 CLI —— 覆盖了插件开发的完整要素（`name` / `inject` / Schemastery `Config` / `ctx.llm` 注册 provider/adapter/discovery / `ctx.settings` 设置节 / `ctx.authorization` 授权流 + `ctx.credentials` 凭据记录 / `ctx.webServer` 自有浏览器↔宿主通道 / `dsh.client` 浏览器半插件 + `settings.section` Slot UI / `ctx.logger`）。详见[包内 README](./packages/oauth-providers/README.md)。
+当前包含四个 bundle：
+
+- `packages/oauth-providers`（`dsh-oauth-providers`）：**OAuth 认证的 LLM 厂商集合**——每厂商一个模块（当前：ChatGPT 订阅，路由 `chatgpt`），共享同一套 pi 风格登录（链接 → 浏览器授权 → 自动回调 / 粘贴回退），无需 API Key、无需任何厂商 CLI —— 覆盖了插件开发的完整要素（`name` / `inject` / Schemastery `Config` / `ctx.llm` 注册 provider/adapter/discovery / `ctx.settings` 设置节 / `ctx.authorization` 授权流 + `ctx.credentials` 凭据记录 / `ctx.webServer` 自有浏览器↔宿主通道 / `dsh.client` 浏览器半插件 + `settings.section` Slot UI / `ctx.logger`）。详见[包内 README](./packages/oauth-providers/README.md)。
+- `packages/handoff`（`dsh-handoff`）：**一条命令的会话交接**——`/handoff <任务>` 让当前会话写自包含简报（`.dsh/handoff/`），插件检测完成标记后经 `ctx.agents.create`（与 Web 新建会话同一工厂链路）在同一 workspace 起 session，简报即首条 prompt；`ctx.commands` 注册命令、`ctx.userQuestions` 确认卡片、`ctx.agentPresets`/`agentDefaultModel` 预设继承、`ctx.sessionTitle` 命名。详见[包内 README](./packages/handoff/README.md)。
+- `packages/plan-usage`（`dsh-plan-usage`）：**Coding 套餐配额查询**——把 GLM Coding Plan 的 5h / 周 / 月度 MCP 窗口（订阅控制台监控 API，含 `nextResetTime`）发布成 `planUsage` 宿主服务（Cordis `Service`，按端点+key 去重共享缓存），附设置页「Coding 套餐用量」分区（进度条 + 重置倒计时）；独立可用。详见[包内 README](./packages/plan-usage/README.md)。
+- `packages/auto-continue`（`dsh-auto-continue`）：**限额后自动续跑**——模型请求因套餐限额失败（`QUOTA`）时，在 `agent/request-error` waterfall 上接管恢复：经 `planUsage` 服务读重置点，睡到重置后**同 turn 原样重试失败的 step**（无 "continue" 消息、无额外 prompt token）；服务缺席则退化为阶梯探测。等待写 `llm/retry` 事件（Web 原生渲染倒计时），可取消、有总预算。详见[包内 README](./packages/auto-continue/README.md)。
 
 ## 仓库结构
 
@@ -12,29 +17,41 @@ dsh-extensions/
 ├── pnpm-workspace.yaml     # packages/* 为 workspace 成员
 ├── tsconfig.base.json      # 共享严格 TS 配置（noEmit，构建交给 tsdown）
 └── packages/
-    └── oauth-providers/       # dsh-oauth-providers（复制此目录即得新插件骨架）
-        ├── package.json         # 声明 dsh.bundle.patch + dsh.client —— "可安装 bundle" 的标志
-        ├── cordis.patch.yml     # bundle 层：插入 authorization 缝隙行 + 插件行
-        ├── tsdown.config.ts     # 构建到 lib/index.js（+.d.ts），依赖保持 external
-        ├── tsconfig.json
-        ├── dev.patch.yml       # 开发期 --patch overlay（同 systemd 单元用法）
-        ├── THIRD-PARTY-NOTICE.md  # 上游 MIT 许可与派生声明
-        ├── client/client.js    # 浏览器半插件：设置页 "OAuth 登录" 分区（每厂商一张卡片）
-        └── src/                # 宿主半插件：apply(ctx, config)
-            ├── index.ts        # 入口：Config schema + 注册各厂商模块
-            ├── identity.ts     # 包名 / 插件名 / 浏览器↔宿主通道
-            ├── channel.ts      # 共享登录通道（/dsh-oauth-providers，按厂商派发）
-            ├── transport.ts    # 代理感知 fetch（env / macOS / Windows / Linux）
-            └── providers/chatgpt/   # ChatGPT 厂商模块（新厂商 = 新目录）
-                ├── index.ts    # 模块入口：Config/路由/目录/设置节/登录 一站注册
-                ├── identity.ts # 路由 `chatgpt` / 命名空间 / 凭据 id / 显示名
-                ├── oauth.ts    # OAuth 协议（PKCE + 1455 回调 + 粘贴回退）
-                ├── auth.ts     # 令牌存取/刷新（凭据商店，跨进程互斥轮换）
-                ├── login.ts    # 授权流注册（ctx.authorization）
-                ├── adapter.ts  # LlmAdapter：Responses API → StreamChunk 翻译
-                ├── catalog.ts  # ChatGPT /models 模型目录（TTL 缓存）
-                ├── discovery.ts # registerModelDiscovery 处理器
-                └── serialize.ts # 会话消息 → Responses API input
+    ├── oauth-providers/       # dsh-oauth-providers（复制此目录即得新插件骨架）
+    │   ├── package.json         # 声明 dsh.bundle.patch + dsh.client —— "可安装 bundle" 的标志
+    │   ├── cordis.patch.yml     # bundle 层：插入 authorization 缝隙行 + 插件行
+    │   ├── tsdown.config.ts     # 构建到 lib/index.js（+.d.ts），依赖保持 external
+    │   ├── tsconfig.json
+    │   ├── dev.patch.yml       # 开发期 --patch overlay（同 systemd 单元用法）
+    │   ├── THIRD-PARTY-NOTICE.md  # 上游 MIT 许可与派生声明
+    │   ├── client/client.js    # 浏览器半插件：设置页 "OAuth 登录" 分区（每厂商一张卡片）
+    │   └── src/                # 宿主半插件：apply(ctx, config)
+    │       ├── index.ts        # 入口：Config schema + 注册各厂商模块
+    │       ├── identity.ts     # 包名 / 插件名 / 浏览器↔宿主通道
+    │       ├── channel.ts      # 共享登录通道（/dsh-oauth-providers，按厂商派发）
+    │       ├── transport.ts    # 代理感知 fetch（env / macOS / Windows / Linux）
+    │       └── providers/chatgpt/   # ChatGPT 厂商模块（新厂商 = 新目录）
+    │           ├── index.ts    # 模块入口：Config/路由/目录/设置节/登录 一站注册
+    │           ├── identity.ts # 路由 `chatgpt` / 命名空间 / 凭据 id / 显示名
+    │           ├── oauth.ts    # OAuth 协议（PKCE + 1455 回调 + 粘贴回退）
+    │           ├── auth.ts     # 令牌存取/刷新（凭据商店，跨进程互斥轮换）
+    │           ├── login.ts    # 授权流注册（ctx.authorization）
+    │           ├── adapter.ts  # LlmAdapter：Responses API → StreamChunk 翻译
+    │           ├── catalog.ts  # ChatGPT /models 模型目录（TTL 缓存）
+    │           ├── discovery.ts # registerModelDiscovery 处理器
+    │           └── serialize.ts # 会话消息 → Responses API input
+    └── handoff/                # dsh-handoff（host-only：/handoff 会话交接）
+        ├── package.json         # dsh.bundle.patch；peer 仅 cordis/dsh-llm/schemastery
+        ├── cordis.patch.yml     # 单行插件 handoff → dsh-handoff
+        ├── dev.patch.yml        # 开发期 --patch overlay（指向本地 lib/index.js）
+        ├── smoke.mjs            # 运行时冒烟测试（node smoke.mjs）
+        └── src/                 # 宿主半插件：apply(ctx, config)
+            ├── index.ts         # 入口：Config schema + HandoffRuntime + 注册命令
+            ├── identity.ts      # 包名 / 命令名 / 完成标记 / 默认目录
+            ├── shims.d.ts       # agentPresets / agentDefaultModel 最小类型 shim
+            ├── command.ts       # /handoff handler：确认卡片 + brief 指令 + 防重入
+            ├── brief.ts         # 简报模板 / 完成检测 watcher / 失败通知
+            └── spawn.ts         # agents.create + preset 挂载 + 首条 prompt + 标题
 ```
 
 ## 前置条件

@@ -1,0 +1,19 @@
+# dsh-auto-continue bundle layer: a single host plugin row.
+#
+# The plugin publishes no service of its own — it listens on the
+# `agent/request-error` waterfall (downstream of the built-in llm-retry row)
+# and reads the `planUsage` service (dsh-plan-usage) optionally via
+# ctx.get(), so it needs no isolate realm and mounts cleanly beside any
+# composition that runs the agent loop (the stock `web` profile does).
+# Mount it together with dsh-plan-usage to align waits with the reported
+# window resets; alone, it falls back to staged probing.
+#
+# Users can override the row later (by id) in a later patch layer — a patch
+# replaces the row's whole `config`.
+- insert:
+    - id: auto-continue
+      name: dsh-auto-continue
+      config:
+        # Defaults suit the GLM coding plan's 5-hour rolling window.
+        # maxWaitMs: 21600000
+        # resetMarginMs: 60000
