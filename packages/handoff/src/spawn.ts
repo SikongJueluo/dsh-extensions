@@ -7,6 +7,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session-title'
+import type {} from '@deepseek-ai/dsh-workspace'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
@@ -75,6 +76,25 @@ function titleFor(task: string): string {
 }
 
 /**
+ * Attach the fresh session to the workspace owning the origin cwd, so it
+ * joins the origin's sidebar group — the same `attachSession` the web
+ * "New Session" flow performs (prepend into the workspace's session order).
+ * A cwd matching no registered workspace stays ungrouped, exactly like its
+ * origin; an attach failure only downgrades grouping, never the handoff.
+ */
+async function attachToWorkspace(rt: HandoffRuntime, pending: PendingHandoff, sessionId: SessionId): Promise<void> {
+  const registry = rt.ctx.get('workspaceRegistry')
+  if (registry === undefined) return
+  try {
+    const workspace = await registry.resolveByPath(pending.cwd)
+    if (workspace === undefined) return
+    await workspace.attachSession(sessionId)
+  } catch (error) {
+    rt.ctx.logger(PACKAGE_NAME).warn('workspace attach failed; session stays ungrouped', { error: String(error) })
+  }
+}
+
+/**
  * Create the fresh session and hand it the brief as its first turn.
  *
  * @returns the new session id.
@@ -101,6 +121,7 @@ export async function spawnHandoff(rt: HandoffRuntime, pending: PendingHandoff, 
     },
     ...(preset.setup !== undefined ? { setup: preset.setup } : {}),
   })
+  await attachToWorkspace(rt, pending, sessionId)
 
   handle.agent.followup(
     createUserMessage({

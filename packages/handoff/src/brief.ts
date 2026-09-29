@@ -60,39 +60,33 @@ export function timestampSlug(date: Date): string {
 /** The instruction handed to the CURRENT agent: write the brief, then stop. */
 export function briefInstruction(briefPath: string, task: string, maxBriefChars: number): string {
   return [
-    '[handoff 指令] 用户刚执行了 /handoff 命令，要求做一次会话交接。你本回合的唯一任务：为本会话写一份交接简报（handoff brief）。它将作为下一个全新会话的唯一上下文——新会话看不到本会话的任何历史，因此简报必须自包含。',
+    `[handoff] /handoff 触发会话交接。本回合唯一任务：写一份交接简报到 ${briefPath}，供下一个没有本会话历史的新会话接手——简报必须自包含。`,
     '',
-    '按以下结构组织（用 Markdown）：',
-    '# Goal —— 用户在本会话中的总目标',
-    '# Current state —— 目前做到哪一步（结合工作区实际状态：已改动/已创建的文件、未完成的工作）',
-    '# Key decisions —— 已做出的关键决策及理由',
-    '# Important files & paths —— 相关文件、路径及其当前状态',
-    '# Next steps —— 建议的后续步骤（有序列表）',
-    '# Open questions —— 未决问题与需要用户确认的事项',
+    'Markdown 六节：',
+    '- Goal：本会话总目标',
+    '- Current state：进展与工作区现状（已改文件、未完成项）',
+    '- Key decisions：关键决策与理由',
+    '- Files：关键文件/路径及状态',
+    '- Next steps：后续步骤（有序）',
+    '- Open questions：待用户确认的事项',
     '',
-    '## Task（原样转交给新会话）',
+    '末尾追加原样任务：',
+    '',
+    '## Task',
     task,
     '',
-    '硬性要求：',
-    `1. 简报总长度不超过约 ${maxBriefChars} 个字符；宁可精炼，不要省略关键状态。`,
-    `2. 用文件写入工具把简报写入：${briefPath}`,
-    `3. 文件的最后一行必须单独一行写：${COMPLETE_MARKER}`,
-    '4. 写完后只回复一行确认（例如「handoff brief 已写入」），不要做其他事。',
+    `要求：不超过约 ${maxBriefChars} 字符；文件最后一行单独写 ${COMPLETE_MARKER}；写完后只回一行确认，不做其他事。`,
   ].join('\n')
 }
 
 /** The first prompt of the fresh session: the brief plus bootstrap guidance. */
 export function bootstrapPrompt(pending: PendingHandoff, brief: string): string {
   return [
-    '[handoff 交接] 你是通过 dsh-handoff 插件启动的新会话。上一个会话把它的上下文浓缩成了下面的交接简报，这是你唯一的历史；请优先依据简报和当前工作区的实际状态工作。',
-    '',
-    `（来源会话 ${String(pending.agent.id)}；简报文件 ${pending.briefPath}）`,
+    `[handoff] 你是新会话，无历史；上一会话的全部上下文在下方简报中（源 ${String(pending.agent.id)}，文件 ${pending.briefPath}）。直接开始执行 Task：按 Next steps 推进；简报与工作区不符时以工作区为准；仅对简报未覆盖且无法查证的信息询问用户。`,
     '',
     '---',
     brief,
     '---',
-    '',
-    '请阅读简报后直接开始执行「Task」部分：按 Next steps 推进；发现简报与工作区实际状态不符时以实际状态为准；遇到简报未覆盖且无法自行查证的信息再询问用户。',
   ].join('\n')
 }
 

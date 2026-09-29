@@ -12,13 +12,13 @@ agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文
   │
   ├─ (可选) 确认卡片：继承当前会话的 preset/model，或全局默认；关掉卡片 = 取消
   ├─ 当前 agent 排队一个 turn：按六节模板写简报 + 末尾完成标记
-  │    Goal / Current state / Key decisions / Important files & paths / Next steps / Open questions
+  │    Goal / Current state / Key decisions / Files / Next steps / Open questions
   ├─ 插件轮询简报文件，命中 <!-- handoff:complete --> 即完成
-  └─ ctx.agents.create({meta: {cwd 同源}}) → followup(简报) → 侧边栏出现
-     "Handoff: 修复 README …" 新会话并开始执行
+  └─ ctx.agents.create({meta: {cwd 同源}}) → attachSession(归入原 workspace 分组)
+     → followup(简报) → 侧边栏出现 "Handoff: 修复 README …" 新会话并开始执行
 ```
 
-- 新 session 与原 session 同 cwd，自动进入同一 workspace，侧边栏直接可见。
+- 新 session 与原 session 同 cwd，并经 `resolveByPath(cwd) → attachSession` 显式归入原 workspace 分组（与 Web 在 workspace 内新建会话同机制，排组内最前）；cwd 无对应 workspace 时保持 ungrouped，与原会话一致。
 - 原 session 保持不动，可以继续回去追问。
 - 原 agent 忙碌时 `followup` 自动排队到当前 turn 结束。
 - 交接失败（超时/创建失败）会记录日志，并可配置向原会话发一条可见通知。
