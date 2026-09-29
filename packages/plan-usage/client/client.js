@@ -25,6 +25,7 @@ window.__ModuleLoader__.load({
       refresh: "Refresh",
       refreshing: "Refreshing…",
       fiveHour: "5-hour window",
+      windowOfSize: "{size} window",
       weekly: "Weekly window",
       monthlyMcp: "Monthly MCP tools",
       resetsIn: "resets in {duration}",
@@ -45,6 +46,7 @@ window.__ModuleLoader__.load({
       refresh: "刷新",
       refreshing: "刷新中…",
       fiveHour: "5 小时窗口",
+      windowOfSize: "{size} 窗口",
       weekly: "周窗口",
       monthlyMcp: "月度 MCP 工具",
       resetsIn: "{duration}后重置",
@@ -120,6 +122,19 @@ window.__ModuleLoader__.load({
       });
     }
 
+    // "5h" / "2.5h" / "45m" from API-reported window minutes, when present.
+    function fmtWindowSize(minutes) {
+      if (!minutes || minutes <= 0) return null;
+      if (minutes < 60) return minutes + "m";
+      var h = minutes / 60;
+      return (h === Math.round(h) ? String(Math.round(h)) : h.toFixed(1)) + "h";
+    }
+
+    function windowLabel(t, base, w) {
+      var size = w && w.windowMinutes ? fmtWindowSize(w.windowMinutes) : null;
+      return size ? t("windowOfSize", { size: size }) : base;
+    }
+
     function barColor(percent) {
       if (percent >= 100) return "var(--dsw-alias-state-error-primary)";
       if (percent >= 80) return "var(--dsw-alias-state-warn-label)";
@@ -191,8 +206,8 @@ window.__ModuleLoader__.load({
           ? React.createElement("div", { style: { fontSize: 13, lineHeight: "20px", color: "var(--dsw-alias-label-secondary)" } }, t("notMonitored"))
           : snapshot
             ? [
-              React.createElement(WindowBar, { key: "5h", t: t, label: t("fiveHour"), window: snapshot.fiveHour, nowTick: nowTick }),
-              React.createElement(WindowBar, { key: "weekly", t: t, label: t("weekly"), window: snapshot.weekly, nowTick: nowTick }),
+              React.createElement(WindowBar, { key: "5h", t: t, label: windowLabel(t, t("fiveHour"), snapshot.fiveHour), window: snapshot.fiveHour, nowTick: nowTick }),
+              React.createElement(WindowBar, { key: "weekly", t: t, label: windowLabel(t, t("weekly"), snapshot.weekly), window: snapshot.weekly, nowTick: nowTick }),
               snapshot.monthlyMcp
                 ? React.createElement(WindowBar, { key: "mcp", t: t, label: t("monthlyMcp"), window: snapshot.monthlyMcp, nowTick: nowTick })
                 : null

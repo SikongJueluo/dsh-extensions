@@ -26,7 +26,7 @@ export interface ProviderQuotaView {
   provider: string
   /** Whether a monitor (endpoint + key) is resolvable for the route. */
   monitored: boolean
-  snapshot?: import('./quota.js').QuotaSnapshot
+  snapshot?: import('./types.js').QuotaSnapshot
   /** Why the quota is unavailable, when known. */
   error?: string
 }
@@ -39,9 +39,15 @@ async function quotaView(service: PlanUsageService, refresh: boolean): Promise<{
         return { provider, monitored: false }
       }
       const snapshot = await service.get(provider, { force: refresh })
-      return snapshot === undefined
-        ? { provider, monitored: true, error: 'quota fetch failed (see host logs)' }
-        : { provider, monitored: true, snapshot }
+      if (snapshot !== undefined) return { provider, monitored: true, snapshot }
+      const sourceId = service.sourceId(provider)
+      return {
+        provider,
+        monitored: true,
+        error: sourceId === 'openai-codex'
+          ? 'no signed-in ChatGPT token, or the usage fetch failed (see host logs)'
+          : 'quota fetch failed (see host logs)',
+      }
     }),
   )
   return { providers: views }

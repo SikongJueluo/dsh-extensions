@@ -1,5 +1,5 @@
 /**
- * Coding-plan quota monitor for z.ai / bigmodel.cn GLM coding plans.
+ * GLM coding-plan quota source for z.ai / bigmodel.cn.
  *
  * Data source: the subscription console's own (undocumented but stable)
  * monitor endpoint `GET {host}/api/monitor/usage/quota/limit`, authenticated
@@ -13,34 +13,14 @@
  * Verified against live responses captured by OpenTokenUsage and opencodex
  * (both MIT); the legacy flat-field payload shape is kept as a fallback.
  *
- * @module dsh-plan-usage/quota
+ * @module dsh-plan-usage/sources/glm
  */
 
-/** One quota window as the monitor sees it. */
-export interface QuotaWindow {
-  /** Consumed share, 0-100 (one decimal at most). */
-  percent?: number
-  /** Consumed value, when the API reports it. */
-  used?: number
-  /** Window total, when the API reports it. */
-  total?: number
-  /** Epoch ms of the next window reset, when reported. */
-  resetAt?: number
-}
+import type { QuotaSnapshot, QuotaWindow } from '../types.js'
 
-/** One provider's quota snapshot. */
-export interface QuotaSnapshot {
-  /** Provider route id this snapshot belongs to. */
-  provider: string
-  fiveHour?: QuotaWindow
-  weekly?: QuotaWindow
-  monthlyMcp?: QuotaWindow
-  /** Plan level, when the API reports it ("lite" / "pro" / "max" …). */
-  level?: string
-  /** Epoch ms of the fetch. */
-  fetchedAt: number
-  /** Which response shape the numbers were read from. */
-  source: 'limits' | 'legacy'
+/** Window facts parsed from one GLM monitor response (no provider/fetch time). */
+export interface GlmWindows extends Pick<QuotaSnapshot, 'fiveHour' | 'weekly' | 'monthlyMcp' | 'level'> {
+  source: 'glm:limits' | 'glm:legacy'
 }
 
 /** How to reach one provider's quota endpoint. */
@@ -141,7 +121,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 /** Read one `limits`-array row into a QuotaWindow. */
-function windowOf(row: Record<string, unknown>): QuotaWindow {
+function windowOf(row: Record<string, unknown>, windowMinutes?: number): QuotaWindow {
   const used = finiteNumber(row.currentValue)
   const total = finiteNumber(row.usage)
   let percent = normalizePercent(row.percentage)
@@ -154,6 +134,7 @@ function windowOf(row: Record<string, unknown>): QuotaWindow {
   if (total !== undefined) window.total = total
   const resetAt = normalizeResetAt(row.nextResetTime)
   if (resetAt !== undefined) window.resetAt = resetAt
+  if (windowMinutes !== undefined) window.windowMinutes = windowMinutes
   return window
 }
 
@@ -167,7 +148,7 @@ function usable(window: QuotaWindow | undefined): boolean {
  * flat fields as fallback). Pure; returns the window facts without provider
  * identity or fetch time.
  */
-export function parseQuotaBody(body: unknown): Pick<QuotaSnapshot, 'fiveHour' | 'weekly' | 'monthlyMcp' | 'level' | 'source'> | null {
+export function parseQuotaBody(body: unknown): GlmWindows | null {
   const outer = asRecord(body)
   if (outer === null || outer.success === false) return null
   const data = asRecord(outer.data) ?? outer
@@ -182,15 +163,15 @@ export function parseQuotaBody(body: unknown): Pick<QuotaSnapshot, 'fiveHour' | 
       if (row.type === 'TOKENS_LIMIT' || row.type === 'CREDIT_LIMIT') {
         const unit = finiteNumber(row.unit)
         const number = finiteNumber(row.number)
-        if (unit === 3 && number === 5) fiveHour = windowOf(row)
-        else if (unit === 6 && number === 1) weekly = windowOf(row)
+        if (unit === 3 && number === 5) fiveHour = windowOf(row, (number ?? 0) * 60)
+        else if (unit === 6 && number === 1) weekly = windowOf(row, 7 * 24 * 60)
       } else if (row.type === 'TIME_LIMIT') {
         monthlyMcp = windowOf(row)
       }
     }
     // Per opencodex: when the `limits` key is present, legacy fields are ignored —
     // even an empty array means "no windows", not "fall back".
-    const parsed: Pick<QuotaSnapshot, 'fiveHour' | 'weekly' | 'monthlyMcp' | 'level' | 'source'> = { source: 'limits' }
+    const parsed: GlmWindows = { source: 'glm:limits' }
     if (usable(fiveHour)) parsed.fiveHour = fiveHour
     if (usable(weekly)) parsed.weekly = weekly
     if (usable(monthlyMcp)) parsed.monthlyMcp = monthlyMcp
@@ -205,7 +186,7 @@ export function parseQuotaBody(body: unknown): Pick<QuotaSnapshot, 'fiveHour' | 
   const fiveHourPercent = percentAt('fiveHourPercent') ?? percentAt('fiveHourUsage') ?? percentAt('fiveHourUsed')
   const weeklyPercent = percentAt('weeklyPercent') ?? percentAt('weeklyUsage') ?? percentAt('weeklyUsed')
   const monthlyPercent = percentAt('monthlyMCPUsage') ?? percentAt('monthlyMcpUsage')
-  const parsed: Pick<QuotaSnapshot, 'fiveHour' | 'weekly' | 'monthlyMcp' | 'level' | 'source'> = { source: 'legacy' }
+  const parsed: GlmWindows = { source: 'glm:legacy' }
   if (fiveHourPercent !== undefined) parsed.fiveHour = { percent: fiveHourPercent }
   if (weeklyPercent !== undefined) parsed.weekly = { percent: weeklyPercent }
   if (monthlyPercent !== undefined) parsed.monthlyMcp = { percent: monthlyPercent }
@@ -231,7 +212,7 @@ export interface QuotaMonitorOptions {
 }
 
 interface CacheEntry {
-  windows: Pick<QuotaSnapshot, 'fiveHour' | 'weekly' | 'monthlyMcp' | 'level' | 'source'>
+  windows: GlmWindows
   fetchedAt: number
 }
 
@@ -327,7 +308,7 @@ export class QuotaMonitor {
     provider: string,
     monitor: MonitorConfig,
     apiKey: string,
-  ): Promise<Pick<QuotaSnapshot, 'fiveHour' | 'weekly' | 'monthlyMcp' | 'level' | 'source'> | undefined> {
+  ): Promise<GlmWindows | undefined> {
     const url = `${monitor.monitorBaseUrl.replace(/\/$/, '')}/api/monitor/usage/quota/limit`
     let response: Response
     try {
