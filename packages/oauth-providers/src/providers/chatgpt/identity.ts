@@ -12,8 +12,13 @@
 /** The LLM provider route this module registers. */
 export const PROVIDER = 'chatgpt'
 
-/** DSH settings namespace holding this provider's editable configuration. */
-export const SETTINGS_NAMESPACE = 'oauth-providers-chatgpt'
+/**
+ * DSH settings namespace holding this provider's editable configuration:
+ * the owning plugin row's entry id (0.2: namespace ≡ profile entry id). The
+ * live value is resolved from the registering fiber's entry, falling back to
+ * the bundle patch's stock row id.
+ */
+export const SETTINGS_NAMESPACE = 'oauth-providers'
 
 /** Credential-record id: the sign-in under this package's scope. */
 export const CREDENTIAL_ID = 'chatgpt'

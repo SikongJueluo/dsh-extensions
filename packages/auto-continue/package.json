@@ -1,6 +1,6 @@
 {
   "name": "dsh-auto-continue",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "DSH auto-continue plugin: owns recovery of quota/rate-limited model requests — waits until the coding-plan window resets (via the planUsage service from dsh-plan-usage) and retries the failed step in the same open turn; falls back to staged probing without it",
   "type": "module",
   "license": "GPL-3.0-or-later",
@@ -33,15 +33,15 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-llm": "^0.1.5-rc.2",
-    "@deepseek-ai/schemastery": "^3.18.2"
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-llm": "^0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session": "0.1.5-rc.2",
-    "@deepseek-ai/schemastery": "3.18.2"
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-agent": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4"
   }
 }

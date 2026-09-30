@@ -6,9 +6,9 @@
  * `.devenv/profile/bin` never reaches `PATH`. This plugin replaces the stock
  * sandboxed bash executor with one that layers the direnv diff on top:
  *
- * - `agent/session-start` kicks a host-side `direnv export json` for the
+ * - `agent/created` kicks a host-side `direnv export json` for the
  *   session directory, so the overlay is warm before the model's first
- *   command (the event is a synchronous notification — the kick is
+ *   command (the notification listener is serial, but the kick is
  *   fire-and-forget by design).
  * - `tools/pre-execute` awaits the overlay for every `bash` tool call — the
  *   awaitable waterfall gate that closes the race for foreground AND
@@ -61,10 +61,12 @@ const DIRENV_DEFAULTS = {
 
 /**
  * Plugin-row configuration: the sandboxed bash executor's knobs (see
- * `@deepseek-ai/dsh-bash-local`) plus the `direnv*` fields this plugin
- * adds — optional in the interface so the class's static `Config` stays
- * assignable to the parent executor's; the schema fills the defaults, and
- * the constructor falls back to {@link DIRENV_DEFAULTS} for direct callers.
+ * `@deepseek-ai/dsh-bash-local`, all live-editable `Volatile` references so
+ * settings edits apply without a remount) plus the `direnv*` fields this
+ * plugin adds. The schema fills the defaults, and the constructor falls back
+ * to {@link DIRENV_DEFAULTS} for direct callers; direnv knobs are plain
+ * fields — editing one remounts the executor (and its loader), which is the
+ * right blast radius for a changed `direnvPath`.
  */
 export interface Config extends LocalBashConfig {
   /** Direnv executable: absolute path or bare PATH name. */
@@ -79,16 +81,20 @@ export interface Config extends LocalBashConfig {
   direnvWatch?: boolean
 }
 
-// The executor fields mirror LocalBashExecutor's schema defaults verbatim; a
-// row that only sets `timeoutMs` (like the stock `bash-sandbox` row) keeps
-// the stock behavior everywhere else.
-export const Config: Schema<Config> = Schema.object({
-  cwd: Schema.string().description('Default working directory for commands (default: process.cwd()).'),
-  timeoutMs: Schema.number().step(1).min(1_000).default(120_000).description('Default per-command timeout (ms).'),
-  maxTimeoutMs: Schema.number().step(1).min(1_000).default(600_000).description('Upper bound a caller may raise the per-command timeout to (ms).'),
-  maxOutputBytes: Schema.number().step(1).min(1_024).default(64_000).description('Default stdout/stderr capture budget per stream (bytes).'),
-  maxSpillBytes: Schema.number().step(1).min(65_536).default(67_108_864).description('Per-stream spill-file cap (bytes).'),
-  graceMs: Schema.number().step(1).min(100).max(2_147_483_647).default(3_000).description('SIGTERM→SIGKILL grace period (ms).'),
+// The executor fields mirror LocalBashExecutor's schema defaults verbatim
+// (`.volatile()` included, so the static `Config` stays assignable to the
+// parent executor's and settings edits apply live); a row that only sets
+// `timeoutMs` (like the stock `bash-sandbox` row) keeps the stock behavior
+// everywhere else. No `Schema<Config>` annotation: schemastery ≥ 3.18.4 types
+// volatile modes into the schema generics, and an annotation would fight the
+// inference the loader checks `static Config` against.
+export const Config = Schema.object({
+  cwd: Schema.string().volatile().description('Default working directory for commands (default: process.cwd()).'),
+  timeoutMs: Schema.number().step(1).min(1_000).default(120_000).volatile().description('Default per-command timeout (ms).'),
+  maxTimeoutMs: Schema.number().step(1).min(1_000).default(600_000).volatile().description('Upper bound a caller may raise the per-command timeout to (ms).'),
+  maxOutputBytes: Schema.number().step(1).min(1_024).default(64_000).volatile().description('Default stdout/stderr capture budget per stream (bytes).'),
+  maxSpillBytes: Schema.number().step(1).min(65_536).default(67_108_864).volatile().description('Per-stream spill-file cap (bytes).'),
+  graceMs: Schema.number().step(1).min(100).max(2_147_483_647).default(3_000).volatile().description('SIGTERM→SIGKILL grace period (ms).'),
   direnvPath: Schema.string().default(DIRENV_DEFAULTS.direnvPath).description('Direnv executable: absolute path or bare PATH name resolved in the harness environment.'),
   direnvTimeoutMs: Schema.number().step(1).min(1_000).default(DIRENV_DEFAULTS.direnvTimeoutMs).description('Budget for one `direnv export json` evaluation; a cold devenv/nix evaluation can take tens of seconds (ms).'),
   direnvRevalidateMs: Schema.number().step(1).min(0).default(DIRENV_DEFAULTS.direnvRevalidateMs).description('Re-evaluate direnv when the cached overlay is older than this; direnv’s own cache keeps repeat runs near 20 ms (ms).'),
@@ -135,10 +141,12 @@ async function ensureOverlay(loader: DirenvLoader, dir: string): Promise<EnvOver
  * The `ctx.shell` provider: the stock sandboxed bash executor with a direnv
  * overlay merged into every execution. Mount it in place of the base
  * composition's `bash-sandbox` row (the bundle patch disables that row and
- * appends this one — patch layers cannot rename a row). Foreground `run`
- * awaits a fresh overlay; background `start` reads the snapshot warmed by
- * `agent/session-start` / `tools/pre-execute` and kicks a recompute when
- * even that is missing, so a cold start degrades for at most one command.
+ * appends this one — patch layers cannot rename a row). One `execute` entry
+ * point covers foreground and background alike (0.2 folded `run`/`start`
+ * into `execute`; callers decide foreground by awaiting the handle's
+ * `result`): each spawn awaits a fresh overlay — warm after the
+ * `agent/created` kick and the `tools/pre-execute` gate, and at most one
+ * cold `direnv export` on the first direct programmatic call.
  *
  * No `#private` members here on purpose: cordis rebinds service-method
  * receivers to a shadow Proxy (`createShadowMethod` in @deepseek-ai/cordis
@@ -168,23 +176,17 @@ export class AutoEnvBashExecutor extends SandboxBashExecutor {
     wireExecutor(ctx, this)
   }
 
-  override async run(spec: ShellExecSpec) {
+  override async execute(spec: ShellExecSpec) {
     const overlay = await ensureOverlay(this.direnv, spec.workdir)
-    return super.run(mergeOverlay(spec, overlay))
-  }
-
-  override start(spec: ShellExecSpec) {
-    const overlay = this.direnv.snapshot(spec.workdir)
-    if (overlay === undefined) void ensureOverlay(this.direnv, spec.workdir)
-    return super.start(mergeOverlay(spec, overlay ?? EMPTY_OVERLAY))
+    return super.execute(mergeOverlay(spec, overlay))
   }
 }
 
 /** Register the session-start kick, the pre-execute gate, and `$DSH_DIRENV`. */
 function wireExecutor(ctx: Context, executor: AutoEnvBashExecutor): void {
   // Warm the session directory's overlay before the first turn; the event
-  // is a synchronous notification, so the kick is deliberately un-awaited.
-  ctx.on('agent/session-start', ({ agent }) => {
+  // is a serial notification, but the kick is deliberately un-awaited.
+  ctx.on('agent/created', ({ agent }) => {
     const cwd = agent.session.header.cwd
     if (cwd !== undefined) void ensureOverlay(executor.direnv, cwd)
   })

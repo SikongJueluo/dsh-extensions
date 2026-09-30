@@ -11,10 +11,12 @@ session 不可见。本插件把 base composition 的沙箱 bash 执行器（`ba
 ## 工作机制
 
 ```
-agent/session-start ──► 对 session 目录 kick 一次 direnv 求值（预热）
+agent/created ─────► 对 session 目录 kick 一次 direnv 求值（预热）
 tools/pre-execute  ──► 每次 bash 工具调用前 await 该目录的 overlay（封死竞态）
-executor run/start ──► overlay 合并进 ShellExecSpec.env（官方 in-process 注入缝，
-                        hooks 桥注入 CLAUDE_PROJECT_DIR 用的同一通道）
+executor execute  ──► overlay 合并进 ShellExecSpec.env（官方 in-process 注入缝，
+                        hooks 桥注入 CLAUDE_PROJECT_DIR 用的同一通道；
+                        dsh 0.2 起 run/start 合并为单一 execute，前台/后台
+                        只是调用方是否 await handle.result 的差别）
 ```
 
 - **direnv 在宿主侧运行**（经 `ctx.subprocess`），不在模型 bash 沙箱里——沙箱会拒绝

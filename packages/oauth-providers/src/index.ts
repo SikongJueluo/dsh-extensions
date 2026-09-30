@@ -14,10 +14,9 @@
  *
  * @module dsh-oauth-providers
  */
-import type { Context } from '@deepseek-ai/cordis'
-// Type-only imports: pull the `Context.settings` / `Context.authorization` /
+import type { Context, Volatile } from '@deepseek-ai/cordis'
+// Type-only imports: pull the `Context.authorization` /
 // `Context.credentials` module augmentations in.
-import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-authorization'
 import type {} from '@deepseek-ai/dsh-credentials'
 import Schema from '@deepseek-ai/schemastery'
@@ -39,22 +38,26 @@ export {
 export const name = PLUGIN_NAME
 // `authorization`, `connection`, and `webServer` are soft-injected at runtime
 // (the channel and the flows wait for them), so compositions without a web
-// server still load the provider routes.
-export const inject = ['llm', 'settings', 'credentials']
+// server still load the provider routes. `settings` needs no inject in 0.2:
+// the row's own Config schema is the settings form.
+export const inject = ['llm', 'credentials']
 
-/** Plugin-row config: one sub-object per provider module. */
+/** Plugin-row config: one sub-object per provider module, live-editable. */
 export interface Config {
   /** ChatGPT provider configuration. */
-  chatgpt?: ChatGptConfigShape
+  chatgpt?: Volatile<ChatGptConfigShape>
 }
 
-export const Config: Schema<Config> = Schema.object({
-  chatgpt: ChatGptConfig.description('ChatGPT provider configuration (base layer for its settings section).'),
+// No `Schema<Config>` annotation: schemastery ≥ 3.18.4 types volatile modes
+// into the schema generics, and an annotation would fight the inference the
+// loader validates `Config` against.
+export const Config = Schema.object({
+  chatgpt: ChatGptConfig.volatile().description('ChatGPT provider configuration (the Settings page edits this section live).'),
 })
 
 export function apply(ctx: Context, config: Config): void {
   ctx.logger(PACKAGE_NAME).info('loaded')
   const channel = registerAuthChannel(ctx)
   const tokens = new OAuthProvidersService(ctx)
-  registerChatGpt(ctx, { channel, tokens, base: config.chatgpt ?? {} })
+  registerChatGpt(ctx, { channel, tokens, config: () => config.chatgpt?.get() ?? {} })
 }

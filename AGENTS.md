@@ -44,7 +44,8 @@ dsh --profile <profile> --dump-config   # 应出现 "# == dsh-<name>" 层
 - **bundle**：带 `dsh.bundle` 声明的 npm 包 = 一层配置；`cordis.patch.yml` 的行以 `id` + `name`（npm 包名）表示。
 - **profile**：`$DSH_HOME/profiles/<name>` 下的可启动组合。层序：bundles → profile 自身 patch → 用户层 patch → `--patch` overlays。后层按 id 覆盖前层，且 config 整体替换而非深合并——覆盖一行必须重述它需要的所有键。
 - **双半插件**：`package.json` 的 `dsh.client`（`platform` + `inject` 依赖图）声明浏览器半插件，代码经 `exports["./client"]` 装载；宿主半插件走 `lib/index.js`。两侧经 Typed Client Remote wire（`ctx.remote.*`）或插件自有 webServer 前缀路由通信。
-- **凭据**：秘密只存 `ctx.credentials`（`<scope>/<id>`），`modifyRecord` 的独占写窗口即跨进程刷新锁；settings 文档只有引用。
+- **凭据**：秘密只存 `ctx.credentials`（`<scope>/<id>`），`modifyRecord` 的独占写窗口即跨进程刷新锁；settings 只有引用。
+- **settings（0.2 模型）**：无自定义配置节——`ctx.settings` 自动把每个在挂插件行的 `Config` schema 投影成表单，namespace ≡ profile 行 id；编辑写入即改行 config。volatile 字段（`.volatile()`）热生效不重挂（通过 `Volatile.get()` 读活值、监听 `loader/volatile-update`），非 volatile 字段编辑则重挂插件行。LLM 目录的 `settingsNs` 填行 id、`settingsPath` 填行 config 内的路径。
 - service（`ctx.llm` / `ctx.settings` / `ctx.authorization` / `ctx.credentials` / `ctx.logger` 等）由宿主提供；`inject` 列表让 `apply` 等到 service 就绪才执行，`ctx.inject([...], fn)` 等运行期才出现的 service。
 
 ## 新增插件
@@ -57,7 +58,7 @@ dsh --profile <profile> --dump-config   # 应出现 "# == dsh-<name>" 层
 
 ## 版本钉版
 
-`@deepseek-ai/*` 的 devDependencies 钉本机 dsh 内置的精确版本（cordis 4.0.2 / schemastery 3.18.2 / dsh-* 0.1.5-rc.2），使类型检查与宿主运行时一致——schemastery 3.18.4 起类型变严，`Schema<Config>` 注解会与 `.default()` 推断冲突。`peerDependencies` 保持宽松，交给安装方解析。升级 dsh 后同步核对这些钉版；API 演进（如 `CallId` → `ToolCallId`、`installSettingsSection` → `ctx.settings.installSection`）正是靠钉版类型检查暴露的。
+`@deepseek-ai/*` 的 devDependencies 钉本机 dsh 内置的精确版本（dsh 0.2.0-rc.2：cordis 4.0.4 / schemastery 3.18.4 / dsh-* 0.2.0-rc.2），使类型检查与宿主运行时一致。schemastery 3.18.4 起类型把 volatile 模式编进 schema 泛型，**不要给 `Config` 写 `Schema<Config>` 注解**——声明 `interface Config`（volatile 字段用 `Volatile<T>`，见 dsh-llm-pi-ai 或本仓 auto-permit/settings.ts 的写法），让 `const Config = Schema.object({...})` 自行推断，loader 才能对上 `static Config`/`Config` 导出的形状。`peerDependencies` 保持宽松，交给安装方解析。升级 dsh 后同步核对这些钉版；API 演进（如 `CallId` → `ToolCallId`、0.2 删掉 `ctx.settings.installSection`）正是靠钉版类型检查暴露的。
 
 ## 参考
 

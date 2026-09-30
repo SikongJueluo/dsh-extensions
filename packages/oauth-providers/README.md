@@ -58,8 +58,10 @@ reasoning 档位在模型选择器里按请求选择。
 `@openai/codex`（同样 2 小时缓存，版本变化立即失效模型缓存），离线时回退内置
 快照 `0.157.1`。新模型上线后最多 2 小时自动出现，点「刷新模型」立即拉取。
 
-每厂商仍保留一个 settings 命名空间（如 `oauth-providers-chatgpt`），供组合层
-（cordis patch 的行 config）覆盖内部默认，无 UI：
+每厂商在插件行 config 下保留一个配置子对象（`oauth-providers` 行的
+`chatgpt`，dsh 0.2 设置模型：settings namespace ≡ profile 行 id，即
+`settingsNs: "oauth-providers"`、`settingsPath: ["chatgpt"]`），供组合层
+（cordis patch 的行 config）或 Settings 页覆盖内部默认，volatile 热生效：
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
@@ -77,8 +79,8 @@ reasoning 档位在模型选择器里按请求选择。
   `src/channel.ts` 是共享登录通道——`ctx.webServer` 上的 `/dsh-oauth-providers`
   前缀路由（connection RPC 同款信封），按 provider id 派发
   providers/status/begin/poll/submit/decline/cancel/logout；
-  每个厂商模块注册自己的 `ctx.llm` 路由、`ctx.authorization` 登录流程与
-  `ctx.settings` 配置节。
+  每个厂商模块注册自己的 `ctx.llm` 路由与 `ctx.authorization` 登录流程；
+  配置即插件行 config（0.2 无独立 settings 配置节）。
 - **浏览器半**（`client/client.js`）：设置页 "OAuth 登录" 分区，每厂商一张
   卡片（状态灯 / 登录流 / 模型 / 配置表单），经 Typed Client Remote 读状态、
   经共享通道完成登录。

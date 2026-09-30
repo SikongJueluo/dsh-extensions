@@ -1,6 +1,6 @@
 {
   "name": "dsh-plan-usage",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DSH plan-usage plugin: a planUsage host service aggregating coding-plan quota windows (GLM 5h/weekly via z.ai/bigmodel, OpenAI Codex via ChatGPT OAuth, MiniMax Token Plan) plus a Settings section with bars and reset countdowns; shows only routes the process actually registers",
   "type": "module",
   "license": "GPL-3.0-or-later",
@@ -42,14 +42,14 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/schemastery": "^3.18.2"
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/schemastery": "^3.18.4"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/dsh-client-connection": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-host-webserver": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
-    "@deepseek-ai/schemastery": "3.18.2"
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4"
   }
 }

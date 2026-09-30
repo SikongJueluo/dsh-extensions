@@ -110,16 +110,16 @@ export function resolveAdapterOptions(config: ResolvedChatGptConfig = {}): Resol
 
 export interface RegisterChatGptDeps {
   channel: AuthChannel
-  /** Composition-entry base layer for the settings namespace. */
-  base?: ResolvedChatGptConfig
+  /** Live reader for this provider's configuration snapshot. */
+  config: () => ResolvedChatGptConfig
   /** Shared OAuth token service this module registers its resolver into. */
   tokens?: OAuthProvidersService
 }
 
 /** Wire the ChatGPT provider: LLM route, catalog, token store, settings, sign-in. */
-export function registerChatGpt(ctx: Context, { channel, tokens, base = {} }: RegisterChatGptDeps): void {
+export function registerChatGpt(ctx: Context, { channel, tokens, config }: RegisterChatGptDeps): void {
   const log = ctx.logger(`${PACKAGE_NAME}/chatgpt`)
-  let current: () => ResolvedChatGptConfig = () => base
+  const current: () => ResolvedChatGptConfig = config
   let lastRaw: ResolvedChatGptConfig | undefined
   let lastGood: ResolvedOptions | undefined
 
@@ -161,27 +161,26 @@ export function registerChatGpt(ctx: Context, { channel, tokens, base = {} }: Re
   const catalog = new ModelCatalog({ fetch: fetchVia, options })
   const adapter = new OpenAiOauthAdapter({ options, tokenStore, catalog, getFetch })
 
+  // 0.2 settings model: the settings namespace IS this plugin's profile entry
+  // id, and the editable section is the row config's `chatgpt` sub-object —
+  // `@deepseek-ai/dsh-settings` projects this entry's Config schema
+  // automatically (0.1's `settings.installSection` is gone). A Settings edit
+  // commits into the running fiber's volatile `chatgpt` reference, which
+  // `current()` below reads live; `options()` re-resolves on the next use.
+  // `fiber.entry` is attached at runtime by cordis-plugin-loader (untyped in
+  // cordis 4.0.4's Fiber declaration); fall back to the stock row id.
+  const entry = (ctx.fiber as { entry?: { options: { id: string } } }).entry
+  const settingsNs = entry?.options.id ?? SETTINGS_NAMESPACE
   ctx.llm.registerConfigurableProviders([
     {
       provider: PROVIDER,
       displayName: DISPLAY_NAME,
-      settingsNs: SETTINGS_NAMESPACE,
-      settingsPath: [],
+      settingsNs,
+      settingsPath: ['chatgpt'],
     },
   ])
   ctx.llm.registerAdapter([PROVIDER], adapter)
-  ctx.llm.registerModelDiscovery(SETTINGS_NAMESPACE, createDiscovery({ options, tokenStore, catalog }))
+  ctx.llm.registerModelDiscovery(settingsNs, createDiscovery({ options, tokenStore, catalog }))
 
-  // The composition entry is the base layer; while the settings service holds
-  // our namespace, its resolved scope replaces the entry as the live source.
-  ctx.settings.installSection(ctx, SETTINGS_NAMESPACE, ChatGptConfig, base as ChatGptConfig, {
-    setSource: (source) => {
-      current = source
-    },
-    onChange: () => {
-      options()
-    },
-  })
-
-  registerChatGptSignIn(ctx, { key: CREDENTIAL_KEY, fetch: fetchVia, channel })
+  registerChatGptSignIn(ctx, { key: CREDENTIAL_KEY, fetch: fetchVia, channel, settingsNs })
 }

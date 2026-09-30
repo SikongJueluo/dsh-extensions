@@ -21,13 +21,15 @@ import {
 } from './oauth.js'
 import type { OAuthGrant } from './oauth.js'
 import type { FetchLike } from '../../transport.js'
-import { CREDENTIAL_ID, DISPLAY_NAME, PROVIDER, SETTINGS_NAMESPACE } from './identity.js'
+import { CREDENTIAL_ID, DISPLAY_NAME, PROVIDER } from './identity.js'
 import { PACKAGE_NAME } from '../../identity.js'
 
 export interface ChatGptSignInDeps {
   key: CredentialKey
   fetch: FetchLike
   channel: AuthChannel
+  /** Settings namespace (the plugin row's entry id) this provider is edited under. */
+  settingsNs: string
 }
 
 /** Parse and state-check a pasted authorization answer. */
@@ -46,9 +48,9 @@ function grantRecord(grant: OAuthGrant): { kind: 'grant'; payload: OAuthGrant } 
  * Register the ChatGPT authorization flow and declare the provider on the
  * shared browser sign-in channel.
  */
-export function registerChatGptSignIn(ctx: Context, { key, fetch, channel }: ChatGptSignInDeps): void {
+export function registerChatGptSignIn(ctx: Context, { key, fetch, channel, settingsNs }: ChatGptSignInDeps): void {
   // Registry entry first: `providers`/`status` answer with or without the seam.
-  channel.register({ id: PROVIDER, label: DISPLAY_NAME, settingsNs: SETTINGS_NAMESPACE, key })
+  channel.register({ id: PROVIDER, label: DISPLAY_NAME, settingsNs, key })
 
   ctx.inject(['authorization'], (authCtx) => {
     authCtx.authorization.registerFlow({

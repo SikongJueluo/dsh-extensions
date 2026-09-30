@@ -7,12 +7,17 @@
  * reasoning without an opt-in summary), and image blocks are rejected because
  * this plugin's wire path is text-only.
  *
+ * Tool results are first-class `role: 'tool'` messages in the 0.2 message
+ * model; developer-role tool addition/removal notices are skipped — the
+ * harness projects active declarations through `GenerateOptions.tools` /
+ * `toolHistory` instead.
+ *
  * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
  *
  * @module dsh-openai-oauth/serialize
  */
 import { LlmError, contentHasImage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, GenerateOptions, RequestMessage } from '@deepseek-ai/dsh-llm'
 
 /** Join the text blocks of a message's content into one string. */
 function flattenText(blocks: readonly ContentBlock[]): string {
@@ -37,11 +42,11 @@ type InputItem = Record<string, unknown>
  * System messages are skipped — the harness delivers the system prompt
  * separately as `GenerateOptions.system` → `instructions`.
  */
-export function serializeInput(messages: readonly Message[]): InputItem[] {
+export function serializeInput(messages: readonly RequestMessage[]): InputItem[] {
   const input: InputItem[] = []
   for (const message of messages) {
     assertTextOnly(message.content)
-    if (message.role === 'system') continue
+    if (message.role === 'system' || message.role === 'developer') continue
 
     if (message.role === 'assistant') {
       const text = flattenText(message.content)
@@ -62,21 +67,19 @@ export function serializeInput(messages: readonly Message[]): InputItem[] {
       continue
     }
 
-    // User-role messages: visible text first, then tool results as
-    // top-level function_call_output items.
-    const text = flattenText(message.content)
-    const toolResults = message.content.filter((block) => block.type === 'tool-result')
-    if (text.length > 0 || toolResults.length === 0) {
-      input.push({ role: 'user', content: [{ type: 'input_text', text }] })
-    }
-    for (const result of toolResults) {
-      if (result.type !== 'tool-result') continue
+    if (message.role === 'tool') {
+      // 0.2 message model: one first-class tool-role message per result.
       input.push({
         type: 'function_call_output',
-        call_id: result.toolCallId,
-        output: flattenText(result.content) || '(no output)',
+        call_id: message.toolCallId,
+        output: flattenText(message.content) || '(no output)',
       })
+      continue
     }
+
+    // User-role messages (persisted or one-shot identity-free inputs).
+    const text = flattenText(message.content)
+    input.push({ role: 'user', content: [{ type: 'input_text', text }] })
   }
   return input
 }
