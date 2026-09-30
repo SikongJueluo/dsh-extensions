@@ -12,6 +12,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
 import { bootstrapPrompt, type HandoffRuntime, type PendingHandoff } from './brief.js'
+import { defaultRoute, sessionRoute, toAgentOptions } from './selection.js'
 
 /** Sidebar title prefix; the task tail is trimmed to keep it readable. */
 const TITLE_PREFIX = 'Handoff: '
@@ -23,15 +24,17 @@ function mintSessionId(): SessionId {
 }
 
 /** Copy the origin agent's model route into creation options (defined fields only). */
-function inheritAgentOptions(agent: Agent): AgentOptions | undefined {
-  const origin = agent.options
-  const out: Partial<AgentOptions> = {}
-  if (origin.provider !== undefined) out.provider = origin.provider
-  if (origin.model !== undefined) out.model = origin.model
-  if (origin.reasoningEffort !== undefined) out.reasoningEffort = origin.reasoningEffort
-  if (origin.maxTokens !== undefined) out.maxTokens = origin.maxTokens
-  const keys = Object.keys(out) as (keyof AgentOptions)[]
-  return keys.length > 0 ? (out as AgentOptions) : undefined
+function inheritAgentOptions(ctx: Context, agent: Agent): AgentOptions | undefined {
+  // The session's durable selection — provider, model, and reasoning effort —
+  // is the route it is actually on; `agent.options` is only the creation
+  // fallback for a session that has not recorded a selection yet.
+  const route = sessionRoute(ctx, agent)
+  const options = toAgentOptions(route)
+  if (options === undefined) return undefined
+  // The origin's own output cap is a per-agent setting rather than part of a
+  // route, so it carries over only on an inherited route.
+  const maxTokens = agent.options.maxTokens
+  return maxTokens === undefined ? options : { ...options, maxTokens }
 }
 
 /** Resolve the agent options for the fresh session per the confirmed choice. */
@@ -40,19 +43,18 @@ function resolveAgentOptions(ctx: Context, agent: Agent, choice: PendingHandoff[
     // An explicit route switches the brain. The effort is whatever the picker
     // chose; without one the target model's own default applies, and the
     // origin's maxTokens never carries over.
-    return {
+    return toAgentOptions({
       provider: choice.provider,
       model: choice.model,
-      ...(choice.reasoningEffort === undefined
-        ? {}
-        : { reasoningEffort: choice.reasoningEffort as AgentOptions['reasoningEffort'] }),
-    }
+      ...(choice.reasoningEffort === undefined ? {} : { reasoningEffort: choice.reasoningEffort }),
+    })
   }
   if (choice.kind === 'default') {
-    const selection = ctx.get('agentDefaultModel')?.currentSelection()
-    return selection === undefined ? undefined : { provider: selection.provider, model: selection.model }
+    // The deployment default carries its own reasoning effort; dropping it
+    // silently downgraded the fresh session to the model default.
+    return toAgentOptions(defaultRoute(ctx))
   }
-  return inheritAgentOptions(agent)
+  return inheritAgentOptions(ctx, agent)
 }
 
 /**

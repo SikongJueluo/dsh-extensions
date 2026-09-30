@@ -21,7 +21,8 @@ export interface AgentPresetsShim {
 
 /** Minimal `ctx.agentDefaultModel` surface used for the "global default" choice. */
 export interface AgentDefaultModelShim {
-  currentSelection(): { provider: string; model: string }
+  /** The deployment default: provider, model, and its reasoning effort when set. */
+  currentSelection(): { provider: string; model: string; reasoningEffort?: string }
 }
 
 declare module '@deepseek-ai/cordis' {

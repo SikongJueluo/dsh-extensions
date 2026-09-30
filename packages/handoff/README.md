@@ -37,8 +37,14 @@ agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文
 4. **命令直达**：`/handoff --model provider/model <任务>` 跳过选择，适合脚本与 `confirm: false`；
    拼写只做形状校验，路由合法性由首次请求验证（强度用模型默认）。
 
-显式切换模型时**保留当前会话的 preset**（同一人设、不同大脑）；选了强度就按选的强度，没选则用目标
-模型自己的默认值；`maxTokens` 不从原会话继承。
+**三条路径各自的强度来源**：
+
+- **继承当前会话** = 原会话**实际在用**的 provider/model/强度，读会话的 `modelSelection` 投影
+  （`ctx.sessionProjections.stateOf(session, 'modelSelection')`，取 `pending → lastUsed`；投影缺席时
+  回退到 agent 的创建选项）。`/model` 切换过的模型与强度因此能正确带走，原 `maxTokens` 一并保留。
+- **全局默认** = 部署默认选择，**含它自带的强度**（此前只取了 provider/model，把强度丢了）。
+- **显式选模型** = 你选的强度（没选则用该模型默认值），**保留当前会话的 preset**（同一人设、不同大脑），
+  不继承原 `maxTokens`。
 
 要点：
 

@@ -31,7 +31,9 @@ const ctx = {
     return () => {}
   },
   get(name) {
-    if (name === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'global-provider', model: 'global-model' }) }
+    if (name === 'agentDefaultModel') {
+      return { currentSelection: () => ({ provider: 'global-provider', model: 'global-model', reasoningEffort: 'low' }) }
+    }
     if (name === 'llm') return { listProviders: async () => [], listModels: async () => [] }
     return undefined
   },
@@ -105,6 +107,16 @@ const flowCtx = {
 }
 flowCtx.get = (key) => {
   if (key === 'sessionTitle') return { rename: (_session, title) => { renamed = title } }
+  // The origin session's durable selection: what it is actually on, including
+  // the effort — deliberately different from the agent's creation options.
+  if (key === 'sessionProjections') {
+    return {
+      stateOf: () => ({
+        lastUsed: { provider: 'origin-provider', model: 'origin-model', reasoningEffort: 'low' },
+        pending: { provider: 'origin-provider', model: 'origin-model', reasoningEffort: 'medium' },
+      }),
+    }
+  }
   return ctx.get(key)
 }
 
@@ -136,9 +148,39 @@ if (before.requests.length !== 0) throw new Error('expected no pending picks bef
 
 const agent = {
   id: 'origin-session',
-  options: { provider: 'origin-provider', model: 'origin-model' },
+  options: { provider: 'origin-provider', model: 'origin-model', maxTokens: 4096 },
   session: { header: { cwd } },
   followup(message) { followups.push(message) },
+}
+
+/**
+ * Run one complete handoff cycle: start the command, answer the pending pick,
+ * hand it a completion-marked brief, and wait for the spawn.
+ */
+async function runHandoff(rawInput, choice) {
+  created = null
+  followups.length = 0
+  spawnedFollowups.length = 0
+  const handled = registered.handler({ rawInput, agent, signal: null })
+  let pick = null
+  for (let i = 0; i < 40 && pick === null; i += 1) {
+    const listed = await channel('pending', {})
+    if (listed.requests.length > 0) pick = listed.requests[0]
+    else await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  if (pick === null) throw new Error(`"${rawInput}": the command never published a pending pick`)
+  const chosen = await channel('choose', { requestId: pick.id, choice })
+  if (chosen.ok !== true) throw new Error(`"${rawInput}": choose rejected: ${JSON.stringify(chosen)}`)
+  const answer = await handled
+  if (answer.kind !== 'success') throw new Error(`"${rawInput}": command failed: ${JSON.stringify(answer)}`)
+  const briefText = followups[0].content[0].text
+  const briefPath = briefText.match(/\S+handoff\.md/)?.[0]
+  if (briefPath === undefined) throw new Error('brief instruction names no target file')
+  await mkdir(dirname(briefPath), { recursive: true })
+  await writeFile(briefPath, `# Goal\nsmoke\n<!-- handoff:complete -->\n`, 'utf8')
+  for (let i = 0; i < 200 && created === null; i += 1) await new Promise(resolve => setTimeout(resolve, 10))
+  if (created === null) throw new Error(`"${rawInput}": the watcher never spawned the fresh session`)
+  return { pick, answer, options: created.agentOptions, meta: created.meta }
 }
 
 const handled = registered.handler({ rawInput: 'fix the readme', agent, signal: null })
@@ -151,6 +193,14 @@ for (let i = 0; i < 40 && pending === null; i += 1) {
 }
 if (pending === null) throw new Error('the command never published a pending pick')
 console.log('pending pick:', JSON.stringify(pending))
+// Both base options must carry the effort their route is actually on: the
+// origin session's durable (pending) selection, and the deployment default.
+if (pending.inherited?.reasoningEffort !== 'medium') {
+  throw new Error(`inherit route lost the session effort: ${JSON.stringify(pending.inherited)}`)
+}
+if (pending.fallback?.reasoningEffort !== 'low') {
+  throw new Error(`global default lost its effort: ${JSON.stringify(pending.fallback)}`)
+}
 
 const chosen = await channel('choose', {
   requestId: pending.id,
@@ -187,6 +237,33 @@ if (spawnedFollowups.length !== 1 || !spawnedFollowups[0].content[0].text.includ
 }
 if (renamed !== 'Handoff: fix the readme') throw new Error(`unexpected session title: ${renamed}`)
 console.log('spawned:', JSON.stringify(created.agentOptions), '| title:', renamed)
+
+// Inheriting the window must carry the session's durable effort (medium), not
+// the creation-option effort (absent), and must keep the origin output cap.
+const inherit = await runHandoff('inherited cycle', { kind: 'inherit' })
+console.log('inherit spawn:', JSON.stringify(inherit.options))
+if (inherit.options.provider !== 'origin-provider' || inherit.options.model !== 'origin-model') {
+  throw new Error(`inherit used the wrong route: ${JSON.stringify(inherit.options)}`)
+}
+if (inherit.options.reasoningEffort !== 'medium') {
+  throw new Error(`inherit lost the session effort: ${JSON.stringify(inherit.options)}`)
+}
+if (inherit.options.maxTokens !== 4096) {
+  throw new Error(`inherit lost the origin maxTokens: ${JSON.stringify(inherit.options)}`)
+}
+if (!inherit.answer.text.includes('强度 medium')) {
+  throw new Error(`inherit result does not name the effort: ${inherit.answer.text}`)
+}
+
+// The deployment default must carry its own effort.
+const fallback = await runHandoff('default cycle', { kind: 'default' })
+console.log('default spawn:', JSON.stringify(fallback.options))
+if (fallback.options.provider !== 'global-provider' || fallback.options.model !== 'global-model') {
+  throw new Error(`default used the wrong route: ${JSON.stringify(fallback.options)}`)
+}
+if (fallback.options.reasoningEffort !== 'low') {
+  throw new Error(`default lost its effort: ${JSON.stringify(fallback.options)}`)
+}
 
 for (const dispose of [...flowDisposers, ...disposers]) dispose()
 await rm(cwd, { recursive: true, force: true })

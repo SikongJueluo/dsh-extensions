@@ -238,18 +238,36 @@ window.__ModuleLoader__.load({
         return needle.length === 0 || (failure.name + " " + failure.id + " " + failure.message).toLowerCase().indexOf(needle) >= 0;
       });
 
-      /** Name a base option's route as the full catalog labels it, else as provider/model. */
-      function routeText(route, fallbackText) {
-        if (!route) return fallbackText;
+      /** The catalog's entry for one route, when it advertises it. */
+      function catalogModel(provider, model) {
         for (var g = 0; g < allGroups.length; g += 1) {
-          if (allGroups[g].id !== route.provider) continue;
+          if (allGroups[g].id !== provider) continue;
           for (var m = 0; m < allGroups[g].models.length; m += 1) {
-            if (allGroups[g].models[m].id === route.model) {
-              return allGroups[g].models[m].name + " · " + route.provider + "/" + route.model;
-            }
+            if (allGroups[g].models[m].id === model) return allGroups[g].models[m];
           }
         }
-        return route.provider + "/" + route.model;
+        return null;
+      }
+
+      /** The catalog's display name for one reasoning effort, else the raw id. */
+      function effortText(provider, model, effortId) {
+        var entry = catalogModel(provider, model);
+        var efforts = entry && entry.reasoning && entry.reasoning.efforts ? entry.reasoning.efforts : [];
+        for (var e = 0; e < efforts.length; e += 1) {
+          if (efforts[e].id === effortId) return efforts[e].name;
+        }
+        return effortId;
+      }
+
+      /** Name a base option's route as the full catalog labels it, effort included. */
+      function routeText(route, fallbackText) {
+        if (!route) return fallbackText;
+        var entry = catalogModel(route.provider, route.model);
+        var parts = [];
+        if (entry) parts.push(entry.name);
+        parts.push(route.provider + "/" + route.model);
+        if (route.reasoningEffort) parts.push("强度 " + effortText(route.provider, route.model, route.reasoningEffort));
+        return parts.join(" · ");
       }
 
       /** One model row: pick it, or step into its reasoning-effort choices. */

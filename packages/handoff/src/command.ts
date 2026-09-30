@@ -11,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-user-questions'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { COMMAND_NAME, DEFAULT_BRIEF_DIR, PACKAGE_NAME } from './identity.js'
 import { briefInstruction, startHandoffWatch, timestampSlug, type HandoffRuntime, type ModelChoice, type PendingHandoff } from './brief.js'
+import { defaultRoute, sessionRoute, type RouteSummary } from './selection.js'
 
 /** Label shown for "keep this session's preset and model". */
 const LABEL_INHERIT = '继承当前会话'
@@ -52,20 +53,6 @@ interface ModelRoute {
 interface MenuEntry {
   readonly label: string
   readonly route: ModelRoute
-}
-
-/** A provider/model pair (plus the effort in force) as the UI describes it. */
-interface RouteSummary {
-  readonly provider: string
-  readonly model: string
-  readonly reasoningEffort?: string
-}
-
-/** The origin agent's own route, when it has one. */
-function inheritedRoute(agent: Agent): RouteSummary | undefined {
-  const { provider, model, reasoningEffort } = agent.options
-  if (provider === undefined || model === undefined) return undefined
-  return { provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }
 }
 
 function menuDescription(route: ModelRoute): string | undefined {
@@ -229,12 +216,13 @@ async function askChoiceCard(
   }
 }
 
-/** One line naming the route a base option resolves to. */
+/** One line naming the route a base option resolves to, effort included. */
 function routeText(label: string, summary: RouteSummary | undefined): string {
   if (summary === undefined) {
     return label === LABEL_DEFAULT ? '默认 preset + 全局默认模型' : '沿用本会话的 preset 与模型'
   }
-  return `${summary.provider}/${summary.model}${label === LABEL_DEFAULT ? '（全局默认）' : '（本会话）'}`
+  const effort = summary.reasoningEffort === undefined ? '' : ` · 强度 ${summary.reasoningEffort}`
+  return `${summary.provider}/${summary.model}${effort}${label === LABEL_DEFAULT ? '（全局默认）' : '（本会话）'}`
 }
 
 /**
@@ -245,8 +233,8 @@ function routeText(label: string, summary: RouteSummary | undefined): string {
  */
 async function resolveChoice(rt: HandoffRuntime, agent: Agent, task: string): Promise<AskOutcome> {
   const { ctx, config } = rt
-  const inherited = inheritedRoute(agent)
-  const fallback = ctx.get('agentDefaultModel')?.currentSelection()
+  const inherited = sessionRoute(ctx, agent)
+  const fallback = defaultRoute(ctx)
   const channel = rt.channel
   if (channel !== undefined && channel.clientAttached()) {
     const outcome = await channel.request(
@@ -272,14 +260,16 @@ function describeChoice(
   inherited: RouteSummary | undefined,
   fallback: RouteSummary | undefined,
 ): string {
+  const named = (label: string, route: RouteSummary | undefined): string => {
+    if (route === undefined) return label
+    const effort = route.reasoningEffort === undefined ? '' : ` · 强度 ${route.reasoningEffort}`
+    return `${label}（${route.provider}/${route.model}${effort}）`
+  }
   if (choice.kind === 'model') {
     const route = `${choice.provider}/${choice.model}`
     return choice.reasoningEffort === undefined ? route : `${route}（强度 ${choice.reasoningEffort}）`
   }
-  if (choice.kind === 'default') {
-    return fallback === undefined ? LABEL_DEFAULT : `${LABEL_DEFAULT}（${fallback.provider}/${fallback.model}）`
-  }
-  return inherited === undefined ? LABEL_INHERIT : `${LABEL_INHERIT}（${inherited.provider}/${inherited.model}）`
+  return choice.kind === 'default' ? named(LABEL_DEFAULT, fallback) : named(LABEL_INHERIT, inherited)
 }
 
 /** Build the `/handoff` command definition. */
@@ -332,7 +322,7 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       } else {
         choice = { kind: 'inherit' }
       }
-      const choiceText = describeChoice(choice, inheritedRoute(agent), ctx.get('agentDefaultModel')?.currentSelection())
+      const choiceText = describeChoice(choice, sessionRoute(ctx, agent), defaultRoute(ctx))
 
       const workspace = cwd.replace(/\/+$/, '')
       const dir = config.dir?.startsWith('/') === true
