@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "DSH plan-usage plugin: a planUsage host service aggregating coding-plan quota windows (GLM 5h/weekly via z.ai/bigmodel, OpenAI Codex via ChatGPT OAuth, MiniMax Token Plan) plus a Settings section with bars and reset countdowns; shows only routes the process actually registers",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "exports": {

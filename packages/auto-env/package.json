@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "DSH auto-env plugin: sandboxed bash executor that layers a direnv (devenv) environment diff — evaluated host-side per working directory — onto every model and in-process shell command",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "exports": {

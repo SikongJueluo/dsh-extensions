@@ -1,0 +1,65 @@
+# AGENTS.md
+
+dsh-extensions —— out-of-tree DeepSeek Harness 插件 bundle 集。每个 `packages/*` 是一个可独立安装的 bundle（内含 Cordis plugin）；各包细节读其 README。
+
+## 命令
+
+前置：Node ≥ 20、pnpm ≥ 10、`dsh` CLI。
+
+```sh
+pnpm install        # 各包 prepare 自动完成首次构建
+pnpm build          # tsdown → lib/index.js + lib/index.d.ts
+pnpm typecheck      # 各包 tsc --noEmit
+pnpm check          # typecheck + build
+pnpm clean
+```
+
+`pnpm-workspace.yaml` 的 `nodeLinker: hoisted` 是刻意的：本机 pnpm 12 的 isolated store 曾对带 peer 的 `@deepseek-ai/*` 生成悬空链接。勿改回。
+
+## 两种加载方式
+
+开发 overlay（不安装，立即生效）：
+
+```sh
+pnpm build
+dsh --profile web --patch $PWD/packages/<name>/dev.patch.yml --no-open --port <端口>
+```
+
+- patch 内路径必须是绝对路径；重新构建后重启 dsh 进程才生效。
+- `--patch` 是全局旗标，配 `--profile` 用；`web` 子命令不接受它。
+
+安装循环（作为 bundle 装进 profile）：
+
+```sh
+pnpm build    # add 不会触发构建，先本地构建
+dsh plugin --profile <profile> add ./packages/<name>
+dsh --profile <profile> --dump-config   # 应出现 "# == dsh-<name>" 层
+```
+
+插件按 profile 安装，多个 profile 需分别 `add`。`dsh plugin` 本质是在 profile 目录里转发 pnpm 并对账 `dsh.profile.bundles`。
+
+## 关键概念
+
+- **plugin**：导出 `apply(ctx, config)` 的 ESM，可附 `name` / `inject` / `Config`（Schemastery schema，加载期校验并填默认值）。
+- **bundle**：带 `dsh.bundle` 声明的 npm 包 = 一层配置；`cordis.patch.yml` 的行以 `id` + `name`（npm 包名）表示。
+- **profile**：`$DSH_HOME/profiles/<name>` 下的可启动组合。层序：bundles → profile 自身 patch → 用户层 patch → `--patch` overlays。后层按 id 覆盖前层，且 config 整体替换而非深合并——覆盖一行必须重述它需要的所有键。
+- **双半插件**：`package.json` 的 `dsh.client`（`platform` + `inject` 依赖图）声明浏览器半插件，代码经 `exports["./client"]` 装载；宿主半插件走 `lib/index.js`。两侧经 Typed Client Remote wire（`ctx.remote.*`）或插件自有 webServer 前缀路由通信。
+- **凭据**：秘密只存 `ctx.credentials`（`<scope>/<id>`），`modifyRecord` 的独占写窗口即跨进程刷新锁；settings 文档只有引用。
+- service（`ctx.llm` / `ctx.settings` / `ctx.authorization` / `ctx.credentials` / `ctx.logger` 等）由宿主提供；`inject` 列表让 `apply` 等到 service 就绪才执行，`ctx.inject([...], fn)` 等运行期才出现的 service。
+
+## 新增插件
+
+1. `cp -r packages/oauth-providers packages/<name>`。
+2. 改 `package.json`：`name`（`dsh-<name>`）、`description`；consumed services 进 `peerDependencies` + `devDependencies`，仅宿主侧用不到的 runtime 依赖进 `dependencies`。
+3. 改 `cordis.patch.yml`（行的 `id` 与 `name` 换成新包名）和 `dev.patch.yml`（绝对路径）。
+4. 改 `src/`；不需要浏览器 UI 就删掉 `client/`、`dsh.client` 声明与 `exports["./client"]`。
+5. `pnpm install && pnpm check` 通过，并按上面任一方式验证：Web 里出现对应命令 / 设置分区 / provider。
+
+## 版本钉版
+
+`@deepseek-ai/*` 的 devDependencies 钉本机 dsh 内置的精确版本（cordis 4.0.2 / schemastery 3.18.2 / dsh-* 0.1.5-rc.2），使类型检查与宿主运行时一致——schemastery 3.18.4 起类型变严，`Schema<Config>` 注解会与 `.default()` 推断冲突。`peerDependencies` 保持宽松，交给安装方解析。升级 dsh 后同步核对这些钉版；API 演进（如 `CallId` → `ToolCallId`、`installSettingsSection` → `ctx.settings.installSection`）正是靠钉版类型检查暴露的。
+
+## 参考
+
+- [官方插件开发文档](https://deepseek-harness.github.io/deepseek-harness/en/develop/basic/)（最小形态 / tool / config / 打包安装 / Cordis tutorial）
+- [auto-env 调研文档](docs/research-dsh-session-direnv.md)

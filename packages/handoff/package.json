@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "DSH handoff plugin: /handoff <task> asks the current session to write a self-contained brief, then spawns a fresh session on the same workspace with the brief as its first prompt",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "exports": {

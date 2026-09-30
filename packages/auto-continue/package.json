@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "description": "DSH auto-continue plugin: owns recovery of quota/rate-limited model requests — waits until the coding-plan window resets (via the planUsage service from dsh-plan-usage) and retries the failed step in the same open turn; falls back to staged probing without it",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "exports": {
