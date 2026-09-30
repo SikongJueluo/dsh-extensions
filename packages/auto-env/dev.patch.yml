@@ -1,0 +1,22 @@
+# Development / deployment overlay: the locally built plugin entry, by
+# absolute path. Equivalent to the bundle layer in cordis.patch.yml, for the
+# two flows that mount entries directly instead of installing the bundle:
+#
+#   - dev:    dsh --profile web --patch ./packages/auto-env/dev.patch.yml \
+#               --no-open --port <port>
+#   - deploy: the NixOS dsh module's programs.dsh.extraPatches (see
+#             ~/.config/nixos/home/ai/dsh/plugins.nix)
+#
+# Rebuild first (`pnpm build`) so lib/ is current, then restart dsh. Paths
+# must stay quoted strings: a bare path literal would be copied into the Nix
+# store at eval time and later rebuilds would never be seen.
+- id: bash-sandbox
+  name: '@deepseek-ai/dsh-bash-sandbox'
+  disabled: true
+
+- insert:
+    - id: auto-env
+      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/auto-env/lib/index.js'
+      disabled: !!js process.platform === 'win32'
+      config:
+        timeoutMs: 60000

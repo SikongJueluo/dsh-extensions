@@ -8,6 +8,7 @@ Out-of-tree [DeepSeek Harness](https://www.deepseek.com/harness/en/) 插件库 �
 - `packages/handoff`（`dsh-handoff`）：**一条命令的会话交接**——`/handoff <任务>` 让当前会话写自包含简报（`.dsh/handoff/`），插件检测完成标记后经 `ctx.agents.create`（与 Web 新建会话同一工厂链路）起 session 并 `attachSession` 归入原 workspace 分组，简报即首条 prompt；模型经浏览器下拉选择（`shell.overlay` + `ctx.remote.session.modelCatalog()` 同 `/model` 数据源，`/dsh-handoff` 通道回传；无 Web half 时降级为 `ctx.userQuestions` 卡片）。`ctx.commands` 注册命令、`ctx.agentPresets`/`agentDefaultModel` 预设继承、`ctx.sessionTitle` 命名。详见[包内 README](./packages/handoff/README.md)。
 - `packages/plan-usage`（`dsh-plan-usage`）：**Coding 套餐配额查询（三源聚合）**——GLM（z.ai/bigmodel 监控 API）、OpenAI Codex（`wham/usage`，经 `oauthProviders` 服务取 OAuth token）、MiniMax（`token_plan/remains`，2049 自动翻区）三家的 5h/周窗口归一为 `planUsage` 宿主服务（统一消耗% + epoch 毫秒重置时间 + 窗口大小），**只显示本进程实际注册的路由**（GLM 别名家族收敛为一张卡），附设置页「Coding 套餐用量」分区（进度条 + 重置倒计时 + 实际窗口大小）；独立可用。详见[包内 README](./packages/plan-usage/README.md)。
 - `packages/auto-continue`（`dsh-auto-continue`）：**限额后自动续跑**——模型请求因套餐限额失败（`QUOTA`）时，在 `agent/request-error` waterfall 上接管恢复：经 `planUsage` 服务读重置点，睡到重置后**同 turn 原样重试失败的 step**（无 "continue" 消息、无额外 prompt token）；服务缺席则退化为阶梯探测。等待写 `llm/retry` 事件（Web 原生渲染倒计时）并持久化到 spool——**跨进程重启**：新实例认领记录，到点经 sessionController 冷启动会话发送续跑消息（护栏：预算过期清理/用户已接管放弃/忙碌重试）。详见[包内 README](./packages/auto-continue/README.md)。
+- `packages/auto-env`（`dsh-auto-env`）：**按工作区自动加载 direnv/devenv 环境**——DSH 的 bash 恒为非交互 `bash -c`，direnv hook 永不触发；本插件经 bundle patch 禁用 base 的 `bash-sandbox` 行并挂入其 `SandboxBashExecutor` 子类（约束行为不变），把宿主侧 `direnv export json` 的差量（按 `.envrc` 目录缓存 + inotify 主动失效 + 并发去重）合并进每条命令的 `ShellExecSpec.env`（hooks 桥注入 `CLAUDE_PROJECT_DIR` 的同一官方缝）。`agent/session-start` 预热 + `tools/pre-execute` await 封死前后台竞态；`null` 差量即 unset tombstone，`DSH_*`/`DIRENV_*` 键剥离；信任模型与交互 direnv 一致（未 `direnv allow` 的目录报 `$DSH_DIRENV=blocked`、什么都不加载；终端里 allow 后 watcher 立即失效缓存）。同一工作区的 session 与子代理共享一份 overlay。详见[包内 README](./packages/auto-env/README.md)与[调研文档](./docs/research-dsh-session-direnv.md)。
 
 ## 仓库结构
 
@@ -54,6 +55,15 @@ dsh-extensions/
             ├── command.ts       # /handoff handler：模型选择 + brief 指令 + 防重入
             ├── brief.ts         # 简报模板 / 完成检测 watcher / 失败通知
             └── spawn.ts         # agents.create + preset 挂载 + workspace 归组 + 首条 prompt
+    └── auto-env/                # dsh-auto-env（按工作区自动加载 direnv/devenv 环境）
+        ├── package.json         # dsh.bundle.patch；peer 含 dsh-bash-sandbox（运行时 import）
+        ├── cordis.patch.yml     # 禁用 base 的 bash-sandbox 行 + 插入 auto-env 行
+        ├── dev.patch.yml        # 开发/部署 overlay（同上，绝对路径 entry；NixOS 经 extraPatches 引用）
+        ├── smoke.mjs            # 假 direnv 的确定性用例（node smoke.mjs）
+        ├── live-check.mjs       # 真实 direnv 全链路手工验证（需宿主 shell 运行）
+        └── src/                 # 宿主半插件：class 插件（default export 即 executor）
+            ├── index.ts         # AutoEnvBashExecutor + Config + 事件接线/mergeOverlay
+            └── direnv.ts        # DirenvLoader：.envrc 探测/求值/缓存/状态分类
 ```
 
 ## 前置条件

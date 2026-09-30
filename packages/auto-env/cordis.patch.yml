@@ -1,0 +1,26 @@
+# dsh-auto-env bundle layer.
+#
+# Replaces the stock sandboxed bash executor: the `bash-sandbox` row is
+# disabled (patch layers cannot rename a row, so the stock row goes dark and
+# this one is appended) and the `auto-env` row mounts a SandboxBashExecutor
+# subclass that merges a per-working-directory direnv overlay into every
+# command's environment. Confinement behavior is unchanged — the executor
+# extends the stock sandboxed one; only the child environment differs.
+#
+# The `name` on the disable entry is a guard: if a later deployment already
+# swapped the bash-sandbox row for something else, this patch skips itself
+# instead of disabling an unknown executor.
+#
+# Users can override the auto-env row later (by id) in a later patch layer —
+# a patch replaces the row's whole `config`.
+- id: bash-sandbox
+  name: '@deepseek-ai/dsh-bash-sandbox'
+  disabled: true
+
+- insert:
+    - id: auto-env
+      name: dsh-auto-env
+      disabled: !!js process.platform === 'win32'
+      config:
+        # Mirror the stock bash-sandbox row's tighter default.
+        timeoutMs: 60000
