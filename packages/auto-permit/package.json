@@ -1,17 +1,17 @@
 {
   "name": "dsh-auto-permit",
   "version": "0.2.0",
-  "description": "DSH auto-permit plugin: an AI answerer on the approval waterfall that auto-allows repeated/nearly-repeated bash sandbox escalations a small judge model can ground in the session's user prompts and prior approvals; judge model picked in Settings (select + reasoning effort)",
+  "description": "DSH auto-permit plugin: an AI answerer on the approval waterfall that auto-allows repeated/nearly-repeated bash sandbox escalations a small judge model can ground in the session's user prompts and prior approvals; judge route declared in the plugin row config, editable in Settings when the row is Web-writable",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "exports": {
+    "./client": "./client/client.js",
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./client": "./client/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },

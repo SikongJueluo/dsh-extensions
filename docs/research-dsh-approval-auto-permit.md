@@ -267,6 +267,36 @@ approval/request (req, next):
 - 判官的 session 事件审计依赖 service 自动写的 `approval/asked`/`decided`
   对（放行在日志里可见 outcome=allowed-once），插件侧用 logger 记录判决理由。
 
+### 0.2 迁移记录（2026-10，最终版）
+
+升级 dsh 0.2 后的三个事实与最终决策：
+
+1. **行 config 的层规则**（`dsh-config-editor/lib/index.js:122`）：Web
+   Settings 表单编辑插件行 config，但 ConfigEditor 只写 profile patch 层，
+   而 `--patch` overlay（nixos `programs.dsh.plugins` 的注入方式）定义的行
+   永远压过它——Web 编辑必然报 "Configuration for … is overridden by a
+   home patch or command-line overlay"。这是设计行为：**行 config 的权威
+   归定义层**。对通过 overlay 装载的所有插件行（handoff、oauth-providers
+   等）同样成立。
+2. **曾经走过的弯路**（已回退）：判官路由一度改存插件自有文件
+   `$DSH_HOME/storages/…/config.json` + 插件自有 channel + 自定义 Settings
+   分区（select + effort）。功能可用但整套自制轮子维护面大，且与全量
+   nixos 声明式管理的部署哲学相悖。
+3. **最终决策：nix 声明式管理 + Web 分区展示**。判官路由回到插件行 config
+   （全部 volatile 字段），由 nixos 的插件行声明（`modules/home/dsh.nix` 的
+   `plugins` 选项需加一个 `config` 透传），随 rebuild 原子生效。Web 设置页
+   保留 "Auto Permit" 分区（select + effort 二级），但它编辑的就是行
+   config——走官方 `remote.settings.describe/mutate` 通道（与
+   permission-presets 等官方分区同一路径）：Web 可写的行（bundle 安装）
+   选择即生效；overlay 行（nixos 声明）写入被拒时分区显示"此行由
+   overlay 声明管理"提示，退化为展示 + 目录浏览。单一事实源始终是行
+   config；插件自有 channel/存储的弯路已回退删除。
+
+附：0.2 官方新增 `dsh-experimental-auto-review`（Auto preset：每工具调用前
+用会话模型做 risk×decision 审查，Full access 沙箱，无记忆、会 deny）——与
+本插件正交：官方审"每个动作"，我们审"每次问人"；Auto preset 下沙箱不再
+拒绝 bash → 不产生提权审批 → 本插件天然静止，两者可在同一部署共存。
+
 
 ## 5. 风险与我的意见（讨论点）
 

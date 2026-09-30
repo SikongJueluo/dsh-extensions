@@ -3,12 +3,15 @@
 # The plugin publishes no service of its own. It consumes the host `llm`
 # service (hard-injected) for one-shot judge calls, listens on the
 # `approval/request` waterfall (registered with prepend so the judge runs
-# before the Web GUI answerer), and optionally registers a Settings namespace
-# through `ctx.inject(['settings'], …)` so the judge route is editable in the
-# Web Settings page without touching the composition.
+# before the Web GUI answerer), and declares its whole configuration in the
+# row config (all volatile — an edit commits without a remount).
 #
-# Users can override the row later (by id) in a later patch layer — a patch
-# replaces the row's whole `config`.
+# On the author's deployment the row is contributed by a nixos `--patch`
+# overlay that also declares the judge route in the row config: overlay
+# layers outrank the profile patch ConfigEditor writes, so the Web Settings
+# form is read-only for this row there (an edit is refused with "overridden
+# by a home patch or command-line overlay") — by design, the defining layer
+# owns the config. Bundle-installed rows (dsh plugin add) are Web-editable.
 - insert:
     - id: auto-permit
       name: dsh-auto-permit

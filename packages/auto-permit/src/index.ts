@@ -53,7 +53,7 @@ function sessionOf(ctx: Context, agent: { id: string }): Session | undefined {
  * Plugin entry.
  *
  * @param ctx - plugin context.
- * @param config - composition row config (Settings base layer).
+ * @param config - composition row config (volatile live references).
  */
 export function apply(ctx: Context, config: RowConfig): void {
   const readSettings = registerSettings(ctx, config)

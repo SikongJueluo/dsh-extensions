@@ -26,16 +26,37 @@ DSH 的 AI 自动审批判官：在 `approval/request` waterfall 上插队一个
 
 ## 配置
 
-Web 设置页的「自动审批」分区：
+插件行 config（全部 volatile，`{enabled, provider, model, reasoningEffort?}`）：
 
-- **启用开关**（默认开；未配置判官模型时不生效）。
-- **判官模型**：从部署的全部模型目录中选择（与 /handoff、/model 同一目录），
-  支持思考强度的二级选择。判官模型必须显式指定——不跟随会话模型，
-  避免主模型审自己。
+- **enabled**（默认开；未配置判官模型时不生效）。
+- **provider** / **model**：判官模型路由。必须显式指定——不跟随会话模型，
+  避免主模型审自己。可选 **reasoningEffort** 思考强度。
+- 写错模型 id 是安全的：判官调用失败 → defer → 回人工弹窗（fail-open）。
 
-配置落在插件自身的行 config（dsh 0.2 设置模型：settings namespace ≡ profile 行 id
-`auto-permit`，`{enabled, provider, model, reasoningEffort?}` 全部 volatile，
-Settings 页编辑即热生效，无需重挂载）。
+两种配置方式（取决于行的来源层，dsh 0.2 的规则是"行 config 权威归定义层"）：
+
+- **nixos / `--patch` overlay 声明**（本仓库作者的用法）：行由
+  `programs.dsh.plugins` 注入时直接在行上声明 config，随 rebuild 原子生效。
+  注意 `modules/home/dsh.nix` 的 `plugins` 选项默认只透传 `id`+`name`，
+  需加一个 `config` 透传。Web 侧对 overlay 行写入会被拒（"overridden by a
+  home patch or command-line overlay"）——这是 0.2 ConfigEditor 的设计约束，
+  非本插件 bug。
+- **bundle 安装（`dsh plugin add`）**：行在 bundles 层，Web 编辑写 profile
+  patch 覆盖层，可正常持久化。
+
+### Web 设置分区（"Auto Permit"）
+
+无论行来自哪层，设置页都有 "Auto Permit" 分区：Enabled 开关 + 判官模型
+select（按厂商分组）+ 思考强度二级 select（选中带 efforts 的模型时出现），
+目录与 `/model` 弹窗同源。它编辑的就是行 config（走官方
+`remote.settings` 通道，与 permission-presets 等官方分区同一路径）：
+
+- Web 可写的行（bundle 安装）：选择即生效（volatile 热更新）；
+- overlay 行（nixos 声明）：写入得到"此行由 home patch / overlay 管理，
+  请在声明处修改"的提示——分区退化为当前值展示 + 目录浏览。
+
+判官模型 id 也可从 `/model` 弹窗查。写错模型 id 是安全的：判官调用失败 →
+defer → 回人工弹窗（fail-open）。
 
 ## 安装
 
