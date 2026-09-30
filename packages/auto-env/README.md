@@ -76,6 +76,17 @@ NixOS 部署走 `programs.dsh.extraPatches`（指向 `dev.patch.yml`，见仓库
   overlay 运行并在 `$DSH_DIRENV` 报 `timeout`，缓存好后的后续命令恢复正常。
 - 本插件不产生浏览器 UI。
 
+## 实现注记（踩坑记录）
+
+**`'shell'` 服务类里禁止使用 `#private` 成员。** cordis 对 service 方法调用会把
+receiver 重绑为一个 shadow Proxy（`createShadowMethod`，让方法看到调用方的活跃
+context），而 V8 的私有 brand 检查在 Proxy receiver 上必然抛
+`Receiver must be an instance of class …`——一条 `this.#x` 就能让每条 bash 命令
+报废（0.1.0 首版即栽在此：启动验证通过、命令全炸）。上游 executor 全用公开成员
+（`mode` / `processFacts`）正是为此。规则：凡是会经过 ctx/service proxy 调用的
+方法，其触达的一切保持公开；只被真实实例直调的内部对象（如 `DirenvLoader`）
+可以私有。
+
 ## 验证
 
 ```sh

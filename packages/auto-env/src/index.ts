@@ -120,6 +120,18 @@ function bashWorkdir(args: unknown, sessionCwd: string): string {
 }
 
 /**
+ * Resolve the overlay for `dir` without ever rejecting (evaluation failures
+ * degrade to the empty overlay and surface through `$DSH_DIRENV`).
+ */
+async function ensureOverlay(loader: DirenvLoader, dir: string): Promise<EnvOverlay> {
+  try {
+    return await loader.ensure(dir)
+  } catch {
+    return EMPTY_OVERLAY
+  }
+}
+
+/**
  * The `ctx.shell` provider: the stock sandboxed bash executor with a direnv
  * overlay merged into every execution. Mount it in place of the base
  * composition's `bash-sandbox` row (the bundle patch disables that row and
@@ -127,91 +139,93 @@ function bashWorkdir(args: unknown, sessionCwd: string): string {
  * awaits a fresh overlay; background `start` reads the snapshot warmed by
  * `agent/session-start` / `tools/pre-execute` and kicks a recompute when
  * even that is missing, so a cold start degrades for at most one command.
+ *
+ * No `#private` members here on purpose: cordis rebinds service-method
+ * receivers to a shadow Proxy (`createShadowMethod` in @deepseek-ai/cordis
+ * replaces `thisArg` so method calls see the caller's active context), and
+ * V8's private-brand check rejects Proxy receivers outright — one `this.#x`
+ * inside `run`/`start` throws "Receiver must be an instance of class …" on
+ * every command. Everything reached from a proxied method stays public;
+ * `DirenvLoader` keeps its private state because it is only ever invoked on
+ * the real instance captured here.
  */
 export class AutoEnvBashExecutor extends SandboxBashExecutor {
   static inject = ['subprocess', 'sandbox', 'sandboxPolicy', 'shellEnv']
   static Config = Config
 
-  readonly #direnv: DirenvLoader
+  /** Direnv overlay cache; public because proxied methods read it. */
+  direnv: DirenvLoader
 
   constructor(ctx: Context, config: Config) {
     super(ctx, config)
-    this.#direnv = new DirenvLoader(ctx, {
+    this.direnv = new DirenvLoader(ctx, {
       direnvPath: config.direnvPath ?? DIRENV_DEFAULTS.direnvPath,
       timeoutMs: config.direnvTimeoutMs ?? DIRENV_DEFAULTS.direnvTimeoutMs,
       revalidateMs: config.direnvRevalidateMs ?? DIRENV_DEFAULTS.direnvRevalidateMs,
       stdoutMaxBytes: config.direnvStdoutMaxBytes ?? DIRENV_DEFAULTS.direnvStdoutMaxBytes,
       watch: config.direnvWatch ?? true,
     })
-    this.#wire(ctx)
+    wireExecutor(ctx, this)
   }
 
   override async run(spec: ShellExecSpec) {
-    const overlay = await this.#safeEnsure(spec.workdir)
+    const overlay = await ensureOverlay(this.direnv, spec.workdir)
     return super.run(mergeOverlay(spec, overlay))
   }
 
   override start(spec: ShellExecSpec) {
-    const overlay = this.#direnv.snapshot(spec.workdir)
-    if (overlay === undefined) void this.#safeEnsure(spec.workdir)
+    const overlay = this.direnv.snapshot(spec.workdir)
+    if (overlay === undefined) void ensureOverlay(this.direnv, spec.workdir)
     return super.start(mergeOverlay(spec, overlay ?? EMPTY_OVERLAY))
   }
+}
 
-  async #safeEnsure(dir: string): Promise<EnvOverlay> {
-    try {
-      return await this.#direnv.ensure(dir)
-    } catch {
-      return EMPTY_OVERLAY
+/** Register the session-start kick, the pre-execute gate, and `$DSH_DIRENV`. */
+function wireExecutor(ctx: Context, executor: AutoEnvBashExecutor): void {
+  // Warm the session directory's overlay before the first turn; the event
+  // is a synchronous notification, so the kick is deliberately un-awaited.
+  ctx.on('agent/session-start', ({ agent }) => {
+    const cwd = agent.session.header.cwd
+    if (cwd !== undefined) void ensureOverlay(executor.direnv, cwd)
+  })
+  // Close the race for every bash tool call (foreground and background):
+  // this waterfall is awaited before the tool executes, by which time the
+  // executor reads a warm snapshot.
+  ctx.on('tools/pre-execute', async (exec, next) => {
+    const cwd = exec.agent?.session.header.cwd
+    if (exec.name === 'bash' && cwd !== undefined) {
+      await ensureOverlay(executor.direnv, bashWorkdir(exec.arguments, cwd))
     }
-  }
-
-  /** Register the session-start kick, the pre-execute gate, and `$DSH_DIRENV`. */
-  #wire(ctx: Context): void {
-    // Warm the session directory's overlay before the first turn; the event
-    // is a synchronous notification, so the kick is deliberately un-awaited.
-    ctx.on('agent/session-start', ({ agent }) => {
-      const cwd = agent.session.header.cwd
-      if (cwd !== undefined) void this.#safeEnsure(cwd)
-    })
-    // Close the race for every bash tool call (foreground and background):
-    // this waterfall is awaited before the tool executes, by which time the
-    // executor reads a warm snapshot.
-    ctx.on('tools/pre-execute', async (exec, next) => {
-      const cwd = exec.agent?.session.header.cwd
-      if (exec.name === 'bash' && cwd !== undefined) {
-        await this.#safeEnsure(bashWorkdir(exec.arguments, cwd))
-      }
-      return next()
-    })
-    const unregister = ctx.shellEnv.register({
-      name: 'auto-env',
-      variables: {
-        DSH_DIRENV: {
-          description: 'auto-env status for the session directory: active, none, pending, blocked, timeout, error, or missing',
-        },
-        DSH_DIRENV_RC: {
-          description: 'directory holding the .envrc backing the loaded environment (set when active)',
-        },
+    return next()
+  })
+  const unregister = ctx.shellEnv.register({
+    name: 'auto-env',
+    variables: {
+      DSH_DIRENV: {
+        description: 'auto-env status for the session directory: active, none, pending, blocked, timeout, error, or missing',
       },
-      resolve: (execution) => {
-        const values: Record<string, string> = {}
-        const cwd = execution.agent?.session.header.cwd
-        if (cwd === undefined) {
-          values.DSH_DIRENV = 'none'
-          return values
-        }
-        const facts = this.#direnv.status(cwd)
-        values.DSH_DIRENV = facts.status
-        if (facts.status === 'active' && facts.rcDir !== undefined) values.DSH_DIRENV_RC = facts.rcDir
+      DSH_DIRENV_RC: {
+        description: 'directory holding the .envrc backing the loaded environment (set when active)',
+      },
+    },
+    resolve: (execution) => {
+      const values: Record<string, string> = {}
+      const cwd = execution.agent?.session.header.cwd
+      if (cwd === undefined) {
+        values.DSH_DIRENV = 'none'
         return values
-      },
-    })
-    // shellEnv.register ties disposal to the registry's fiber; keep our own
-    // handle as well so an executor reload unregisters deterministically.
-    ctx.effect(() => unregister)
-    // Close the direnv input watchers with the executor.
-    ctx.effect(() => () => this.#direnv.dispose())
-  }
+      }
+      const facts = executor.direnv.status(cwd)
+      values.DSH_DIRENV = facts.status
+      if (facts.status === 'active' && facts.rcDir !== undefined) values.DSH_DIRENV_RC = facts.rcDir
+      return values
+    },
+  })
+  // shellEnv.register ties disposal to the registry's fiber; keep our own
+  // handle as well so an executor reload unregisters deterministically.
+  ctx.effect(() => unregister)
+  // Close the direnv input watchers with the executor.
+  ctx.effect(() => () => executor.direnv.dispose())
 }
 
 export default AutoEnvBashExecutor
