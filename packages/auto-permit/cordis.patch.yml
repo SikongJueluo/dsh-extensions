@@ -1,0 +1,18 @@
+# dsh-auto-permit bundle layer: a single host plugin row.
+#
+# The plugin publishes no service of its own. It consumes the host `llm`
+# service (hard-injected) for one-shot judge calls, listens on the
+# `approval/request` waterfall (registered with prepend so the judge runs
+# before the Web GUI answerer), and optionally registers a Settings namespace
+# through `ctx.inject(['settings'], …)` so the judge route is editable in the
+# Web Settings page without touching the composition.
+#
+# Users can override the row later (by id) in a later patch layer — a patch
+# replaces the row's whole `config`.
+- insert:
+    - id: auto-permit
+      name: dsh-auto-permit
+      config:
+        enabled: true
+        provider: ""
+        model: ""
