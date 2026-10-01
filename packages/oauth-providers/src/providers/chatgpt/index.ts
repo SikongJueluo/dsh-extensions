@@ -7,6 +7,8 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
+// Type-only import: pulls the `Context.attachments` module augmentation in.
+import type {} from '@deepseek-ai/dsh-attachment'
 // Type-only import: pulls the `Context.settings` module augmentation in.
 import type {} from '@deepseek-ai/dsh-settings'
 import Schema from '@deepseek-ai/schemastery'
@@ -159,7 +161,20 @@ export function registerChatGpt(ctx: Context, { channel, tokens, config }: Regis
   // ChatGPT backend directly — quota monitors today.
   tokens?.register(PROVIDER, () => tokenStore.resolve())
   const catalog = new ModelCatalog({ fetch: fetchVia, options })
-  const adapter = new OpenAiOauthAdapter({ options, tokenStore, catalog, getFetch })
+  const adapter = new OpenAiOauthAdapter({
+    options,
+    tokenStore,
+    catalog,
+    getFetch,
+    // Lazy resolution: the host attachment service owns request-image bytes.
+    resolveAttachments: () => {
+      try {
+        return ctx.get('attachments')
+      } catch {
+        return undefined
+      }
+    },
+  })
 
   // 0.2 settings model: the settings namespace IS this plugin's profile entry
   // id, and the editable section is the row config's `chatgpt` sub-object —

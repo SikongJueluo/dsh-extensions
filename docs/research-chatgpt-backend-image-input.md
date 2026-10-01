@@ -84,4 +84,9 @@ pub const DEFAULT_IMAGE_DETAIL: ImageDetail = ImageDetail::High;
 3. [adapter.ts:335/:348](../packages/oauth-providers/src/providers/chatgpt/adapter.ts#L335) 的 `inputModalities` 改 `['text','image']`（可按模型目录的 `input_modalities` 投影）。
 4. 其余不动：`store:false` / `stream:true` / `include` / `instructions` 与图像正交；畸形图可仿 codex 降级为文本占位而非抛错。
 
+> **2026-10-01 已实现**（feat(oauth-providers): send images to the ChatGPT
+> backend）：用户消息 `input_image` 直传（detail high + codex 风格 handle 文本）、
+> offload 占位、`input_modalities` 目录投影（缺省 text+image）均已落地；GIF 按
+> 附件服务的 mediaType 直传，未做 codex 的 GIF→PNG 重编码（后端接受静态 GIF）。
+
 **未验证项**（如实列出）：① 真实 ChatGPT OAuth 会话下 live `GET /backend-api/codex/models` 的响应体（以 codex 打包的 models.json 为代理）；② OpenAI 官方 docs 页面（developers/platform.openai.com）未直接抓取——仅引用了 codex 源码内注释转引的 [images-vision guide](https://platform.openai.com/docs/guides/images-vision)；③ 后端对非 vision 模型收到 `input_image` 时的具体报错（codex 无客户端门控、也无错误样本）；④ 交互式 TUI `--image` 的精确引入 commit（已 pin 到 ≤ rust-v0.35.0 / 2025-09-15）；⑤ live 后端是否存在裸 `gpt-6` slug（目录中无）；⑥ `ResponseItem` 外层 message 的 serde tag（`"type":"message"`）未逐字核对——我们现有无 tag 的 `{role, content}` 形态后端已接受，稳妥起见新增图像时与 codex 保持同构即可。

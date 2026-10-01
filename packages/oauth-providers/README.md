@@ -41,7 +41,12 @@ dsh plugin --profile <你的profile> add ./packages/oauth-providers
    若跳转失败，复制地址栏 URL 粘贴回设置页。
 3. 授权令牌存入 DSH 凭据商店（记录如 `oauth-providers/chatgpt`），临近过期
    自动刷新（`modifyRecord` 独占写窗口 = 跨进程轮换锁）。退出登录即删除记录。
-4. 在会话里选用该路由的模型（如 `chatgpt` 的 gpt-5.x）。
+4. 在会话里选用该路由的模型（如 `chatgpt` 的 gpt-5.x / gpt-6.x）。
+5. **图片输入**：用户消息可直接附图。以 Responses API 的 `input_image`
+   （base64 data URL，`detail: high`）直传，长边 > 2048px 自动缩放；已卸载
+   （offload）的历史图片退化为占位文本。模型输入类型投影自后端 `/models` 的
+   `input_modalities`，缺省按 text+image（与 Codex 客户端的宽容默认一致）。
+   依据见 [docs/research-chatgpt-backend-image-input.md](../../docs/research-chatgpt-backend-image-input.md)。
 
 凭据不落 settings 文档、不进仓库；凭据商店文件（默认
 `$DSH_HOME/.credentials.yaml`）请勿提交。

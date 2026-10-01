@@ -21,6 +21,7 @@ import {
   ReasoningEffortId,
   ToolCallId,
   attributionHeaders,
+  contentHasImage,
   isContextWindowExceededError,
   isQuotaExceededError,
 } from '@deepseek-ai/dsh-llm'
@@ -33,6 +34,8 @@ import type {
   StreamChunk,
   TokenUsage,
 } from '@deepseek-ai/dsh-llm'
+import { longEdgeDimensions } from '@deepseek-ai/dsh-attachment'
+import type { AttachmentStore, ImageAttachmentRef, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 import type { FetchLike } from '../../transport.js'
 import type { ModelCatalog } from './catalog.js'
 import { oauthHeaders } from './auth.js'
@@ -40,6 +43,7 @@ import type { TokenStore } from './auth.js'
 import { REASONING_EFFORT_NAMES } from './catalog.js'
 import { PACKAGE_NAME } from '../../identity.js'
 import { serializeRequest } from './serialize.js'
+import type { RequestImages } from './serialize.js'
 
 /** Connection facts the adapter reads per request. */
 export interface AdapterOptions {
@@ -49,6 +53,14 @@ export interface AdapterOptions {
   defaultContextWindow: number
   refreshMarginMs: number
 }
+
+/**
+ * Long-edge pixel cap for request images — the resize Codex applies to
+ * non-`original` detail images before sending them to the same backend.
+ */
+const REQUEST_IMAGE_LONG_EDGE = 2048
+/** Encoded-byte sanity bound per request image, mirroring Codex's 1 GiB guard. */
+const REQUEST_IMAGE_MAX_BYTES = 2 ** 30
 
 /** Map the Responses API SSE byte stream into data payload strings. */
 async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
@@ -295,6 +307,8 @@ export interface OpenAiOauthAdapterDeps {
   tokenStore: TokenStore
   catalog: ModelCatalog
   getFetch: () => Promise<FetchLike>
+  /** Live attachment store reader; `undefined` when the service is absent. */
+  resolveAttachments: () => AttachmentStore | undefined
 }
 
 export class OpenAiOauthAdapter extends LlmAdapter {
@@ -302,13 +316,15 @@ export class OpenAiOauthAdapter extends LlmAdapter {
   private readonly tokenStore: TokenStore
   private readonly catalog: ModelCatalog
   private readonly getFetch: () => Promise<FetchLike>
+  private readonly resolveAttachments: () => AttachmentStore | undefined
 
-  constructor({ options, tokenStore, catalog, getFetch }: OpenAiOauthAdapterDeps) {
+  constructor({ options, tokenStore, catalog, getFetch, resolveAttachments }: OpenAiOauthAdapterDeps) {
     super()
     this.options = options
     this.tokenStore = tokenStore
     this.catalog = catalog
     this.getFetch = getFetch
+    this.resolveAttachments = resolveAttachments
   }
 
   override providerInfo(provider: string): LlmProviderInfo {
@@ -332,7 +348,7 @@ export class OpenAiOauthAdapter extends LlmAdapter {
       provider,
       id: entry.id,
       name: entry.name,
-      inputModalities: ['text'],
+      inputModalities: entry.inputModalities,
       context: { contextWindow },
       reasoning: {
         efforts: efforts.map((effort) => ({
@@ -344,8 +360,8 @@ export class OpenAiOauthAdapter extends LlmAdapter {
     }
   }
 
-  private modelInfo(provider: string, model: { id: string; name: string }): LlmModelInfo {
-    return { provider, id: model.id, name: model.name, inputModalities: ['text'] }
+  private modelInfo(provider: string, model: { id: string; name: string; inputModalities: readonly ('text' | 'image')[] }): LlmModelInfo {
+    return { provider, id: model.id, name: model.name, inputModalities: model.inputModalities }
   }
 
   override async *stream(options: GenerateOptions): AsyncGenerator<StreamChunk> {
@@ -381,6 +397,38 @@ export class OpenAiOauthAdapter extends LlmAdapter {
     }
   }
 
+  /**
+   * Read encoded request images for every live image occurrence in the
+   * conversation (offloaded occurrences stay text placeholders). Returns
+   * `undefined` for text-only requests, so nothing else changes on the wire.
+   */
+  private async prepareImages(options: GenerateOptions, signal: AbortSignal): Promise<RequestImages | undefined> {
+    if (!options.messages.some((message) => contentHasImage(message.content))) return undefined
+    const attachments = this.resolveAttachments()
+    if (attachments === undefined) {
+      throw new LlmError(
+        'the attachment service is unavailable; cannot read request images',
+        'UNSUPPORTED_CONTENT',
+      )
+    }
+    const refs = new Map<string, ImageAttachmentRef>()
+    for (const message of options.messages) {
+      for (const block of message.content) {
+        if (block.type === 'image' && block.offloaded !== true) {
+          refs.set(block.attachment.attachmentId, block.attachment)
+        }
+      }
+    }
+    const versions = new Map<string, RequestImageAttachment>()
+    await Promise.all([...refs.values()].map(async (ref) => {
+      versions.set(ref.attachmentId, await attachments.readImageRequest(ref, {
+        ...longEdgeDimensions(ref.width, ref.height, REQUEST_IMAGE_LONG_EDGE),
+        maxBytes: REQUEST_IMAGE_MAX_BYTES,
+      }, signal))
+    }))
+    return versions
+  }
+
   private async *request(
     options: GenerateOptions,
     signal: AbortSignal,
@@ -389,7 +437,7 @@ export class OpenAiOauthAdapter extends LlmAdapter {
     access: string,
     accountId: string | undefined,
   ): AsyncGenerator<StreamChunk> {
-    const body = serializeRequest(options)
+    const body = serializeRequest(options, await this.prepareImages(options, signal))
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       accept: 'text/event-stream',

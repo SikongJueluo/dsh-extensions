@@ -4,8 +4,10 @@
  * The ChatGPT subscription backend only accepts the Responses wire shape:
  * user/assistant messages plus top-level `function_call` / `function_call_output`
  * items. Assistant reasoning is dropped (the backend does not surface raw
- * reasoning without an opt-in summary), and image blocks are rejected because
- * this plugin's wire path is text-only.
+ * reasoning without an opt-in summary). User-role image blocks map to
+ * `input_image` parts with inline base64 data URLs — the exact shape Codex
+ * sends to the same endpoint; images in other roles are rejected because the
+ * wire path cannot represent them.
  *
  * Tool results are first-class `role: 'tool'` messages in the 0.2 message
  * model; developer-role tool addition/removal notices are skipped — the
@@ -16,22 +18,64 @@
  *
  * @module dsh-openai-oauth/serialize
  */
-import { LlmError, contentHasImage } from '@deepseek-ai/dsh-llm'
+import { LlmError, contentHasImage, offloadedImageText, requestImageHandleText } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, RequestMessage } from '@deepseek-ai/dsh-llm'
+import type { RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
+
+/** Prepared request-image versions keyed by attachment id. */
+export type RequestImages = ReadonlyMap<string, RequestImageAttachment>
 
 /** Join the text blocks of a message's content into one string. */
 function flattenText(blocks: readonly ContentBlock[]): string {
   return blocks.filter((block) => block.type === 'text').map((block) => block.text).join('')
 }
 
-/** Reject image content before text-flattening can silently erase it. */
-function assertTextOnly(blocks: readonly ContentBlock[]): void {
+/** Reject image content the Responses wire path cannot represent (non-user roles). */
+function assertNoUnrepresentableImage(blocks: readonly ContentBlock[]): void {
   if (contentHasImage(blocks)) {
     throw new LlmError(
-      'The OpenAI OAuth (ChatGPT subscription) adapter does not support image content.',
+      'The OpenAI OAuth (ChatGPT subscription) adapter only carries image content in user messages.',
       'UNSUPPORTED_CONTENT',
     )
   }
+}
+
+/**
+ * Serialize one user message's blocks into Responses content parts. Text-only
+ * messages keep the historical single joined `input_text` part; messages with
+ * live image blocks map block-by-block (`input_text` / `input_image`), while
+ * offloaded image occurrences degrade to their placeholder text.
+ */
+function userContent(blocks: readonly ContentBlock[], images: RequestImages | undefined): InputItem[] {
+  if (!blocks.some((block) => block.type === 'image')) {
+    return [{ type: 'input_text', text: flattenText(blocks) }]
+  }
+  const content: InputItem[] = []
+  for (const block of blocks) {
+    if (block.type === 'text') {
+      if (block.text.length > 0) content.push({ type: 'input_text', text: block.text })
+    } else if (block.type === 'image') {
+      if (block.offloaded === true) {
+        content.push({ type: 'input_text', text: offloadedImageText(block.attachment) })
+        continue
+      }
+      const version = images?.get(block.attachment.attachmentId)
+      if (version === undefined) {
+        throw new LlmError(
+          `no request image prepared for attachment ${block.attachment.attachmentId}`,
+          'INVALID_REQUEST',
+        )
+      }
+      // Label the occurrence the way Codex does, so the model can name it.
+      content.push({ type: 'input_text', text: requestImageHandleText(block.attachment, version) })
+      content.push({
+        type: 'input_image',
+        image_url: `data:${version.mediaType};base64,${Buffer.from(version.data).toString('base64')}`,
+        detail: 'high',
+      })
+    }
+  }
+  return content.length > 0 ? content : [{ type: 'input_text', text: '' }]
 }
 
 /** A Responses API input item (loose structural type). */
@@ -42,13 +86,13 @@ type InputItem = Record<string, unknown>
  * System messages are skipped — the harness delivers the system prompt
  * separately as `GenerateOptions.system` → `instructions`.
  */
-export function serializeInput(messages: readonly RequestMessage[]): InputItem[] {
+export function serializeInput(messages: readonly RequestMessage[], images?: RequestImages): InputItem[] {
   const input: InputItem[] = []
   for (const message of messages) {
-    assertTextOnly(message.content)
     if (message.role === 'system' || message.role === 'developer') continue
 
     if (message.role === 'assistant') {
+      assertNoUnrepresentableImage(message.content)
       const text = flattenText(message.content)
       const toolCalls = message.content.filter((block) => block.type === 'tool-call')
       if (text.length > 0) {
@@ -68,6 +112,7 @@ export function serializeInput(messages: readonly RequestMessage[]): InputItem[]
     }
 
     if (message.role === 'tool') {
+      assertNoUnrepresentableImage(message.content)
       // 0.2 message model: one first-class tool-role message per result.
       input.push({
         type: 'function_call_output',
@@ -78,8 +123,7 @@ export function serializeInput(messages: readonly RequestMessage[]): InputItem[]
     }
 
     // User-role messages (persisted or one-shot identity-free inputs).
-    const text = flattenText(message.content)
-    input.push({ role: 'user', content: [{ type: 'input_text', text }] })
+    input.push({ role: 'user', content: userContent(message.content, images) })
   }
   return input
 }
@@ -99,7 +143,7 @@ export function resolveReasoning(effort: string | undefined): { effort: string }
  * `max_output_tokens` / `temperature` / `stop` scalars, so they are
  * deliberately omitted.
  */
-export function serializeRequest(options: GenerateOptions): Record<string, unknown> {
+export function serializeRequest(options: GenerateOptions, images?: RequestImages): Record<string, unknown> {
   const tools = options.tools?.map((tool) => ({
     type: 'function',
     name: tool.name,
@@ -112,7 +156,7 @@ export function serializeRequest(options: GenerateOptions): Record<string, unkno
     ...(options.system !== undefined && options.system.length > 0
       ? { instructions: options.system }
       : {}),
-    input: serializeInput(options.messages),
+    input: serializeInput(options.messages, images),
     ...(tools !== undefined && tools.length > 0
       ? { tools, tool_choice: 'auto', parallel_tool_calls: true }
       : {}),

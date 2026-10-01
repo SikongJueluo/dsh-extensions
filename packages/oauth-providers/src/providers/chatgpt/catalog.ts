@@ -14,12 +14,23 @@ import { LlmError } from '@deepseek-ai/dsh-llm'
 import { readJson } from '../../transport.js'
 import type { FetchLike } from '../../transport.js'
 
+/** Input modality vocabulary shared with the harness model catalog. */
+export type InputModality = 'text' | 'image'
+
+/**
+ * Modalities assumed when the backend does not disclose them. The ChatGPT
+ * backend follows the same conservative default as Codex: absent
+ * `input_modalities` means text and images are both accepted.
+ */
+export const DEFAULT_INPUT_MODALITIES: readonly InputModality[] = ['text', 'image']
+
 /** One model entry in the internal catalog. */
 export interface ModelEntry {
   id: string
   name: string
   contextWindow?: number
   reasoning: string[]
+  inputModalities: readonly InputModality[]
 }
 
 /** Bundled fallback when neither config nor the npm registry answers. */
@@ -53,6 +64,14 @@ interface RawModel {
   context_window?: number
   supported_in_api?: boolean
   supported_reasoning_levels?: Array<{ effort?: string }>
+  input_modalities?: unknown
+}
+
+/** Keep the modalities the harness understands; unknown lists fall back to the default. */
+function parseInputModalities(value: unknown): readonly InputModality[] {
+  if (!Array.isArray(value)) return DEFAULT_INPUT_MODALITIES
+  const kept = DEFAULT_INPUT_MODALITIES.filter((modality) => value.includes(modality))
+  return kept.length > 0 ? kept : DEFAULT_INPUT_MODALITIES
 }
 
 /** Parse the ChatGPT `/models` payload into the internal catalog shape. */
@@ -71,6 +90,7 @@ export function parseModelsPayload(payload: unknown): ModelEntry[] {
       name: model.display_name || model.name || slug,
       ...(typeof model.context_window === 'number' ? { contextWindow: model.context_window } : {}),
       reasoning,
+      inputModalities: parseInputModalities(model.input_modalities),
     })
   }
   return out
@@ -108,7 +128,7 @@ export class ModelCatalog {
   /** Look up one model's metadata, synthesizing a minimal entry when unknown. */
   resolve(model: string): ModelEntry {
     const found = this.current().find((entry) => entry.id === model)
-    return found ?? { id: model, name: model, reasoning: [] }
+    return found ?? { id: model, name: model, reasoning: [], inputModalities: DEFAULT_INPUT_MODALITIES }
   }
 
   /**
