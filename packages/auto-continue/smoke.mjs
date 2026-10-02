@@ -148,6 +148,48 @@ check('no retry event for non-owned failure', events.length === 0)
   check('no retry-started after cancellation', !events.some((e) => e.type === 'llm/retry-started'))
 }
 
+// 2b) A cancelled wait is re-armed in-process and resumes at retryAt.
+{
+  const { registerResume } = await import('./lib/index.js')
+  const sp = new WaitSpool({ path: join(await mkdtemp(join(tmpdir(), 'ac-cr-')), 'p.json') })
+  await sp.load()
+  const wired = makeCtx({})
+  const adopter = registerResume(wired.ctx, { maxWaitMs: 6 * 3600_000 }, sp)
+  const stubUsage = { get: async () => undefined }
+  const rearmCtx = makeCtx({ planUsage: stubUsage })
+  registerRecovery(rearmCtx.ctx, {
+    maxWaitMs: 60_000, resetMarginMs: 0, spool: sp,
+    onWaitKept: (entry) => adopter.schedule(entry),
+  })
+  const sent = []
+  const fakeAgent = {
+    status: 'idle',
+    session: { id: 'sess-cr', ownEvents: () => [{ seq: 5, type: 'user/message', data: { source: { kind: 'user' } } }] },
+    followup: (m) => sent.push(m),
+  }
+  // agents registry absent in rearmCtx (recovery never needs it); the adopter
+  // resolves through it — give wired.ctx a live agents registry instead.
+  wired.ctx.get = (name) => (name === 'agents' ? { get: () => fakeAgent } : undefined)
+  const cancelEvents = []
+  const cancelSession = { id: 'sess-cr', append: (t, d) => { cancelEvents.push({ type: t, data: d }); return { seq: 5 } } }
+  // exhausted 5h resetting in 120ms → retryAt ≈ now+120ms; abort at 40ms.
+  const stubPlan = { get: async () => ({ provider: 'p', fetchedAt: Date.now(), source: 'limits', fiveHour: { percent: 100, resetAt: Date.now() + 120 }, weekly: { percent: 10, resetAt: Date.now() + 9 * 3600_000 } }) }
+  rearmCtx.ctx.get = (name) => (name === 'planUsage' ? stubPlan : undefined)
+  const ctrl = new AbortController()
+  const pending = rearmCtx.listeners.get('agent/request-error')(
+    { agent: { session: cancelSession }, turn: 1, step: 1, provider: 'zai-coding-cn', failure: { code: 'QUOTA', message: 'x' }, signal: ctrl.signal },
+    async () => undefined,
+  )
+  await new Promise((r) => setTimeout(r, 40))
+  ctrl.abort()
+  await pending
+  check('aborted wait record kept with future retryAt', sp.get('sess-cr') !== undefined)
+  await new Promise((r) => setTimeout(r, 300))
+  check('re-armed wait resumes in-process after abort', sent.length === 1 && sp.get('sess-cr') === undefined)
+  await wired.effects[0]()()
+  await rearmCtx.effects[0]()()
+}
+
 // 3) Owned failure with a planUsage stub reporting an exhausted 5h window
 //    resetting in 80ms (margin 0) → the full happy path: durable retry event,
 //    short sleep, retry-started, and { kind: 'retry' } returned.
@@ -253,7 +295,9 @@ await rm(spoolDir, { recursive: true, force: true })
   check('wait record persisted before sleeping', cancelSpool.get('sess-c') !== undefined)
   ctrl.abort()
   await pendingCancel
-  check('user cancellation deletes the wait record', cancelSpool.get('sess-c') === undefined)
+  // A turn abort must NOT abandon the wait (it can be a user stop, a relay
+  // teardown, or shutdown ordering) — the record survives for resumption.
+  check('turn abort keeps the wait record', cancelSpool.get('sess-c') !== undefined)
 
   // disposal path: abort lifetime via the effect → record kept
   const disposeSpool = new WaitSpool({ path: join(await mkdtemp(join(tmpdir(), 'ac-d-')), 'p.json') })

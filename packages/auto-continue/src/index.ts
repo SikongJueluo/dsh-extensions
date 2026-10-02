@@ -64,10 +64,11 @@ export const inject: string[] = []
 
 export function apply(ctx: Context, config: Config): void {
   const spool = config.persist ? new WaitSpool() : undefined
+  const adopter = spool === undefined ? undefined : registerResume(ctx, { maxWaitMs: config.maxWaitMs }, spool)
   registerRecovery(ctx, {
     maxWaitMs: config.maxWaitMs,
     resetMarginMs: config.resetMarginMs,
     spool,
+    onWaitKept: (entry) => adopter?.schedule(entry),
   })
-  if (spool !== undefined) registerResume(ctx, { maxWaitMs: config.maxWaitMs }, spool)
 }

@@ -52,11 +52,19 @@ function lastUserSeq(agent: Agent): number {
   return last
 }
 
+/** Handle for arming resumptions from outside (the recovery owner). */
+export interface ResumeHandle {
+  /** Arm (or re-arm) one record's resumption timer in this process. */
+  schedule(entry: PendingWait): void
+}
+
 /**
  * Register the resumption adopter: boot scan + agent/created adoption, both
- * unwound on plugin disposal.
+ * unwound on plugin disposal. Records armed later in this process (a wait
+ * whose turn aborted while the plugin kept running) reach the same scheduler
+ * through the returned handle.
  */
-export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSpool): void {
+export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSpool): ResumeHandle {
   const lifetime = new AbortController()
   const pending = new Map<string, Promise<void>>()
 
@@ -159,4 +167,6 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
     lifetime.abort(new Error('auto-continue plugin disposed'))
     await Promise.allSettled([...pending.values()])
   }, 'auto-continue: abort and drain pending resumptions')
+
+  return { schedule }
 }

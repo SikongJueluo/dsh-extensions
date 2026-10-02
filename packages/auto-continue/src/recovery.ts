@@ -23,7 +23,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from './shims.js'
 import type { ScheduleOptions, WaitPlan } from './schedule.js'
 import { planProbeWait, planResetWait } from './schedule.js'
-import type { WaitSpool } from './spool.js'
+import type { PendingWait, WaitSpool } from './spool.js'
 
 /** Failure codes this plugin owns. */
 const OWNED_CODES = new Set(['QUOTA', 'RATE_LIMIT'])
@@ -38,6 +38,9 @@ interface WaitState {
 export interface RecoveryConfig extends ScheduleOptions {
   /** Durable wait records; `undefined` disables persistence entirely. */
   spool?: WaitSpool
+  /** Called when a wait is kept after its turn aborted (user stop, relay
+   *  teardown, shutdown ordering) so the in-process adopter re-arms it. */
+  onWaitKept?: (entry: PendingWait) => void
 }
 
 /** Hard cap on tracked turn states; the map is pruned to its first entries. */
@@ -162,7 +165,7 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
 
       // Persist before sleeping: a process restart (or plugin update) during
       // the wait leaves this record for the resumption adopter to pick up.
-      await spool?.set({
+      const entry: PendingWait = {
         sessionId: agent.session.id,
         provider,
         code: failure.code,
@@ -172,14 +175,19 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
         attempts: state.attempts,
         probes: state.probes,
         retryAt: Date.now() + wait.delayMs,
-      })
+      }
+      await spool?.set(entry)
 
       const slept = await cancellableSleep(wait.delayMs, fused)
       if (!slept) {
         dropState(agent.session.id, turn)
-        // Plugin disposal keeps the record (a fresh instance adopts it);
-        // only a user/turn cancellation means the wait is truly gone.
-        if (!lifetime.signal.aborted) await spool?.delete(agent.session.id)
+        // A turn abort is NOT an instruction to abandon the wait: it can be a
+        // user stop, a relay peer tearing the turn down, or graceful-shutdown
+        // ordering — so the record is always kept, and when the plugin itself
+        // is not being disposed the in-process adopter re-arms it. (A session
+        // the user has since driven is stood down at resume time by the
+        // newer-user-message guard; the budget deadline bounds everything.)
+        if (!lifetime.signal.aborted) config.onWaitKept?.(entry)
         return undefined
       }
       await spool?.delete(agent.session.id)
