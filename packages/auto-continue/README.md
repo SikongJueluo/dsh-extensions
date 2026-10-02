@@ -41,8 +41,13 @@ dsh --profile web --patch ./packages/plan-usage/dev.patch.yml --patch ./packages
 
 验证：`pnpm -C packages/auto-continue smoke`（调度数学 + 恢复流三路径：委派 / 探测 / 重置对齐重试）。
 
+## restart-resume（跑动任务的跨重启续跑）
+
+限额等待之外，**重启时正在运行的会话**也会自动续跑：插件把 RUNNING 会话集合在每次状态变化时镜像到 `storages/dsh-auto-continue/running.json`（停机顺序无关，硬杀也基本覆盖）；下次 boot 在 `resumeMaxAgeMs`（默认 12h）窗口内逐个冷启动并发送续跑消息。护栏：最后一 turn 已 `completed` 的跳过（状态写入与死亡的竞态）；用户手动停止的会话不在镜像中（停止即写 idle）；subagent 会话不独立恢复（由父会话继续编排）；恢复后若撞限额则自然进入配额等待路径。`resumeOnRestart: false` 可关。
+
 ## 已知限制
 
 - 跨重启的恢复走**新 turn + 续跑消息**（重启后原 turn 已被 crash-recovery 标记 interrupted），非同 turn 原样重试；语义等价于准点自动发送 continue。
 - 单 dsh 进程假设：多进程共用同一 spool 最坏会重复一条续跑消息。
+- dsh 0.2 无宿主插件热重载（`patchReload` 为残留字段）；换插件版本仍需重启进程——restart-resume 即为重启的补偿。
 - 无 planUsage（或该路由无 monitor）时只能探测，恢复延迟 = 探测间隔。

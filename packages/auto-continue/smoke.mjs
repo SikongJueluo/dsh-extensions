@@ -463,6 +463,83 @@ await rm(spoolDir, { recursive: true, force: true })
   check('cancelled recovery records no retry-started', !events.some((e) => e.type === 'llm/retry-started'))
 }
 
+// ── restart-resume: mirror + boot adoption ──────────────────────────────────
+{
+  const { registerRestartResume, defaultMirrorPath } = await import('./lib/index.js')
+  const settleFast = (ms = 60) => new Promise((r) => setTimeout(r, ms))
+  const mirrorPath = join(await mkdtemp(join(tmpdir(), 'ac-rr-')), 'running.json')
+  const statusListeners = []
+  const sent = []
+
+  const mkCtx = () => ({
+    logger: { info() {}, warn() {} },
+    get: (name) => name === 'sessionController'
+      ? { agents: { resolveAgent: async () => ({ agent: fakeAgent }) } }
+      : undefined,
+    on: (e, l) => { if (e === 'agent/status') statusListeners.push(l); return () => {} },
+    effect: (fn) => { effectsRestart.push(fn); return () => {} },
+    inject: () => {},
+  })
+  const effectsRestart = []
+  const fakeAgent = {
+    status: 'idle',
+    session: {
+      id: 'sess-rr',
+      ownEvents: () => [
+        { seq: 1, type: 'user/message', data: { source: { kind: 'user' } } },
+        { seq: 3, type: 'turn/end', data: { reason: { kind: 'interrupted' } } },
+      ],
+      append: () => ({ seq: 4 }),
+    },
+    followup: (m) => sent.push(m),
+  }
+
+  // 1) mirror tracks running/idle transitions durably
+  const ctxA = mkCtx()
+  registerRestartResume(ctxA, { resumeOnRestart: true, resumeMaxAgeMs: 12 * 3600_000 }, { mirrorPath, settleMs: 10, staggerMs: 5 })
+  for (const l of statusListeners) l({ agent: { id: 'sess-rr' }, status: 'running' })
+  await settleFast()
+  let doc = JSON.parse(await readFile(mirrorPath, 'utf8'))
+  check('mirror records the running session', doc.entries.some((e) => e.sessionId === 'sess-rr'))
+  for (const l of statusListeners) l({ agent: { id: 'sess-rr' }, status: 'idle' })
+  await settleFast()
+  doc = JSON.parse(await readFile(mirrorPath, 'utf8'))
+  check('mirror drops the idle session', doc.entries.length === 0)
+  await effectsRestart[0]()()
+
+  // 2) boot adoption: interrupted turn → followup; completed turn → skip; stale → skip
+  const ctxB = mkCtx()
+  const now = Date.now()
+  const doneAgent = { ...fakeAgent, session: { ...fakeAgent.session, ownEvents: () => [{ seq: 3, type: 'turn/end', data: { reason: { kind: 'completed' } } }] } }
+  await writeFile(mirrorPath, JSON.stringify({ version: 1, entries: [
+    { sessionId: 'sess-rr', at: now - 1000 },
+    { sessionId: 'sess-done', at: now - 1000 },
+    { sessionId: 'sess-old', at: now - 13 * 3600_000 },
+  ] }), 'utf8')
+  let which = 'sess-rr'
+  ctxB.get = (name) => name === 'sessionController'
+    ? { agents: { resolveAgent: async (id) => ({ agent: String(id) === 'sess-done' ? doneAgent : fakeAgent }) } }
+    : undefined
+  void which
+  registerRestartResume(ctxB, { resumeOnRestart: true, resumeMaxAgeMs: 12 * 3600_000 }, { mirrorPath, settleMs: 10, staggerMs: 5 })
+  await settleFast(200)
+  check('restart mirror resumes the interrupted session', sent.length === 1 && sent[0].content[0].text.includes('harness restarted'))
+  check('completed turn is not resumed', !sent.some((m) => m === undefined))
+  doc = JSON.parse(await readFile(mirrorPath, 'utf8'))
+  check('mirror consumed once at boot', doc.entries.length === 0)
+  await effectsRestart[1]()()
+
+  // 3) resumeOnRestart: false → mirror still maintained, boot does nothing
+  const ctxC = mkCtx()
+  const before = sent.length
+  await writeFile(mirrorPath, JSON.stringify({ version: 1, entries: [{ sessionId: 'sess-rr', at: Date.now() - 1000 }] }), 'utf8')
+  registerRestartResume(ctxC, { resumeOnRestart: false, resumeMaxAgeMs: 12 * 3600_000 }, { mirrorPath, settleMs: 10, staggerMs: 5 })
+  await settleFast(100)
+  check('resumeOnRestart=false sends nothing', sent.length === before)
+  await effectsRestart[2]()()
+  void defaultMirrorPath
+}
+
 if (failures > 0) {
   console.error(`${failures} check(s) failed`)
   process.exit(1)
