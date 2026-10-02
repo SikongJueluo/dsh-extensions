@@ -13,7 +13,7 @@ QUOTA 失败 ──▶ planUsage 服务在？──▶ 查配额窗口 ──▶
 ```
 
 - 与 plan-usage 是**软依赖**（`ctx.get('planUsage')`）：服务在就精确对齐重置点；不在或无该路由的 monitor，退化为阶梯探测，插件独立可用。
-- 每次等待前写一条 `llm/retry` 会话事件（与内置重试同格式），Web 对话视图**原生渲染重试倒计时**；重启后被认领的等待在会话打开时也会补一条倒计时事件——不再是静默黑盒。
+- 等待期间（turn 仍打开时）写 `llm/retry` 事件，Web 对话视图**原生渲染重试倒计时**；重启后被认领的等待在会话打开时补一条**折叠通知行**（`user/message` + `form: 'notice'`，auto-permit verdict 同款——`llm/retry` 有 turn/step 不变量，turn 关闭后写入会腐蚀日志，见 repair-llm-retry.py）——不再是静默黑盒。
 - **操作员可见可控**：`/ac-status` 查看当前会话的等待（provider、触发时刻）；`/ac-cancel` 随时取消（清除记录 + 定时器 + 进行中的等待）。默认自动续跑，取消权在你。
 - 默认总预算 `maxWaitMs` 6 小时（覆盖 5h 滚动窗口 + 余量）。若配额显示绑定窗口的重置超出预算（如周限额还有几天），立即放弃，turn 照常失败——不空等。
 - **等待跨重启持久化**（默认开启，`persist: false` 关闭）：每次等待先原子写入 spool（`$DSH_HOME/storages/dsh-auto-continue/pending.json`）再入睡；进程重启/插件更新后，新实例在启动时认领记录，到点经 sessionController 冷启动会话（浏览器同款路径，含 preset 组装）并发送一条可见的续跑消息。护栏：超总预算的记录清理；用户在等待期间动过会话（`user/message` seq 更新）则放弃；agent 忙则稍后重试；续跑后若再限额则正常路径接管并重新持久化——可跨任意次重启持续工作。turn 中止（用户停止 / relay 对端拆 turn / 优雅停机的拆除顺序）**不**视为放弃：记录一律保留，由恢复时的 user-message 护栏与预算超时兜底；同进程内被中止的等待会立即重新武装到恢复定时器。
