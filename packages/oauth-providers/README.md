@@ -43,7 +43,8 @@ dsh plugin --profile <你的profile> add ./packages/oauth-providers
    自动刷新（`modifyRecord` 独占写窗口 = 跨进程轮换锁）。退出登录即删除记录。
 4. 在会话里选用该路由的模型（如 `chatgpt` 的 gpt-5.x / gpt-6.x）。
 5. **图片输入**：用户消息可直接附图。以 Responses API 的 `input_image`
-   （base64 data URL，`detail: high`）直传，长边 > 2048px 自动缩放；已卸载
+   （base64 data URL，`detail: high`）直传，长边 > 2048px 自动缩放；工具结果带图时
+   `function_call_output.output` 走 content-item 数组（codex 同款 wire）；已卸载
    （offload）的历史图片退化为占位文本。模型输入类型投影自后端 `/models` 的
    `input_modalities`，缺省按 text+image（与 Codex 客户端的宽容默认一致）。
    依据见 [docs/research-chatgpt-backend-image-input.md](../../docs/research-chatgpt-backend-image-input.md)。

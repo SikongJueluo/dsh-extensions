@@ -6,8 +6,10 @@
  * items. Assistant reasoning is dropped (the backend does not surface raw
  * reasoning without an opt-in summary). User-role image blocks map to
  * `input_image` parts with inline base64 data URLs — the exact shape Codex
- * sends to the same endpoint; images in other roles are rejected because the
- * wire path cannot represent them.
+ * sends to the same endpoint — and tool results carrying images switch
+ * `function_call_output.output` to the content-item array Codex uses for MCP
+ * image results. Images in assistant messages are rejected because the wire
+ * path cannot represent them.
  *
  * Tool results are first-class `role: 'tool'` messages in the 0.2 message
  * model; developer-role tool addition/removal notices are skipped — the
@@ -19,7 +21,7 @@
  * @module dsh-openai-oauth/serialize
  */
 import { LlmError, contentHasImage, offloadedImageText, requestImageHandleText } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, GenerateOptions, RequestMessage } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, GenerateOptions, ImageBlock, RequestMessage } from '@deepseek-ai/dsh-llm'
 import type { RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 
 /** Prepared request-image versions keyed by attachment id. */
@@ -30,13 +32,34 @@ function flattenText(blocks: readonly ContentBlock[]): string {
   return blocks.filter((block) => block.type === 'text').map((block) => block.text).join('')
 }
 
-/** Reject image content the Responses wire path cannot represent (non-user roles). */
+/** Reject image content the Responses wire path cannot represent (assistant role). */
 function assertNoUnrepresentableImage(blocks: readonly ContentBlock[]): void {
   if (contentHasImage(blocks)) {
     throw new LlmError(
-      'The OpenAI OAuth (ChatGPT subscription) adapter only carries image content in user messages.',
+      'The OpenAI OAuth (ChatGPT subscription) adapter cannot represent image content in assistant messages.',
       'UNSUPPORTED_CONTENT',
     )
+  }
+}
+
+/** Resolve the prepared request-image version for one live occurrence, or throw. */
+function requestVersion(block: ImageBlock, images: RequestImages | undefined): RequestImageAttachment {
+  const version = images?.get(block.attachment.attachmentId)
+  if (version === undefined) {
+    throw new LlmError(
+      `no request image prepared for attachment ${block.attachment.attachmentId}`,
+      'INVALID_REQUEST',
+    )
+  }
+  return version
+}
+
+/** Build the wire `input_image` part for one prepared request image. */
+function imagePart(version: RequestImageAttachment): InputItem {
+  return {
+    type: 'input_image',
+    image_url: `data:${version.mediaType};base64,${Buffer.from(version.data).toString('base64')}`,
+    detail: 'high',
   }
 }
 
@@ -59,23 +82,38 @@ function userContent(blocks: readonly ContentBlock[], images: RequestImages | un
         content.push({ type: 'input_text', text: offloadedImageText(block.attachment) })
         continue
       }
-      const version = images?.get(block.attachment.attachmentId)
-      if (version === undefined) {
-        throw new LlmError(
-          `no request image prepared for attachment ${block.attachment.attachmentId}`,
-          'INVALID_REQUEST',
-        )
-      }
+      const version = requestVersion(block, images)
       // Label the occurrence the way Codex does, so the model can name it.
       content.push({ type: 'input_text', text: requestImageHandleText(block.attachment, version) })
-      content.push({
-        type: 'input_image',
-        image_url: `data:${version.mediaType};base64,${Buffer.from(version.data).toString('base64')}`,
-        detail: 'high',
-      })
+      content.push(imagePart(version))
     }
   }
   return content.length > 0 ? content : [{ type: 'input_text', text: '' }]
+}
+
+/**
+ * Serialize one tool result's `function_call_output.output` value. Text-only
+ * results keep the historical plain-string output; results carrying image
+ * blocks switch to the content-item array Codex sends for MCP image results,
+ * with offloaded occurrences degrading to placeholder text.
+ */
+function toolOutput(blocks: readonly ContentBlock[], images: RequestImages | undefined): string | InputItem[] {
+  if (!blocks.some((block) => block.type === 'image')) {
+    return flattenText(blocks) || '(no output)'
+  }
+  const items: InputItem[] = []
+  for (const block of blocks) {
+    if (block.type === 'text') {
+      if (block.text.length > 0) items.push({ type: 'input_text', text: block.text })
+    } else if (block.type === 'image') {
+      if (block.offloaded === true) {
+        items.push({ type: 'input_text', text: offloadedImageText(block.attachment) })
+        continue
+      }
+      items.push(imagePart(requestVersion(block, images)))
+    }
+  }
+  return items.length > 0 ? items : [{ type: 'input_text', text: '(no output)' }]
 }
 
 /** A Responses API input item (loose structural type). */
@@ -112,12 +150,11 @@ export function serializeInput(messages: readonly RequestMessage[], images?: Req
     }
 
     if (message.role === 'tool') {
-      assertNoUnrepresentableImage(message.content)
       // 0.2 message model: one first-class tool-role message per result.
       input.push({
         type: 'function_call_output',
         call_id: message.toolCallId,
-        output: flattenText(message.content) || '(no output)',
+        output: toolOutput(message.content, images),
       })
       continue
     }

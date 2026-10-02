@@ -89,4 +89,13 @@ pub const DEFAULT_IMAGE_DETAIL: ImageDetail = ImageDetail::High;
 > offload 占位、`input_modalities` 目录投影（缺省 text+image）均已落地；GIF 按
 > 附件服务的 mediaType 直传，未做 codex 的 GIF→PNG 重编码（后端接受静态 GIF）。
 
+> **2026-10-02 补充（compact 回归修复）**：声明图片能力后，`read_image` 等工具会向
+> 模型返回内嵌 live 图片块的 tool 结果（compact 抹掉原始 user 附图、模型重新读图即
+> 触发），适配器最初只在 user 路径放行图片导致 UNSUPPORTED_CONTENT。修复：tool 结果
+> 带图时 `function_call_output.output` 从纯字符串切换为 codex 同款 content-item 数组
+> （`input_text` / `input_image`；见 [models.rs 的 FunctionCallOutputBody 与
+> convert_mcp_content_to_items](https://github.com/openai/codex/blob/5aa92804d255dcaefe169dd7febb4006a2474e32/codex-rs/protocol/src/models.rs)，
+> 注释明言 "output is encoded as either an array of structured content items
+> or a plain string"）；assistant 角色图片仍拒绝（与 pi-ai 的 user+tool 白名单一致）。
+
 **未验证项**（如实列出）：① 真实 ChatGPT OAuth 会话下 live `GET /backend-api/codex/models` 的响应体（以 codex 打包的 models.json 为代理）；② OpenAI 官方 docs 页面（developers/platform.openai.com）未直接抓取——仅引用了 codex 源码内注释转引的 [images-vision guide](https://platform.openai.com/docs/guides/images-vision)；③ 后端对非 vision 模型收到 `input_image` 时的具体报错（codex 无客户端门控、也无错误样本）；④ 交互式 TUI `--image` 的精确引入 commit（已 pin 到 ≤ rust-v0.35.0 / 2025-09-15）；⑤ live 后端是否存在裸 `gpt-6` slug（目录中无）；⑥ `ResponseItem` 外层 message 的 serde tag（`"type":"message"`）未逐字核对——我们现有无 tag 的 `{role, content}` 形态后端已接受，稳妥起见新增图像时与 codex 保持同构即可。
