@@ -11,17 +11,21 @@
  * 2. high-risk irreversibility shapes (rm -rf ~, git clean -xfd, reset
  *    --hard, push --force, sudo, curl|sh…) → straight to the human dialog;
  * 3. otherwise one bounded one-shot judge call (a small model configured in
- *    Settings) over the session's user prompts, the pending call's full
- *    arguments, and the already-approved commands: ALLOW claims the request,
- *    everything else — ambiguity, timeout, parse failure — falls through to
- *    the human answerer.
+ *    the plugin row config) over the session's user prompts, the pending
+ *    call's full arguments, and the already-approved commands: ALLOW claims
+ *    the request, everything else — ambiguity, timeout, parse failure —
+ *    falls through to the human answerer.
  *
- * The plugin never returns `rejected`: an AI denial must not masquerade as
- * the user's explicit "no". Fail-open direction is toward the human dialog,
- * so a broken judge degrades to the stock behavior, never worse.
+ * Every decision is appended to the session's log as a `form: 'notice'`
+ * message, so the stock Web chat shows it as a collapsed context row
+ * (persistent, replayable; the one-line account also enters the model
+ * transcript). The plugin never returns `rejected`: an AI denial must not
+ * masquerade as the user's explicit "no". Fail-open direction is toward the
+ * human dialog, so a broken judge degrades to the stock behavior, never
+ * worse.
  *
- * Consumed host services: `llm` (injected); `settings` and `sessions`
- * opportunistically via `ctx.get()`/`ctx.inject`.
+ * Consumed host services: `llm` (injected); `sessions` opportunistically
+ * via `ctx.get()`.
  *
  * @module dsh-auto-permit
  */
@@ -31,7 +35,8 @@ import type { Session } from '@deepseek-ai/dsh-session'
 import { collectEvidence } from './evidence.js'
 import { isHighRisk } from './rules.js'
 import { judge } from './judge.js'
-import { registerChannel } from './channel.js'
+import { buildNoticeMessage } from './notice.js'
+import type { NoticeOutcome } from './notice.js'
 import { registerSettings, routeConfigured } from './settings.js'
 import type { Config as RowConfig } from './settings.js'
 
@@ -40,6 +45,7 @@ export type { AutoPermitSettings } from './settings.js'
 export { collectEvidence } from './evidence.js'
 export { isHighRisk } from './rules.js'
 export { judge, buildJudgeMessage, PROMPT_VERSION } from './judge.js'
+export { buildNoticeMessage } from './notice.js'
 
 export const inject = ['llm']
 
@@ -50,6 +56,18 @@ function sessionOf(ctx: Context, agent: { id: string }): Session | undefined {
   return ctx.get('sessions')?.get(agent.id as never)
 }
 
+/** Append the decision's notice row to the session log; never throws into the caller. */
+function notify(session: Session, outcome: NoticeOutcome, command: string, reason?: string): void {
+  try {
+    session.append('user/message', buildNoticeMessage(outcome, command, reason), {
+      surfaceOp: 'append',
+    })
+  } catch {
+    // A notice is best-effort observability; the approval outcome itself
+    // must not fail because the log rejected the row.
+  }
+}
+
 /**
  * Plugin entry.
  *
@@ -58,7 +76,6 @@ function sessionOf(ctx: Context, agent: { id: string }): Session | undefined {
  */
 export function apply(ctx: Context, config: RowConfig): void {
   const readSettings = registerSettings(ctx, config)
-  const feed = registerChannel(ctx)
 
   ctx.on(
     'approval/request',
@@ -74,60 +91,47 @@ export function apply(ctx: Context, config: RowConfig): void {
         const evidence = collectEvidence(session, req.callId)
         if (evidence.call === undefined) return next()
 
+        const command = evidence.call.command.slice(0, 160)
+
         if (isHighRisk(evidence.call.command)) {
           ctx.logger.info(
             'auto-permit: high-risk shape, deferring to human: %s',
-            evidence.call.command.slice(0, 120),
+            command,
           )
-          feed.record({
-            toolName: req.toolName,
-            command: evidence.call.command.slice(0, 160),
-            outcome: 'high-risk',
-          })
+          notify(session, 'high-risk', command)
           return next()
         }
 
         if (evidence.exactRepeat) {
           ctx.logger.info(
             'auto-permit: exact repeat of an allowed command, allowing: %s',
-            evidence.call.command.slice(0, 120),
+            command,
           )
-          feed.record({
-            toolName: req.toolName,
-            command: evidence.call.command.slice(0, 160),
-            outcome: 'allowed-by-memory',
-          })
+          notify(session, 'allowed-by-memory', command)
           return 'allowed-once'
         }
 
-        const verdict = await judge(
+        const result = await judge(
           ctx,
           settings,
           evidence,
           session.id,
           req.signal,
         )
-        if (verdict === 'allow') {
+        if (result.verdict === 'allow') {
           ctx.logger.info(
             'auto-permit: judge allowed: %s',
-            evidence.call.command.slice(0, 120),
+            command,
           )
-          feed.record({
-            toolName: req.toolName,
-            command: evidence.call.command.slice(0, 160),
-            outcome: 'allowed',
-          })
+          notify(session, 'allowed', command, result.reason)
           return 'allowed-once'
         }
         ctx.logger.info(
-          'auto-permit: judge deferred to human: %s',
-          evidence.call.command.slice(0, 120),
+          'auto-permit: judge deferred to human: %s (%s)',
+          command,
+          result.reason ?? 'no reason recorded',
         )
-        feed.record({
-          toolName: req.toolName,
-          command: evidence.call.command.slice(0, 160),
-          outcome: 'deferred',
-        })
+        notify(session, 'deferred', command, result.reason)
         return next()
       } catch (error) {
         // Any surprise (log read failure, agent shape drift, …) goes to the

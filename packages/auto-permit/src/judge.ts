@@ -25,6 +25,12 @@ import type { AutoPermitSettings } from './settings.js'
 /** Judge verdict: `allow` claims the request; `defer` delegates to the human. */
 export type Verdict = 'allow' | 'defer'
 
+/** The judge's settled answer, with its reason line when the call produced one. */
+export interface JudgeResult {
+  readonly verdict: Verdict
+  readonly reason?: string
+}
+
 export const PROMPT_VERSION = 'dsh-auto-permit-v2'
 const DEFAULT_TIMEOUT_MS = 15000
 const MAX_OUTPUT_TOKENS = 1024
@@ -136,7 +142,7 @@ export async function judge(
   sessionId: SessionId,
   signal: AbortSignal | undefined,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
-): Promise<Verdict> {
+): Promise<JudgeResult> {
   const controller = new AbortController()
   const abort = () => controller.abort()
   signal?.addEventListener('abort', abort, { once: true })
@@ -163,10 +169,14 @@ export async function judge(
       if (block.type === 'text') text.push(block.text)
     }
     const match = VERDICT_PATTERN.exec(text.join('\n').trim())
-    if (match === null) return 'defer'
-    return match[1] === 'allow' ? 'allow' : 'defer'
+    if (match === null) return { verdict: 'defer' }
+    const reason = text.join('\n').trim().split('\n').slice(1).join(' ').trim()
+    return {
+      verdict: match[1] === 'allow' ? 'allow' : 'defer',
+      ...(reason === '' ? {} : { reason: reason.slice(0, 240) }),
+    }
   } catch {
-    return 'defer'
+    return { verdict: 'defer' }
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener('abort', abort)

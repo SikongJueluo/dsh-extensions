@@ -26,18 +26,22 @@ DSH 的 AI 自动审批判官：在 `approval/request` waterfall 上插队一个
 
 ## 可见性
 
-每次判官决策都会在 Web 界面弹一条 toast（锚在输入框上方）：
+每次判官决策都向会话 log 追加一条 `form: 'notice'` 消息，Web 对话流以
+**折叠行**形式持久显示（不展开即可读，随 session 回放；官方 model-switch
+通知同款形态）：
 
-- **Auto-permit allowed**（绿）：判官放行；
-- **Auto-permit allowed (approved earlier this session)**：精确记忆命中，
+- `auto-permit ✓ allowed: <命令>`——判官放行；
+- `auto-permit ✓ allowed (seen this session): <命令>`——精确记忆命中，
   零模型调用；
-- **Auto-permit deferred to you**：判官不确定，回人工弹窗（紧接着会出现
-  原生审批面板）；
-- **Auto-permit: irreversible shape, needs you**：高风险形状直接转人工。
+- `auto-permit ✎ deferred to you: <命令>`——判官不确定，回人工弹窗
+  （展开可见判官理由）；
+- `auto-permit ⚠ irreversible shape — needs you: <命令>`——高风险形状
+  直接转人工。
 
-host 侧同时通过 `ctx.logger` 记日志（`journalctl --user -u dsh-web | grep
-auto-permit`），client 侧经插件自有 channel（`/dsh-auto-permit`）轮询判决
-流。新打开的页面只提示之后的判决，不回放历史。
+注意：notice 的一行正文会进入模型 transcript（这是唯一能进对话流的第三方
+通道，官方未开放零上下文的纯 UI 行）；单行成本极低，且模型知道提权被放行
+是正面信息。host 侧同时通过 `ctx.logger` 记日志（`journalctl --user -u
+dsh-web | grep auto-permit`）。
 
 ## 判官判据（v2）
 

@@ -249,59 +249,6 @@ window.__ModuleLoader__.load({
       return React.createElement("div", { style: section }, children);
     }
 
-    // --- verdict notifier: an always-mounted overlay that polls the judge feed ---
-    var POLL_MS = 2000;
-    var TOAST_HOLD_MS = 5000;
-
-    var OUTCOME_TEXT = {
-      allowed: "Auto-permit allowed",
-      "allowed-by-memory": "Auto-permit allowed (approved earlier this session)",
-      deferred: "Auto-permit deferred to you",
-      "high-risk": "Auto-permit: irreversible shape, needs you"
-    };
-
-    function VerdictNotifier(props) {
-      var operations = props.operations;
-
-      var queueState = React.useState([]);
-      var queue = queueState[0];
-      var setQueue = queueState[1];
-
-      React.useEffect(function () {
-        var alive = true;
-        var lastSeq = null; // null = fresh attacher: skip the backlog
-        function tick() {
-          operations.verdictEvents(lastSeq).then(function (result) {
-            if (!alive || !result || result.ok !== true) return;
-            lastSeq = result.value.next;
-            if (result.value.events.length > 0) {
-              setQueue(function (pending) { return pending.concat(result.value.events); });
-            }
-          }).catch(function () { /* channel absent or offline: keep polling */ });
-        }
-        tick();
-        var timer = window.setInterval(tick, POLL_MS);
-        return function () { alive = false; window.clearInterval(timer); };
-      }, []);
-
-      if (queue.length === 0) return null;
-      var next = queue[0];
-      var allowed = next.outcome === "allowed" || next.outcome === "allowed-by-memory";
-      var primitives = props.primitives;
-      return React.createElement(primitives.Toast, {
-        key: next.seq,
-        text: OUTCOME_TEXT[next.outcome] + ": " + next.command.slice(0, 90),
-        icon: React.createElement(
-          allowed ? primitives.IconCheckCircleFillRegular : primitives.IconWarningOutlineRegular,
-          {}
-        ),
-        tone: allowed ? "success" : undefined,
-        holdMs: TOAST_HOLD_MS,
-        anchor: document.querySelector("[data-composer-card]"),
-        onDone: function () { setQueue(function (pending) { return pending.slice(1); }); }
-      }, next.seq);
-    }
-
     function apply(ctx) {
       var operations = {
         read: function () {
@@ -345,22 +292,6 @@ window.__ModuleLoader__.load({
           label: function () { return "Auto Permit"; },
           inject: injected
         }, AutoPermitSection);
-      });
-
-      // The always-mounted verdict notifier: toasts every judge decision.
-      var primitives = require("@deepseek-ai/dsh-client-ui-primitives");
-      var verdictOperations = {
-        verdictEvents: function (since) { return callRpc("events", { since: since === null ? undefined : since }); }
-      };
-      ctx.slots.inject("shell.overlay", function () {
-        return ctx.slots.register({
-          name: "shell.overlay",
-          id: "dsh-auto-permit-notifier",
-          order: 60,
-          inject: function () {
-            return { operations: verdictOperations, primitives: primitives };
-          }
-        }, VerdictNotifier);
       });
     }
 

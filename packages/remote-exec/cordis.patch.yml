@@ -1,0 +1,26 @@
+# dsh-remote-exec bundle layer.
+#
+# Mounts the remote-exec plugin: one `remote_exec` tool that runs fish
+# commands inside a fixed Docker container on a whitelisted SSH host
+# (protocol mirrors Mini-Nav's mini_nav/utils/remote.py, plus an autoStart
+# branch). Consumes host services `tools` (tool registry) and `subprocess`
+# (host-side ssh — the model bash sandbox is never involved, so the real
+# ~/.ssh, agent forwarding and jump chains all apply). Approval is fetched
+# opportunistically (ctx.get('approval')); a missing approval service fails
+# closed unless approvalMode is explicitly 'never'.
+#
+# The row config owns the target whitelist — operator-managed (bundle layer
+# here, or a later patch/nixos overlay layer can replace it by id). Zero
+# targets is valid: the tool then errors on use until targets are added.
+- id: remote-exec
+  name: dsh-remote-exec
+  # config:
+  #   approvalMode: session        # session | every | never
+  #   defaultTimeoutMs: 600000
+  #   maxTimeoutMs: 3600000
+  #   targets:
+  #     mini-nav-gpu:
+  #       sshHost: gpu-workstation
+  #       container: mini-nav
+  #       workdir: /workspace/Mini-Nav
+  #       description: Mini-Nav experiment box
