@@ -21,7 +21,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import type {} from './shims.js'
+import type { SessionControllerShim } from './shims.js'
 
 /** The continuation message sent into a restarted-mid-flight session. */
 export const RESTART_RESUME_MESSAGE =
@@ -48,6 +48,9 @@ export function defaultMirrorPath(): string {
 const RESUME_STAGGER_MS = 2_000
 /** Grace period after boot before the first resume fires. */
 const BOOT_SETTLE_MS = 5_000
+/** How long the boot pass keeps retrying while the sessionController is absent. */
+const CONTROLLER_WAIT_MS = 30_000
+const CONTROLLER_POLL_MS = 1_000
 
 function isEntry(value: unknown): value is RunningEntry {
   if (typeof value !== 'object' || value === null) return false
@@ -74,7 +77,7 @@ function lastTurnCompleted(agent: Agent): boolean {
 export function registerRestartResume(
   ctx: Context,
   config: { resumeOnRestart: boolean; resumeMaxAgeMs: number },
-  options: { mirrorPath?: string; settleMs?: number; staggerMs?: number } = {},
+  options: { mirrorPath?: string; settleMs?: number; staggerMs?: number; controllerWaitMs?: number; controllerPollMs?: number } = {},
 ): void {
   const path = options.mirrorPath ?? defaultMirrorPath()
   const settleMs = options.settleMs ?? BOOT_SETTLE_MS
@@ -112,28 +115,43 @@ export function registerRestartResume(
     source: { kind: 'user' },
   })
 
-  const resumeOne = async (entry: RunningEntry): Promise<void> => {
+  /** Wait for the sessionController (the composition may still be mounting). */
+  const awaitController = async (): Promise<SessionControllerShim | undefined> => {
+    const deadline = Date.now() + (options.controllerWaitMs ?? CONTROLLER_WAIT_MS)
+    for (;;) {
+      const controller = ctx.get('sessionController')
+      if (controller !== undefined || lifetime.signal.aborted || Date.now() >= deadline) {
+        return controller ?? undefined
+      }
+      await new Promise((resolve) => setTimeout(resolve, options.controllerPollMs ?? CONTROLLER_POLL_MS))
+    }
+  }
+
+  /** One resume attempt; resolves false when the composition could not serve
+   *  it (controller absent) and the whole pass should leave the mirror alone. */
+  const resumeOne = async (entry: RunningEntry): Promise<boolean> => {
     const registry = ctx.get('agents')
     let agent: Agent | undefined = registry?.get(entry.sessionId as Parameters<typeof registry.get>[0])
     if (agent === undefined) {
-      const controller = ctx.get('sessionController')
+      const controller = await awaitController()
       if (controller === undefined) {
         ctx.logger.warn('auto-continue: no sessionController to resume "%s" after restart', entry.sessionId)
-        return
+        return false
       }
-      const result = await controller.agents.resolveAgent(entry.sessionId as Parameters<typeof controller.agents.resolveAgent>[0])
+      const result = await controller.agents.resolveAgent(entry.sessionId as Parameters<SessionControllerShim['agents']['resolveAgent']>[0])
       if ('error' in result) {
         ctx.logger.warn('auto-continue: cannot reopen "%s" after restart (%o)', entry.sessionId, result.error)
-        return
+        return true
       }
       agent = result.agent
     }
-    if (lastTurnCompleted(agent)) {
-      ctx.logger.info('auto-continue: "%s" finished its turn before the restart — not resumed', entry.sessionId)
-      return
+    if (agent === undefined || lastTurnCompleted(agent)) {
+      if (agent !== undefined) ctx.logger.info('auto-continue: "%s" finished its turn before the restart — not resumed', entry.sessionId)
+      return true
     }
     agent.followup(resumeMessage)
     ctx.logger.info('auto-continue: resumed "%s" after restart', entry.sessionId)
+    return true
   }
 
   const adoptAtBoot = async (): Promise<void> => {
@@ -144,9 +162,9 @@ export function registerRestartResume(
     } catch {
       return
     }
-    // One-shot: consume the mirror immediately, whatever we do with it.
-    persist([])
     const entries = Array.isArray(doc?.entries) ? doc.entries.filter(isEntry) : []
+    // Consume only after the pass finishes, so a not-yet-ready composition
+    // (or a mid-pass crash) leaves the mirror for the next boot to retry.
     const now = Date.now()
     const fresh = entries.filter((entry) => now - entry.at < config.resumeMaxAgeMs)
     const stale = entries.length - fresh.length
@@ -157,12 +175,15 @@ export function registerRestartResume(
     for (const entry of fresh) {
       if (lifetime.signal.aborted) return
       try {
-        await resumeOne(entry)
+        if (!(await resumeOne(entry))) return // composition not ready: keep the mirror
       } catch (error) {
         ctx.logger.warn('auto-continue: restart-resume of "%s" failed: %o', entry.sessionId, error)
       }
       await new Promise((resolve) => setTimeout(resolve, staggerMs))
     }
+    // One-shot: consume once the pass has finished, so a not-yet-ready
+    // composition (or a mid-pass crash) leaves the mirror for the next boot.
+    persist([])
   }
 
   // The boot pass waits for the plugin tree (and sessionController) to exist;

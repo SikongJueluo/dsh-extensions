@@ -529,6 +529,19 @@ await rm(spoolDir, { recursive: true, force: true })
   check('mirror consumed once at boot', doc.entries.length === 0)
   await effectsRestart[1]()()
 
+  // 2b) controller absent at boot → entries survive for the next boot
+  {
+    const mirrorPath2 = join(await mkdtemp(join(tmpdir(), 'ac-rr2-')), 'running.json')
+    const ctxNoCtl = mkCtx()
+    ctxNoCtl.get = () => undefined
+    await writeFile(mirrorPath2, JSON.stringify({ version: 1, entries: [{ sessionId: 'sess-rr', at: Date.now() - 1000 }] }), 'utf8')
+    registerRestartResume(ctxNoCtl, { resumeOnRestart: true, resumeMaxAgeMs: 12 * 3600_000 }, { mirrorPath: mirrorPath2, settleMs: 5, staggerMs: 5, controllerWaitMs: 20, controllerPollMs: 10 })
+    await settleFast(120)
+    const doc2 = JSON.parse(await readFile(mirrorPath2, 'utf8'))
+    check('controller-absent boot keeps the mirror for retry', doc2.entries.length === 1)
+    await effectsRestart[2]()()
+  }
+
   // 3) resumeOnRestart: false → mirror still maintained, boot does nothing
   const ctxC = mkCtx()
   const before = sent.length
