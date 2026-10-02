@@ -25,6 +25,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
 import { registerRecovery } from './recovery.js'
 import { registerResume } from './resume.js'
+import { registerCommands } from './command.js'
 import { WaitSpool } from './spool.js'
 import { DEFAULT_MAX_WAIT_MS, DEFAULT_RESET_MARGIN_MS } from './schedule.js'
 
@@ -64,11 +65,16 @@ export const inject: string[] = []
 
 export function apply(ctx: Context, config: Config): void {
   const spool = config.persist ? new WaitSpool() : undefined
+  const cancelled = new Set<string>()
   const adopter = spool === undefined ? undefined : registerResume(ctx, { maxWaitMs: config.maxWaitMs }, spool)
   registerRecovery(ctx, {
     maxWaitMs: config.maxWaitMs,
     resetMarginMs: config.resetMarginMs,
     spool,
+    cancelled,
     onWaitKept: (entry) => adopter?.schedule(entry),
   })
+  if (adopter !== undefined && spool !== undefined) {
+    registerCommands(ctx, { adopter, spool, cancelled })
+  }
 }

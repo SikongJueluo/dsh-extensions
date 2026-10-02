@@ -41,6 +41,9 @@ export interface RecoveryConfig extends ScheduleOptions {
   /** Called when a wait is kept after its turn aborted (user stop, relay
    *  teardown, shutdown ordering) so the in-process adopter re-arms it. */
   onWaitKept?: (entry: PendingWait) => void
+  /** Session ids whose wait the user cancelled via /ac-cancel; the sleeping
+   *  recovery checks it at wake and stands down without retrying. */
+  cancelled?: Set<string>
 }
 
 /** Hard cap on tracked turn states; the map is pruned to its first entries. */
@@ -170,6 +173,7 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
         provider,
         code: failure.code,
         turn,
+        step,
         lastSeq: recorded.seq,
         firstFailureAt: state.firstFailureAt,
         attempts: state.attempts,
@@ -179,6 +183,13 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
       await spool?.set(entry)
 
       const slept = await cancellableSleep(wait.delayMs, fused)
+      if (slept && config.cancelled?.has(agent.session.id)) {
+        // The user cancelled while we slept: stand down without retrying.
+        config.cancelled.delete(agent.session.id)
+        dropState(agent.session.id, turn)
+        await spool?.delete(agent.session.id)
+        return undefined
+      }
       if (!slept) {
         dropState(agent.session.id, turn)
         // A turn abort is NOT an instruction to abandon the wait: it can be a

@@ -399,6 +399,70 @@ await rm(spoolDir, { recursive: true, force: true })
   }
 }
 
+// ── adoption countdown notice + cancel ───────────────────────────────────────
+{
+  const settle = (ms = 120) => new Promise((r) => setTimeout(r, ms))
+  const noticeEvents = []
+  const noticeAgent = {
+    status: 'idle',
+    session: {
+      id: 'sess-n',
+      ownEvents: () => [],
+      append: (type, data) => { noticeEvents.push({ type, data }); return { seq: 60 } },
+    },
+    followup: () => {},
+  }
+  const sp = new WaitSpool({ path: join(await mkdtemp(join(tmpdir(), 'ac-n-')), 'p.json') })
+  await sp.load()
+  await sp.set({ ...entry, sessionId: 'sess-n', lastSeq: 50, retryAt: Date.now() + 3_600_000 })
+  const createdListeners = []
+  const noticeCtx = {
+    logger: { info() {}, warn() {} },
+    get: (name) => (name === 'agents' ? { get: () => noticeAgent } : undefined),
+    on: (e, l) => { createdListeners.push([e, l]); return () => {} },
+    effect: () => () => {},
+    inject: () => {},
+  }
+  const handle = registerResume(noticeCtx, { maxWaitMs: 6 * 3600_000 }, sp)
+  await settle()
+  check('adoption appends a visible llm/retry countdown', noticeEvents.some((e) => e.type === 'llm/retry' && e.data.delayMs > 3_000_000 && e.data.provider === entry.provider))
+  for (const [event, listener] of createdListeners) {
+    if (event === 'agent/created') listener({ agent: noticeAgent })
+  }
+  const retryNotices = noticeEvents.filter((e) => e.type === 'llm/retry')
+  check('adoption notice shown exactly once', retryNotices.length === 1)
+
+  check('cancel drops the pending record', (await handle.cancel('sess-n')) === true && sp.get('sess-n') === undefined)
+  check('cancel of nothing reports false', (await handle.cancel('sess-n')) === false)
+  await noticeCtx.effect === undefined ? undefined : undefined
+  // timer fires into a missing record: no followup sent
+  await settle(50)
+  check('cancelled timer never sends a followup', noticeAgent.followupCalls === undefined)
+}
+
+// ── recovery honours the shared cancel set at wake ──────────────────────────
+{
+  const cancelSpool = new WaitSpool({ path: join(await mkdtemp(join(tmpdir(), 'ac-w-')), 'p.json') })
+  await cancelSpool.load()
+  const cancelled = new Set()
+  const events = []
+  const cancelSession = { id: 'sess-w', append: (t, d) => { events.push({ type: t, data: d }); return { seq: 9 } } }
+  const wakeCtx = makeCtx({ planUsage: { get: async () => ({ provider: 'p', fetchedAt: Date.now(), source: 'limits', fiveHour: { percent: 100, resetAt: Date.now() + 150 }, weekly: { percent: 10, resetAt: Date.now() + 9 * 3600_000 } }) } })
+  registerRecovery(wakeCtx.ctx, { maxWaitMs: 60_000, resetMarginMs: 0, spool: cancelSpool, cancelled })
+  const pendingWake = wakeCtx.listeners.get('agent/request-error')(
+    { agent: { session: cancelSession }, turn: 1, step: 1, provider: 'zai-coding-cn', failure: { code: 'QUOTA', message: 'x' }, signal: new AbortController().signal },
+    async () => undefined,
+  )
+  await new Promise((r) => setTimeout(r, 40))
+  check('wait armed before cancel', cancelSpool.get('sess-w') !== undefined)
+  cancelled.add('sess-w')
+  await cancelSpool.delete('sess-w')
+  const action = await pendingWake
+  await new Promise((r) => setTimeout(r, 60))
+  check('cancelled recovery returns terminal without retry', action === undefined)
+  check('cancelled recovery records no retry-started', !events.some((e) => e.type === 'llm/retry-started'))
+}
+
 if (failures > 0) {
   console.error(`${failures} check(s) failed`)
   process.exit(1)

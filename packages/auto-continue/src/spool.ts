@@ -29,6 +29,8 @@ export interface PendingWait {
   code: string
   /** The interrupted turn number. */
   turn: number
+  /** The interrupted step number, when recorded (for adoption notices). */
+  step?: number
   /** Session log seq of the `llm/retry` event that scheduled this wait. */
   lastSeq: number
   /** When the first owned failure for this turn arrived (deadline anchor). */
