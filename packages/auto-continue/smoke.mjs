@@ -425,12 +425,15 @@ await rm(spoolDir, { recursive: true, force: true })
   }
   const handle = registerResume(noticeCtx, { maxWaitMs: 6 * 3600_000 }, sp)
   await settle()
-  check('adoption appends a visible llm/retry countdown', noticeEvents.some((e) => e.type === 'llm/retry' && e.data.delayMs > 3_000_000 && e.data.provider === entry.provider))
+  // llm/retry events carry a turn/step invariant the persistence reader
+  // enforces; adoption must NEVER append one outside a live open step. The
+  // notice is a user/message row with form:'notice' (auto-permit pattern).
+  check('adoption appends a collapsed notice row', noticeEvents.some((e) => e.type === 'user/message' && e.data?.source?.form === 'notice' && String(e.data?.source?.summary ?? '').includes('auto-continue')))
   for (const [event, listener] of createdListeners) {
     if (event === 'agent/created') listener({ agent: noticeAgent })
   }
-  const retryNotices = noticeEvents.filter((e) => e.type === 'llm/retry')
-  check('adoption notice shown exactly once', retryNotices.length === 1)
+  check('adoption notice appended exactly once', noticeEvents.filter((e) => e.type === 'user/message').length === 1)
+  check('adoption never appends llm/retry outside a live step', noticeEvents.every((e) => e.type !== 'llm/retry'))
 
   check('cancel drops the pending record', (await handle.cancel('sess-n')) === true && sp.get('sess-n') === undefined)
   check('cancel of nothing reports false', (await handle.cancel('sess-n')) === false)

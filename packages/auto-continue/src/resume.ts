@@ -23,8 +23,8 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from './shims.js'
 import type { PendingWait, WaitSpool } from './spool.js'
-import { randomUUID } from 'node:crypto'
 import { cancellableSleep } from './recovery.js'
+import { buildWaitNotice } from './notice.js'
 
 /** How long to wait before re-checking a busy or unresolvable session. */
 export const RETRY_LATER_MS = 60_000
@@ -70,33 +70,23 @@ export interface ResumeHandle {
 export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSpool): ResumeHandle {
   const lifetime = new AbortController()
   const pending = new Map<string, Promise<void>>()
-  /** Sessions whose adoption countdown was already shown in the session log. */
+  /** Sessions whose adoption notice was already appended to the log. */
   const noticed = new Set<string>()
 
   /**
-   * Surface one armed record in its session: append an `llm/retry` countdown
-   * event the stock conversation view renders, so opening the session shows
-   * "auto-continue will retry at HH:MM" instead of a silently idle tail.
-   * Skipped when the fire is imminent or the notice was already shown.
+   * Surface one armed record in its session as a collapsed notice row (the
+   * auto-permit verdict-notice pattern): appending `user/message` is legal at
+   * any time, unlike `llm/retry` events which the persistence reader
+   * validates against the open step.
    */
   const notice = (entry: PendingWait, agent: Agent): void => {
     if (noticed.has(entry.sessionId) || entry.retryAt <= Date.now() + 1_000) return
     noticed.add(entry.sessionId)
     try {
-      agent.session.append('llm/retry', {
-        retryId: randomUUID(),
-        turn: entry.turn,
-        step: entry.step ?? 0,
-        provider: entry.provider,
-        mode: 'always',
-        policyKey: '"auto-continue"',
-        retry: entry.attempts,
-        delayMs: entry.retryAt - Date.now(),
-        failure: { message: `${entry.code} wait re-armed after restart`, code: entry.code },
-      })
+      agent.session.append('user/message', buildWaitNotice(entry.provider, entry.code, entry.retryAt), { surfaceOp: 'append' })
     } catch (error) {
       noticed.delete(entry.sessionId)
-      ctx.logger.warn('auto-continue: countdown notice for "%s" failed: %o', entry.sessionId, error)
+      ctx.logger.warn('auto-continue: wait notice for "%s" failed: %o', entry.sessionId, error)
     }
   }
 
