@@ -38,6 +38,10 @@ dsh --profile <profile> --dump-config   # 应出现 "# == dsh-<name>" 层
 
 插件按 profile 安装，多个 profile 需分别 `add`。`dsh plugin` 本质是在 profile 目录里转发 pnpm 并对账 `dsh.profile.bundles`。
 
+## 宿主边界（dsh 归 nix 管）
+
+dsh 本体与 `$DSH_HOME`（`~/.dsh` 下 profiles、patch 层、bin 等运行时配置）由用户的 nix configuration 声明式管理。宿主侧的行为问题（沙箱、profile 组合、全局 patch……）一律产出计划文档交用户落进 flake（例：[docs/plan-dsh-sandbox-ssh-fix.md](docs/plan-dsh-sandbox-ssh-fix.md)），不改 `~/.dsh`、不为此申请提权；上面安装循环里的 `dsh plugin add` 等命令也由用户执行，agent 负责构建 bundle 并给出命令。
+
 ## 关键概念
 
 - **plugin**：导出 `apply(ctx, config)` 的 ESM，可附 `name` / `inject` / `Config`（Schemastery schema，加载期校验并填默认值）。

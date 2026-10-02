@@ -24,6 +24,40 @@ DSH 的 AI 自动审批判官：在 `approval/request` waterfall 上插队一个
 非 bash 工具的审批一律 `next()` 交还原链路。风险自担：放行即
 `danger-full-access` 执行，请谨慎选择判官模型。
 
+## 可见性
+
+每次判官决策都会在 Web 界面弹一条 toast（锚在输入框上方）：
+
+- **Auto-permit allowed**（绿）：判官放行；
+- **Auto-permit allowed (approved earlier this session)**：精确记忆命中，
+  零模型调用；
+- **Auto-permit deferred to you**：判官不确定，回人工弹窗（紧接着会出现
+  原生审批面板）；
+- **Auto-permit: irreversible shape, needs you**：高风险形状直接转人工。
+
+host 侧同时通过 `ctx.logger` 记日志（`journalctl --user -u dsh-web | grep
+auto-permit`），client 侧经插件自有 channel（`/dsh-auto-permit`）轮询判决
+流。新打开的页面只提示之后的判决，不回放历史。
+
+## 判官判据（v2）
+
+除 v1 的显式意图 + 等价两判据外，v2 新增两类（解决 cargo/direnv/nix 这类
+构建工具反复弹窗的问题）：
+
+1. **工具链缓存副作用**：命令是用户意图覆盖的常规构建/包管理/环境操作
+   （cargo、nix、direnv、pnpm、npm、uv、go、gradle…），且越界写入只指向
+   该工具链公开缓存/registry 目录（~/.cargo、~/.cache、/nix/store、.direnv、
+   ~/.npm、~/.pnpm-store、~/.uv…）→ 效果可重建，可 ALLOW。工具的显式输出
+   目标（--out、--target-dir 别处、重定向）不在此列。
+2. **同族命令等价**：同 session 批准过任一同族命令后，后续命令仅差子命令
+   组合（fmt/check/clippy/build/test）、输出截断包装（tail/head/grep）、
+   env 前缀、重复幂等执行 → 视为等价可 ALLOW。
+
+背景：模型每次生成的命令字符串几乎总有微小差异（tail -25 vs -8、带不带
+clippy），精确记忆命中率低；v1 判据又要求用户意图显式覆盖每个操作的目标
+与效果，而 ~/.cargo 这类工具隐式副作用永远不会被 prompt 提及——两层叠加
+导致 cargo 类审批全部 defer。v2 两个判据分别修这两层。
+
 ## 配置
 
 插件行 config（全部 volatile，`{enabled, provider, model, reasoningEffort?}`）：

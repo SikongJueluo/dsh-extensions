@@ -31,6 +31,7 @@ import type { Session } from '@deepseek-ai/dsh-session'
 import { collectEvidence } from './evidence.js'
 import { isHighRisk } from './rules.js'
 import { judge } from './judge.js'
+import { registerChannel } from './channel.js'
 import { registerSettings, routeConfigured } from './settings.js'
 import type { Config as RowConfig } from './settings.js'
 
@@ -57,6 +58,7 @@ function sessionOf(ctx: Context, agent: { id: string }): Session | undefined {
  */
 export function apply(ctx: Context, config: RowConfig): void {
   const readSettings = registerSettings(ctx, config)
+  const feed = registerChannel(ctx)
 
   ctx.on(
     'approval/request',
@@ -77,6 +79,11 @@ export function apply(ctx: Context, config: RowConfig): void {
             'auto-permit: high-risk shape, deferring to human: %s',
             evidence.call.command.slice(0, 120),
           )
+          feed.record({
+            toolName: req.toolName,
+            command: evidence.call.command.slice(0, 160),
+            outcome: 'high-risk',
+          })
           return next()
         }
 
@@ -85,6 +92,11 @@ export function apply(ctx: Context, config: RowConfig): void {
             'auto-permit: exact repeat of an allowed command, allowing: %s',
             evidence.call.command.slice(0, 120),
           )
+          feed.record({
+            toolName: req.toolName,
+            command: evidence.call.command.slice(0, 160),
+            outcome: 'allowed-by-memory',
+          })
           return 'allowed-once'
         }
 
@@ -100,8 +112,22 @@ export function apply(ctx: Context, config: RowConfig): void {
             'auto-permit: judge allowed: %s',
             evidence.call.command.slice(0, 120),
           )
+          feed.record({
+            toolName: req.toolName,
+            command: evidence.call.command.slice(0, 160),
+            outcome: 'allowed',
+          })
           return 'allowed-once'
         }
+        ctx.logger.info(
+          'auto-permit: judge deferred to human: %s',
+          evidence.call.command.slice(0, 120),
+        )
+        feed.record({
+          toolName: req.toolName,
+          command: evidence.call.command.slice(0, 160),
+          outcome: 'deferred',
+        })
         return next()
       } catch (error) {
         // Any surprise (log read failure, agent shape drift, …) goes to the
