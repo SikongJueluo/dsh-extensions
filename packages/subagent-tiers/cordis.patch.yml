@@ -1,0 +1,13 @@
+# dsh-subagent-tiers bundle layer.
+#
+# 三个固定路由的委派工具(quick/workhorse/smart),档位语义写进各自的工具
+# description(选型时最强的信号),路由由插件 Config 钉死,模型只能"选工具"。
+# 路由默认值在 src/index.ts 的 Config 里;要覆盖就以后层 patch 按 id 改写
+# 整个 config(或直接改这里的默认值)。
+#
+# 注意:挂本插件的 profile 必须 disable stock 的 `tool-subagent` 行
+# (preset 里那个实例会注册同名 `subagent` 工具)。`subagent_fork` 行
+# 不受影响,保留 fork 的"继承父上下文与父模型"语义。
+- insert:
+    - id: subagent-tiers
+      name: dsh-subagent-tiers

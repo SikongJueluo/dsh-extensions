@@ -52,6 +52,15 @@ dsh 本体与 `$DSH_HOME`（`~/.dsh` 下 profiles、patch 层、bin 等运行时
 - **settings（0.2 模型）**：无自定义配置节——`ctx.settings` 自动把每个在挂插件行的 `Config` schema 投影成表单，namespace ≡ profile 行 id；编辑写入即改行 config。volatile 字段（`.volatile()`）热生效不重挂（通过 `Volatile.get()` 读活值、监听 `loader/volatile-update`），非 volatile 字段编辑则重挂插件行。LLM 目录的 `settingsNs` 填行 id、`settingsPath` 填行 config 内的路径。
 - service（`ctx.llm` / `ctx.settings` / `ctx.authorization` / `ctx.credentials` / `ctx.logger` 等）由宿主提供；`inject` 列表让 `apply` 等到 service 就绪才执行，`ctx.inject([...], fn)` 等运行期才出现的 service。
 
+## 客户端纪律（移动端）
+
+移动端方案是 [dsh-mobile](https://github.com/saya-ch/dsh-mobile)（社区插件，Android App/手机浏览器，网关已验证 0.2.0-rc.2）：其移动页仍由 DSH 加载同一批 web 客户端插件，移动层只做布局与连接适配；不装它时手机浏览器开的也是同一 web app。浏览器半插件（见上「双半插件」）按此写：
+
+- **挂载只走 slot**：UI 经 `ctx.slots.register` / `ctx.slots.inject`（contribution slot）进宿主界面；不 patch Desktop DOM（`querySelector` / `MutationObserver` / 改 `document.*`）——手机端没有对应结构，slot 是唯一稳定挂载点。
+- **通信只走双通道**：`ctx.remote.*`，或本包 `webServer.register` 前缀路由 + client 侧相对路径 fetch（`/dsh-<name>/…`）。不硬编码回环连接（`new WebSocket("ws://localhost:…")`、`fetch("http://127.0.0.1:…/api")`）——手机上 localhost 指向手机自身，且绕过 connection/授权层。
+- **触摸优先**：交互绑 `onClick`；hover（`onMouseEnter`）、`onMouseDown` 背景关闭、键盘快捷键、`autoFocus` 只作桌面增强（`pointer: coarse` 退避），须有点按兜底。宽度用 `min(<px>, <vw>)` 自适应，可点目标 ≥ 44px。
+- **dsh-mobile 网关边界**：网关以同源代理普通插件路由（GET/HEAD/POST/PUT/PATCH/DELETE，配对 Session + CSRF），相对路径 fetch 原样穿透；回环端口（如 OAuth `localhost:1455` 回跳）**不在代理范围**——登录类流程取舍为「电脑端登录、手机端消费状态」；第三方 WebSocket 路径默认拦截、只能在诊断页按精确路径放行（不支持前缀/查询串），client 侧不建自有 WS。
+
 ## 新增插件
 
 1. `cp -r packages/oauth-providers packages/<name>`。
