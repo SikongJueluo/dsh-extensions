@@ -1,8 +1,9 @@
-# 计划：crew 插件上线 + 默认委派工具屏蔽（宿主侧改动）
+# 计划/记录：crew 插件上线 + 默认委派工具屏蔽
 
-状态：插件本体已在 `packages/crew/` 构建通过（`pnpm check`；旧名
-`subagent-tiers` 已废弃改名）。以下是 `~/.config/nixos` 侧需要落的三处改动 +
-验证步骤。全部由用户执行，本仓不动 `~/.dsh`。
+状态：插件本体在 `packages/crew/`（`pnpm check` 通过）；nix 侧已由 agent 代改
+（jj `feat(dsh): delegate through crew tiers and block stock tools`）。首轮部署
+用的"顶层行 disable"被实测证伪，已改为 **preset-standard 声明覆盖**，等待再次
+rebuild 生效。
 
 目标工具面（模型的委派选择被收窄到"只能选档位"）：
 
@@ -11,21 +12,12 @@
 | `subagent_quick` / `subagent` / `subagent_smart` | crew 插件 | 保留（三档，路由钉死） |
 | `create_agent` | crew 插件 | 保留（常驻角色代理，tier 枚举复用三档路由） |
 | `list_agents` / `send_message` / `interrupt_agent` | stock `tool-subagent-control` / `tool-subagent-list-agents` 行 | 保留（crew 的控制面） |
-| stock `subagent` | preset `tool-subagent` 行 | **disable**（与 crew 的 `subagent` 重名） |
-| `subagent_fork` | preset `tool-subagent-fork` 行 | **disable**（继承父模型 = 绕过档位；fork 钉别的模型又会丢 KV 前缀复用，不如关） |
-| `workflow` | preset `tool-workflow` + `workflow-ptc` 行 | **disable**（脚本里 `agent()` 可自由指定 provider/model，最后一条旁路） |
+| stock `subagent` / `subagent_fork` | preset `delegation` 组内嵌套行 | **从 preset 覆盖中删除** |
+| `workflow` | preset `workflow-ptc` + `tool-workflow` 行 | **从 preset 覆盖中删除** |
 
-背景（为什么）：stock `dsh-tool-subagent` 挂多个实例时工具描述一字不差，
-模型选型没有任何成本/能力信号。实测 2026-10-03/04 全部 workspace 的
-`tool/call` 分布：主力档（GLM-5.3）14 次、最贵 smart 档 4 次、便宜 quick 档
-仅 2 次——系统性 over-escalation。crew 把档位语义写进各自工具描述，升级规则
-改为失败驱动（"quick 的结果不够用才升档"），并把 fork / workflow 两条自由
-选路旁路一并关掉。
+## 1. `home/ai/dsh/plugins.nix`：挂插件（已落地）
 
-## 1. `home/ai/dsh/plugins.nix`：挂插件
-
-`programs.dsh.plugins` 列表追加一项（路由用插件 Config 默认值；要改路由就
-在这里传 `config`，或在 Web 设置页编辑——插件行 Config 会自动投影成表单）：
+`programs.dsh.plugins` 追加（路由用插件 Config 默认值，可在 Web 设置页改）：
 
 ```nix
 {
@@ -34,84 +26,65 @@
 }
 ```
 
-默认三档（`packages/crew/src/index.ts`）：
+默认三档（`packages/crew/src/index.ts`）：quick = deepseek-official /
+deepseek-flash @ max；workhorse = zai-coding-cn / glm-5.3 @ max；smart =
+openai-codex / gpt-6.1-sol @ xhigh。
 
-| 档位 | 路由 |
-| --- | --- |
-| quick | deepseek-official / deepseek-flash @ max |
-| workhorse | zai-coding-cn / glm-5.3 @ max |
-| smart | openai-codex / gpt-6.1-sol @ xhigh |
+## 2. `home/ai/dsh/subagents.patch.yml`：覆盖 preset-standard 声明
 
-## 2. `home/ai/dsh/subagents.patch.yml`：disable 全部 stock 委派工具
+**首轮教训（2026-10-06 实测）**：按行 id `- id: tool-subagent / disabled: true`
+只命中**顶层**行（那些本来就被 web-app 根 patch disable 了，等于空操作）；
+standard 预设从 `delegation` 组的**嵌套**行重新挂出 stock `subagent`（含
+`modelSelectionSettings: true`）、`subagent_fork`、`workflow`。dump-config 证实
+嵌套行原样启用。Loader 的按 id 覆盖打不进组内嵌套行，唯一可靠做法是**按行
+id `preset-standard` 整份重述声明**（config 整体替换）。
 
-整个文件替换为（`tool-subagent-control` / `tool-subagent-list-agents` 两行
-**不在**此列，保留）：
+正确做法：该文件内容 = 对官方 `dsh-web-app/presets/standard.patch.yml`
+（0.2.0-rc.2）的逐行重述，仅从 `delegation` 组删去 `tool-subagent` /
+`tool-subagent-fork` / `workflow-ptc` / `tool-workflow` 四行；其余（persona、
+planning/compaction 组、control/list-agents、codex/claude-code/ralph 的原生
+disabled 行等）原样保留。模板见 `packages/crew/dev.patch.yml`（由脚本从官方
+文件做文本手术生成：去 `- insert:` 头、整体缩进减 4、删四个行块）。
 
-```yaml
-# crew 插件(dsh-extensions)接管全部委派工具的注册。disable 四条 stock 行:
-# - tool-subagent:注册同名 subagent 工具,与 crew 重名;
-# - tool-subagent-fork:fork 继承父上下文与父模型,是绕过档位的旁路
-#   (fork 钉别的模型会丢 KV 前缀复用,不划算,直接关);
-# - tool-workflow / workflow-ptc:workflow 脚本的 agent() 可自由指定
-#   provider/model,是模型选路白名单的最后一条旁路。
-# 保留 tool-subagent-control 与 tool-subagent-list-agents(send_message /
-# interrupt_agent / list_agents 是 crew 的配套控制面)。
-- id: tool-subagent
-  name: '@deepseek-ai/dsh-tool-subagent'
-  disabled: true
+**维护代价**：升级 dsh 后必须重新 diff 官方 standard 预设，把新增/变更行同步
+进这份重述，否则 preset 漂移。
 
-- id: tool-subagent-fork
-  name: '@deepseek-ai/dsh-tool-subagent'
-  disabled: true
+## 3. `home/ai/agents-md.nix`：选型文案（已落地）
 
-- id: tool-workflow
-  disabled: true
-
-- id: workflow-ptc
-  disabled: true
-```
-
-## 3. `home/ai/agents-md.nix`：选型文案改机械式触发
-
-`dshBlock` 替换为（失败驱动，不做难度预判）：
-
-```nix
-dshBlock =
-  "\n## Delegation (DSH)\n\n"
-  + "Delegation runs through the crew tools with pinned routes; choose the tier, not a model.\n\n"
-  + "- Start at `subagent_quick` (cheap & fast) for any delegation whose result you can verify directly.\n"
-  + "- Escalate to `subagent` (workhorse) when quick's result is wrong or too shallow, or the task clearly needs multi-file engineering depth up front.\n"
-  + "- Escalate to `subagent_smart` (strongest, most expensive) only after cheaper tiers failed, or for architecture decisions and adversarial review.\n"
-  + "- `create_agent` starts a persistent named agent with a standing role on a tier; send it tasks with `send_message` and reuse it for repeated work of the same kind.\n"
-  + "- `list_agents` lists live agents; `interrupt_agent` stops one.\n"
-  + "- Never spend an expensive tier on work a cheaper tier already finished adequately.\n";
-```
+`dshBlock` 为失败驱动的机械式文案（quick 起步 → 升档要理由 → create_agent /
+list_agents 用法），2026-10-06 rebuild 后已确认再生成进 `~/.dsh/AGENTS.md`
+并在存活会话内热刷新。
 
 ## 4. 生效与验证
 
 ```sh
 pnpm -C ~/Projects/dsh-extensions build   # 已构建,幂等
-# nixosRebuild / home-manager switch 后:
-systemctl --user restart dsh-web
+sudo nixos-rebuild switch --flake ~/.config/nixos#Minisforum
 ```
 
-- 新开会话，模型看到的委派工具应当**只有**：`subagent_quick` / `subagent` /
-  `subagent_smart` / `create_agent` / `list_agents` / `send_message` /
-  `interrupt_agent`（外加 `job_*` 常规件）。`subagent_fork` 与 `workflow`
-  应当消失；三个 tier 工具描述各不相同（quick 自称默认档、smart 自称保留档）。
-- `dsh --profile web --dump-config`：上述四行带 `disabled`，plugins 层出现
-  `crew` 行。
-- 观察一周左右的 `tool/call` 分布：期望 quick 占比显著上升、smart 只在
-  升级链尾出现。
+- **新开会话**（旧会话保留其创建时的 preset 修订，工具面不回溯）：委派工具
+  应当只剩 `subagent_quick` / `subagent` / `subagent_smart` / `create_agent` /
+  `list_agents` / `send_message` / `interrupt_agent`；`subagent_fork` 与
+  `workflow` 消失；三个 tier 工具描述各不相同。
+- `dsh --profile web --dump-config`：`preset-standard` 行的 config 为重述版
+  （delegation 组内无 tool-subagent / fork / workflow）。
+- 观察一周左右的 `tool/call` 分布：期望 quick 占比显著上升。
 
-回滚：revert 上述三处即可，stock 工具随行恢复。
+## 验证记录（2026-10-06，首轮 rebuild 后）
+
+- crew 插件挂载 ✓：存活会话内 `subagent_quick` / `subagent_smart` /
+  `create_agent` 均为新描述（Tool inspect 证实）。
+- **路由钉死 ✓**：`subagent_quick` 前台委派一次，子会话 `request/header` =
+  `{"provider":"deepseek-official","model":"deepseek-flash","reasoningEffort":"max"}`。
+- 旧会话残留 ✗（预期内）：本会话仍见 stock `subagent`（旧描述）、
+  `subagent_fork`、`workflow` —— preset 修订随会话冻结 + 首轮 disable 无效，
+  均由 preset 覆盖修复，新会话生效。
 
 ## 已知边界
 
 - 插件要求 provider（默认 `spawn`）具备 `agentOptions` + `prepareContinuable`
   能力，缺失会在挂载时报错而不是静默降级。
 - `create_agent` 语义 = 常驻角色代理：bootstrap 提示词让子代理确认角色后
-  待命，恒为后台；后续任务经 `send_message`。没有"空 prompt 创建"的 API，
-  这是最贴近的等价物。
+  待命，恒为后台；后续任务经 `send_message`。
 - depth 仍读宿主 `subagent.maxDepth` 设置（默认 1），create_agent 创建的
-  常驻代理同样受深度约束（它们自己不能再委派，除非调大设置）。
+  常驻代理同样受深度约束。

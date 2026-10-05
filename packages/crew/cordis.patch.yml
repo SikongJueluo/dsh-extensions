@@ -5,9 +5,11 @@
 # Config 钉死,模型只能"选档位",不能选模型。路由默认值在 src/index.ts 的
 # Config 里;要覆盖就以后层 patch 按 id 改写整个 config(或直接改默认值)。
 #
-# 注意:挂本插件的 profile 必须 disable stock 的委派工具行(tool-subagent /
-# tool-subagent-fork / tool-workflow / workflow-ptc),否则 preset 实例会与
-# 本插件注册的 `subagent` 工具重名、且保留自由选路旁路。保留
+# 注意:按行 id disable 顶层 stock 行打不到 preset 组内的嵌套副本(loader
+# 只命中顶层行,preset 仍会从 delegation 组挂出自己的工具)——挂本插件的
+# profile 应按行 id 覆盖 preset-standard 声明,从 delegation 组删去
+# tool-subagent / tool-subagent-fork / workflow-ptc / tool-workflow 四行
+# (模板见 dev.patch.yml 与 docs/plan-dsh-crew.md);保留
 # tool-subagent-control 与 tool-subagent-list-agents(send_message /
 # interrupt_agent / list_agents 是 crew 的配套控制面)。
 - insert:
