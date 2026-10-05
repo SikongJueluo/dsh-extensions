@@ -1,0 +1,15 @@
+# dsh-crew bundle layer.
+#
+# 固定路由的委派工具组(quick/workhorse/smart 三档 + create_agent 常驻角色
+# 代理),档位语义写进各自的工具 description(选型时最强的信号),路由由插件
+# Config 钉死,模型只能"选档位",不能选模型。路由默认值在 src/index.ts 的
+# Config 里;要覆盖就以后层 patch 按 id 改写整个 config(或直接改默认值)。
+#
+# 注意:挂本插件的 profile 必须 disable stock 的委派工具行(tool-subagent /
+# tool-subagent-fork / tool-workflow / workflow-ptc),否则 preset 实例会与
+# 本插件注册的 `subagent` 工具重名、且保留自由选路旁路。保留
+# tool-subagent-control 与 tool-subagent-list-agents(send_message /
+# interrupt_agent / list_agents 是 crew 的配套控制面)。
+- insert:
+    - id: crew
+      name: dsh-crew

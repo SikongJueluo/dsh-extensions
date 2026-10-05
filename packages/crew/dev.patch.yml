@@ -1,0 +1,29 @@
+# Development / deployment overlay: the locally built plugin entry, by
+# absolute path. For the two flows that mount entries directly instead of
+# installing the bundle:
+#
+#   - dev:    dsh --profile web --patch ./packages/crew/dev.patch.yml \
+#               --no-open --port <port>
+#   - deploy: the NixOS dsh module's programs.dsh.plugins (absolute-path name,
+#             see ~/.config/nixos/home/ai/dsh/plugins.nix)
+#
+# 记得同时 disable stock 委派工具行(tool-subagent / tool-subagent-fork /
+# tool-workflow / workflow-ptc),见 docs/plan-dsh-crew.md。Rebuild 先行
+# (pnpm build),路径保持带引号的字符串。
+- id: tool-subagent
+  name: '@deepseek-ai/dsh-tool-subagent'
+  disabled: true
+
+- id: tool-subagent-fork
+  name: '@deepseek-ai/dsh-tool-subagent'
+  disabled: true
+
+- id: tool-workflow
+  disabled: true
+
+- id: workflow-ptc
+  disabled: true
+
+- insert:
+    - id: crew
+      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/crew/lib/index.js'

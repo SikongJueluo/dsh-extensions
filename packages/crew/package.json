@@ -1,7 +1,7 @@
 {
-  "name": "dsh-subagent-tiers",
+  "name": "dsh-crew",
   "version": "0.2.0",
-  "description": "DSH subagent-tiers plugin: three fixed-route delegation tools (quick / workhorse / smart) with tier-specific descriptions so the model picks cost-appropriately",
+  "description": "DSH crew plugin: fixed-tier delegation tools (quick / workhorse / smart) plus create_agent for persistent role agents — tier semantics live in the tool descriptions so the model picks cost-appropriately",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",

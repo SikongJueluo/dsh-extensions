@@ -9,7 +9,7 @@ Out-of-tree [DeepSeek Harness](https://www.deepseek.com/harness/en/) 插件 bund
 | [`dsh-plan-usage`](packages/plan-usage/) | GLM / OpenAI Codex / MiniMax 套餐配额查询，`planUsage` 服务 + 设置页分区 |
 | [`dsh-auto-continue`](packages/auto-continue/) | 套餐限额后睡到重置点自动重试，支持跨进程重启续跑 |
 | [`dsh-auto-env`](packages/auto-env/) | 按 session 工作区自动加载 direnv / devenv 环境 |
-| [`dsh-subagent-tiers`](packages/subagent-tiers/) | 三档固定路由 subagent 工具（quick / 主力 / smart），档位语义写进工具描述治 over-escalation |
+| [`dsh-crew`](packages/crew/) | 固定路由委派工具组：三档 subagent（quick / 主力 / smart）+ `create_agent` 常驻角色代理，档位语义写进工具描述治 over-escalation |
 
 ## 安装
 
