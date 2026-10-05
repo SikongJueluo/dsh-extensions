@@ -11,6 +11,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Config } from './index.js'
 import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
 import type { HandoffChannel } from './channel.js'
+import type { HandoffTarget } from './workspace.js'
 import { spawnHandoff } from './spawn.js'
 
 /** Which model route the fresh session should use. */
@@ -23,9 +24,13 @@ export type ModelChoice =
 export interface PendingHandoff {
   /** The agent (and session) that writes the brief. */
   readonly agent: Agent
-  /** Absolute workspace cwd shared by the origin and the fresh session. */
+  /** Absolute origin workspace cwd the brief is written under. */
   readonly cwd: string
-  /** Absolute path the brief must be written to. */
+  /** Where the fresh session spawns (origin cwd or a picked workspace). */
+  readonly target: HandoffTarget
+  /** True when the target lies outside the origin workspace. */
+  readonly crossWorkspace: boolean
+  /** Absolute path the brief must be written to (always origin-side). */
   readonly briefPath: string
   /** The verbatim task description from the command line. */
   readonly task: string
@@ -66,7 +71,18 @@ export function timestampSlug(date: Date): string {
 }
 
 /** The instruction handed to the CURRENT agent: write the brief, then stop. */
-export function briefInstruction(briefPath: string, task: string, maxBriefChars: number): string {
+export function briefInstruction(
+  briefPath: string,
+  task: string,
+  maxBriefChars: number,
+  cross?: { title: string },
+): string {
+  const crossNote = cross === undefined
+    ? []
+    : [
+      '',
+      `注意：本次交接目标是另一个工作区（${cross.title}）。后继会话对上文路径只读、且其来源分支工作区日后可能被清理，关键文件内容请直接摘录进简报而非只给路径。`,
+    ]
   return [
     `[handoff] /handoff 触发会话交接。本回合唯一任务：写一份交接简报到 ${briefPath}，供下一个没有本会话历史的新会话接手——简报必须自包含。`,
     '',
@@ -77,6 +93,7 @@ export function briefInstruction(briefPath: string, task: string, maxBriefChars:
     '- Files：关键文件/路径及状态',
     '- Next steps：后续步骤（有序）',
     '- Open questions：待用户确认的事项',
+    ...crossNote,
     '',
     '末尾追加原样任务：',
     '',
@@ -89,8 +106,11 @@ export function briefInstruction(briefPath: string, task: string, maxBriefChars:
 
 /** The first prompt of the fresh session: the brief plus bootstrap guidance. */
 export function bootstrapPrompt(pending: PendingHandoff, brief: string): string {
+  const crossNote = pending.crossWorkspace
+    ? `本次交接来自另一个工作区（${pending.cwd}）：简报中的原路径对你只读，写入一律在当前工作区进行；简报与当前工作区不符时以当前工作区为准。`
+    : ''
   return [
-    `[handoff] 你是新会话，无历史；上一会话的全部上下文在下方简报中（源 ${String(pending.agent.id)}，文件 ${pending.briefPath}）。直接开始执行 Task：按 Next steps 推进；简报与工作区不符时以工作区为准；仅对简报未覆盖且无法查证的信息询问用户。`,
+    `[handoff] 你是新会话，无历史；上一会话的全部上下文在下方简报中（源 ${String(pending.agent.id)}，文件 ${pending.briefPath}）。${crossNote}直接开始执行 Task：按 Next steps 推进；仅对简报未覆盖且无法查证的信息询问用户。`,
     '',
     '---',
     brief,

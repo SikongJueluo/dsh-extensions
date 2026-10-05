@@ -11,12 +11,24 @@ import type {} from '@deepseek-ai/dsh-user-questions'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { COMMAND_NAME, DEFAULT_BRIEF_DIR, PACKAGE_NAME } from './identity.js'
 import { briefInstruction, startHandoffWatch, timestampSlug, type HandoffRuntime, type ModelChoice, type PendingHandoff } from './brief.js'
+import type { WorkspacePick } from './channel.js'
+import {
+  consumeTitleSpec,
+  resolveFlagTarget,
+  resolveTargetById,
+  snapshotRoster,
+  targetForOrigin,
+  type HandoffTarget,
+  type WorkspaceRoster,
+} from './workspace.js'
 import { defaultRoute, sessionRoute, type RouteSummary } from './selection.js'
 
 /** Label shown for "keep this session's preset and model". */
 const LABEL_INHERIT = '继承当前会话'
 /** Label shown for "same as manually clicking New Session". */
 const LABEL_DEFAULT = '全局默认'
+/** Label shown for the origin workspace entry of the workspace step. */
+const LABEL_ORIGIN = '原工作区'
 
 /** How long the confirmation card may sit unanswered before we fall back to the default choice. */
 const CONFIRM_TIMEOUT_MS = 60_000
@@ -24,8 +36,12 @@ const CONFIRM_TIMEOUT_MS = 60_000
 const MODEL_LIST_TIMEOUT_MS = 8_000
 /** Keep the dialog list sane; beyond this, custom input is the escape hatch. */
 const MODEL_MENU_LIMIT = 50
+/** Same cap for the workspace question card (the browser list itself is unbounded). */
+const WORKSPACE_MENU_LIMIT = 50
 /** Prefix flag selecting the fresh session's model without a dialog. */
 const MODEL_FLAG = '--model'
+/** Prefix flag selecting the target workspace without a dialog. */
+const WORKSPACE_FLAG = '--workspace'
 
 function ok(text: string): CommandResult {
   return { kind: 'success', text }
@@ -139,8 +155,108 @@ async function listModelRoutes(ctx: Context): Promise<ModelRoute[]> {
   }
 }
 
-/** Dialog outcome: a resolved choice, or a cancellation with an optional user-facing reason. */
-type AskOutcome = { kind: 'choice'; choice: ModelChoice } | { kind: 'cancel'; reason?: string }
+/** Dialog outcome: a resolved choice plus its workspace verdict, or a cancellation. */
+type AskOutcome =
+  | { kind: 'choice'; choice: ModelChoice; workspace: WorkspacePick }
+  | { kind: 'cancel'; reason?: string }
+
+/** The model card's own outcome (the workspace verdict is asked separately). */
+type ModelAskOutcome = { kind: 'choice'; choice: ModelChoice } | { kind: 'cancel'; reason?: string }
+
+/** Resolve a workspace verdict (browser pick or card pick) into a spawn target. */
+async function resolvePick(
+  ctx: Context,
+  roster: WorkspaceRoster,
+  pick: WorkspacePick,
+): Promise<HandoffTarget | { error: string }> {
+  if (pick === 'origin') return targetForOrigin(roster)
+  const target = await resolveTargetById(ctx, pick)
+  return target ?? { error: `所选工作区已不在注册表中（${pick}），请重试 /handoff` }
+}
+
+/** Distinguishing suffix for duplicated workspace titles: the final path segments. */
+function pathTail(path: string): string {
+  const segments = path.split('/').filter((segment) => segment.length > 0)
+  return segments.slice(-2).join('/')
+}
+
+/** Clickable workspace rows; duplicate titles get the path tail appended. */
+function buildWorkspaceMenu(
+  rows: readonly { id: string; title: string; path: string }[],
+): { label: string; id: string }[] {
+  const counts = new Map<string, number>()
+  for (const row of rows) counts.set(row.title, (counts.get(row.title) ?? 0) + 1)
+  return rows.map(row => ({
+    label: (counts.get(row.title) ?? 0) > 1 ? `${row.title} (${pathTail(row.path)})` : row.title,
+    id: row.id,
+  }))
+}
+
+/**
+ * The workspace half of the shipped question-card path, asked after the model
+ * card whenever a browser picker is unavailable. Falls back to the origin on
+ * timeout, exactly like the model card falls back to inheritance.
+ */
+async function askWorkspaceCard(
+  ctx: Context,
+  agent: Agent,
+  roster: WorkspaceRoster,
+): Promise<{ kind: 'pick'; pick: WorkspacePick } | { kind: 'cancel'; reason?: string }> {
+  const userQuestions = ctx.get('userQuestions')
+  if (userQuestions === undefined) return { kind: 'pick', pick: 'origin' }
+  try {
+    const selectable = roster.others.filter((row) => !row.missing)
+    const menu = buildWorkspaceMenu(selectable.slice(0, WORKSPACE_MENU_LIMIT))
+    const ask = userQuestions.ask({
+      questions: [
+        {
+          id: 'workspace',
+          header: 'Handoff',
+          question: '新会话开在哪个工作区？',
+          options: [
+            { label: LABEL_ORIGIN, description: roster.origin.path },
+            ...menu.map((entry) => ({
+              label: entry.label,
+              description: selectable.find((row) => row.id === entry.id)?.path,
+            })),
+          ],
+        },
+      ],
+      agent,
+    })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<'timeout'>(resolve => {
+      timer = setTimeout(() => resolve('timeout'), CONFIRM_TIMEOUT_MS)
+    })
+    let answer: Awaited<typeof ask> | 'timeout'
+    try {
+      answer = await Promise.race([ask, timeout])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+    if (answer === 'timeout') return { kind: 'pick', pick: 'origin' }
+    const item = answer.answers[0]
+    const selected = item?.selected[0]
+    if (selected === LABEL_ORIGIN) return { kind: 'pick', pick: 'origin' }
+    if (selected !== undefined) {
+      const picked = menu.find((entry) => entry.label === selected)
+      if (picked !== undefined) return { kind: 'pick', pick: picked.id }
+    }
+    const custom = item?.custom?.trim()
+    if (selected === undefined && custom !== undefined && custom.length > 0) {
+      const resolved = await resolveFlagTarget(ctx, custom)
+      if ('error' in resolved) return { kind: 'cancel', reason: `无法解析工作区：${resolved.error}` }
+      return {
+        kind: 'pick',
+        pick: resolved.target.workspaceId === roster.origin.id ? 'origin' : (resolved.target.workspaceId ?? 'origin'),
+      }
+    }
+    return { kind: 'pick', pick: 'origin' }
+  } catch {
+    // Dismissed card, aborted request, or an answerer failure: treat as cancel.
+    return { kind: 'cancel' }
+  }
+}
 
 /**
  * The shipped question-card path: a flat clickable list of model display names
@@ -158,7 +274,7 @@ async function askChoiceCard(
   routes: readonly ModelRoute[],
   inherited: RouteSummary | undefined,
   fallback: RouteSummary | undefined,
-): Promise<AskOutcome> {
+): Promise<ModelAskOutcome> {
   const userQuestions = ctx.get('userQuestions')
   if (userQuestions === undefined) return { kind: 'choice', choice: { kind: 'inherit' } }
   try {
@@ -226,12 +342,23 @@ function routeText(label: string, summary: RouteSummary | undefined): string {
 }
 
 /**
- * Resolve the fresh session's model: prefer the browser picker (a searchable,
- * provider-grouped dropdown backed by the same catalog as the /model popup),
- * and fall back to the shipped question card whenever no browser is attached
- * or the picker goes unanswered.
+ * Resolve the fresh session's model and workspace: prefer the browser picker
+ * (a searchable, provider-grouped dropdown backed by the same catalog as the
+ * /model popup, followed by a workspace step), and fall back to the shipped
+ * question cards whenever no browser is attached or the picker goes unanswered.
+ *
+ * `modelFixed` means the model came from `--model`; the browser then starts
+ * (and the card path skips) the model step, and the returned choice is a
+ * placeholder the caller overrides with the flag's route.
  */
-async function resolveChoice(rt: HandoffRuntime, agent: Agent, task: string): Promise<AskOutcome> {
+async function resolveChoice(
+  rt: HandoffRuntime,
+  agent: Agent,
+  task: string,
+  roster: WorkspaceRoster,
+  needWorkspace: boolean,
+  modelFixed: boolean,
+): Promise<AskOutcome> {
   const { ctx, config } = rt
   const inherited = sessionRoute(ctx, agent)
   const fallback = defaultRoute(ctx)
@@ -243,15 +370,34 @@ async function resolveChoice(rt: HandoffRuntime, agent: Agent, task: string): Pr
         task,
         ...(inherited === undefined ? {} : { inherited }),
         ...(fallback === undefined ? {} : { fallback }),
+        ...(needWorkspace
+          ? {
+            origin: roster.origin,
+            workspaces: roster.others,
+            pickWorkspace: true,
+            ...(modelFixed ? { modelFixed: true } : {}),
+          }
+          : {}),
       },
       rt.pickTimeoutMs,
     )
     if (outcome !== undefined) return outcome
     ctx.logger(PACKAGE_NAME).warn('model picker unanswered; inheriting the origin model')
-    return { kind: 'choice', choice: { kind: 'inherit' } }
+    return { kind: 'choice', choice: { kind: 'inherit' }, workspace: 'origin' }
   }
-  const routes = config.modelMenu !== false ? await listModelRoutes(ctx) : []
-  return askChoiceCard(ctx, agent, routes, inherited, fallback)
+  if (!modelFixed) {
+    const routes = config.modelMenu !== false ? await listModelRoutes(ctx) : []
+    const model = await askChoiceCard(ctx, agent, routes, inherited, fallback)
+    if (model.kind === 'cancel') return model
+    if (!needWorkspace) return { kind: 'choice', choice: model.choice, workspace: 'origin' }
+    const workspace = await askWorkspaceCard(ctx, agent, roster)
+    if (workspace.kind === 'cancel') return workspace
+    return { kind: 'choice', choice: model.choice, workspace: workspace.pick }
+  }
+  if (!needWorkspace) return { kind: 'choice', choice: { kind: 'inherit' }, workspace: 'origin' }
+  const workspace = await askWorkspaceCard(ctx, agent, roster)
+  if (workspace.kind === 'cancel') return workspace
+  return { kind: 'choice', choice: { kind: 'inherit' }, workspace: workspace.pick }
 }
 
 /** Human-readable name of a resolved choice for the command result. */
@@ -278,27 +424,49 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
   return {
     name: COMMAND_NAME,
     description: 'summarize this session into a self-contained brief, then start a fresh session on the task',
-    input: { hint: '[--model provider/model] <task description>' },
+    input: { hint: '[--model provider/model] [--workspace <title|path>] <task description>' },
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
       const agent = invocation.agent
       let task = invocation.rawInput.trim()
+      const usage = `Usage: /handoff [${MODEL_FLAG} provider/model] [${WORKSPACE_FLAG} <title|path>] <task description>`
 
-      // `/handoff --model provider/model <task>`: explicit route, no dialog.
+      // Leading flags (`--model provider/model`, `--workspace <title|path>`)
+      // skip their dialog step; flags may appear in either order. A workspace
+      // title may contain spaces, so `--workspace` first tries the longest
+      // registered-title prefix before falling back to a single token (path).
       let flagChoice: ModelChoice | undefined
-      if (task.startsWith(`${MODEL_FLAG} `)) {
-        const rest = task.slice(MODEL_FLAG.length + 1).trim()
-        const space = rest.indexOf(' ')
-        const spec = space === -1 ? rest : rest.slice(0, space)
-        const route = parseModelFlagValue(spec)
-        if (route === undefined || space === -1) {
-          return fail(`Usage: /handoff ${MODEL_FLAG} provider/model <task description>`)
+      let flagWorkspaceSpec: string | undefined
+      for (;;) {
+        const flag = task.startsWith(`${MODEL_FLAG} `)
+          ? MODEL_FLAG
+          : task.startsWith(`${WORKSPACE_FLAG} `)
+            ? WORKSPACE_FLAG
+            : undefined
+        if (flag === undefined) break
+        const rest = task.slice(flag.length + 1).trim()
+        if (flag === WORKSPACE_FLAG) {
+          const titled = consumeTitleSpec(ctx, rest)
+          if (titled !== undefined) {
+            flagWorkspaceSpec = titled.spec
+            task = titled.remaining
+            continue
+          }
         }
-        flagChoice = { kind: 'model', provider: route.provider, model: route.model }
+        const space = rest.indexOf(' ')
+        if (space === -1) return fail(usage)
+        const spec = rest.slice(0, space)
+        if (flag === MODEL_FLAG) {
+          const route = parseModelFlagValue(spec)
+          if (route === undefined) return fail(usage)
+          flagChoice = { kind: 'model', provider: route.provider, model: route.model }
+        } else if (spec.length === 0) {
+          return fail(usage)
+        } else {
+          flagWorkspaceSpec = spec
+        }
         task = rest.slice(space + 1).trim()
       }
-      if (task.length === 0) {
-        return fail(`Usage: /handoff [${MODEL_FLAG} provider/model] <task description>`)
-      }
+      if (task.length === 0) return fail(usage)
 
       const key = keyOf(agent)
       if (rt.pending.has(key)) {
@@ -310,18 +478,37 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         return fail('This session records no working directory, so a handoff target workspace is unknown.')
       }
 
+      // Resolve the flag's workspace (if any) before opening any dialog, so
+      // the picker knows the target is settled and skips its workspace step.
+      let flagTarget: HandoffTarget | undefined
+      if (flagWorkspaceSpec !== undefined) {
+        const resolved = await resolveFlagTarget(ctx, flagWorkspaceSpec)
+        if ('error' in resolved) return fail(resolved.error)
+        flagTarget = resolved.target
+      }
+
+      const roster = await snapshotRoster(ctx, cwd)
+      const needWorkspace = flagTarget === undefined && roster.others.some((row) => !row.missing)
+
       let choice: ModelChoice
-      if (flagChoice !== undefined) {
+      let target: HandoffTarget
+      if (flagChoice !== undefined && flagTarget !== undefined) {
         choice = flagChoice
+        target = flagTarget
       } else if (config.confirm !== false) {
-        const outcome = await resolveChoice(rt, agent, task)
+        const outcome = await resolveChoice(rt, agent, task, roster, needWorkspace, flagChoice !== undefined)
         if (outcome.kind === 'cancel') {
           return outcome.reason === undefined ? ok('Handoff cancelled.') : fail(outcome.reason)
         }
-        choice = outcome.choice
+        choice = flagChoice ?? outcome.choice
+        const resolved = flagTarget !== undefined ? flagTarget : await resolvePick(ctx, roster, outcome.workspace)
+        if ('error' in resolved) return fail(resolved.error)
+        target = resolved
       } else {
-        choice = { kind: 'inherit' }
+        choice = flagChoice ?? { kind: 'inherit' }
+        target = flagTarget ?? targetForOrigin(roster)
       }
+      const crossWorkspace = target.path !== roster.origin.path
       const choiceText = describeChoice(choice, sessionRoute(ctx, agent), defaultRoute(ctx))
 
       const workspace = cwd.replace(/\/+$/, '')
@@ -332,10 +519,21 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
 
       // Queue the briefing turn on the CURRENT agent. followup parks a normal
       // next-turn message, so a busy agent writes the brief after its current
-      // turn finishes.
+      // turn finishes. The brief always lands origin-side: that is the one
+      // place the origin agent can write under every sandbox mode.
       agent.followup(
         createUserMessage({
-          content: [{ type: 'text', text: briefInstruction(briefPath, task, rt.maxBriefChars) }],
+          content: [
+            {
+              type: 'text',
+              text: briefInstruction(
+                briefPath,
+                task,
+                rt.maxBriefChars,
+                crossWorkspace ? { title: target.title } : undefined,
+              ),
+            },
+          ],
           source: { kind: 'user' },
         }),
       )
@@ -343,6 +541,8 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       const pending: PendingHandoff = {
         agent,
         cwd,
+        target,
+        crossWorkspace,
         briefPath,
         task,
         choice,
@@ -352,13 +552,21 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       rt.pending.set(key, pending)
       startHandoffWatch(rt, pending)
 
-      ctx.logger(PACKAGE_NAME).info('handoff requested', { session: key, briefPath, choice: choiceText })
+      ctx.logger(PACKAGE_NAME).info('handoff requested', {
+        session: key,
+        briefPath,
+        choice: choiceText,
+        target: target.path,
+      })
       return ok(
         [
           'Handoff started.',
           `- Brief target: \`${briefPath}\``,
           `- Model: ${choiceText}`,
-          `The new session appears in this workspace's sidebar (title "Handoff: …") once the brief is complete (timeout ${Math.round(rt.timeoutMs / 1000)}s).`,
+          ...(crossWorkspace ? [`- Target workspace: ${target.title} (\`${target.path}\`)`] : []),
+          crossWorkspace
+            ? `The new session appears in workspace "${target.title}" once the brief is complete (timeout ${Math.round(rt.timeoutMs / 1000)}s).`
+            : `The new session appears in this workspace's sidebar (title "Handoff: …") once the brief is complete (timeout ${Math.round(rt.timeoutMs / 1000)}s).`,
         ].join('\n'),
       )
     },

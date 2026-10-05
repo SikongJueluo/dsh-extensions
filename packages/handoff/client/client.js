@@ -39,6 +39,14 @@ window.__ModuleLoader__.load({
 
     var INHERIT_LABEL = "继承当前会话";
     var DEFAULT_LABEL = "全局默认";
+    var ORIGIN_LABEL = "原工作区";
+    var ORIGIN_BADGE = "当前";
+
+    // Touch-primary devices (phones): hover feedback and autofocus are
+    // desktop enhancements; on them a tap-fired mouseenter sticks and the
+    // autofocus keyboard covers the list, so both stay off.
+    var COARSE = typeof window.matchMedia === "function"
+      && window.matchMedia("(pointer: coarse)").matches;
 
     // --- styles (theme-token driven, so light/dark both work) ---
     var backdrop = {
@@ -65,7 +73,9 @@ window.__ModuleLoader__.load({
     };
     var search = {
       margin: "0 20px 8px", padding: "8px 12px",
-      font: "inherit", fontSize: "14px",
+      font: "inherit",
+      // 16px keeps iOS Safari from zooming the page when the field focuses.
+      fontSize: "16px",
       color: "var(--dsw-alias-label-primary, #e8e8ea)",
       background: "var(--dsw-alias-bg-module-platform, rgba(255,255,255,.04))",
       border: "1px solid var(--dsw-alias-border-l4, rgba(255,255,255,.16))",
@@ -117,18 +127,21 @@ window.__ModuleLoader__.load({
       return active ? { background: "var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.06))" } : null;
     }
 
-    /** One clickable entry, optionally carrying a small badge beside its label. */
+    /** One clickable entry, optionally carrying a small badge beside its label.
+     * `muted` renders an unselectable row (e.g. a workspace whose directory
+     * is gone) without hiding the reason from the operator. */
     function Entry(props) {
       var hovered = React.useState(false);
       var isHovered = hovered[0];
       var setHovered = hovered[1];
       var style = Object.assign({}, row, hoverStyle(isHovered) || {});
+      if (props.muted) style = Object.assign(style, { opacity: 0.5, cursor: "default" });
       return React.createElement("button", {
         type: "button",
         style: style,
-        disabled: props.busy,
-        onMouseEnter: function () { setHovered(true); },
-        onMouseLeave: function () { setHovered(false); },
+        disabled: props.busy || props.muted === true,
+        onMouseEnter: COARSE ? undefined : function () { setHovered(true); },
+        onMouseLeave: COARSE ? undefined : function () { setHovered(false); },
         onClick: props.onPick
       }, [
         React.createElement("span", { key: "line", style: rowLine }, [
@@ -164,12 +177,28 @@ window.__ModuleLoader__.load({
       var effortState = React.useState(null);
       var effortFor = effortState[0];
       var setEffortFor = effortState[1];
+      // Non-null while the third step (workspace) is showing; carries the
+      // already-made model choice, or null when the model came from --model.
+      var wsState = React.useState(null);
+      var wsFor = wsState[0];
+      var setWsFor = wsState[1];
+
+      var modelFixed = request.modelFixed === true;
+      function needsWorkspace() {
+        return request.pickWorkspace === true
+          && request.workspaces && request.workspaces.length > 0;
+      }
 
       React.useEffect(function () {
         if (request === null) return undefined;
         setQuery("");
         setError(null);
         setEffortFor(null);
+        // With --model given, the wizard starts directly at the workspace step.
+        setWsFor(request.pickWorkspace === true && request.modelFixed === true
+          && request.workspaces && request.workspaces.length > 0
+          ? { choice: null }
+          : null);
         var alive = true;
         // `ctx.remote.*` answers with the connection result envelope
         // ({ok:true, value} | {ok:false, error}); the catalog is inside `value`.
@@ -187,10 +216,13 @@ window.__ModuleLoader__.load({
         return function () { alive = false; };
       }, [request === null ? "" : request.id]);
 
-      function submit(choice) {
-        if (busy) return;
+      /** Send the final verdict to the host: model choice plus workspace pick. */
+      function finalize(choice, workspace) {
         setBusy(true);
-        operations.choose(request.id, choice).then(function (result) {
+        var payload = workspace === undefined
+          ? choice
+          : Object.assign({}, choice, { workspace: workspace });
+        operations.choose(request.id, payload).then(function (result) {
           if (result && result.ok) {
             props.onSettled();
           } else {
@@ -203,6 +235,23 @@ window.__ModuleLoader__.load({
         });
       }
 
+      function submit(choice) {
+        if (busy) return;
+        if (needsWorkspace() && !modelFixed) {
+          setQuery("");
+          setWsFor({ choice: choice });
+          return;
+        }
+        finalize(modelFixed ? { kind: "inherit" } : choice);
+      }
+
+      /** A workspace row was picked: submit along with the held model choice. */
+      function pickWorkspace(id) {
+        if (busy) return;
+        var held = wsFor && wsFor.choice ? wsFor.choice : null;
+        finalize(held === null ? { kind: "inherit" } : held, id);
+      }
+
       function cancel() {
         if (busy) return;
         setBusy(true);
@@ -212,13 +261,18 @@ window.__ModuleLoader__.load({
       React.useEffect(function () {
         function onKey(event) {
           if (event.key !== "Escape") return;
-          // Escape steps back out of the effort step, then cancels.
-          if (effortFor !== null) setEffortFor(null);
+          // Escape steps back: workspace → effort → model list, then cancels.
+          // When the model came from --model, the workspace step is the first
+          // step, so Escape there cancels instead of stepping back.
+          if (wsFor !== null) {
+            if (modelFixed) cancel();
+            else setWsFor(null);
+          } else if (effortFor !== null) setEffortFor(null);
           else cancel();
         }
         window.addEventListener("keydown", onKey);
         return function () { window.removeEventListener("keydown", onKey); };
-      }, [request.id, busy, effortFor === null ? "" : effortFor.model]);
+      }, [request.id, busy, effortFor === null ? "" : effortFor.model, wsFor === null ? "" : "ws"]);
 
       var needle = query.trim().toLowerCase();
       var groups = [];
@@ -293,6 +347,80 @@ window.__ModuleLoader__.load({
         });
       }
 
+      // Third step: which workspace the fresh session spawns in. The first
+      // row is always the origin workspace; the rest is a searchable list of
+      // the other registered workspaces (missing directories greyed out).
+      if (wsFor !== null) {
+        var wsList = request.workspaces || [];
+        var wsNeedle = query.trim().toLowerCase();
+        var wsFiltered = wsList.filter(function (w) {
+          return wsNeedle.length === 0 || (w.title + " " + w.path).toLowerCase().indexOf(wsNeedle) >= 0;
+        });
+        var wsTitleCounts = {};
+        wsList.forEach(function (w) { wsTitleCounts[w.title] = (wsTitleCounts[w.title] || 0) + 1; });
+        var wsRows = [
+          React.createElement(Entry, {
+            key: "origin",
+            label: ORIGIN_LABEL,
+            badge: ORIGIN_BADGE,
+            description: request.origin ? request.origin.path : undefined,
+            busy: busy,
+            onPick: function () { pickWorkspace("origin"); }
+          }),
+          React.createElement("div", { key: "divider", style: divider })
+        ].concat(
+          wsFiltered.length === 0
+            ? [React.createElement("div", {
+                key: "none", style: empty
+              }, wsNeedle.length > 0 ? "没有匹配的工作区" : "没有其他已注册的工作区")]
+            : wsFiltered.map(function (w) {
+                var tail = w.path.split("/").filter(Boolean).slice(-2).join("/");
+                var label = (wsTitleCounts[w.title] || 0) > 1 ? w.title + " (" + tail + ")" : w.title;
+                return React.createElement(Entry, {
+                  key: "w:" + w.id,
+                  label: label,
+                  description: w.missing ? w.path + " · 目录不存在" : w.path,
+                  muted: w.missing === true,
+                  busy: busy,
+                  onPick: function () { pickWorkspace(w.id); }
+                });
+              })
+        );
+        return React.createElement("div", {
+          style: backdrop,
+          onClick: function (event) { if (event.target === event.currentTarget) cancel(); }
+        }, React.createElement("div", { style: card }, [
+          React.createElement("div", { key: "header", style: header }, [
+            React.createElement("div", { key: "title", style: title }, "新会话开在哪个工作区？"),
+            React.createElement("div", { key: "task", style: subtitle }, request.task)
+          ]),
+          React.createElement("input", {
+            key: "search",
+            style: search,
+            value: query,
+            placeholder: "搜索工作区 / 路径…",
+            autoFocus: !COARSE,
+            onChange: function (event) { setQuery(event.target.value); }
+          }),
+          React.createElement("div", { key: "body", style: body }, wsRows),
+          error !== null
+            ? React.createElement("div", { key: "error", style: errorLine }, error)
+            : null,
+          React.createElement("div", { key: "footer", style: footer },
+            [
+              modelFixed
+                ? null
+                : React.createElement("button", {
+                    key: "back", type: "button", style: button, disabled: busy,
+                    onClick: function () { setWsFor(null); }
+                  }, "返回"),
+              React.createElement("button", {
+                key: "cancel", type: "button", style: button, disabled: busy, onClick: cancel
+              }, "取消")
+            ].filter(Boolean))
+        ]));
+      }
+
       // Second step: the model advertises reasoning efforts, so ask which one.
       if (effortFor !== null) {
         var effortRows = effortFor.efforts.map(function (effort) {
@@ -319,7 +447,7 @@ window.__ModuleLoader__.load({
         });
         return React.createElement("div", {
           style: backdrop,
-          onMouseDown: function (event) { if (event.target === event.currentTarget) cancel(); }
+          onClick: function (event) { if (event.target === event.currentTarget) cancel(); }
         }, React.createElement("div", { style: card }, [
           React.createElement("div", { key: "header", style: header }, [
             React.createElement("div", { key: "title", style: title }, effortFor.name + " · 思考强度"),
@@ -351,7 +479,7 @@ window.__ModuleLoader__.load({
           style: search,
           value: query,
           placeholder: "搜索模型 / 厂商…",
-          autoFocus: true,
+          autoFocus: !COARSE,
           onChange: function (event) { setQuery(event.target.value); }
         }),
         React.createElement("div", { key: "body", style: body }, [
@@ -426,7 +554,7 @@ window.__ModuleLoader__.load({
 
       return React.createElement("div", {
         style: backdrop,
-        onMouseDown: function (event) { if (event.target === event.currentTarget) cancel(); }
+        onClick: function (event) { if (event.target === event.currentTarget) cancel(); }
       }, React.createElement("div", { style: card }, children));
     }
 

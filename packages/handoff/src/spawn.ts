@@ -2,8 +2,15 @@
  * Fresh-session spawn: the same factory chain the Web "New Session" button
  * uses (`ctx.agents.create` with a mounted preset), plus the first prompt.
  *
+ * The fresh session spawns on the chosen target workspace (`meta.cwd` is its
+ * canonical path, which both the sandbox boundary and `attachSession`'s
+ * cwd-equals-path rule key off); for cross-workspace handoffs the full brief
+ * is copied into the target so the successor can always reach it.
+ *
  * @module dsh-handoff/spawn
  */
+import { mkdir, writeFile } from 'node:fs/promises'
+import { basename } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session-title'
@@ -12,6 +19,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
 import { bootstrapPrompt, type HandoffRuntime, type PendingHandoff } from './brief.js'
+import { targetBriefDir } from './workspace.js'
 import { defaultRoute, sessionRoute, toAgentOptions } from './selection.js'
 
 /** Sidebar title prefix; the task tail is trimmed to keep it readable. */
@@ -93,21 +101,68 @@ function titleFor(task: string): string {
 }
 
 /**
- * Attach the fresh session to the workspace owning the origin cwd, so it
- * joins the origin's sidebar group — the same `attachSession` the web
- * "New Session" flow performs (prepend into the workspace's session order).
- * A cwd matching no registered workspace stays ungrouped, exactly like its
- * origin; an attach failure only downgrades grouping, never the handoff.
+ * Attach the fresh session to its target workspace so it joins that
+ * workspace's sidebar group — the same `attachSession` the web "New Session"
+ * flow performs. A registered target attaches directly by id; an ungrouped
+ * origin keeps today's `resolveByPath` fallback (which then finds nothing, and
+ * the session stays ungrouped exactly like its origin). An attach failure only
+ * downgrades grouping, never the handoff.
  */
 async function attachToWorkspace(rt: HandoffRuntime, pending: PendingHandoff, sessionId: SessionId): Promise<void> {
   const registry = rt.ctx.get('workspaceRegistry')
   if (registry === undefined) return
   try {
-    const workspace = await registry.resolveByPath(pending.cwd)
+    let workspace: Awaited<ReturnType<typeof registry.resolveByPath>> = undefined
+    if (pending.target.workspaceId !== undefined) {
+      workspace = registry.get(pending.target.workspaceId as Parameters<typeof registry.get>[0])
+    } else {
+      workspace = await registry.resolveByPath(pending.target.path)
+    }
     if (workspace === undefined) return
     await workspace.attachSession(sessionId)
   } catch (error) {
     rt.ctx.logger(PACKAGE_NAME).warn('workspace attach failed; session stays ungrouped', { error: String(error) })
+  }
+}
+
+/**
+ * Guard the spawn against a target that vanished between the pick and the
+ * brief's completion: `agents.create` itself accepts any absolute cwd, but a
+ * session rooted in a missing directory would be unusable.
+ */
+async function preflightTarget(rt: HandoffRuntime, pending: PendingHandoff): Promise<void> {
+  if (pending.target.workspaceId === undefined) return
+  const registry = rt.ctx.get('workspaceRegistry')
+  if (registry === undefined) return
+  const workspace = registry.get(pending.target.workspaceId as Parameters<typeof registry.get>[0])
+  if (workspace === undefined) {
+    throw new Error(`目标工作区已不在注册表中：${pending.target.title} (${pending.target.path})`)
+  }
+  if (await workspace.status() !== 'ok') {
+    throw new Error(`目标工作区目录已不存在：${pending.target.title} (${pending.target.path})`)
+  }
+}
+
+/**
+ * Copy the full brief into the target workspace (host-side write, so no
+ * sandbox applies) so the successor always has a readable local copy — the
+ * origin side may be a per-branch workspace directory that gets cleaned up.
+ * Failures degrade to referencing the origin file, which stays readable.
+ */
+async function copyBriefToTarget(rt: HandoffRuntime, pending: PendingHandoff, full: string): Promise<string | undefined> {
+  if (!pending.crossWorkspace) return undefined
+  const dir = targetBriefDir(rt.config.dir, pending.target)
+  const path = `${dir}/${basename(pending.briefPath)}`
+  try {
+    await mkdir(dir, { recursive: true })
+    await writeFile(path, `${full}\n`, 'utf8')
+    return path
+  } catch (error) {
+    rt.ctx.logger(PACKAGE_NAME).warn('cross-workspace brief copy failed; referencing the origin file', {
+      error: String(error),
+      path,
+    })
+    return undefined
   }
 }
 
@@ -118,12 +173,16 @@ async function attachToWorkspace(rt: HandoffRuntime, pending: PendingHandoff, se
  */
 export async function spawnHandoff(rt: HandoffRuntime, pending: PendingHandoff, rawBrief: string): Promise<SessionId> {
   const { ctx } = rt
-  const brief = (() => {
-    const stripped = rawBrief.split(COMPLETE_MARKER)[0] ?? rawBrief
-    const trimmed = stripped.trimEnd()
-    if (trimmed.length <= rt.maxBriefChars) return trimmed
-    return `${trimmed.slice(0, rt.maxBriefChars)}\n\n[handoff] 简报超长，已截断至 ${rt.maxBriefChars} 字符；完整内容见 ${pending.briefPath}`
-  })()
+  await preflightTarget(rt, pending)
+  const stripped = rawBrief.split(COMPLETE_MARKER)[0] ?? rawBrief
+  const full = stripped.trimEnd()
+  const copiedPath = await copyBriefToTarget(rt, pending, full)
+  // The truncation notice must name a path the successor can read: the copied
+  // target-side brief first, the origin file second (reads are never fenced).
+  const briefRef = copiedPath ?? pending.briefPath
+  const brief = full.length <= rt.maxBriefChars
+    ? full
+    : `${full.slice(0, rt.maxBriefChars)}\n\n[handoff] 简报超长，已截断至 ${rt.maxBriefChars} 字符；完整内容见 ${briefRef}`
 
   const sessionId = mintSessionId()
   const agentOptions = resolveAgentOptions(ctx, pending.agent, pending.choice)
@@ -133,7 +192,7 @@ export async function spawnHandoff(rt: HandoffRuntime, pending: PendingHandoff, 
     sessionId,
     ...(agentOptions !== undefined ? { agentOptions } : {}),
     meta: {
-      cwd: pending.cwd,
+      cwd: pending.target.path,
       ...(preset.id !== undefined ? { agentPreset: preset.id } : {}),
     },
     ...(preset.setup !== undefined ? { setup: preset.setup } : {}),
@@ -157,6 +216,8 @@ export async function spawnHandoff(rt: HandoffRuntime, pending: PendingHandoff, 
     origin: String(pending.agent.id),
     session: String(sessionId),
     briefPath: pending.briefPath,
+    ...(copiedPath === undefined ? {} : { briefCopy: copiedPath }),
+    target: pending.target.path,
     preset: preset.id ?? '(none)',
   })
   return sessionId

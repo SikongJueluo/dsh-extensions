@@ -33,6 +33,15 @@ export interface RouteWire {
   readonly reasoningEffort?: string
 }
 
+/** One workspace row the browser may list (registry snapshot, command time). */
+export interface WorkspaceWire {
+  readonly id: string
+  readonly title: string
+  readonly path: string
+  /** The directory disappeared; the row renders greyed and unselectable. */
+  readonly missing: boolean
+}
+
 /** What the browser learns about one pending pick. */
 export interface ChoiceRequestWire {
   readonly id: string
@@ -40,10 +49,23 @@ export interface ChoiceRequestWire {
   readonly task: string
   readonly inherited?: RouteWire
   readonly fallback?: RouteWire
+  /** The origin session's workspace (or bare cwd when ungrouped). */
+  readonly origin?: WorkspaceWire
+  /** Registered workspaces other than the origin's; absent/empty = no step. */
+  readonly workspaces?: readonly WorkspaceWire[]
+  /** Whether the browser must run the workspace step before answering. */
+  readonly pickWorkspace?: boolean
+  /** The model came from `--model`; the picker starts at the workspace step. */
+  readonly modelFixed?: boolean
 }
 
+/** The workspace verdict riding a choice: `'origin'` or a registry id. */
+export type WorkspacePick = 'origin' | (string & {})
+
 /** The user's verdict on one pending pick. */
-export type ChoiceOutcome = { kind: 'choice'; choice: ModelChoice } | { kind: 'cancel' }
+export type ChoiceOutcome =
+  | { kind: 'choice'; choice: ModelChoice; workspace: WorkspacePick }
+  | { kind: 'cancel' }
 
 interface PendingChoice extends ChoiceRequestWire {
   settle: (outcome: ChoiceOutcome) => void
@@ -60,10 +82,8 @@ export interface HandoffChannel {
   clientAttached(): boolean
 }
 
-/** Narrow untrusted browser payloads into a ModelChoice. */
-function parseChoice(value: unknown): ModelChoice | undefined {
-  if (typeof value !== 'object' || value === null) return undefined
-  const record = value as Record<string, unknown>
+/** Narrow the model part of an untrusted browser payload. */
+function parseModelChoice(record: Record<string, unknown>): ModelChoice | undefined {
   if (record.kind === 'inherit') return { kind: 'inherit' }
   if (record.kind === 'default') return { kind: 'default' }
   if (record.kind === 'model') {
@@ -76,6 +96,21 @@ function parseChoice(value: unknown): ModelChoice | undefined {
     return { kind: 'model', provider, model, ...(effort === undefined ? {} : { reasoningEffort: effort }) }
   }
   return undefined
+}
+
+/**
+ * Narrow untrusted browser payloads into a choice plus its workspace verdict.
+ * An absent workspace field means `'origin'` (single-workspace deployments and
+ * flag-resolved targets never run the browser step).
+ */
+function parseChoice(value: unknown): { choice: ModelChoice; workspace: WorkspacePick } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const record = value as Record<string, unknown>
+  const choice = parseModelChoice(record)
+  if (choice === undefined) return undefined
+  const raw = record.workspace
+  if (raw !== undefined && (typeof raw !== 'string' || raw.length === 0)) return undefined
+  return { choice, workspace: raw === undefined ? 'origin' : raw }
 }
 
 /**
@@ -108,15 +143,19 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
           task: entry.task,
           ...(entry.inherited === undefined ? {} : { inherited: entry.inherited }),
           ...(entry.fallback === undefined ? {} : { fallback: entry.fallback }),
+          ...(entry.origin === undefined ? {} : { origin: entry.origin }),
+          ...(entry.workspaces === undefined ? {} : { workspaces: entry.workspaces }),
+          ...(entry.pickWorkspace === undefined ? {} : { pickWorkspace: entry.pickWorkspace }),
+          ...(entry.modelFixed === undefined ? {} : { modelFixed: entry.modelFixed }),
         }))
         return { requests }
       }
       case 'choose': {
         const id = payload.requestId
         if (typeof id !== 'string') return { ok: false, message: 'missing requestId' }
-        const choice = parseChoice(payload.choice)
-        if (choice === undefined) return { ok: false, message: 'invalid choice' }
-        const settled = settlePending(id, { kind: 'choice', choice })
+        const parsed = parseChoice(payload.choice)
+        if (parsed === undefined) return { ok: false, message: 'invalid choice' }
+        const settled = settlePending(id, { kind: 'choice', choice: parsed.choice, workspace: parsed.workspace })
         return settled ? { ok: true } : { ok: false, message: 'request is no longer pending' }
       }
       case 'cancel': {
