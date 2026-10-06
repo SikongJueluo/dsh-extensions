@@ -1,9 +1,9 @@
 # 计划/记录：crew 插件上线 + 默认委派工具屏蔽
 
-状态：插件本体在 `packages/crew/`（`pnpm check` 通过）；nix 侧已由 agent 代改
-（jj `feat(dsh): delegate through crew tiers and block stock tools`）。首轮部署
-用的"顶层行 disable"被实测证伪，已改为 **preset-standard 声明覆盖**，等待再次
-rebuild 生效。
+状态：插件本体在 `packages/crew/`（`pnpm check` 通过）；preset 覆盖已扩展到
+**standard + cordis**（03:15 二轮发现：新会话落在 cordis 预设，只盖 standard
+无效），修复版已离线组合验证，待 rebuild 生效。nix 侧 jj
+`feat(dsh): delegate through crew tiers and block stock tools`。
 
 目标工具面（模型的委派选择被收窄到"只能选档位"）：
 
@@ -79,6 +79,52 @@ sudo nixos-rebuild switch --flake ~/.config/nixos#Minisforum
 - 旧会话残留 ✗（预期内）：本会话仍见 stock `subagent`（旧描述）、
   `subagent_fork`、`workflow` —— preset 修订随会话冻结 + 首轮 disable 无效，
   均由 preset 覆盖修复，新会话生效。
+
+## 验证记录（2026-10-06 03:01–03:15，二轮 rebuild 后的新会话测试）
+
+- 02:59:09 的第二次 rebuild **实际已执行**且 bake 了 preset-standard 重述
+  （部署单元 ExecStart 引用的 store 文件与源 IDENTICAL，dsh-web 02:59:14 随
+  switch 重启）；handoff 里"尚未执行"是过期认知。
+- 新会话（03:01:01 创建，晚于重启）工具面仍带 `subagent_fork` / `workflow`。
+  根因：会话头 `agentPreset: "cordis"` —— Web UI 记住最近选过的预设，新开
+  对话落在 cordis（历史会话 110 standard / 9 cordis / 0 ptc），
+  `preset-standard` 覆盖对 cordis 预设零作用。离线 dump-config 复现确认
+  preset-standard 的 delegation 组已干净，重述机制本身成立。
+- 修复：subagents.patch.yml 追加 `preset-cordis` 整份重述（同样删四行）。
+  一处刻意偏差：cordis 的 `skill-filesystem.customSkillDirs` 官方用
+  `!!js createRequire(baseUrl)` 相对解析，而 loader 的 `baseUrl` 绑定
+  "贡献该行的 patch 文件"（cordis-plugin-loader 的 EntryTree ctx 继承链），
+  重述进用户层文件后解析链必然 MODULE_NOT_FOUND；改为
+  `createRequire(process.argv[1])`（dsh 的 bin.js，升级稳定），node 实测
+  解析到同一 skills 目录。
+- ptc 预设（delegation 组还有 tool-subagent/fork 两行 active）从未被任何
+  会话使用，暂不覆盖；启用前需按同样手法重述。
+- 离线验证方法：临时 `DSH_HOME`（可写）+ 复刻服务 ExecStart 的完整
+  `--patch` 链做 `--dump-config`；diff 唯一变化区 = preset-cordis（删四行 +
+  锚点改写），其余 1340 行零扰动。注意：`--dump-config` 会写
+  `profiles/<p>/cordis.yml`，在会话沙箱内 EROFS；`/tmp` 在 bash 沙箱内按
+  调用隔离，写读需同一命令完成或放工作区。
+
+## 验证记录（2026-10-06 12:06–12:10，三轮 rebuild 后终验通过）
+
+- 第三次 rebuild（12:04 switch）生效：dsh-web.service ExecStart 引用新
+  store `ws2j59s6c…-subagents.patch.yml`，含 `preset-cordis` 且与源
+  IDENTICAL。
+- 终验会话（27dc023a，12:06 创建）恰好开在 **cordis 预设**（上次失败
+  路径）。结果全绿：
+  - 工具面：仅 `subagent_quick` / `subagent` / `subagent_smart` /
+    `create_agent` + `list_agents` / `send_message` / `interrupt_agent`；
+    `subagent_fork` 与 `workflow` 消失。
+  - 技能目录正常：marimo / typst / jujutsu 等自定义技能全部在列 ——
+    `customSkillDirs` 的 `process.argv[1]` 锚点在运行时解析成立（离线
+    只验证过组合层，此处为运行时实证）。
+  - `subagent_quick` 前台（run_in_background:false）往返成功；子会话
+    d3efcee3 的 request header =
+    `{"provider":"deepseek-official","model":"deepseek-flash","reasoningEffort":"max"}`。
+  - `create_agent`（quick 档持久代理）→ 角色确认回传 → `send_message`
+    任务送达 → ack 回传，往返全通。
+- 残留事项：两仓 jj describe（nixos 工作副本的 subagents.patch.yml、
+  本仓 @ 的 plan doc）；观察数天 tool/call 分布；ptc 预设启用前补覆盖。
 
 ## 已知边界
 
