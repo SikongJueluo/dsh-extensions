@@ -75,10 +75,10 @@ tools/pre-execute（waterfall：allow/deny/ask，不支持改写入参）
 | 挂点 | 契约 | 对 rtk 的用处 |
 |---|---|---|
 | `tools/post-execute` | `PostToolDecision = { kind:'accept', content?: ContentBlock[] } \| …`；`exec` 带只读 `name`/`arguments` | **输出侧改写的一等公民**（`dsh-spill-policy` 就住在里面）。但 rtk 不是输出过滤器——它必须自己执行命令才能过滤，已捕获的输出无法事后喂给 rtk。**用不上** |
-| `tools/execute` | 包装器可替换整个返回结果（`$DSH/dsh-tool-call-timeout-policy` 先例：`ctx.on("tools/execute")` 里换 signal、返回自制超时结果） | **完整方案的落点**：在这里拿到 `exec.arguments.command`，spawn `rtk rewrite`，改写后执行 |
+| `tools/execute` | 包装器可替换整个返回结果（`$DSH/dsh-tool-call-timeout-policy` 先例：`ctx.on("tools/execute")` 里换 signal、返回自制超时结果） | ~~完整方案的落点~~ **已被证伪为首选**：读 `$DSH/dsh-tools/lib/index.js` L3294-3319 可知 `dispatchToolBody` 直接把 deep-frozen 的 `exec.arguments` 喂给 `tool.execute`（返回**原始 value**，由 registry 内部做 schema 校验 + `output.render` 规范化）——包装器想替换命令就得自建合成 exec 并**复刻 registry 规范化**，契约外且脆 |
 | `tools/pre-execute` | d.ts 注释原话："Input rewriting is excluded because arguments are already logged and presented" | **死路**（设计排除） |
 | `tools/ptc-dispatch-log` | 改写 run_code 子调用的持久日志副本 | PTC 模式（`mode:'ptc'`）下的补充挂点，同思路可用 |
-| `ctx.shell`（`$DSH/dsh-shell`，`dsh-bash-local`/`dsh-bash-sandbox` 实现） | bash 执行器 seam：`resolve`/`execute`/`sandboxMode` | 自建 wrapper bash 工具时的执行后端 |
+| `ctx.shell`（`$DSH/dsh-shell`，`dsh-bash-local`/`dsh-bash-sandbox` 实现） | bash 执行器 seam：`resolve`/`execute`/`sandboxMode`；auto-env 证明该行可**替换继承**并在 `execute()` 里调整 spec | **实际落点**：`RtkBashExecutor extends AutoEnvBashExecutor`，宿主侧查 `rtk rewrite` 后换 `spec.command` 再 `super.execute`——jobs/升权/截断/spill 全部原样（见 [packages/rtk-rewrite](../packages/rtk-rewrite/)） |
 | `ctx.shellEnv`（`dsh-shell-env`） | 只允许声明 `DSH_*` 键 | 不能塞 PATH shim——PATH 劫持路线被设计排除 |
 | `ctx.systemPrompt.section` | 提示词分节注册 | **awareness 路线的落点**（教模型自己加 rtk 前缀） |
 | `dsh-hooks-claude-code` | 跑现成 Claude Code hooks.json；`$DSH/dsh-hooks-claude-code/lib/index.js` L109/L189：`updatedInput` **"logged and warned but not honored"** | **死路**（今天就装 `rtk init -g` 也不会改写命令，只会白跑 hook 并打 warning） |
@@ -87,12 +87,13 @@ tools/pre-execute（waterfall：allow/deny/ask，不支持改写入参）
 
 | 方案 | 做法 | 工作量 | 风险/限制 |
 |---|---|---|---|
-| **A. awareness 提示词插件**（推荐起步） | 小插件注册 system-prompt 分节 +（可选）装 rtk 的 RTK.md 要点：长输出命令优先 `rtk <cmd>`，截断时 `rtk recall` | 极小（半天） | 非强制，模型可能忘；rtk 官方对无 hook 宿主（Windsurf/Cline/Kimi）就是这做法 |
-| **B. `tools/execute` 改写包装器**（推荐完整形态） | `ctx.on('tools/execute')` 拦 `bash`：spawn `rtk rewrite <command>`（<10ms）→ 有改写则取全局 bash 定义 `ctx.tools.get('bash')`，用 `{...exec, arguments:{...args, command: rewritten}}` 直调其 `execute` 并返回结果；无改写则 `next()` | 中（2-4 天含验证） | ① 合成 `ToolRunContext` 属契约外用法（`dsh-tool-bash` 未用 `deferContext`/`concludeTurn`，已核对，但升级可能变）；② 审批/日志看到的是原命令（`git status`），实际执行 `rtk git status`——前缀是受信改写，语义上等同 Claude Code 的 updatedInput，但需在输出里附标记保持透明；③ 与沙箱兼容（原定义照常走 `ctx.shell`，`dsh-bash-sandbox` 无感） |
+| **A. awareness 提示词插件** | 小插件注册 system-prompt 分节 +（可选）装 rtk 的 RTK.md 要点：长输出命令优先 `rtk <cmd>`，截断时 `rtk recall` | 极小（半天） | 非强制，模型可能忘；rtk 官方对无 hook 宿主（Windsurf/Cline/Kimi）就是这做法；执行器方案落地后不再需要 |
+| ~~B. `tools/execute` 改写包装器~~（原完整形态，**已弃**） | `ctx.on('tools/execute')` 拦 `bash` 后合成 exec 直调原定义 `execute` | 中 | 实现前读码证伪：`tool.execute` 返回**原始 value**，规范化（schema 校验 + `output.render`）是 registry 内部逻辑，包装器得复刻它——契约外且脆。改用 E |
 | C. 影子 bash 工具 | 会话作用域注册同名 `bash` 遮蔽全局，内部改写后走 `ctx.shell` | 大 | 要复刻 jobs 提升/沙箱升权提示/presentCall 等一整层；最不划算 |
 | D. 上游增强 | 给 `tools/pre-execute` 加受信改写决策，或让 `dsh-hooks-claude-code` 真正 honor `updatedInput`（源码注释自己承认是缺口） | 上游 PR | dsh 归 nix 管，要等发版；hooks 桥一旦支持，`rtk hook claude` 可直接复用 |
+| **E. `ctx.shell` 执行器改写**（**已实现**：[packages/rtk-rewrite](../packages/rtk-rewrite/)） | `RtkBashExecutor extends AutoEnvBashExecutor`（auto-env 确立的行替换继承模式）：`execute()` 里宿主侧 spawn `rtk rewrite <command>`，stdout 非空单行则换 `spec.command` 再 `super.execute`；命令串 memo（256 LRU） | 小（半天） | ① 改写后的命令进沙箱跑（实测 rtk 0.49.0 tracking 写入被拒时静默降级，无 stderr 噪音）；② patch 行整体替换——profile 给 auto-env 行设过的键要在 rtk 行重述；③ **判定只看 stdout 不看退出码**（实测 0.49.0 成功改写 rc=3、无等价 rc=1，与其文档 0/2/3 不符，stdout 是唯一稳定契约） |
 
-组合注意：B 的改写发生在 `tools/execute`，早于 post-execute——`dsh-spill-policy`（自述
+组合注意：E 的改写发生在执行器内，早于 post-execute——`dsh-spill-policy`（自述
 "prepended listener delegates before bounding"）与 `auto-permit`（本仓）看到的分别是
 「已压缩的输出」和「原始入参」，顺序天然正确。
 
@@ -101,31 +102,40 @@ tools/pre-execute（waterfall：allow/deny/ask，不支持改写入参）
 auto-env 是本仓唯一动 bash 执行链的插件，但它**不改命令字符串**：`AutoEnvBashExecutor
 extends SandboxBashExecutor` 替换 `ctx.shell` 执行器行，在 `execute(spec)` 里把 direnv
 overlay 叠进 `spec.env`（`packages/auto-env/src/index.ts` L160-183）；`tools/pre-execute`
-只是预热 gate。与方案 B 分层正交：
+只是预热 gate。方案 E 直接**继承它**而非并列：
+
 
 ```text
 bash(command="git status")
  → tools/pre-execute   auto-env 预热 direnv（gate，不改入参）
- → tools/execute       rtk 改写命令 → 直调原 bash 定义（定义未被替换）
-      → ctx.shell.execute = AutoEnvBashExecutor → direnv 叠加 → 沙箱 → spawn
+ → 工具层（审批/升权/jobs 原样，看到的是原命令）
+ → ctx.shell.execute = RtkBashExecutor
+       ① 宿主侧 rtk rewrite 查询（沙箱外，~10ms，memo）
+       ② spec.command → "rtk git status"
+       ③ super.execute = AutoEnvBashExecutor → direnv 叠加 → 沙箱 → spawn
  → tools/post-execute  spill-policy（对已压缩输出做预算）
 ```
 
 `rtk git status` 会在 devenv 环境里跑（rtk 用 `std::process::Command` 跑真 git，继承
-叠加后 env）。真正要防的是三点，均与 auto-env 无关：
+叠加后 env）。两个注意点（已实测/已处理）：
 
-1. **rtk 写路径 vs 模型沙箱**：改写后命令走 `ctx.shell` 受沙箱约束，rtk 默认写 SQLite
-   tracking/recall 库（XDG 目录），`workspace-write` 下会被拒。对策：`config.toml` 把
-   `[tracking]`/`[retriever]` DB 指到工作区内或 `disabled`。
-2. **`rtk rewrite` 子进程走宿主侧 `ctx.subprocess`**（auto-env 跑 `direnv export` 同款），
-   别走 `ctx.shell`，否则改写查询自己也被沙箱管。
-3. **与 `dsh-tool-call-timeout-policy` 的包装先后**：只影响 ~10ms 改写查询是否计入 bash
-   超时，两个方向都能用，bundle 行序可调。
+1. **rtk 写路径 vs 模型沙箱**（实测 2026-10-11，rtk 0.49.0）：沙箱内 `rtk git status`
+   正常输出紧凑结果、rc=0、tracking DB 写入被拒时**静默降级无噪音**。要完整
+   recall/tracking，把 rtk `config.toml` 的 `[tracking]`/`[retriever]` 落盘路径指到
+   工作区内。
+2. **`rtk rewrite` 子进程走宿主侧 `ctx.subprocess`**（auto-env 跑 `direnv export`
+   同款），已按此实现；执行器层也没有 timeout-policy 包装先后的问题（那是
+   `tools/execute` 层的事，方案 E 不经过）。
 
-落地 `packages/rtk-rewrite` 时，smoke 用例应包含与 auto-env 的组合（devenv 项目里
-`rtk <cmd>` 拿到叠加环境）。
+> **已实现**：[packages/rtk-rewrite](../packages/rtk-rewrite/)（2026-10-11）。
+> 装进 profile 后建议在 devenv 项目里抽查一条 `rtk <cmd>` 是否拿到叠加环境。
 
 ### 4.2 按命令放行：`cmd-permit` 插件设计（与 rtk-rewrite 分开的小插件）
+
+> **已实现**：[packages/cmd-permit](../packages/cmd-permit/)（2026-10-11），
+> 高危形状规则同步拆入（内置不可逆表仍源自 auto-permit 的 `isHighRisk`，用户
+> `denyShape` 在本插件追加，经 `ctx.cmdPermit` 服务暴露；auto-permit 判官已改为
+> 优先咨询该 oracle，两条路径对同一批形状让路）。本节保留设计记录。
 
 需求：`rtk`/`cargo`/`direnv` 这类高频命令别每次撞沙箱都要人批。DSH 的官方挂点是
 `approval/request` waterfall——`dsh-user-approval` 定义的 answerer 链，插件可以
@@ -173,22 +183,23 @@ cargo build → 沙箱拒（写 ~/.cargo）→ 模型带 sandbox_permissions 重
 - 插件配置（`config.toml`）只影响 rtk 自身（limits/tracking/hooks 排除清单）；DSH 侧不装
   rtk 的任何 hook（`rtk init` 跳过，hook 由 DSH 插件自己当）。
 
-## 6. 建议路线
+## 6. 建议路线（进度）
 
 三个互相独立的小插件，各管一层，不塞一个包里：
 
-1. **`packages/rtk-rewrite`**（方案 B）：`tools/execute` 改写包装器；原型验证两个契约
-   细节（合成 exec 直调定义、输出透明标记），Config 暴露 enable/excludeCommands。
-2. **`packages/cmd-permit`**（§4.2）：白名单 answerer，`rtk`/`cargo`/`direnv` 等
-   免人工审批；复用 auto-permit 的 `collectEvidence`/`isHighRisk` 导出，行放
-   auto-permit 之后。
+1. ~~`packages/rtk-rewrite`（方案 B：tools/execute 包装器）~~ → **已按方案 E 实现**
+   （[packages/rtk-rewrite](../packages/rtk-rewrite/)）：`RtkBashExecutor extends
+   AutoEnvBashExecutor`，宿主侧 `rtk rewrite` 查询（stdout 判定、LRU memo）后换
+   `spec.command`；auto-env 为此导出了 `configFields` 供 schema 继承。
+2. **`packages/cmd-permit`**（§4.2）：**已实现**——白名单 answerer + 共享高危 oracle，
+   auto-permit 判官优先咨询 `ctx.cmdPermit`。
 3. **宿主侧 runnerCommand wrapper**（plan 文档，nix 落点）：ssh 修复 + 常用缓存
    （`~/.cargo`、`~/.cache` 等只读或可写 bind）——读类撞墙一次修永久，见
-   [plan-dsh-sandbox-ssh-fix.md](plan-dsh-sandbox-ssh-fix.md) 的扩展方向。
+   [plan-dsh-sandbox-ssh-fix.md](plan-dsh-sandbox-ssh-fix.md) 的扩展方向。**未做**。
 
-flake 加 `pkgs.rtk`；顺手向上游反馈 `updatedInput` 缺口（`dsh-hooks-claude-code`
-源码注释已自认），若上游实现则 rtk-rewrite 可整体退役换成 hooks 桥直跑
-`rtk hook claude`。
+rtk 已进 nix profile（本机 0.49.0，nixpkgs 0.38.0 落后上游）；顺手向上游反馈
+`updatedInput` 缺口（`dsh-hooks-claude-code` 源码注释已自认），若上游实现则
+rtk-rewrite 可整体退役换成 hooks 桥直跑 `rtk hook claude`。
 
 ## 来源
 

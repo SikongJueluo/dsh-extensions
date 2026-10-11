@@ -1,0 +1,30 @@
+# dsh-rtk-rewrite bundle layer.
+#
+# Replaces the dsh-auto-env executor row the same way auto-env replaced the
+# stock bash-sandbox row: the `auto-env` row is disabled (patch layers cannot
+# rename a row) and the `rtk-rewrite` row mounts an AutoEnvBashExecutor
+# subclass that first rewrites the command via a host-side `rtk rewrite`
+# query, then runs it under the direnv overlay + sandbox as before. The
+# base `bash-sandbox` disable is restated (name-guarded) so this bundle also
+# works when auto-env is not installed.
+#
+# A patch row replaces the row's WHOLE config: when your profile set
+# auto-env keys (direnvPath etc.), restate them here.
+- id: bash-sandbox
+  name: '@deepseek-ai/dsh-bash-sandbox'
+  disabled: true
+
+- id: auto-env
+  name: dsh-auto-env
+  disabled: true
+
+- insert:
+    - id: rtk-rewrite
+      name: dsh-rtk-rewrite
+      disabled: !!js process.platform === 'win32'
+      config:
+        # Mirror the stock bash-sandbox row's tighter default (auto-env's
+        # row did the same; restating because patch config replaces).
+        timeoutMs: 60000
+        rewrite: true
+        rtkPath: rtk

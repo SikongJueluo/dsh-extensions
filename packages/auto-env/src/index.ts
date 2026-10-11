@@ -88,7 +88,9 @@ export interface Config extends LocalBashConfig {
 // everywhere else. No `Schema<Config>` annotation: schemastery ≥ 3.18.4 types
 // volatile modes into the schema generics, and an annotation would fight the
 // inference the loader checks `static Config` against.
-export const Config = Schema.object({
+// `configFields` is the plain field map so subclassing executors (see
+// dsh-rtk-rewrite) can extend the schema without restating these entries.
+export const configFields = {
   cwd: Schema.string().volatile().description('Default working directory for commands (default: process.cwd()).'),
   timeoutMs: Schema.number().step(1).min(1_000).default(120_000).volatile().description('Default per-command timeout (ms).'),
   maxTimeoutMs: Schema.number().step(1).min(1_000).default(600_000).volatile().description('Upper bound a caller may raise the per-command timeout to (ms).'),
@@ -100,7 +102,9 @@ export const Config = Schema.object({
   direnvRevalidateMs: Schema.number().step(1).min(0).default(DIRENV_DEFAULTS.direnvRevalidateMs).description('Re-evaluate direnv when the cached overlay is older than this; direnv’s own cache keeps repeat runs near 20 ms (ms).'),
   direnvStdoutMaxBytes: Schema.number().step(1).min(4_096).default(DIRENV_DEFAULTS.direnvStdoutMaxBytes).description('stdout budget for one direnv evaluation (bytes).'),
   direnvWatch: Schema.boolean().default(true).description('Drop cached overlays the moment an .envrc or devenv.nix/yaml/lock changes (and when the direnv allow list changes), instead of waiting for direnvRevalidateMs. Private watch_file targets still rely on the TTL.'),
-})
+}
+
+export const Config = Schema.object({ ...configFields })
 
 const EMPTY_OVERLAY: EnvOverlay = Object.freeze({})
 

@@ -1,0 +1,25 @@
+# Development overlay: the locally built plugin entry, by absolute path.
+# Rebuild first (`pnpm build`) so lib/ is current, then restart dsh. Use with
+# the global flag, e.g.
+#   dsh --profile web --patch ./packages/rtk-rewrite/dev.patch.yml --no-open --port <port>
+# The runtime imports `dsh-auto-env` (AutoEnvBashExecutor, configFields), so
+# that package must be resolvable from the profile's node_modules — the
+# profile needs dsh-auto-env installed even when only this overlay is tested.
+# This row also disables the auto-env row by id, so an installed auto-env
+# bundle yields to the overlay.
+- id: bash-sandbox
+  name: '@deepseek-ai/dsh-bash-sandbox'
+  disabled: true
+
+- id: auto-env
+  name: dsh-auto-env
+  disabled: true
+
+- insert:
+    - id: rtk-rewrite
+      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/rtk-rewrite/lib/index.js'
+      disabled: !!js process.platform === 'win32'
+      config:
+        timeoutMs: 60000
+        rewrite: true
+        rtkPath: rtk
