@@ -161,9 +161,11 @@ cargo build → 沙箱拒（写 ~/.cargo）→ 模型带 sandbox_permissions 重
 
 - **绝不 `rejected`**：与 auto-permit 同原则——插件不能冒充用户的「否」，fail-open
   方向是交人工。
-- **行序决定 answerer 顺序**：两个插件都 prepend 时，后挂的行在链头；cmd-permit 行放
-  auto-permit 之后即先于 LLM judge 运行（白名单命中连 judge 调用都省了）。cmd-permit
-  必须自带 isHighRisk 检查（它先于 auto-permit 拿到请求）。
+- **链序之争的终局**（2026-10-11 两轮实测）：answerer 都 prepend、后挂载的先跑；
+  auto-permit 因 `static inject = ['llm']` 永远晚于无依赖的 cmd-permit 启动、
+  永远占据链头——insert 行序无济于事。最终设计：cmd-permit 不争链头，服务暴露
+  `claim(command, mode)`，由 auto-permit（链头）在高危检查后、记忆/判官前咨询，
+  得到恒定顺序 `[高危 → 白名单 → 记忆 → 判官]`。行序彻底无关。
 - **Config（行 schema，settings UI 自动出表单）**：`allow: string[]`（前缀或 `^…`
   正则）、`denyShape: string[]`（额外强制人工形状）、`maxMode`（默认
   `danger-full-access`；`workspace-write` 则只自动放到工作区档）。

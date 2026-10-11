@@ -31,12 +31,14 @@ declare module '@deepseek-ai/dsh-llm' {
 export type NoticeOutcome =
   | 'allowed'
   | 'allowed-by-memory'
+  | 'allowed-by-cmd-permit'
   | 'deferred'
   | 'high-risk'
 
 const SUMMARY_PREFIX: Record<NoticeOutcome, string> = {
   allowed: 'auto-permit ✓ allowed',
   'allowed-by-memory': 'auto-permit ✓ allowed (seen this session)',
+  'allowed-by-cmd-permit': 'cmd-permit ✓ allowlisted',
   deferred: 'auto-permit ✎ deferred to you',
   'high-risk': 'auto-permit ⚠ irreversible shape — needs you',
 }
@@ -44,8 +46,14 @@ const SUMMARY_PREFIX: Record<NoticeOutcome, string> = {
 const BODY_PREFIX: Record<NoticeOutcome, string> = {
   allowed: '[auto-permit] allowed this escalation to full access',
   'allowed-by-memory': '[auto-permit] allowed this escalation (an equivalent command was approved earlier in this session)',
+  'allowed-by-cmd-permit': '[cmd-permit via auto-permit] allowed this escalation: allowlist hit',
   deferred: '[auto-permit] deferred this escalation to the user',
   'high-risk': '[auto-permit] routed this escalation to the user: irreversible shape',
+}
+
+/** The reason line's label per outcome (the judge is not the only decider). */
+const REASON_PREFIX: Partial<Record<NoticeOutcome, string>> = {
+  'allowed-by-cmd-permit': 'rule',
 }
 
 /**
@@ -63,7 +71,7 @@ export function buildNoticeMessage(
 ): UserMessage {
   const summary = boundContextSummary(`${SUMMARY_PREFIX[outcome]}: ${command}`)
   const lines = [`${BODY_PREFIX[outcome]}: ${command}`]
-  if (reason !== undefined && reason !== '') lines.push(`judge: ${reason}`)
+  if (reason !== undefined && reason !== '') lines.push(`${REASON_PREFIX[outcome] ?? 'judge'}: ${reason}`)
   return createUserMessage({
     content: [{ type: 'text', text: lines.join('\n') }],
     source: { kind: 'auto-permit', form: 'notice', summary },

@@ -1,0 +1,23 @@
+# dsh-cmd-permit bundle layer: a single host plugin row, one service.
+#
+# The plugin publishes the `cmdPermit` service (the shared high-risk oracle:
+# dsh-auto-permit's built-in shapes plus this row's denyShape regexes) and
+# registers one deterministic answerer on the `approval/request` waterfall
+# with prepend. Order is deliberately NOT load-bearing: dsh-auto-permit
+# (inject = llm) always starts after dependency-free plugins, so its
+# prepended answerer reliably leads the chain — and it consults this
+# plugin's `cmdPermit.claim()` between its high-risk guard and its
+# memory/judge paths. The deterministic sequence [high-risk → allowlist →
+# memory → judge] therefore holds regardless of row order; this plugin's
+# own answerer remains for compositions without dsh-auto-permit.
+#
+# All row config is volatile — a Settings edit commits without a remount.
+- insert:
+    - id: cmd-permit
+      name: dsh-cmd-permit
+      config:
+        enabled: true
+        allow: [rtk, cargo, direnv]
+        allowPattern: []
+        denyShape: []
+        maxMode: danger-full-access

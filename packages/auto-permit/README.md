@@ -13,6 +13,8 @@ DSH 的 AI 自动审批判官：在 `approval/request` waterfall 上插队一个
    无需自建存储）。
 2. **不可逆硬规则**：`rm -rf ~`、`git clean -xfd`、`git reset --hard`、
    `git push --force`、`sudo`、`curl|sh` 一类形状 → 永远交人工，不过模型。
+   挂载 [dsh-cmd-permit](../cmd-permit/) 时，判官优先用它的共享 oracle
+   （本表 ∪ 其 `denyShape` 配置），两条路径对同一批形状让路。
 3. **判官判决**：一次性小模型调用，证据 = 会话内全部用户 prompt（截最近
    16 条）+ 待批命令全文（含 description / justification，标记为
    agent 声称的意图）+ 本会话已批准命令列表。`VERDICT: allow` → 放行；

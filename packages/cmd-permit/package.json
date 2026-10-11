@@ -1,0 +1,49 @@
+{
+  "name": "dsh-cmd-permit",
+  "version": "0.2.0",
+  "description": "DSH cmd-permit plugin: a deterministic allowlist answerer on the approval waterfall that auto-allows bash sandbox escalations for configured commands (rtk/cargo/direnv…) — plus the shared high-risk shape table (built-ins from dsh-auto-permit extended with row-configured denyShape patterns) exposed as the cmdPermit service",
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf lib",
+    "prepare": "tsdown"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-llm": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-user-approval": "^0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4",
+    "dsh-auto-permit": "^0.2.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-user-approval": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4",
+    "dsh-auto-permit": "workspace:*"
+  }
+}
