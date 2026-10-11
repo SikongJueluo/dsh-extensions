@@ -1,0 +1,12 @@
+# dsh-search-integrator bundle layer.
+#
+# One row: the host-only research tool plugin. It consumes the host `tools`,
+# `llm`, `credentials`, and `systemPrompt` services (declared via `inject`),
+# and uses `spillStore` opportunistically when a spill backend is mounted.
+#
+# Users override this row later (by id) in a later patch layer to change the
+# row config — a patch replaces the row's whole `config`, so restate every
+# key the row needs.
+- insert:
+    - id: search-integrator
+      name: dsh-search-integrator
