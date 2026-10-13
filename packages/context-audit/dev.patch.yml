@@ -1,0 +1,6 @@
+# Development overlay: the locally built plugin entry, by absolute path.
+# Rebuild first (`pnpm build`) so lib/ is current. Use with the global flag, e.g.
+#   dsh --profile web --patch ./packages/context-audit/dev.patch.yml --no-open --port <port>
+- insert:
+    - id: context-audit
+      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/context-audit/lib/index.js'

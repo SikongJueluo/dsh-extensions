@@ -1,0 +1,14 @@
+# dsh-context-audit bundle layer: a single host plugin row (the browser half
+# rides the same package via dsh.client).
+#
+# The plugin registers one slash command (`/context-audit`) plus a web-server
+# channel serving the sidebar panel, reading local session event logs under
+# $DSH_HOME — it publishes no service and mounts cleanly beside any
+# composition that runs the command registry and a web server (the stock
+# `web` profile does).
+#
+# Users can override the row later (by id) in a later patch layer — a patch
+# replaces the row's whole `config`.
+- insert:
+    - id: context-audit
+      name: dsh-context-audit

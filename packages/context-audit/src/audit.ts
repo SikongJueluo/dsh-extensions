@@ -1,21 +1,24 @@
 /**
- * Session-log usage audit: scan the local DSH session event logs and
- * aggregate per-request token usage into cache-hit statistics.
+ * Session-log context audit: scan the local DSH session event logs and
+ * aggregate model-request token usage and tool-call outcomes.
  *
  * The session event log (`$DSH_HOME/sessions/<cwd-dir>/<sessionId>/session.v*.jsonl.zstd`)
- * records one `assistant/message` event per completed model request, each
- * carrying the disjoint usage buckets already normalized by the adapter
- * (`inputTokens` excludes cached reads; `cacheReadTokens` is the cached
- * share). Summing them per provider/model and per session yields exactly
- * the numbers quota-drain and cache-affinity investigations need:
+ * records one `assistant/message` event per completed model request (with
+ * the disjoint usage buckets already normalized by the adapter:
+ * `inputTokens` excludes cached reads) plus one `tool/call` /
+ * `tool/result` pair per tool invocation (with `isError` and the error
+ * `code`). Summing them per provider/model, per session, and per tool name
+ * yields exactly the numbers quota-drain, cache-affinity, and tool-design
+ * investigations need:
  *
  *   cache hit rate = cacheRead / (cacheRead + uncachedInput)
+ *   tool failure rate = errored results / paired results
  *
  * Titles come from the session projection cache
  * (`$DSH_HOME/storages/session_projcache/sessions/<sessionId>.json`),
  * read best-effort — a missing projection just leaves the row untitled.
  *
- * @module dsh-usage-audit/audit
+ * @module dsh-context-audit/audit
  */
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -33,6 +36,16 @@ interface UsageSample {
   reasoningTokens: number
 }
 
+/** One tool invocation, paired from its `tool/call` and `tool/result`. */
+interface ToolSample {
+  name: string
+  callTime: number
+  /** Result arrival time; undefined when the call never completed in the log. */
+  resultTime: number | undefined
+  error: boolean
+  errorCode: string | undefined
+}
+
 /** Aggregate for one provider/model route. */
 export interface ModelAggregate {
   provider: string
@@ -46,6 +59,23 @@ export interface ModelAggregate {
   sessions: number
   first: number
   last: number
+}
+
+/** Aggregate for one tool name (built-in or plugin-provided). */
+export interface ToolAggregate {
+  name: string
+  calls: number
+  /** Results marked `isError` (or carrying an error object). */
+  errors: number
+  /** Completed results the failure rate is computed over. */
+  completed: number
+  /** Calls whose result never landed in the log (interrupted sessions). */
+  unfinished: number
+  totalDurationMs: number
+  maxDurationMs: number
+  sessions: number
+  /** Error codes with counts, most frequent first. */
+  errorCodes: [string, number][]
 }
 
 /** Aggregate for one session (may span several routes). */
@@ -69,6 +99,7 @@ export interface AuditReport {
   scannedSessionFiles: number
   sessionsWithUsage: number
   models: ModelAggregate[]
+  tools: ToolAggregate[]
   sessions: SessionAggregate[]
 }
 
@@ -96,9 +127,17 @@ async function readLogText(path: string): Promise<string> {
   }
 }
 
-/** Extract usage samples plus the session header's cwd from one log's text. */
-function parseLog(text: string): { samples: UsageSample[]; cwd: string | undefined } {
+interface ParsedLog {
+  samples: UsageSample[]
+  toolSamples: ToolSample[]
+  cwd: string | undefined
+}
+
+/** Extract usage samples, tool samples, and the session header's cwd. */
+function parseLog(text: string): ParsedLog {
   const samples: UsageSample[] = []
+  const toolSamples: ToolSample[] = []
+  const openCalls = new Map<string, ToolSample>()
   let cwd: string | undefined
   for (const line of text.split('\n')) {
     if (line.length === 0) continue
@@ -114,7 +153,14 @@ function parseLog(text: string): { samples: UsageSample[]; cwd: string | undefin
           outputTokens?: number
           reasoningTokens?: number
         }
-        message?: { source?: { provider?: string; model?: string } }
+        message?: {
+          source?: { provider?: string; model?: string }
+          toolCallId?: string
+          isError?: boolean
+        }
+        error?: { code?: unknown; name?: unknown } | undefined
+        callId?: string
+        name?: string
       }
     }
     try {
@@ -126,23 +172,46 @@ function parseLog(text: string): { samples: UsageSample[]; cwd: string | undefin
       cwd = event.cwd
       continue
     }
-    if (event.type !== 'assistant/message') continue
-    const usage = event.data?.usage
-    const source = event.data?.message?.source
-    if (usage === undefined || source?.provider === undefined || source.model === undefined) continue
     if (typeof event.time !== 'number') continue
-    samples.push({
-      time: event.time,
-      provider: source.provider,
-      model: source.model,
-      inputTokens: usage.inputTokens ?? 0,
-      cacheReadTokens: usage.cacheReadTokens ?? 0,
-      cacheWriteTokens: usage.cacheWriteTokens ?? 0,
-      outputTokens: usage.outputTokens ?? 0,
-      reasoningTokens: usage.reasoningTokens ?? 0,
-    })
+    const data = event.data
+    if (event.type === 'assistant/message') {
+      const usage = data?.usage
+      const source = data?.message?.source
+      if (usage === undefined || source?.provider === undefined || source.model === undefined) continue
+      samples.push({
+        time: event.time,
+        provider: source.provider,
+        model: source.model,
+        inputTokens: usage.inputTokens ?? 0,
+        cacheReadTokens: usage.cacheReadTokens ?? 0,
+        cacheWriteTokens: usage.cacheWriteTokens ?? 0,
+        outputTokens: usage.outputTokens ?? 0,
+        reasoningTokens: usage.reasoningTokens ?? 0,
+      })
+      continue
+    }
+    if (event.type === 'tool/call') {
+      const name = data?.name
+      const callId = data?.callId
+      if (typeof name !== 'string' || typeof callId !== 'string') continue
+      const sample: ToolSample = { name, callTime: event.time, resultTime: undefined, error: false, errorCode: undefined }
+      toolSamples.push(sample)
+      openCalls.set(callId, sample)
+      continue
+    }
+    if (event.type === 'tool/result') {
+      const callId = data?.message?.toolCallId
+      if (typeof callId !== 'string') continue
+      const sample = openCalls.get(callId)
+      if (sample === undefined) continue
+      openCalls.delete(callId)
+      sample.resultTime = event.time
+      sample.error = data?.message?.isError === true || data?.error !== undefined
+      const code = data?.error?.code ?? data?.error?.name
+      sample.errorCode = sample.error ? (typeof code === 'string' ? code : 'ERROR') : undefined
+    }
   }
-  return { samples, cwd }
+  return { samples, toolSamples, cwd }
 }
 
 /** Best-effort title lookup in the session projection cache. */
@@ -162,6 +231,20 @@ function isSessionDirName(name: string): boolean {
   return name.startsWith('--') && name.endsWith('--')
 }
 
+interface MutableTool extends ToolAggregate {
+  sessionIds: Set<string>
+  errorCodeCounts: Map<string, number>
+}
+
+function finishTool(tool: MutableTool): ToolAggregate {
+  const { sessionIds, errorCodeCounts, ...rest } = tool
+  return {
+    ...rest,
+    sessions: sessionIds.size,
+    errorCodes: [...errorCodeCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5),
+  }
+}
+
 export async function collectAudit(
   sessionsRoot: string,
   projcacheDir: string,
@@ -169,6 +252,7 @@ export async function collectAudit(
 ): Promise<AuditReport> {
   const windowStart = options.days === undefined ? 0 : options.now - options.days * 86_400_000
   const models = new Map<string, ModelAggregate>()
+  const tools = new Map<string, MutableTool>()
   const sessions = new Map<string, SessionAggregate>()
   const sessionModels = new Map<string, Map<string, number>>()
   let scannedSessionFiles = 0
@@ -184,6 +268,7 @@ export async function collectAudit(
       scannedSessionFiles: 0,
       sessionsWithUsage: 0,
       models: [],
+      tools: [],
       sessions: [],
     }
   }
@@ -214,7 +299,7 @@ export async function collectAudit(
           continue
         }
         scannedSessionFiles++
-        const { samples, cwd } = parseLog(await readLogText(path))
+        const { samples, toolSamples, cwd } = parseLog(await readLogText(path))
         for (const sample of samples) {
           if (sample.time < windowStart) continue
           const key = routeKey(sample.provider, sample.model)
@@ -270,6 +355,41 @@ export async function collectAudit(
           const perModel = sessionModels.get(sessionId)!
           perModel.set(key, (perModel.get(key) ?? 0) + 1)
         }
+        for (const sample of toolSamples) {
+          if (sample.callTime < windowStart) continue
+          let tool = tools.get(sample.name)
+          if (tool === undefined) {
+            tool = {
+              name: sample.name,
+              calls: 0,
+              errors: 0,
+              completed: 0,
+              unfinished: 0,
+              totalDurationMs: 0,
+              maxDurationMs: 0,
+              sessions: 0,
+              errorCodes: [],
+              sessionIds: new Set(),
+              errorCodeCounts: new Map(),
+            }
+            tools.set(sample.name, tool)
+          }
+          tool.calls++
+          tool.sessionIds.add(sessionId)
+          if (sample.resultTime === undefined) {
+            tool.unfinished++
+            continue
+          }
+          tool.completed++
+          const duration = Math.max(0, sample.resultTime - sample.callTime)
+          tool.totalDurationMs += duration
+          tool.maxDurationMs = Math.max(tool.maxDurationMs, duration)
+          if (sample.error) {
+            tool.errors++
+            const code = sample.errorCode ?? 'ERROR'
+            tool.errorCodeCounts.set(code, (tool.errorCodeCounts.get(code) ?? 0) + 1)
+          }
+        }
       }
     }
   }
@@ -298,6 +418,7 @@ export async function collectAudit(
     scannedSessionFiles,
     sessionsWithUsage: sessionList.length,
     models: [...models.values()].sort((a, b) => b.uncachedInput - a.uncachedInput),
+    tools: [...tools.values()].sort((a, b) => b.calls - a.calls).map(finishTool),
     sessions: sessionList
       .sort((a, b) => b.uncachedInput - a.uncachedInput)
       .slice(0, options.sessionLimit),
@@ -322,48 +443,80 @@ function hitRate(cacheRead: number, uncached: number): string {
   return total === 0 ? '—' : `${((cacheRead / total) * 100).toFixed(1)}%`
 }
 
+function formatDuration(ms: number): string {
+  if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)}m`
+  if (ms >= 1_000) return `${(ms / 1_000).toFixed(1)}s`
+  return `${Math.round(ms)}ms`
+}
+
 /** Render the report as the command's reply text. */
 export function formatReport(report: AuditReport): string {
   const window = report.windowDays === undefined ? '全部历史' : `近 ${report.windowDays} 天`
   const lines: string[] = []
-  lines.push(`usage-audit：扫描 ${report.scannedSessionFiles} 个会话日志（${window}），${report.sessionsWithUsage} 个会话有用量。`)
+  lines.push(`context-audit：扫描 ${report.scannedSessionFiles} 个会话日志（${window}），${report.sessionsWithUsage} 个会话有用量。`)
   lines.push('')
 
-  if (report.models.length === 0) {
-    lines.push('窗口内没有模型用量。')
-    return lines.join('\n')
+  if (report.models.length > 0) {
+    lines.push('**按 provider/model 汇总**（命中率 = cacheRead / (cacheRead + uncached输入)）')
+    lines.push('')
+    lines.push('| 路由 | 请求 | prompt总量 | 缓存命中 | 命中率 | 输出 | 会话数 |')
+    lines.push('|---|---:|---:|---:|---:|---:|---:|')
+    for (const model of report.models) {
+      const promptTotal = model.uncachedInput + model.cacheRead
+      lines.push(
+        `| ${routeKey(model.provider, model.model)} | ${model.requests} | ${formatTokens(promptTotal)} | ${formatTokens(model.cacheRead)} | ${hitRate(model.cacheRead, model.uncachedInput)} | ${formatTokens(model.output)} | ${model.sessions === 0 ? '—' : model.sessions} |`,
+      )
+    }
+    lines.push('')
   }
 
-  lines.push('**按 provider/model 汇总**（命中率 = cacheRead / (cacheRead + uncached输入)）')
-  lines.push('')
-  lines.push('| 路由 | 请求 | prompt总量 | 缓存命中 | 命中率 | 输出 | 会话数 |')
-  lines.push('|---|---:|---:|---:|---:|---:|---:|')
-  for (const model of report.models) {
-    const promptTotal = model.uncachedInput + model.cacheRead
-    lines.push(
-      `| ${routeKey(model.provider, model.model)} | ${model.requests} | ${formatTokens(promptTotal)} | ${formatTokens(model.cacheRead)} | ${hitRate(model.cacheRead, model.uncachedInput)} | ${formatTokens(model.output)} | ${model.sessions === 0 ? '—' : model.sessions} |`,
-    )
+  if (report.tools.length > 0) {
+    lines.push('**按工具汇总**（失败率 = isError 结果 / 已完成结果）')
+    lines.push('')
+    lines.push('| 工具 | 调用 | 失败 | 失败率 | 平均耗时 | 最长 | 会话数 |')
+    lines.push('|---|---:|---:|---:|---:|---:|---:|')
+    for (const tool of report.tools) {
+      const fail = tool.completed === 0 ? '—' : `${((tool.errors / tool.completed) * 100).toFixed(1)}%`
+      const avg = tool.completed === 0 ? '—' : formatDuration(tool.totalDurationMs / tool.completed)
+      lines.push(
+        `| ${tool.name} | ${tool.calls} | ${tool.errors} | ${fail} | ${avg} | ${tool.maxDurationMs > 0 ? formatDuration(tool.maxDurationMs) : '—'} | ${tool.sessions} |`,
+      )
+    }
+    const withCodes = report.tools.filter((tool) => tool.errorCodes.length > 0)
+    if (withCodes.length > 0) {
+      lines.push('')
+      lines.push('错误码分布：')
+      for (const tool of withCodes.slice(0, 8)) {
+        lines.push(`- ${tool.name}: ${tool.errorCodes.map(([code, n]) => `${code}×${n}`).join('、')}`)
+      }
+    }
+    lines.push('')
   }
-  lines.push('')
 
-  lines.push(`**按会话**（uncached输入最多的前 ${report.sessions.length} 个）`)
-  lines.push('')
-  lines.push('| 会话 | 时间范围 | 路由 | 请求 | uncached | 命中率 |')
-  lines.push('|---|---|---|---:|---:|---:|')
-  for (const session of report.sessions) {
-    const title = session.title === undefined ? session.id.slice(0, 12) : session.title.replace(/\|/g, '丨')
-    lines.push(
-      `| ${title} | ${formatClock(session.first)}→${formatClock(session.last)} | ${session.routes.slice(0, 2).join(' + ')}${session.routes.length > 2 ? ' +…' : ''} | ${session.requests} | ${formatTokens(session.uncachedInput)} | ${hitRate(session.cacheRead, session.uncachedInput)} |`,
-    )
+  if (report.sessions.length > 0) {
+    lines.push(`**按会话**（uncached输入最多的前 ${report.sessions.length} 个）`)
+    lines.push('')
+    lines.push('| 会话 | 时间范围 | 路由 | 请求 | uncached | 命中率 |')
+    lines.push('|---|---|---|---:|---:|---:|')
+    for (const session of report.sessions) {
+      const title = session.title === undefined ? session.id.slice(0, 12) : session.title.replace(/\|/g, '丨')
+      lines.push(
+        `| ${title} | ${formatClock(session.first)}→${formatClock(session.last)} | ${session.routes.slice(0, 2).join(' + ')}${session.routes.length > 2 ? ' +…' : ''} | ${session.requests} | ${formatTokens(session.uncachedInput)} | ${hitRate(session.cacheRead, session.uncachedInput)} |`,
+      )
+    }
+    lines.push('')
   }
-  lines.push('')
 
+  if (report.models.length === 0 && report.tools.length === 0) {
+    return `${lines[0]}\n窗口内没有模型或工具用量。`
+  }
   const worst = report.models[0]
-  if (worst === undefined) return lines.join('\n')
-  const worstPrompt = worst.uncachedInput + worst.cacheRead
-  const at97 = Math.max(0, Math.round(worstPrompt * 0.03))
-  lines.push(
-    `输入量最大的路由 ${routeKey(worst.provider, worst.model)}：若命中率达 97%，其 uncached 输入约为 ${formatTokens(at97)}（现为 ${formatTokens(worst.uncachedInput)}）。`,
-  )
+  if (worst !== undefined) {
+    const worstPrompt = worst.uncachedInput + worst.cacheRead
+    const at97 = Math.max(0, Math.round(worstPrompt * 0.03))
+    lines.push(
+      `输入量最大的路由 ${routeKey(worst.provider, worst.model)}：若命中率达 97%，其 uncached 输入约为 ${formatTokens(at97)}（现为 ${formatTokens(worst.uncachedInput)}）。`,
+    )
+  }
   return lines.join('\n')
 }

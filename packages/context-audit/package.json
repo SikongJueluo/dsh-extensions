@@ -1,7 +1,7 @@
 {
-  "name": "dsh-usage-audit",
-  "version": "0.1.0",
-  "description": "DSH usage-audit plugin: /usage-audit scans local session event logs and reports per-provider/per-model cache-hit rates and token usage, so routing and cache-affinity changes can be measured A/B",
+  "name": "dsh-context-audit",
+  "version": "0.2.0",
+  "description": "DSH context-audit plugin: /context-audit command and a sidebar panel reporting per-route cache-hit rates, token usage, and per-tool call/failure statistics, so routing choices, cache-affinity changes, and tool design can be judged with measured data",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",
@@ -11,11 +11,13 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./client": "./client/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
+    "client",
     "cordis.patch.yml",
     "dev.patch.yml",
     "README.md"
@@ -24,11 +26,20 @@
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
-    "prepare": "tsdown"
+    "prepare": "tsdown",
+    "smoke": "node smoke.mjs"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-locale"
+      ]
     }
   },
   "dependencies": {
@@ -41,7 +52,9 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
     "@deepseek-ai/dsh-commands": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.2.0-rc.2",
     "@deepseek-ai/schemastery": "3.18.4"
   }
 }

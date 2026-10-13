@@ -1,9 +1,10 @@
 /**
- * Smoke checks for dsh-usage-audit (and the oauth-providers cache-affinity
+ * Smoke checks for dsh-context-audit (and the oauth-providers cache-affinity
  * wire shape it exists to measure). Run from the package dir: `node smoke.mjs`.
  *
  * 1. collectAudit + formatReport against the real $DSH_HOME session logs
- *    (skipped when the sessions root does not exist).
+ *    (skipped when the sessions root does not exist), including the per-tool
+ *    call/failure aggregates.
  * 2. serializeRequest stamps `prompt_cache_key` from the session id when
  *    affinity is on, omits it when off, and clamps >64-char ids.
  */
@@ -36,11 +37,18 @@ if (existsSync(sessionsRoot)) {
   const elapsed = Date.now() - started
   console.log(`scanned ${report.scannedSessionFiles} logs in ${elapsed}ms; ${report.sessionsWithUsage} sessions with usage`)
   check('scan found some usage in the last 2 days', report.models.length > 0)
+  check('tool aggregates present', report.tools.length > 0)
+  const known = report.tools.find((tool) => tool.name === 'read' || tool.name === 'bash')
+  check('a known tool is aggregated with calls', known !== undefined && known.calls > 0)
+  check('tool totals are internally consistent',
+    report.tools.every((tool) => tool.completed + tool.unfinished === tool.calls && tool.errors <= tool.completed))
   const text = formatReport(report)
-  check('report renders with both tables', text.includes('按 provider/model 汇总') && text.includes('按会话'))
-  console.log('\n--- formatReport(days=2) ---\n')
-  console.log(text)
-  console.log('\n--- end ---\n')
+  check('report renders with all three tables',
+    text.includes('按 provider/model 汇总') && text.includes('按工具汇总') && text.includes('按会话'))
+  const toolLines = report.tools.slice(0, 5)
+    .map((tool) => `  ${tool.name}: calls=${tool.calls} errors=${tool.errors} (${tool.completed ? ((tool.errors / tool.completed) * 100).toFixed(1) : '—'}%) codes=${JSON.stringify(tool.errorCodes)}`)
+    .join('\n')
+  console.log(`\n--- top tools (days=2) ---\n${toolLines}\n--- end ---`)
 } else {
   console.log(`skip - no sessions root at ${sessionsRoot}`)
 }

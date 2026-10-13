@@ -1,13 +1,14 @@
 /**
- * dsh-usage-audit — `/usage-audit`: measure what the models actually cost.
+ * dsh-context-audit — `/context-audit` + sidebar panel: measure what the
+ * models and tools actually cost.
  *
  * Scans the local session event logs (nothing leaves the machine) and
- * reports per-route and per-session cache-hit rates and token usage, so
- * routing choices and cache-affinity changes (e.g. the chatgpt
- * `promptCacheKey` toggle in dsh-oauth-providers) can be judged with data
- * instead of quota-drain anecdotes.
+ * reports per-route and per-session cache-hit rates, token usage, and
+ * per-tool call/failure statistics, so routing choices, cache-affinity
+ * changes (e.g. the chatgpt `promptCacheKey` toggle in dsh-oauth-providers),
+ * and tool design can be judged with data instead of anecdotes.
  *
- * @module dsh-usage-audit
+ * @module dsh-context-audit
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
@@ -15,14 +16,16 @@ import Schema from '@deepseek-ai/schemastery'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { collectAudit, formatReport } from './audit.js'
+import { registerChannel } from './channel.js'
 
 export { collectAudit, formatReport } from './audit.js'
-export type { AuditReport, ModelAggregate, SessionAggregate } from './audit.js'
+export type { AuditReport, ModelAggregate, SessionAggregate, ToolAggregate } from './audit.js'
+export { RPC_CHANNEL } from './channel.js'
 
-export const USAGE_AUDIT_COMMAND = 'usage-audit'
+export const CONTEXT_AUDIT_COMMAND = 'context-audit'
 
 interface Config {
-  /** Default scan window for `/usage-audit` without arguments (days). */
+  /** Default scan window for `/context-audit` without arguments (days). */
   days?: number
   /** How many sessions the per-session table lists. */
   sessionLimit?: number
@@ -32,7 +35,7 @@ interface Config {
 // inferred shape, and an annotation would fight schemastery's generics.
 export const Config = Schema.object({
   days: Schema.number().step(1).min(1).max(3650).default(14)
-    .description('/usage-audit 不带参数时的默认扫描窗口（天）。'),
+    .description('/context-audit 不带参数时的默认扫描窗口（天）。'),
   sessionLimit: Schema.number().step(1).min(1).max(100).default(15)
     .description('按会话表格最多列出的会话数。'),
 })
@@ -53,10 +56,10 @@ function parseDays(rawInput: string, fallback: number): { days: number | undefin
   return { days: Math.min(3650, Math.floor(value)) }
 }
 
-function usageAuditDefinition(config: Config): CommandDefinition {
+function contextAuditDefinition(config: Config): CommandDefinition {
   return {
-    name: USAGE_AUDIT_COMMAND,
-    description: '扫描本地会话日志，输出各路由/会话的缓存命中率与 token 用量（参数：天数，或 all）',
+    name: CONTEXT_AUDIT_COMMAND,
+    description: '扫描本地会话日志，输出各路由/会话的缓存命中率、token 用量与各工具的调用/失败统计（参数：天数，或 all）',
     async handler(invocation: CommandInvocation): Promise<CommandResult> {
       const parsed = parseDays(invocation.rawInput, config.days ?? 14)
       if ('error' in parsed) return { kind: 'error', text: parsed.error }
@@ -73,18 +76,19 @@ function usageAuditDefinition(config: Config): CommandDefinition {
         )
         return { kind: 'success', text: formatReport(report) }
       } catch (error) {
-        return { kind: 'error', text: `usage-audit 扫描失败：${(error as Error).message}` }
+        return { kind: 'error', text: `context-audit 扫描失败：${(error as Error).message}` }
       }
     },
   }
 }
 
 export function apply(ctx: Context, config: Config): void {
-  ctx.logger('usage-audit').info('loaded')
+  ctx.logger('context-audit').info('loaded')
   ctx.inject(['commands'], (svcCtx) => {
     svcCtx.effect(
-      () => svcCtx.commands.register(usageAuditDefinition(config)),
-      'usage-audit: /usage-audit command',
+      () => svcCtx.commands.register(contextAuditDefinition(config)),
+      'context-audit: /context-audit command',
     )
   })
+  registerChannel(ctx, { defaultDays: config.days ?? 14, sessionLimit: config.sessionLimit ?? 15 })
 }
