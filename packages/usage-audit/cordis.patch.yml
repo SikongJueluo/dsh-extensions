@@ -1,0 +1,12 @@
+# dsh-usage-audit bundle layer: a single host plugin row.
+#
+# The plugin registers one slash command (`/usage-audit`) that reads local
+# session event logs under $DSH_HOME — it publishes no service, needs no
+# client UI, and mounts cleanly beside any composition that runs the
+# command registry (the stock `web` profile does).
+#
+# Users can override the row later (by id) in a later patch layer — a patch
+# replaces the row's whole `config`.
+- insert:
+    - id: usage-audit
+      name: dsh-usage-audit
