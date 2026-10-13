@@ -1,10 +1,10 @@
-// Client half of dsh-plan-usage: a Settings section showing the GLM
+// Client half of dsh-plan-usage: a Settings section showing every monitored
 // coding plan's quota windows — the rolling five-hour bar, the weekly bar,
-// and (when the plan reports it) the monthly MCP budget — each with its
-// consumed percentage and reset countdown. Reads through this package's own
-// channel (`/dsh-plan-usage/quota`), refreshes on demand and once a
-// minute while visible. Plain JavaScript (no JSX), evaluated by the DSH
-// client module loader.
+// the monthly bar, and (when the plan reports it) the monthly MCP budget —
+// each with its consumed percentage and reset countdown. Reads through this
+// package's own channel (`/dsh-plan-usage/quota`), refreshes on demand and
+// once a minute while visible. Plain JavaScript (no JSX), evaluated by the
+// DSH client module loader.
 window.__ModuleLoader__.load({
   id: "dsh-plan-usage",
   factory: function (require) {
@@ -21,12 +21,13 @@ window.__ModuleLoader__.load({
     var en = {
       nav: "Coding Plan Usage",
       title: "Coding Plan Usage",
-      intro: "GLM coding-plan quota windows, with reset countdowns. Mounted with dsh-auto-continue, quota-limited sessions resume automatically at the reported reset.",
+      intro: "Coding-plan quota windows for every monitored provider, with reset countdowns. Mounted with dsh-auto-continue, quota-limited sessions resume automatically at the reported reset.",
       refresh: "Refresh",
       refreshing: "Refreshing…",
       fiveHour: "5-hour window",
       windowOfSize: "{size} window",
       weekly: "Weekly window",
+      monthly: "Monthly window",
       monthlyMcp: "Monthly MCP tools",
       resetsIn: "resets in {duration}",
       resetOverdue: "reset pending",
@@ -42,12 +43,13 @@ window.__ModuleLoader__.load({
     var zh = {
       nav: "Coding 套餐用量",
       title: "Coding 套餐用量",
-      intro: "GLM Coding 套餐的配额窗口与重置倒计时。搭配 dsh-auto-continue 时，限额会话会在重置点自动续跑。",
+      intro: "所监控各服务商 Coding 套餐的配额窗口与重置倒计时。搭配 dsh-auto-continue 时，限额会话会在重置点自动续跑。",
       refresh: "刷新",
       refreshing: "刷新中…",
       fiveHour: "5 小时窗口",
       windowOfSize: "{size} 窗口",
       weekly: "周窗口",
+      monthly: "月度窗口",
       monthlyMcp: "月度 MCP 工具",
       resetsIn: "{duration}后重置",
       resetOverdue: "等待重置生效",
@@ -208,6 +210,9 @@ window.__ModuleLoader__.load({
             ? [
               React.createElement(WindowBar, { key: "5h", t: t, label: windowLabel(t, t("fiveHour"), snapshot.fiveHour), window: snapshot.fiveHour, nowTick: nowTick }),
               React.createElement(WindowBar, { key: "weekly", t: t, label: windowLabel(t, t("weekly"), snapshot.weekly), window: snapshot.weekly, nowTick: nowTick }),
+              snapshot.monthly
+                ? React.createElement(WindowBar, { key: "monthly", t: t, label: t("monthly"), window: snapshot.monthly, nowTick: nowTick })
+                : null,
               snapshot.monthlyMcp
                 ? React.createElement(WindowBar, { key: "mcp", t: t, label: t("monthlyMcp"), window: snapshot.monthlyMcp, nowTick: nowTick })
                 : null

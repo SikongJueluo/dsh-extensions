@@ -1,12 +1,14 @@
-/* Runtime smoke test for dsh-plan-usage: parser vectors for all three
+/* Runtime smoke test for dsh-plan-usage: parser vectors for all four
  * sources (captured live payloads from OpenTokenUsage / opencodex / headroom
- * / ai-usagebar, all MIT), the GLM monitor dedupe, service registration on a
+ * / ai-usagebar, all MIT, plus OpenCode's own endpoint live-verified
+ * 2026-10-13), the GLM monitor dedupe, service registration on a
  * real Cordis context, and live-route filtering via a stub llm service. */
 import { Context, Service } from '@deepseek-ai/cordis'
 import { name, inject, Config, apply, PlanUsageService } from './lib/index.js'
 import { parseQuotaBody, resolveMonitor, monitoredProviders, QuotaMonitor } from './lib/index.js'
 import { parseCodexUsage, OpenAiUsageSource } from './lib/index.js'
 import { parseMiniMaxRemains, consumedFromRemaining, MiniMaxSource } from './lib/index.js'
+import { parseOpenCodeGoUsage, OpenCodeGoSource } from './lib/index.js'
 
 let failures = 0
 function check(label, condition) {
@@ -174,6 +176,57 @@ check('minimax: wrong-region key flips to the other host', flipped?.fiveHour?.pe
 const flippedAgain = await regionSource.get('minimax')
 check('minimax: region choice is remembered', flippedAgain !== undefined && regionCalls.length === 3 && regionCalls[2].includes('minimaxi.com'))
 
+// ── OpenCode Go usage parsing (live capture of 2026-10-13) ───────────────────
+const opencodeLive = {
+  usage: {
+    rolling: { status: 'ok', percent: 0, resetsAt: '2026-10-13T11:32:35.000Z' },
+    weekly: { status: 'ok', percent: 0, resetsAt: '2026-10-19T00:00:00.000Z' },
+    monthly: { status: 'ok', percent: 0, resetsAt: '2026-11-13T06:06:43.000Z' },
+  },
+}
+const opencode = parseOpenCodeGoUsage(opencodeLive)
+check('opencode: rolling→fiveHour with epoch-ms reset', opencode.fiveHour?.percent === 0 && opencode.fiveHour?.resetAt === Date.parse('2026-10-13T11:32:35.000Z'))
+check('opencode: weekly reset epoch ms', opencode.weekly?.percent === 0 && opencode.weekly?.resetAt === Date.parse('2026-10-19T00:00:00.000Z'))
+check('opencode: monthly window parsed', opencode.monthly?.percent === 0 && opencode.monthly?.resetAt === Date.parse('2026-11-13T06:06:43.000Z'))
+check('opencode: percent clamps into 0-100', parseOpenCodeGoUsage({ usage: { rolling: { status: 'ok', percent: 150, resetsAt: '2026-10-13T11:32:35.000Z' } } }).fiveHour?.percent === 100)
+check('opencode: rate-limited reports 100 even when the number lags', (() => {
+  const parsed = parseOpenCodeGoUsage({ usage: { rolling: { status: 'rate-limited', percent: 37, resetsAt: '2026-10-13T12:00:00.000Z' } } })
+  return parsed.fiveHour?.percent === 100 && parsed.fiveHour?.resetAt === Date.parse('2026-10-13T12:00:00.000Z')
+})())
+check('opencode: missing usage degrades to an error', 'error' in parseOpenCodeGoUsage({}))
+check('opencode: non-object body degrades to an error', 'error' in parseOpenCodeGoUsage('nope'))
+check('opencode: bogus resetsAt dropped, percent kept', (() => {
+  const parsed = parseOpenCodeGoUsage({ usage: { weekly: { status: 'ok', percent: 12, resetsAt: 'not-a-date' } } })
+  return !('error' in parsed) && parsed.weekly?.percent === 12 && parsed.weekly?.resetAt === undefined
+})())
+check('opencode: absurd resetsAt dropped', parseOpenCodeGoUsage({ usage: { rolling: { status: 'ok', percent: 5, resetsAt: '1970-01-01T00:00:00.000Z' } } }).fiveHour?.resetAt === undefined)
+
+// OpenCode source: no env key → not ready; keyed → fetches and maps; failures → undefined.
+const opencodeCalls = []
+const opencodeFetch = async (url, init) => {
+  opencodeCalls.push({ url: String(url), auth: init?.headers?.authorization })
+  return new Response(JSON.stringify(opencodeLive), { status: 200, headers: { 'content-type': 'application/json' } })
+}
+const opencodeUnkeyed = new OpenCodeGoSource({ env: {}, fetchImpl: opencodeFetch, logger: { warn() {} } })
+check('opencode: no env key → not ready, undefined, no fetch', opencodeUnkeyed.ready('opencode-go') === false && (await opencodeUnkeyed.get('opencode-go')) === undefined && opencodeCalls.length === 0)
+const opencodeSource = new OpenCodeGoSource({ env: { OPENCODE_API_KEY: 'oc-key' }, fetchImpl: opencodeFetch, logger: { warn() {} } })
+check('opencode: env key → ready, unknown route never', opencodeSource.ready('opencode-go') === true && opencodeSource.ready('opencode') === false)
+const opencodeSnapshot = await opencodeSource.get('opencode-go')
+check('opencode: 200 maps into a snapshot with monthly', opencodeSnapshot?.provider === 'opencode-go' && opencodeSnapshot?.source === 'opencode-go:usage' && opencodeSnapshot?.fiveHour?.resetAt === Date.parse('2026-10-13T11:32:35.000Z') && opencodeSnapshot?.monthly?.resetAt === Date.parse('2026-11-13T06:06:43.000Z'))
+check('opencode: bearer key + zen/go endpoint', opencodeCalls[0]?.auth === 'Bearer oc-key' && opencodeCalls[0]?.url === 'https://opencode.ai/zen/go/v1/usage')
+const opencodeForbidden = new OpenCodeGoSource({
+  env: { OPENCODE_API_KEY: 'oc-key' },
+  fetchImpl: async () => new Response('{"error":"forbidden"}', { status: 403 }),
+  logger: { warn() {} },
+})
+check('opencode: 403 (no Go subscription) resolves undefined', (await opencodeForbidden.get('opencode-go')) === undefined)
+const opencodeBadJson = new OpenCodeGoSource({
+  env: { OPENCODE_API_KEY: 'oc-key' },
+  fetchImpl: async () => new Response('not json', { status: 200, headers: { 'content-type': 'application/json' } }),
+  logger: { warn() {} },
+})
+check('opencode: invalid JSON resolves undefined', (await opencodeBadJson.get('opencode-go')) === undefined)
+
 // ── GLM QuotaMonitor with a stub fetch (shared-monitor dedupe) ───────────────
 let fetchCalls = 0
 const stubFetch = async (url, init) => {
@@ -203,19 +256,20 @@ check('apply registers the planUsage service', service instanceof PlanUsageServi
 
 // Without an llm service every known source route is listed.
 const unfiltered = service.providers()
-check('no llm service → all source routes listed', unfiltered.includes('zai-coding-cn') && unfiltered.includes('chatgpt') && unfiltered.includes('minimax-cn'))
+check('no llm service → all source routes listed', unfiltered.includes('zai-coding-cn') && unfiltered.includes('chatgpt') && unfiltered.includes('minimax-cn') && unfiltered.includes('opencode-go'))
 
 // A stub llm service narrows the list to routes actually registered.
 class StubLlm extends Service {
   constructor(ctx) { super(ctx, 'llm') }
-  listProviders() { return [{ id: 'zai-coding-cn', name: 'Z.AI Coding CN' }, { id: 'chatgpt', name: 'ChatGPT' }] }
+  listProviders() { return [{ id: 'zai-coding-cn', name: 'Z.AI Coding CN' }, { id: 'chatgpt', name: 'ChatGPT' }, { id: 'opencode-go', name: 'OpenCode Go' }] }
 }
 const stubLlm = new StubLlm(root)
 root.emit('llm/adapters-updated')
 const filtered = service.providers()
-check('live registry collapses the GLM alias family', JSON.stringify(filtered) === JSON.stringify(['chatgpt', 'zai-coding-cn']))
+check('live registry collapses the GLM alias family', JSON.stringify(filtered) === JSON.stringify(['chatgpt', 'opencode-go', 'zai-coding-cn']))
 check('unmonitored provider resolves undefined', (await service.get('unknown-provider')) === undefined)
 check('monitored() reflects key resolution', service.monitored('zai-coding-cn') === (process.env.ZAI_CODING_CN_API_KEY !== undefined || process.env.GLM_API_KEY !== undefined))
+check('monitored() reflects opencode env key', service.monitored('opencode-go') === (typeof process.env.OPENCODE_API_KEY === 'string' && process.env.OPENCODE_API_KEY.trim() !== ''))
 void stubLlm
 
 if (failures > 0) {

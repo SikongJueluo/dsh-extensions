@@ -26,6 +26,8 @@ export interface QuotaSnapshot {
   fiveHour?: QuotaWindow
   /** The weekly window. */
   weekly?: QuotaWindow
+  /** The monthly window, when a source reports one (GLM's MCP budget stays monthlyMcp). */
+  monthly?: QuotaWindow
   /** Monthly MCP / tool budget, when the plan reports one. */
   monthlyMcp?: QuotaWindow
   /** Plan level / type, when reported ("max", "plus", …). */

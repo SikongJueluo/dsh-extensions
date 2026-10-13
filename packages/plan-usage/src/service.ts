@@ -4,7 +4,8 @@
  *
  * Sources today: the GLM coding-plan monitor (z.ai / bigmodel, API key), the
  * OpenAI Codex usage endpoint (ChatGPT OAuth via the `oauthProviders`
- * service), and the MiniMax Token Plan endpoint (API key, both regions).
+ * service), the MiniMax Token Plan endpoint (API key, both regions), and
+ * the OpenCode Go usage endpoint (API key).
  * The provider routes surfaced are intersected with the process's live LLM
  * registry (`ctx.llm.listProviders()`, refreshed on `llm/adapters-updated`)
  * so the Settings page shows one card per route actually in use — the GLM
@@ -24,6 +25,7 @@ import { SERVICE_NAME } from './identity.js'
 import type { QuotaSnapshot } from './types.js'
 import { MiniMaxSource } from './sources/minimax.js'
 import { OpenAiUsageSource } from './sources/openai.js'
+import { OpenCodeGoSource } from './sources/opencode.js'
 import { QuotaMonitor, monitoredProviders, resolveMonitor } from './sources/glm.js'
 import type { ProviderMonitorSettings } from './sources/glm.js'
 
@@ -102,6 +104,7 @@ export class PlanUsageService extends Service {
         logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) },
       }),
       new MiniMaxSource({ logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) } }),
+      new OpenCodeGoSource({ logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) } }),
     ]
     this.refreshLiveRoutes()
     ctx.on('llm/adapters-updated', () => this.refreshLiveRoutes())
