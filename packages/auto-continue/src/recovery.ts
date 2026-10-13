@@ -28,11 +28,28 @@ import type { PendingWait, WaitSpool } from './spool.js'
 /** Failure codes this plugin owns. */
 const OWNED_CODES = new Set(['QUOTA', 'RATE_LIMIT'])
 
+/** One `llm/retry` policy chain's event identity. */
+interface RetryChain {
+  /** One retryId per chain: the persistence format requires every attempt of
+   * a (turn, step, provider, policyKey) chain to share the scheduled id. */
+  retryId: string
+  /** Attempts recorded so far in this chain; the next event must be +1. */
+  attempts: number
+}
+
 /** Wait bookkeeping for one open turn of one session. */
 interface WaitState {
   firstFailureAt: number
   attempts: number
   probes: number
+  /**
+   * Event chains by (turn, step, provider). The session format numbers
+   * `llm/retry` per chain — NOT per turn — so a turn that retries at step 79,
+   * advances, and hits the limit again at step 122 must restart at 1 for the
+   * new chain; a turn-scoped counter corrupts the stored log (it then refuses
+   * to load: "llm/retry skips its policy attempt sequence").
+   */
+  chains: Map<string, RetryChain>
 }
 
 export interface RecoveryConfig extends ScheduleOptions {
@@ -105,7 +122,7 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
         if (oldest === undefined) break
         states.delete(oldest)
       }
-      state = { firstFailureAt: Date.now(), attempts: 0, probes: 0 }
+      state = { firstFailureAt: Date.now(), attempts: 0, probes: 0, chains: new Map() }
       states.set(key, state)
     }
     return state
@@ -145,15 +162,23 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
       }
 
       state.attempts += 1
-      const retryId = randomUUID()
+      // Chain-scoped event identity: reuse the chain's retryId and number the
+      // attempt within the chain, per the persistence format's invariants.
+      const chainKey = `${turn}#${step}#${provider}`
+      let chain = state.chains.get(chainKey)
+      if (chain === undefined) {
+        chain = { retryId: randomUUID(), attempts: 0 }
+        state.chains.set(chainKey, chain)
+      }
+      chain.attempts += 1
       const recorded = agent.session.append('llm/retry', {
-        retryId,
+        retryId: chain.retryId,
         turn,
         step,
         provider,
         mode: 'always',
         policyKey: '"auto-continue"',
-        retry: state.attempts,
+        retry: chain.attempts,
         delayMs: wait.delayMs,
         failure,
       })
@@ -202,7 +227,7 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
         return undefined
       }
       await spool?.delete(agent.session.id)
-      agent.session.append('llm/retry-started', { retryId, turn, step, retry: state.attempts })
+      agent.session.append('llm/retry-started', { retryId: chain.retryId, turn, step, retry: chain.attempts })
       return { kind: 'retry' as const }
     })()
     active.add(operation)
