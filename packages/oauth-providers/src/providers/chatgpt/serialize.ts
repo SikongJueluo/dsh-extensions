@@ -175,12 +175,40 @@ export function resolveReasoning(effort: string | undefined): { effort: string }
   return { effort }
 }
 
+/** OpenAI caps `prompt_cache_key` / affinity header values at 64 characters. */
+const AFFINITY_KEY_MAX_LENGTH = 64
+
+/**
+ * Clamp a session id into an OpenAI cache-affinity key (≤ 64 chars, by code
+ * points). `session-<uuid>` fits as-is; the clamp only guards exotic ids.
+ */
+export function clampSessionAffinityKey(sessionId: string): string {
+  const chars = Array.from(sessionId)
+  return chars.length <= AFFINITY_KEY_MAX_LENGTH ? sessionId : chars.slice(0, AFFINITY_KEY_MAX_LENGTH).join('')
+}
+
+/** Cache-affinity knobs the serializer honors per request. */
+export interface SerializeAffinity {
+  /** Attach `prompt_cache_key` derived from the request's session id. */
+  promptCacheKey: boolean
+}
+
 /**
  * Build the full Responses API request body. The backend rejects the standard
  * `max_output_tokens` / `temperature` / `stop` scalars, so they are
  * deliberately omitted.
+ *
+ * With `affinity.promptCacheKey` (the default), the loop-stamped session id
+ * becomes `prompt_cache_key`, matching what Codex CLI / pi-ai send to the
+ * same backend: without it every request routes randomly and the backend's
+ * prompt cache all but never hits (measured 16–21% over 30+ sessions, vs
+ * 97%+ on providers that stamp the key).
  */
-export function serializeRequest(options: GenerateOptions, images?: RequestImages): Record<string, unknown> {
+export function serializeRequest(
+  options: GenerateOptions,
+  images?: RequestImages,
+  affinity?: SerializeAffinity,
+): Record<string, unknown> {
   const tools = options.tools?.map((tool) => ({
     type: 'function',
     name: tool.name,
@@ -188,12 +216,16 @@ export function serializeRequest(options: GenerateOptions, images?: RequestImage
     parameters: tool.parameters,
   }))
   const reasoning = resolveReasoning(options.reasoningEffort)
+  const promptCacheKey = affinity?.promptCacheKey !== false && options.sessionId !== undefined
+    ? clampSessionAffinityKey(String(options.sessionId))
+    : undefined
   return {
     model: options.model,
     ...(options.system !== undefined && options.system.length > 0
       ? { instructions: options.system }
       : {}),
     input: serializeInput(options.messages, images),
+    ...(promptCacheKey !== undefined ? { prompt_cache_key: promptCacheKey } : {}),
     ...(tools !== undefined && tools.length > 0
       ? { tools, tool_choice: 'auto', parallel_tool_calls: true }
       : {}),

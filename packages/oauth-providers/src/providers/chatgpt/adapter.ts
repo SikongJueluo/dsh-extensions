@@ -42,7 +42,7 @@ import { oauthHeaders } from './auth.js'
 import type { TokenStore } from './auth.js'
 import { REASONING_EFFORT_NAMES } from './catalog.js'
 import { PACKAGE_NAME } from '../../identity.js'
-import { serializeRequest } from './serialize.js'
+import { serializeRequest, clampSessionAffinityKey } from './serialize.js'
 import type { RequestImages } from './serialize.js'
 
 /** Connection facts the adapter reads per request. */
@@ -52,6 +52,8 @@ export interface AdapterOptions {
   defaultReasoningEfforts: string[]
   defaultContextWindow: number
   refreshMarginMs: number
+  /** Stamp `prompt_cache_key` + session-affinity headers from the session id. */
+  promptCacheKey: boolean
 }
 
 /**
@@ -437,11 +439,22 @@ export class OpenAiOauthAdapter extends LlmAdapter {
     access: string,
     accountId: string | undefined,
   ): AsyncGenerator<StreamChunk> {
-    const body = serializeRequest(options, await this.prepareImages(options, signal))
+    const body = serializeRequest(options, await this.prepareImages(options, signal), {
+      promptCacheKey: cfg.promptCacheKey,
+    })
+    // Same affinity pair pi-ai's Codex SSE transport sends (`session-id` +
+    // `x-client-request-id`, both the clamped cache key): it keeps a session's
+    // requests on one backend route so the prompt cache actually hits.
+    const affinityKey = cfg.promptCacheKey && options.sessionId !== undefined
+      ? clampSessionAffinityKey(String(options.sessionId))
+      : undefined
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       accept: 'text/event-stream',
       originator: PACKAGE_NAME,
+      ...(affinityKey !== undefined
+        ? { 'session-id': affinityKey, 'x-client-request-id': affinityKey }
+        : {}),
       ...oauthHeaders(access, accountId),
       ...attributionHeaders(),
     }

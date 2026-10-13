@@ -75,6 +75,7 @@ reasoning 档位在模型选择器里按请求选择。
 | `clientVersion` | 自动（npm 最新 `@openai/codex`） | 上报给后端的客户端版本；仅需要钉版时设置 |
 | `refreshMarginMs` | `86400000`（24h） | 距过期多久时刷新令牌 |
 | `defaultContextWindow` | `272000` | 后端未披露时的回退上下文窗口 |
+| `promptCacheKey` | `true` | 按会话 id 发送 `prompt_cache_key` 与 `session-id`/`x-client-request-id` 亲和头，让后端 prompt cache 稳定命中（实测不开仅 8–21% 命中，等价路由开了 97%+）；关闭即回到旧的随机路由，供 A/B 对照 |
 
 登录记录的写入/删除会以 `llm/adapters-updated` 通知所有已打开的模型选择器
 刷新目录（stock 界面只监听 API-key 引用更新，不覆盖授权记录）。

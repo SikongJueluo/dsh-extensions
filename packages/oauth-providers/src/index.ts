@@ -34,6 +34,13 @@ export {
   SETTINGS_NAMESPACE as CHATGPT_SETTINGS_NAMESPACE,
   DISPLAY_NAME as CHATGPT_DISPLAY_NAME,
 } from './providers/chatgpt/index.js'
+// Wire-shape helpers re-exported for smoke tests and future cache-affinity work.
+export {
+  serializeRequest,
+  serializeInput,
+  clampSessionAffinityKey,
+  resolveReasoning,
+} from './providers/chatgpt/serialize.js'
 
 export const name = PLUGIN_NAME
 // `authorization`, `connection`, and `webServer` are soft-injected at runtime

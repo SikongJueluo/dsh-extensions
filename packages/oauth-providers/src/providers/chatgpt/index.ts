@@ -25,6 +25,9 @@ import { createFetch } from '../../transport.js'
 import type { FetchLike } from '../../transport.js'
 
 export { PROVIDER, SETTINGS_NAMESPACE, CREDENTIAL_ID, DISPLAY_NAME } from './identity.js'
+// Wire-shape helpers re-exported for smoke tests and future cache-affinity work.
+export { serializeRequest, clampSessionAffinityKey, resolveReasoning } from './serialize.js'
+export { serializeInput } from './serialize.js'
 
 /** The credential record the sign-in flow writes and the adapter reads. */
 // The credential scope is this plugin's registered name (the composition row id).
@@ -53,6 +56,8 @@ export interface ChatGptConfig {
   refreshMarginMs?: number
   /** Fallback context window for models the backend does not describe. */
   defaultContextWindow?: number
+  /** Stamp `prompt_cache_key` + session-affinity headers (measured 16–21% → high cache hits). */
+  promptCacheKey?: boolean
 }
 
 /** Loose input snapshot accepted by `resolveAdapterOptions`. */
@@ -61,6 +66,7 @@ export interface ResolvedChatGptConfig {
   clientVersion?: string
   refreshMarginMs?: number
   defaultContextWindow?: number
+  promptCacheKey?: boolean
 }
 
 export const ChatGptConfig: Schema<ChatGptConfig> = Schema.object({
@@ -74,6 +80,9 @@ export const ChatGptConfig: Schema<ChatGptConfig> = Schema.object({
   defaultContextWindow: Schema.number().step(1).min(1).description(
     'Fallback context window for models the backend does not describe.',
   ),
+  promptCacheKey: Schema.boolean().default(true).description(
+    'Send prompt_cache_key + session-affinity headers derived from the session id, so the backend prompt cache routes this session to one node (A/B toggle: off reproduces the old random routing).',
+  ),
 })
 
 /** Fully-resolved connection facts (defaults applied and validated). */
@@ -85,6 +94,7 @@ export interface ResolvedOptions {
   defaultContextWindow: number
   defaultReasoningEffort: string
   defaultReasoningEfforts: string[]
+  promptCacheKey: boolean
 }
 
 /**
@@ -107,6 +117,7 @@ export function resolveAdapterOptions(config: ResolvedChatGptConfig = {}): Resol
     defaultContextWindow,
     defaultReasoningEffort: 'high',
     defaultReasoningEfforts: [...DEFAULT_REASONING_EFFORTS],
+    promptCacheKey: config.promptCacheKey !== false,
   }
 }
 
