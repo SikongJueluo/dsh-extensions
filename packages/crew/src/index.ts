@@ -10,8 +10,9 @@
  * 本插件自己注册工具，把档位语义写进各自的 description（工具定义是选型时
  * 最强的信号）；路由在配置层钉死，模型只能"选档位"，不能选模型。行为对齐
  * stock 的 continuable 配置：后台默认（`run_in_background: false` 才前台等待），
- * depth 读宿主 `subagent.maxDepth` 设置，创建子代理前经
- * `ctx.llm.resolveCallConfig` 预检路由。
+ * depth 读宿主 `subagent.maxDepth` 设置。每档可再声明一条 fallback：创建子代理
+ * 前预检钉死路由，路由不可用（provider/模型/effort 解析失败）或其套餐窗口用尽
+ * （`planUsage` 软依赖）时改走 fallback，两边都不行才报错。
  *
  * create_agent 起一个常驻角色代理：bootstrap 提示词让子代理确认角色后待命，
  * 后续任务经 send_message 投递（配套控制面 tool-subagent-control /
@@ -26,7 +27,7 @@
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
-import { ReasoningEffortId, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId, type ContentBlock, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type { SubagentProvider, SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type {} from '@deepseek-ai/dsh-system-prompt'
@@ -34,16 +35,26 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 export const name = 'crew'
 export const inject = ['tools', 'subagents', 'llm', 'systemPrompt']
 
-/** One fixed delegation tier: a model-facing tool name plus its pinned LLM route. */
-export interface TierRoute {
-  /** Model-facing tool name; must be distinct across tiers. */
-  toolName: string
+/** One exact LLM route a delegation can run on. */
+export interface RouteTarget {
   /** Registered LLM provider route for every child of this tier. */
   provider: string
   /** Provider-owned exact model id. */
   model: string
   /** Adapter-owned reasoning effort; omit for the model's default. */
   reasoningEffort?: string
+}
+
+/** One fixed delegation tier: a model-facing tool name plus its pinned LLM route. */
+export interface TierRoute extends RouteTarget {
+  /** Model-facing tool name; must be distinct across tiers. */
+  toolName: string
+  /**
+   * Route used when the pinned route cannot serve a delegation (unregistered
+   * route, unknown model, or an exhausted coding-plan window). An empty
+   * `provider`/`model` disables it and restores the fail-loud behaviour.
+   */
+  fallback?: RouteTarget
 }
 
 /** Config: the subagents backend plus the three pinned tier routes. */
@@ -58,17 +69,31 @@ export interface Config {
   smart: TierRoute
 }
 
+/** One tier's fallback as a fresh Schema.object; empty strings mean "no fallback". */
+const tierFallback = (defaults: RouteTarget | undefined) => Schema.object({
+  provider: Schema.string().default(defaults?.provider ?? ''),
+  model: Schema.string().default(defaults?.model ?? ''),
+  reasoningEffort: Schema.string().default(defaults?.reasoningEffort ?? ''),
+}).default({ provider: defaults?.provider ?? '', model: defaults?.model ?? '', reasoningEffort: defaults?.reasoningEffort ?? '' })
+
 /** One tier's defaults as a fresh Schema.object (schemastery schemas are not safely shareable across fields). */
 const tierRoute = (defaults: TierRoute) => Schema.object({
   toolName: Schema.string().default(defaults.toolName),
   provider: Schema.string().default(defaults.provider),
   model: Schema.string().default(defaults.model),
   reasoningEffort: Schema.string().default(defaults.reasoningEffort ?? 'max'),
+  fallback: tierFallback(defaults.fallback),
 }).default(defaults)
 
 export const Config = Schema.object({
   provider: Schema.string().default('spawn'),
-  quick: tierRoute({ toolName: 'subagent_quick', provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'max' }),
+  quick: tierRoute({
+    toolName: 'subagent_quick',
+    provider: 'opencode-go',
+    model: 'deepseek-v4.1-flash',
+    reasoningEffort: 'max',
+    fallback: { provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'max' },
+  }),
   workhorse: tierRoute({ toolName: 'subagent', provider: 'zai-coding-cn', model: 'glm-5.3', reasoningEffort: 'max' }),
   smart: tierRoute({ toolName: 'subagent_smart', provider: 'openai-codex', model: 'gpt-6.1-sol', reasoningEffort: 'xhigh' }),
 })
@@ -97,6 +122,7 @@ const delegationOutputSchema = { oneOf: [
     properties: {
       kind: { type: 'string', required: true, const: 'continuable' },
       subagentId: { type: 'string', required: true },
+      notice: { type: 'string', description: 'Present when the tier ran on its fallback route' },
     },
   },
   {
@@ -106,6 +132,7 @@ const delegationOutputSchema = { oneOf: [
       kind: { type: 'string', required: true, const: 'foreground' },
       runId: { type: 'string', required: true },
       output: { type: 'array', required: true, items: { type: 'json' } },
+      notice: { type: 'string', description: 'Present when the tier ran on its fallback route' },
     },
   },
 ] } as const
@@ -117,6 +144,7 @@ const createAgentOutputSchema = {
   properties: {
     kind: { type: 'string', required: true, const: 'created' },
     agentId: { type: 'string', required: true },
+    notice: { type: 'string', description: 'Present when the tier ran on its fallback route' },
   },
 } as const
 
@@ -173,20 +201,169 @@ async function settleForegroundRun(run: SubagentRun): Promise<ForegroundResult> 
   return execution.value
 }
 
-/** What one tier-child start produced: a background continuable child id, or the settled foreground result. */
-type TierChildOutcome = { background: true; childId: string } | { background: false; value: ForegroundResult }
+// ── Route selection ──────────────────────────────────────────────────────────
+// A pinned route can be unusable for reasons the LLM registry alone cannot
+// answer: the route may vanish from the adapter topology, its model may be
+// renamed, or its coding-plan window may already be spent. The first two fail
+// the `resolveCallConfig` preflight; the third is visible only through the
+// `planUsage` service (dsh-plan-usage), read optionally. Whenever the tier
+// names a fallback, a blocked delegation runs there instead of failing.
 
-/** Start one child on a pinned tier route: preflight the route, then run continuable-in-background or settle in the foreground. */
+/** Quota window facts as dsh-plan-usage reports them. */
+interface PlanUsageWindowShim {
+  percent?: number
+  resetAt?: number
+}
+
+/** One provider's quota snapshot as dsh-plan-usage reports it. */
+interface PlanUsageSnapshotShim {
+  fiveHour?: PlanUsageWindowShim
+  weekly?: PlanUsageWindowShim
+  monthly?: PlanUsageWindowShim
+  monthlyMcp?: PlanUsageWindowShim
+}
+
+/** Minimal `planUsage` surface consumed by route selection; absent plugin reads as `undefined`. */
+interface PlanUsageServiceShim {
+  get(provider: string, options?: { maxAgeMs?: number; force?: boolean }): Promise<PlanUsageSnapshotShim | undefined>
+}
+
+/** The context surface route selection reads — structurally satisfied by Context, narrowed so tests can stub it. */
+export interface RouteSelectionContext {
+  llm: { resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig> }
+  logger: { warn(message: string, ...args: unknown[]): void }
+  get(name: string): unknown
+}
+
+/** Why the pinned route cannot serve a delegation. */
+interface RouteBlocker {
+  /** `unavailable` is a hard preflight failure; `exhausted` only means "spend the fallback first". */
+  kind: 'unavailable' | 'exhausted'
+  detail: string
+  /** The preflight failure, rethrown when no fallback is configured. */
+  error?: unknown
+}
+
+/** The route one delegation should run on, plus why the pinned one was skipped. */
+export interface RouteSelection {
+  target: RouteTarget
+  /** Model-facing one-liner recorded on the delegation's output when the fallback was used. */
+  notice?: string
+}
+
+/** The tier's fallback, when both halves are named. */
+export function fallbackTarget(tier: TierRoute): RouteTarget | undefined {
+  const fallback = tier.fallback
+  if (fallback === undefined || fallback.provider === '' || fallback.model === '') return undefined
+  return fallback
+}
+
+/** Whether any reported window sits at its limit with the reset still ahead. */
+export function anyWindowExhausted(snapshot: PlanUsageSnapshotShim | undefined, now: number): boolean {
+  if (snapshot === undefined) return false
+  return [snapshot.fiveHour, snapshot.weekly, snapshot.monthly, snapshot.monthlyMcp].some((window) => {
+    if (window === undefined || typeof window.percent !== 'number' || window.percent < 100) return false
+    return window.resetAt === undefined || window.resetAt > now
+  })
+}
+
+/** `<provider>/<model>`, for messages. */
+export function routeName(target: RouteTarget): string {
+  return `${target.provider}/${target.model}`
+}
+
+/** One target as an LLM call config. */
+export function callConfigOf(target: RouteTarget): LlmCallConfig {
+  return {
+    provider: target.provider,
+    model: target.model,
+    ...(target.reasoningEffort !== undefined && target.reasoningEffort !== '' ? { reasoningEffort: ReasoningEffortId(target.reasoningEffort) } : {}),
+  }
+}
+
+/** A short, single-line rendering of a preflight failure. */
+function failureDetail(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const single = message.replace(/\s+/g, ' ').trim()
+  return single.length > 200 ? `${single.slice(0, 197)}…` : single
+}
+
+/** A quota read may serve from cache; older than this it refetches upstream. */
+const PLAN_SNAPSHOT_MAX_AGE_MS = 60_000
+/** A routing hint must never delay the delegation it routes: a quota read gets this budget. */
+const PLAN_READ_BUDGET_MS = 2_000
+
+/** Read the pinned route's coding-plan snapshot; any failure or overrun reads as "no quota data". */
+async function planSnapshotOf(ctx: RouteSelectionContext, provider: string): Promise<PlanUsageSnapshotShim | undefined> {
+  const planUsage = ctx.get('planUsage') as PlanUsageServiceShim | undefined
+  if (planUsage === undefined) return undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const budget = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), PLAN_READ_BUDGET_MS)
+    })
+    return await Promise.race([planUsage.get(provider, { maxAgeMs: PLAN_SNAPSHOT_MAX_AGE_MS }), budget])
+  } catch {
+    return undefined
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/** Why the pinned route cannot serve a delegation right now, or `undefined` when it can. */
+async function pinnedRouteBlocker(ctx: RouteSelectionContext, tier: TierRoute, signal: AbortSignal): Promise<RouteBlocker | undefined> {
+  try {
+    await ctx.llm.resolveCallConfig(callConfigOf(tier), signal)
+  } catch (error) {
+    // Cancellation is the caller's own decision, never a routing signal.
+    if (signal.aborted) throw error
+    return { kind: 'unavailable', detail: `route unavailable (${failureDetail(error)})`, error }
+  }
+  const snapshot = await planSnapshotOf(ctx, tier.provider)
+  if (anyWindowExhausted(snapshot, Date.now())) return { kind: 'exhausted', detail: 'coding-plan window exhausted' }
+  return undefined
+}
+
+/**
+ * Pick the route one delegation runs on: the tier's pinned route, or its
+ * fallback when the pinned route is unavailable or its coding-plan window is
+ * spent. Without a usable fallback the pinned route is preflighted and any
+ * failure is rethrown (fail loud); an exhausted window without a fallback
+ * stays on the pinned route, where dsh-auto-continue resumes it at the reset.
+ */
+export async function selectTierRoute(ctx: RouteSelectionContext, tier: TierRoute, signal: AbortSignal): Promise<RouteSelection> {
+  const blocker = await pinnedRouteBlocker(ctx, tier, signal)
+  if (blocker === undefined) return { target: tier }
+  const fallback = fallbackTarget(tier)
+  if (fallback === undefined) {
+    if (blocker.kind === 'unavailable') throw blocker.error
+    ctx.logger.warn('crew: %s is %s and this tier names no fallback — delegating anyway', routeName(tier), blocker.detail)
+    return { target: tier }
+  }
+  try {
+    await ctx.llm.resolveCallConfig(callConfigOf(fallback), signal)
+  } catch (error) {
+    if (signal.aborted) throw error
+    throw new Error(
+      `crew: neither ${routeName(tier)} (${blocker.detail}) nor its fallback ${routeName(fallback)} (route unavailable: ${failureDetail(error)}) can serve this delegation`,
+      { cause: blocker.error ?? error },
+    )
+  }
+  const notice = `${routeName(tier)} ${blocker.detail} — ran on the fallback ${routeName(fallback)}`
+  ctx.logger.warn('crew: %s', notice)
+  return { target: fallback, notice }
+}
+
+/** What one tier-child start produced: a background continuable child id, or the settled foreground result. */
+type TierChildOutcome = { background: true; childId: string; notice?: string } | { background: false; value: ForegroundResult; notice?: string }
+
+/** Start one child on a pinned tier route: select the route (with its fallback), then run continuable-in-background or settle in the foreground. */
 async function startTierChild(ctx: Context, config: Config, subagentProvider: SubagentProvider, tier: TierRoute, spec: { label: string; promptText: string; runInForeground: boolean }, exec: ToolRunContext): Promise<TierChildOutcome> {
   const parent = exec.agent
   if (!parent) throw new Error('crew tool requires a calling agent (exec.agent was undefined)')
   exec.signal.throwIfAborted()
-  const agentOptions = {
-    provider: tier.provider,
-    model: tier.model,
-    ...(tier.reasoningEffort !== undefined && tier.reasoningEffort !== '' ? { reasoningEffort: ReasoningEffortId(tier.reasoningEffort) } : {}),
-  }
-  await ctx.llm.resolveCallConfig(agentOptions, exec.signal)
+  const selection = await selectTierRoute(ctx, tier, exec.signal)
+  const agentOptions = callConfigOf(selection.target)
   if (ctx.subagents.getProvider(config.provider) !== subagentProvider) throw new Error(`subagent provider "${config.provider}" changed while resolving the child LLM route; retry the delegation`)
   const maxDepth = ctx.subagents.resolveMaxDepth()
   const request = {
@@ -195,6 +372,7 @@ async function startTierChild(ctx: Context, config: Config, subagentProvider: Su
     agentOptions,
     ...(maxDepth !== undefined ? { maxDepth } : {}),
   }
+  const notice = selection.notice
   if (!spec.runInForeground) {
     const start = await ctx.subagents.startContinuable({
       provider: config.provider,
@@ -202,13 +380,13 @@ async function startTierChild(ctx: Context, config: Config, subagentProvider: Su
       request,
       signal: exec.signal,
     })
-    return { background: true, childId: start.childId as string }
+    return { background: true, childId: start.childId as string, ...(notice !== undefined ? { notice } : {}) }
   }
   return { background: false, value: await settleForegroundRun(await ctx.subagents.start(config.provider, {
     ...request,
     label: spec.label,
     signal: exec.signal,
-  })) }
+  })), ...(notice !== undefined ? { notice } : {}) }
 }
 
 /** Install the crew delegation composition. */
@@ -253,7 +431,8 @@ export function apply(ctx: Context, config: Config) {
         schema: delegationOutputSchema,
         render: (_args, value) => [{
           type: 'text',
-          text: value.kind === 'continuable' ? `started subagent ${value.subagentId}` : outputValueText(value.output),
+          text: (value.kind === 'continuable' ? `started subagent ${value.subagentId}` : outputValueText(value.output)) +
+            (value.notice === undefined ? '' : `\n[crew] ${value.notice}`),
         }],
       },
       isConcurrencySafe: () => true,
@@ -263,7 +442,11 @@ export function apply(ctx: Context, config: Config) {
           promptText: args.prompt,
           runInForeground: args.run_in_background === false,
         }, exec)
-        return outcome.background ? { kind: 'continuable' as const, subagentId: outcome.childId } : outcome.value
+        const notice = outcome.notice
+        if (outcome.background) {
+          return { kind: 'continuable' as const, subagentId: outcome.childId, ...(notice !== undefined ? { notice } : {}) }
+        }
+        return { ...outcome.value, ...(notice !== undefined ? { notice } : {}) }
       },
     })))
     mounted = [...disposers, ctx.tools.register(defineTool({
@@ -288,7 +471,10 @@ export function apply(ctx: Context, config: Config) {
       },
       output: {
         schema: createAgentOutputSchema,
-        render: (_args, value) => [{ type: 'text', text: `created agent ${value.agentId}` }],
+        render: (_args, value) => [{
+          type: 'text',
+          text: `created agent ${value.agentId}` + (value.notice === undefined ? '' : `\n[crew] ${value.notice}`),
+        }],
       },
       isConcurrencySafe: () => true,
       async execute(args, exec) {
@@ -298,7 +484,9 @@ export function apply(ctx: Context, config: Config) {
           promptText: `Take on this standing role:\n\n${args.role}\n\nReply with a one-line confirmation that you are ready, then wait for tasks delivered as messages.`,
           runInForeground: false,
         }, exec)
-        return { kind: 'created' as const, agentId: outcome.background ? outcome.childId : (outcome.value.runId as string) }
+        const agentId = outcome.background ? outcome.childId : (outcome.value.runId as string)
+        const notice = outcome.notice
+        return { kind: 'created' as const, agentId, ...(notice !== undefined ? { notice } : {}) }
       },
     }))]
   }

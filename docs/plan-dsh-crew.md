@@ -26,9 +26,10 @@
 }
 ```
 
-默认三档（`packages/crew/src/index.ts`）：quick = deepseek-official /
-deepseek-flash @ max；workhorse = zai-coding-cn / glm-5.3 @ max；smart =
-openai-codex / gpt-6.1-sol @ xhigh。
+默认三档（`packages/crew/src/index.ts`）：quick = opencode-go /
+deepseek-v4.1-flash @ max（fallback：deepseek-official / deepseek-flash @ max）；
+workhorse = zai-coding-cn / glm-5.3 @ max；smart = openai-codex / gpt-6.1-sol @
+xhigh。降级条件与边界见 `packages/crew/README.md`「档位降级」。
 
 ## 2. `home/ai/dsh/subagents.patch.yml`：覆盖 preset-standard 声明
 
