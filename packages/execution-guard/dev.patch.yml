@@ -1,0 +1,10 @@
+# Development overlay: the locally built plugin entry, by absolute path in
+# the FINAL repository (dsh-extensions/packages/execution-guard). Copy this
+# bundle there, `pnpm build`, then use with the global flag, e.g.
+#   dsh --profile web --patch ./packages/execution-guard/dev.patch.yml --no-open --port <port>
+# (the `web` subcommand takes no parent flags; `--profile web` does).
+# While iterating straight from this staging tree instead, point the entry at
+# .../outputs/retro-improvements/dsh-execution-guard/lib/index.js.
+- insert:
+    - id: execution-guard
+      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/execution-guard/lib/index.js'

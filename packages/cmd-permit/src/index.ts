@@ -36,7 +36,8 @@ import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 import type { Session } from '@deepseek-ai/dsh-session'
-import { collectEvidence, isHighRisk as builtinHighRisk } from 'dsh-auto-permit'
+import { collectEvidence, deliverNotice, isHighRisk as builtinHighRisk } from 'dsh-auto-permit'
+import type { NoticeAgent } from 'dsh-auto-permit'
 import { buildNoticeMessage } from './notice.js'
 import { compileRules, decideAllow, MODE_RANK, type SandboxMode } from './rules.js'
 import { Config, registerSettings, type CmdPermitSettings } from './settings.js'
@@ -152,6 +153,7 @@ export class CmdPermit extends Service {
 
           const session = sessionOf(ctx, req.agent)
           if (session === undefined) return next()
+          const agent = req.agent as unknown as NoticeAgent
 
           const evidence = collectEvidence(session, req.callId)
           if (evidence.call === undefined) return next()
@@ -173,7 +175,7 @@ export class CmdPermit extends Service {
           const decision = this.claim(evidence.call.command, mode)
           if (decision !== undefined) {
             ctx.logger.info('cmd-permit: allowlisted (%s): %s', decision.via, command)
-            notify(session, evidence.call.command, mode, decision.via)
+            notify(agent, evidence.call.command, mode, decision.via)
             return 'allowed-once'
           }
           return next()
@@ -192,16 +194,16 @@ export class CmdPermit extends Service {
   }
 }
 
-/** Append the decision's notice row to the session log; never throws. */
-function notify(session: Session, command: string, mode: string, via: string): void {
-  try {
-    session.append('user/message', buildNoticeMessage(command.slice(0, 160), mode, via), {
-      surfaceOp: 'append',
-    })
-  } catch {
-    // A notice is best-effort observability; the approval outcome itself
-    // must not fail because the log rejected the row.
-  }
+/**
+ * Record the allowlist decision's notice row; never throws.
+ *
+ * Goes through `deliverNotice` for the same reason auto-permit does: this runs
+ * inside `approval/request`, i.e. between the assistant's `tool_calls` and the
+ * `tool/result` batch, where a surface `user/message` would split the pair and
+ * wedge the session on OpenAI-compatible endpoints (see `deliverNotice`).
+ */
+function notify(agent: NoticeAgent, command: string, mode: string, via: string): void {
+  deliverNotice(agent, buildNoticeMessage(command.slice(0, 160), mode, via))
 }
 
 export default CmdPermit

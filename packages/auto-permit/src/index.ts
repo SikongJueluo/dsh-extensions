@@ -32,6 +32,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 import type { Session } from '@deepseek-ai/dsh-session'
+import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { collectEvidence } from './evidence.js'
 import { isHighRisk } from './rules.js'
 import { judge } from './judge.js'
@@ -57,6 +58,55 @@ function sessionOf(ctx: Context, agent: { id: string }): Session | undefined {
 }
 
 /**
+ * The approval request's agent, narrowed to what the notice path needs: the
+ * durable session (audit + fallback) and the host's deferred inbox channel.
+ * `inject` is duck-typed because it reached `Agent` after the oldest hosts
+ * this plugin still loads on.
+ */
+export interface NoticeAgent {
+  id: string
+  session: Session
+  inject?(message: UserMessage): void
+}
+
+/**
+ * Deliver a notice without ever breaking the tool-call/result pairing.
+ *
+ * An approval is raised from inside the agent loop's `runGroup`, i.e. between
+ * the assistant's `tool_calls` (committed as `tool/call` before dispatch) and
+ * the `tool/result` batch `commitReady` writes afterwards. A `user/message`
+ * appended to the surface at that point lands *between* them, and
+ * `deriveMessages()` then projects `assistant(tool_calls) -> user -> tool`,
+ * which OpenAI-compatible endpoints reject with HTTP 400 — permanently,
+ * because the bad order is durable history. Observed in DSH session
+ * 5528dac7 seq 121..129: the auto-permit notice at seq 125 wedged every later
+ * request in that session, `/compact` included.
+ *
+ * `agent.inject()` is the host's own answer for exactly this situation —
+ * `ApprovalService.setPolicy()` delivers its mid-turn notices the same way. It
+ * queues the message at the `next-step` boundary without waking the driver, so
+ * the notice is logged after the tool results and claimed at the start of the
+ * next step: same transcript row, correct order.
+ *
+ * @param agent - the agent whose approval produced the notice.
+ * @param message - the built notice message.
+ */
+export function deliverNotice(agent: NoticeAgent, message: UserMessage): void {
+  try {
+    if (typeof agent.inject === 'function') {
+      agent.inject(message)
+      return
+    }
+    // Hosts without the deferred channel: keep the notice, accept the
+    // ordering hazard rather than dropping the audit row.
+    agent.session.append('user/message', message, { surfaceOp: 'append' })
+  } catch {
+    // A notice is best-effort observability; the approval outcome itself must
+    // not fail because the log rejected the row.
+  }
+}
+
+/**
  * The optional dsh-cmd-permit service (the shared high-risk oracle), when
  * that plugin is mounted. Duck-typed on purpose: no packaging dependency in
  * this direction, so auto-permit stays independently installable.
@@ -66,16 +116,21 @@ interface CmdPermitLike {
   claim(command: string, mode: string): { via: string } | undefined
 }
 
-/** Append the decision's notice row to the session log; never throws into the caller. */
-function notify(session: Session, outcome: NoticeOutcome, command: string, reason?: string): void {
-  try {
-    session.append('user/message', buildNoticeMessage(outcome, command, reason), {
-      surfaceOp: 'append',
-    })
-  } catch {
-    // A notice is best-effort observability; the approval outcome itself
-    // must not fail because the log rejected the row.
-  }
+/**
+ * Record the decision's notice through the order-safe channel.
+ *
+ * @param agent - the agent the approval was raised for.
+ * @param outcome - how the request settled.
+ * @param command - the command being escalated (already excerpted).
+ * @param reason - the judge's reason line, when the model call produced one.
+ */
+function notify(
+  agent: NoticeAgent,
+  outcome: NoticeOutcome,
+  command: string,
+  reason?: string,
+): void {
+  deliverNotice(agent, buildNoticeMessage(outcome, command, reason))
 }
 
 /**
@@ -97,6 +152,7 @@ export function apply(ctx: Context, config: RowConfig): void {
 
         const session = sessionOf(ctx, req.agent)
         if (session === undefined) return next()
+        const agent = req.agent as unknown as NoticeAgent
 
         const evidence = collectEvidence(session, req.callId)
         if (evidence.call === undefined) return next()
@@ -114,7 +170,7 @@ export function apply(ctx: Context, config: RowConfig): void {
             'auto-permit: high-risk shape, deferring to human: %s',
             command,
           )
-          notify(session, 'high-risk', command)
+          notify(agent, 'high-risk', command)
           return next()
         }
 
@@ -135,7 +191,7 @@ export function apply(ctx: Context, config: RowConfig): void {
             claim.via,
             command,
           )
-          notify(session, 'allowed-by-cmd-permit', command, claim.via)
+          notify(agent, 'allowed-by-cmd-permit', command, claim.via)
           return 'allowed-once'
         }
 
@@ -144,7 +200,7 @@ export function apply(ctx: Context, config: RowConfig): void {
             'auto-permit: exact repeat of an allowed command, allowing: %s',
             command,
           )
-          notify(session, 'allowed-by-memory', command)
+          notify(agent, 'allowed-by-memory', command)
           return 'allowed-once'
         }
 
@@ -160,7 +216,7 @@ export function apply(ctx: Context, config: RowConfig): void {
             'auto-permit: judge allowed: %s',
             command,
           )
-          notify(session, 'allowed', command, result.reason)
+          notify(agent, 'allowed', command, result.reason)
           return 'allowed-once'
         }
         ctx.logger.info(
@@ -168,7 +224,7 @@ export function apply(ctx: Context, config: RowConfig): void {
           command,
           result.reason ?? 'no reason recorded',
         )
-        notify(session, 'deferred', command, result.reason)
+        notify(agent, 'deferred', command, result.reason)
         return next()
       } catch (error) {
         // Any surprise (log read failure, agent shape drift, …) goes to the

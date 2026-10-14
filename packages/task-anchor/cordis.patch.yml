@@ -1,0 +1,10 @@
+# dsh-task-anchor bundle layer.
+#
+# One plugin row: the recovery anchor (the `checkpoint_task` tool plus the
+# resume comparison on `agent/created`). Consumes `ctx.tools` (to register the
+# tool); publishes no service of its own and never touches a repository or a
+# goal — it only reports agreement or drift. Users can override the row later
+# (by id) in a later patch layer — a patch replaces the row's whole `config`.
+- insert:
+    - id: task-anchor
+      name: dsh-task-anchor

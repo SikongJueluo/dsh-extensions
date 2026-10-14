@@ -1,0 +1,12 @@
+# Development overlay: the locally built plugin entry, by absolute path.
+# Rebuild first (`pnpm build`) so lib/ is current, then restart dsh. Use with
+# the global flag, e.g.
+#   dsh --profile web --patch ./packages/task-anchor/dev.patch.yml --no-open --port <port>
+# (the `web` subcommand takes no parent flags; `--profile web` does).
+- insert:
+    - id: task-anchor
+      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/task-anchor/lib/index.js'
+      config:
+        storagePath: ''
+        jjTimeoutMs: 5000
+        resumeNotice: true

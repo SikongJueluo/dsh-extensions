@@ -1,0 +1,10 @@
+# dsh-execution-guard bundle layer.
+#
+# One plugin row: the execution guard (argument preflight + repeat hints +
+# checkpoint_task recovery anchor). Consumes `ctx.tools` (the host tool
+# registry); registers no fictitious transport tools. Users can override the
+# row later (by id) in a later patch layer — a patch replaces the row's whole
+# `config`.
+- insert:
+    - id: execution-guard
+      name: dsh-execution-guard

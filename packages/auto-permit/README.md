@@ -45,6 +45,35 @@ DSH 的 AI 自动审批判官：在 `approval/request` waterfall 上插队一个
 是正面信息。host 侧同时通过 `ctx.logger` 记日志（`journalctl --user -u
 dsh-web | grep auto-permit`）。
 
+### notice 的投递通道（顺序安全，勿改成 `session.append`）
+
+notice **必须**经 `agent.inject()` 投递（见 `deliverNotice()`），不能直接
+`session.append('user/message', …, { surfaceOp: 'append' })`。
+
+原因：审批请求是在 agent loop 的 `runGroup` 内部抛出的，此刻
+`assistant(tool_calls)` 已落盘（`tool/call` 先于 dispatch 提交），而
+`tool/result` 要等 `commitReady` 之后才写。在这个窗口往 surface 追加
+`user/message`，`deriveMessages()` 就会投影出
+`assistant(tool_calls) → user → tool` 的顺序；OpenAI 兼容端点直接回 HTTP 400，
+而且坏顺序已经固化进历史，该会话之后**每一次**请求（含 `/compact`）都会失败。
+
+实证：DSH session `5528dac7` seq 121–129——seq 125 的 auto-permit notice 夹在
+seq 121 的 `tool/call` 与 seq 129 的 `tool/result` 之间，整个会话就此卡死。
+
+`agent.inject()` 是宿主自己在这个场景下的答案（`ApprovalService.setPolicy()`
+投递轮中通知用的就是它）：消息排进 `next-step` inbox、**不**唤醒 driver，等本批
+tool 结果落盘、下一个 step 边界被领取时才写成 surface 的 `user/message`——折叠
+行形态不变，顺序正确。dsh-cmd-permit 的 allowlist 通知走同一个 `deliverNotice()`。
+
+回归检查（无需 API key、不发网络请求）：
+
+```sh
+node packages/auto-permit/test/notice-order.mjs
+```
+
+它用真实 `Session` 重放失败会话的事件顺序，断言 `assistant(tool_calls)` 后面
+紧跟配对的 `tool` 消息；surface-append 路径失败，`agent.inject()` 路径通过。
+
 ## 判官判据（v2）
 
 除 v1 的显式意图 + 等价两判据外，v2 新增两类（解决 cargo/direnv/nix 这类
