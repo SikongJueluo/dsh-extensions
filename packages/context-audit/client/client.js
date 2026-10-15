@@ -294,7 +294,7 @@ window.__ModuleLoader__.load({
           }
           if (report.tools.length > 30) {
             parts.push(React.createElement("div", { key: "more-tools", style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary)", marginTop: 4 } },
-              template(t("moreRows"), { n: report.tools.length - 30 }));
+              template(t("moreRows"), { n: report.tools.length - 30 })));
           }
         }
         if (report.sessions.length) {
