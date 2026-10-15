@@ -9,7 +9,8 @@
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
-    "check": "pnpm run typecheck && pnpm run build",
+    "check:client": "node scripts/check-client-syntax.mjs",
+    "check": "pnpm run typecheck && pnpm run build && pnpm run check:client",
     "clean": "pnpm -r run clean"
   },
   "devDependencies": {

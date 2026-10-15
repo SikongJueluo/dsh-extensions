@@ -10,7 +10,8 @@ dsh-extensions —— out-of-tree DeepSeek Harness 插件 bundle 集。每个 `p
 pnpm install        # 各包 prepare 自动完成首次构建
 pnpm build          # tsdown → lib/index.js + lib/index.d.ts
 pnpm typecheck      # 各包 tsc --noEmit
-pnpm check          # typecheck + build
+pnpm check          # typecheck + build + client 语法检查
+pnpm check:client   # node --check 扫 packages/*/client/**/*.js
 pnpm clean
 ```
 
@@ -48,6 +49,7 @@ dsh 本体与 `$DSH_HOME`（`~/.dsh` 下 profiles、patch 层、bin 等运行时
 - **bundle**：带 `dsh.bundle` 声明的 npm 包 = 一层配置；`cordis.patch.yml` 的行以 `id` + `name`（npm 包名）表示。
 - **profile**：`$DSH_HOME/profiles/<name>` 下的可启动组合。层序：bundles → profile 自身 patch → 用户层 patch → `--patch` overlays。后层按 id 覆盖前层，且 config 整体替换而非深合并——覆盖一行必须重述它需要的所有键。
 - **双半插件**：`package.json` 的 `dsh.client`（`platform` + `inject` 依赖图）声明浏览器半插件，代码经 `exports["./client"]` 装载；宿主半插件走 `lib/index.js`。两侧经 Typed Client Remote wire（`ctx.remote.*`）或插件自有 webServer 前缀路由通信。
+  浏览器半由 dsh 原样 serve，不经 tsdown，各包 `tsconfig.json` 的 `include` 也只含 `src/`——所以 `pnpm check` 另挂 `scripts/check-client-syntax.mjs` 兜 `packages/*/client/**/*.js` 的语法。那里一个语法错误即整个 client module factory 注册失败，浏览器只报 `<包名>: import failed` + `web boot: 1 entry did not activate`。
 - **凭据**：秘密只存 `ctx.credentials`（`<scope>/<id>`），`modifyRecord` 的独占写窗口即跨进程刷新锁；settings 只有引用。
 - **settings（0.2 模型）**：无自定义配置节——`ctx.settings` 自动把每个在挂插件行的 `Config` schema 投影成表单，namespace ≡ profile 行 id；编辑写入即改行 config。volatile 字段（`.volatile()`）热生效不重挂（通过 `Volatile.get()` 读活值、监听 `loader/volatile-update`），非 volatile 字段编辑则重挂插件行。LLM 目录的 `settingsNs` 填行 id、`settingsPath` 填行 config 内的路径。
 - service（`ctx.llm` / `ctx.settings` / `ctx.authorization` / `ctx.credentials` / `ctx.logger` 等）由宿主提供；`inject` 列表让 `apply` 等到 service 就绪才执行，`ctx.inject([...], fn)` 等运行期才出现的 service。
