@@ -53,7 +53,7 @@ export const Config: Schema<Config> = Schema.object({
     .default(DEFAULT_BRIEF_DIR)
     .description('Brief directory; relative paths resolve against the session workspace cwd.'),
   timeoutMs: Schema.number().step(1).min(1000)
-    .default(300_000)
+    .default(600_000)
     .description('How long to wait for the completion marker before failing the handoff (ms).'),
   pollMs: Schema.number().step(1).min(100)
     .default(1000)
@@ -80,7 +80,7 @@ export function apply(ctx: Context, config: Config): void {
     ctx,
     config,
     maxBriefChars: config.maxBriefChars ?? 65_536,
-    timeoutMs: config.timeoutMs ?? 300_000,
+    timeoutMs: config.timeoutMs ?? 600_000,
     pollMs: config.pollMs ?? 1000,
     pickTimeoutMs: config.pickTimeoutMs ?? 120_000,
     notifyFailure: config.notifyFailure !== false,

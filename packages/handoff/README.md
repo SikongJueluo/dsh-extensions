@@ -106,7 +106,7 @@ agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `dir` | `.dsh/handoff` | 简报目录，相对路径基于 session 的 workspace cwd |
-| `timeoutMs` | `300000` | 等待完成标记的超时 |
+| `timeoutMs` | `600000` | 等待完成标记的超时 |
 | `pollMs` | `1000` | 简报文件轮询间隔 |
 | `confirm` | `true` | 交接前让用户选模型（兼作取消入口） |
 | `modelMenu` | `true` | 问题卡片降级路径里枚举所有 provider/model |
