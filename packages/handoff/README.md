@@ -3,7 +3,8 @@
 **一条命令完成会话交接**：`/handoff <任务描述>` → 浏览器弹出**模型下拉**（可搜索、按厂商分组，可继承当前会话或用全局默认）→ 注册了多个 workspace 时再弹**工作区选择步**（首项「原工作区」，其余可搜索）→ 当前会话把上下文浓缩成一份自包含简报写入
 `.dsh/handoff/<时间戳>-handoff.md` → 插件检测到完成标记后，在**所选工作区**自动新建 session
 （与 Web「新建会话」按钮同一条 `ctx.agents.create` 工厂链路），并把简报作为首条 prompt 交给新
-agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文。
+agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文。**不带参数的 `/handoff`（或
+`/handoff --retry`）重试上一次未完成的交接**：简报已写一半的继续补完，已写完但没来得及拉起新会话的直接拉起。
 
 ## 工作流程
 
@@ -18,10 +19,33 @@ agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文
   ├─ 当前 agent 排队一个 turn：按六节模板写简报 + 末尾完成标记
   │    Goal / Current state / Key decisions / Files / Next steps / Open questions
   │    （跨区交接时额外提示：原路径对后继会话只读，关键内容自行内联进简报）
+  ├─ 命令发起时宿主写 sidecar 记录 <时间戳>-handoff.meta.json（任务/原会话/所选，spawn 后回填）
   ├─ 插件轮询简报文件，命中 <!-- handoff:complete --> 即完成
   └─ ctx.agents.create({meta: {cwd = 目标工作区路径}}) → attachSession(归入目标 workspace 分组)
      → followup(简报) → 侧边栏出现 "Handoff: 修复 README …" 新会话并开始执行
 ```
+
+## 重试（bare /handoff）
+
+超时、dsh 重启、spawn 失败都会留下一次「未完成的交接」。每个 handoff 发起时会在简报旁边写一份
+sidecar 记录 `<时间戳>-handoff.meta.json`（任务、原会话、当时的模型/工作区选择），新会话**成功创建后**
+回填 `spawnedAt`——它是「这次交接到底成没成」的唯一持久判定，也是防止重复拉起会话的闸门。
+
+不带参数的 `/handoff`（或 `/handoff --retry`，两者等价；`--retry` 与任务描述互斥）扫描简报目录，取
+**最新一份没有 `spawnedAt` 的记录**，按简报文件的现状走三个分支：
+
+1. **简报已有完成标记**（watch 丢了/进程重启了）→ 重选模型与工作区后**直接拉起新会话**，不再让
+   agent 写任何东西；
+2. **简报缺失或没写完** → 重选模型与工作区后，给*当前*会话排一条**续写指令**：保留已有内容、只补
+   缺失部分，同一文件、超时重新计满。重试者不是原会话时，指令会注明「无法从你的历史确认的内容
+   不要臆造，写进 Open questions」；文件根本没写过则退回完整简报指令；
+3. **没有可重试的记录** → 报错，并提示用 `/handoff <任务描述>` 发起新交接。
+
+重试时模型/工作区选择重新弹（原选择只在内存里，已丢），但上次的选择会作为「上次」徽标标记在对应
+行上（问题卡片降级路径不带此标记）；`confirm: false` 时直接沿用上次选择，不再弹窗。`--model` /
+`--workspace` 旗标在重试模式下照常生效，例如 `/handoff --retry --model gpt/x` 就是用指定模型重试。
+失败通知的文案也会明确指路这个重试入口。
+
 
 ## 选择新会话的模型与思考强度
 
@@ -44,7 +68,7 @@ agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文
 5. **命令直达**：`/handoff --model provider/model [--workspace <title|path>] <任务>` 跳过对应选择，
    适合脚本与 `confirm: false`；`--model` 拼写只做形状校验，路由合法性由首次请求验证（强度用模型
    默认）；`--workspace` 支持含空格的 title（最长前缀匹配）或 workspace 根路径（realpath 精确匹配），
-   未命中/歧义时列出候选。两个 flag 顺序任意。
+   未命中/歧义时列出候选。两个 flag 顺序任意，`--retry` 同理（见上节）。
 
 **三条路径各自的强度来源**：
 
@@ -70,8 +94,8 @@ agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文
   会话「原工作区路径只读，写入一律在当前工作区进行」。
 - 原 session 保持不动，可以继续回去追问。
 - 原 agent 忙碌时 `followup` 自动排队到当前 turn 结束。
-- 交接失败（超时/创建失败/目标工作区消失——spawn 前有 `status()` 预检）会记录日志，并可配置向原会话发一条可见通知。
-- 插件行卸载会拆除仍在等待的 watcher；已创建的 session 日志持久化，可从侧边栏重新打开。
+- 交接失败（超时/创建失败/目标工作区消失——spawn 前有 `status()` 预检）会记录日志，并可配置向原会话发一条可见通知（文案自带 bare-`/handoff` 重试指引）。
+- 插件行卸载会拆除仍在等待的 watcher；已创建的 session 日志持久化，可从侧边栏重新打开。watcher 丢了也没关系：简报与 sidecar 记录都在磁盘上，bare `/handoff` 能从任何一处断点续上。
 
 ## 安装（bundle）
 

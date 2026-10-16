@@ -19,6 +19,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
 import { bootstrapPrompt, type HandoffRuntime, type PendingHandoff } from './brief.js'
+import { markSpawned, metaPathFor } from './meta.js'
 import { targetBriefDir } from './workspace.js'
 import { defaultRoute, sessionRoute, toAgentOptions } from './selection.js'
 
@@ -197,6 +198,10 @@ export async function spawnHandoff(rt: HandoffRuntime, pending: PendingHandoff, 
     },
     ...(preset.setup !== undefined ? { setup: preset.setup } : {}),
   })
+  // The fresh session exists: record it before any cosmetic step (attach,
+  // title, copy) can fail, so a later bare `/handoff` cannot double-spawn
+  // this brief. A missing sidecar (older briefs) is a silent no-op.
+  await markSpawned(metaPathFor(pending.briefPath))
   await attachToWorkspace(rt, pending, sessionId)
 
   handle.agent.followup(

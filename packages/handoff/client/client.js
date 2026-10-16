@@ -41,6 +41,9 @@ window.__ModuleLoader__.load({
     var DEFAULT_LABEL = "全局默认";
     var ORIGIN_LABEL = "原工作区";
     var ORIGIN_BADGE = "当前";
+    // Retry requests carry the previous attempt's picks; matching rows wear
+    // this badge so a retry starts one click from where it left off.
+    var PREV_BADGE = "上次";
 
     // Touch-primary devices (phones): hover feedback and autofocus are
     // desktop enhancements; on them a tap-fired mouseenter sticks and the
@@ -184,6 +187,16 @@ window.__ModuleLoader__.load({
       var setWsFor = wsState[1];
 
       var modelFixed = request.modelFixed === true;
+      var previous = request.previous || null;
+      var prevChoice = previous ? previous.choice : null;
+      var prevWorkspace = previous ? previous.workspaceId : undefined;
+
+      /** True when a retry's previous choice points at this route. */
+      function isPrevModel(provider, model) {
+        return !!(prevChoice && prevChoice.kind === "model"
+          && prevChoice.provider === provider && prevChoice.model === model);
+      }
+
       function needsWorkspace() {
         return request.pickWorkspace === true
           && request.workspaces && request.workspaces.length > 0;
@@ -332,18 +345,24 @@ window.__ModuleLoader__.load({
           submit({ kind: "model", provider: provider, model: model.id });
           return;
         }
-        // Picking the origin's own route preselects the effort it already runs.
-        var inherited = request.inherited;
-        var preferred = inherited && inherited.provider === provider && inherited.model === model.id
-          ? inherited.reasoningEffort
+        // Picking the origin's own route preselects the effort it already runs;
+        // a retry's previous effort wins over that when it names this model.
+        var prevEffort = isPrevModel(provider, model.id) && prevChoice.reasoningEffort
+          ? prevChoice.reasoningEffort
           : undefined;
+        var inherited = request.inherited;
+        var preferred = prevEffort !== undefined ? prevEffort
+          : inherited && inherited.provider === provider && inherited.model === model.id
+            ? inherited.reasoningEffort
+            : undefined;
         setEffortFor({
           provider: provider,
           model: model.id,
           name: model.name,
           efforts: efforts,
           defaultEffort: reasoning.defaultEffort,
-          preferred: preferred
+          preferred: preferred,
+          preferredIsPrev: prevEffort !== undefined
         });
       }
 
@@ -362,7 +381,7 @@ window.__ModuleLoader__.load({
           React.createElement(Entry, {
             key: "origin",
             label: ORIGIN_LABEL,
-            badge: ORIGIN_BADGE,
+            badge: prevWorkspace === "origin" ? PREV_BADGE : ORIGIN_BADGE,
             description: request.origin ? request.origin.path : undefined,
             busy: busy,
             onPick: function () { pickWorkspace("origin"); }
@@ -381,6 +400,7 @@ window.__ModuleLoader__.load({
                   label: label,
                   description: w.missing ? w.path + " · 目录不存在" : w.path,
                   muted: w.missing === true,
+                  badge: w.id === prevWorkspace ? PREV_BADGE : undefined,
                   busy: busy,
                   onPick: function () { pickWorkspace(w.id); }
                 });
@@ -425,7 +445,7 @@ window.__ModuleLoader__.load({
       if (effortFor !== null) {
         var effortRows = effortFor.efforts.map(function (effort) {
           var marker = effort.id === effortFor.preferred
-            ? "当前会话"
+            ? (effortFor.preferredIsPrev ? PREV_BADGE : "当前会话")
             : effort.id === effortFor.defaultEffort
               ? "默认"
               : undefined;
@@ -487,6 +507,7 @@ window.__ModuleLoader__.load({
             key: "inherit",
             label: INHERIT_LABEL,
             description: routeText(request.inherited, "沿用本会话的 preset 与模型"),
+            badge: prevChoice && prevChoice.kind === "inherit" ? PREV_BADGE : undefined,
             busy: busy,
             onPick: function () { submit({ kind: "inherit" }); }
           }),
@@ -494,6 +515,7 @@ window.__ModuleLoader__.load({
             key: "default",
             label: DEFAULT_LABEL,
             description: routeText(request.fallback, "默认 preset + 全局默认模型"),
+            badge: prevChoice && prevChoice.kind === "default" ? PREV_BADGE : undefined,
             busy: busy,
             onPick: function () { submit({ kind: "default" }); }
           }),
@@ -524,6 +546,7 @@ window.__ModuleLoader__.load({
                       key: "m:" + group.id + "/" + model.id,
                       label: model.name,
                       description: description.join(" · ") || undefined,
+                      badge: isPrevModel(group.id, model.id) ? PREV_BADGE : undefined,
                       busy: busy,
                       onPick: function () { chooseModel(group.id, model); }
                     });

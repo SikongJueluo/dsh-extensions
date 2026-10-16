@@ -20,6 +20,24 @@ export type ModelChoice =
   | { kind: 'default' }
   | { kind: 'model'; provider: string; model: string; reasoningEffort?: string }
 
+/** Narrow an untrusted value (browser payload, sidecar meta JSON) into a choice. */
+export function coerceModelChoice(value: unknown): ModelChoice | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const record = value as Record<string, unknown>
+  if (record.kind === 'inherit') return { kind: 'inherit' }
+  if (record.kind === 'default') return { kind: 'default' }
+  if (record.kind === 'model') {
+    const provider = record.provider
+    const model = record.model
+    if (typeof provider !== 'string' || provider.length === 0) return undefined
+    if (typeof model !== 'string' || model.length === 0) return undefined
+    const effort = record.reasoningEffort
+    if (effort !== undefined && (typeof effort !== 'string' || effort.length === 0)) return undefined
+    return { kind: 'model', provider, model, ...(effort === undefined ? {} : { reasoningEffort: effort }) }
+  }
+  return undefined
+}
+
 /** One in-flight handoff, keyed by the origin agent's session id. */
 export interface PendingHandoff {
   /** The agent (and session) that writes the brief. */
@@ -34,6 +52,12 @@ export interface PendingHandoff {
   readonly briefPath: string
   /** The verbatim task description from the command line. */
   readonly task: string
+  /**
+   * Who the brief's context came from. Fresh handoffs leave it unset (the
+   * origin agent is the source); retries set it from the sidecar meta so the
+   * bootstrap prompt stays truthful when a different session picks up.
+   */
+  readonly originLabel?: string
   /** Model route chosen in the dialog or via --model; preset inheritance follows it. */
   readonly choice: ModelChoice
   /** Epoch milliseconds when the command ran. */
@@ -70,30 +94,20 @@ export function timestampSlug(date: Date): string {
   )
 }
 
-/** The instruction handed to the CURRENT agent: write the brief, then stop. */
-export function briefInstruction(
-  briefPath: string,
-  task: string,
-  maxBriefChars: number,
-  cross?: { title: string },
-): string {
-  const crossNote = cross === undefined
-    ? []
-    : [
-      '',
-      `注意：本次交接目标是另一个工作区（${cross.title}）。后继会话对上文路径只读、且其来源分支工作区日后可能被清理，关键文件内容请直接摘录进简报而非只给路径。`,
-    ]
+/** The six-section skeleton every brief follows. */
+const BRIEF_SECTIONS = [
+  'Markdown 六节：',
+  '- Goal：本会话总目标',
+  '- Current state：进展与工作区现状（已改文件、未完成项）',
+  '- Key decisions：关键决策与理由',
+  '- Files：关键文件/路径及状态',
+  '- Next steps：后续步骤（有序）',
+  '- Open questions：待用户确认的事项',
+]
+
+/** The closing requirements shared by both instruction variants. */
+function instructionTail(task: string, maxBriefChars: number): string[] {
   return [
-    `[handoff] /handoff 触发会话交接。本回合唯一任务：写一份交接简报到 ${briefPath}，供下一个没有本会话历史的新会话接手——简报必须自包含。`,
-    '',
-    'Markdown 六节：',
-    '- Goal：本会话总目标',
-    '- Current state：进展与工作区现状（已改文件、未完成项）',
-    '- Key decisions：关键决策与理由',
-    '- Files：关键文件/路径及状态',
-    '- Next steps：后续步骤（有序）',
-    '- Open questions：待用户确认的事项',
-    ...crossNote,
     '',
     '末尾追加原样任务：',
     '',
@@ -101,6 +115,52 @@ export function briefInstruction(
     task,
     '',
     `要求：不超过约 ${maxBriefChars} 字符；文件最后一行单独写 ${COMPLETE_MARKER}；写完后只回一行确认，不做其他事。`,
+  ]
+}
+
+/** The cross-workspace caution shared by both instruction variants. */
+function crossNoteFor(cross: { title: string } | undefined): string[] {
+  return cross === undefined
+    ? []
+    : [
+      '',
+      `注意：本次交接目标是另一个工作区（${cross.title}）。后继会话对上文路径只读、且其来源分支工作区日后可能被清理，关键文件内容请直接摘录进简报而非只给路径。`,
+    ]
+}
+
+/** The instruction handed to the CURRENT agent: write the brief, then stop. */
+export function briefInstruction(
+  briefPath: string,
+  task: string,
+  maxBriefChars: number,
+  cross?: { title: string },
+): string {
+  return [
+    `[handoff] /handoff 触发会话交接。本回合唯一任务：写一份交接简报到 ${briefPath}，供下一个没有本会话历史的新会话接手——简报必须自包含。`,
+    '',
+    ...BRIEF_SECTIONS,
+    ...crossNoteFor(cross),
+    ...instructionTail(task, maxBriefChars),
+  ].join('\n')
+}
+
+/**
+ * The instruction handed to the CURRENT agent on a retry whose brief file
+ * already exists but never reached the completion marker: keep what is
+ * written, complete the rest, same file.
+ */
+export function continueInstruction(
+  briefPath: string,
+  task: string,
+  maxBriefChars: number,
+  cross?: { title: string },
+): string {
+  return [
+    `[handoff] /handoff 重试：交接简报已部分写于 ${briefPath}（上次超时未完成）。本回合唯一任务：读取该文件，在已有内容基础上补完——已写且仍准确的各节保留原样，只补齐缺失或过时的部分。`,
+    '',
+    ...BRIEF_SECTIONS,
+    ...crossNoteFor(cross),
+    ...instructionTail(task, maxBriefChars),
   ].join('\n')
 }
 
@@ -110,7 +170,7 @@ export function bootstrapPrompt(pending: PendingHandoff, brief: string): string 
     ? `本次交接来自另一个工作区（${pending.cwd}）：简报中的原路径对你只读，写入一律在当前工作区进行；简报与当前工作区不符时以当前工作区为准。`
     : ''
   return [
-    `[handoff] 你是新会话，无历史；上一会话的全部上下文在下方简报中（源 ${String(pending.agent.id)}，文件 ${pending.briefPath}）。${crossNote}直接开始执行 Task：按 Next steps 推进；仅对简报未覆盖且无法查证的信息询问用户。`,
+    `[handoff] 你是新会话，无历史；上一会话的全部上下文在下方简报中（源 ${pending.originLabel ?? String(pending.agent.id)}，文件 ${pending.briefPath}）。${crossNote}直接开始执行 Task：按 Next steps 推进；仅对简报未覆盖且无法查证的信息询问用户。`,
     '',
     '---',
     brief,
@@ -128,7 +188,7 @@ function reportFailure(rt: HandoffRuntime, pending: PendingHandoff, reason: stri
           content: [
             {
               type: 'text',
-              text: `[handoff] 交接未完成（${reason}）。简报文件（若有）保留在 ${pending.briefPath}，可检查后重新执行 /handoff。`,
+              text: `[handoff] 交接未完成（${reason}）。简报文件（若有）保留在 ${pending.briefPath}。重试请执行不带参数的 /handoff（或 /handoff --retry）：已写内容会保留并继续补完。`,
             },
           ],
           source: { kind: 'user' },

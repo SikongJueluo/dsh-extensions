@@ -17,7 +17,7 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { PACKAGE_NAME, RPC_CHANNEL } from './identity.js'
-import type { ModelChoice } from './brief.js'
+import { coerceModelChoice, type ModelChoice } from './brief.js'
 
 /** One endpoint segment of the channel (same grammar as connection RPC). */
 const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
@@ -57,6 +57,14 @@ export interface ChoiceRequestWire {
   readonly pickWorkspace?: boolean
   /** The model came from `--model`; the picker starts at the workspace step. */
   readonly modelFixed?: boolean
+  /**
+   * Retry defaults from the previous attempt's sidecar meta: the picker marks
+   * these as "上次" so a retry starts one click from where it left off.
+   */
+  readonly previous?: {
+    readonly choice: ModelChoice
+    readonly workspaceId?: WorkspacePick
+  }
 }
 
 /** The workspace verdict riding a choice: `'origin'` or a registry id. */
@@ -84,18 +92,7 @@ export interface HandoffChannel {
 
 /** Narrow the model part of an untrusted browser payload. */
 function parseModelChoice(record: Record<string, unknown>): ModelChoice | undefined {
-  if (record.kind === 'inherit') return { kind: 'inherit' }
-  if (record.kind === 'default') return { kind: 'default' }
-  if (record.kind === 'model') {
-    const provider = record.provider
-    const model = record.model
-    if (typeof provider !== 'string' || provider.length === 0) return undefined
-    if (typeof model !== 'string' || model.length === 0) return undefined
-    const effort = record.reasoningEffort
-    if (effort !== undefined && (typeof effort !== 'string' || effort.length === 0)) return undefined
-    return { kind: 'model', provider, model, ...(effort === undefined ? {} : { reasoningEffort: effort }) }
-  }
-  return undefined
+  return coerceModelChoice(record)
 }
 
 /**
@@ -147,6 +144,7 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
           ...(entry.workspaces === undefined ? {} : { workspaces: entry.workspaces }),
           ...(entry.pickWorkspace === undefined ? {} : { pickWorkspace: entry.pickWorkspace }),
           ...(entry.modelFixed === undefined ? {} : { modelFixed: entry.modelFixed }),
+          ...(entry.previous === undefined ? {} : { previous: entry.previous }),
         }))
         return { requests }
       }

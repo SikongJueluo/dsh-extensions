@@ -8,8 +8,12 @@
  * completion-marked brief where the instruction asked for it, and assert the
  * fresh session is created on the chosen model with the brief as its first
  * prompt.
+ *
+ * Part 3 — bare /handoff retries: nothing-to-resume, timeout → continue the
+ * partial brief in place, and complete-but-unspawned (a lost watch) → direct
+ * spawn without a briefing turn.
  */
-import { access, mkdir, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { name, inject, Config, apply, COMMAND_NAME } from './lib/index.js'
@@ -57,9 +61,25 @@ apply(ctx, config)
 if (registered === null || registered.name !== COMMAND_NAME) throw new Error('command not registered')
 console.log('registered command:', registered.name, '|', registered.description)
 
-const result = await registered.handler({ rawInput: '   ', agent: null, signal: null })
+// A bare /handoff is the retry entry: with no unfinished record in sight it
+// fails by naming the retry contract, not with a usage error.
+const part1Agent = {
+  id: 'part1-session',
+  session: { header: { cwd: '/nonexistent-smoke' } },
+  followup() {},
+}
+const result = await registered.handler({ rawInput: '   ', agent: part1Agent, signal: null })
 console.log('empty-args result:', JSON.stringify(result))
-if (result.kind !== 'error') throw new Error('expected usage error')
+if (result.kind !== 'error' || !result.text.includes('没有可重试')) {
+  throw new Error('expected the no-retryable error for empty input')
+}
+
+// --retry and a task description reject each other up front.
+const retryClash = await registered.handler({ rawInput: '--retry fix readme', agent: part1Agent, signal: null })
+console.log('retry-clash result:', JSON.stringify(retryClash))
+if (retryClash.kind !== 'error' || !retryClash.text.includes('互斥')) {
+  throw new Error('expected --retry plus a task to be rejected as exclusive')
+}
 
 const badModelFlag = await registered.handler({ rawInput: '--model nogood fix readme', agent: null, signal: null })
 console.log('bad-model-flag result:', JSON.stringify(badModelFlag))
@@ -404,6 +424,149 @@ if (ordered.meta.cwd !== targetCwd || ordered.options.provider !== 'picked-provi
   throw new Error(`flag order broke resolution: ${JSON.stringify(ordered)}`)
 }
 console.log('ordered flags spawn:', ordered.meta.cwd)
+
+// --- part 3: bare /handoff retries ---------------------------------------
+// Every cycle above spawned, so every sidecar meta is spawn-marked: a bare
+// /handoff has nothing to resume.
+const bareIdle = await registered.handler({ rawInput: '', agent, signal: null })
+console.log('bare /handoff (all spawned):', JSON.stringify(bareIdle))
+if (bareIdle.kind !== 'error' || !bareIdle.text.includes('没有可重试')) {
+  throw new Error('bare /handoff must fail when every record is spawned')
+}
+
+// The flagged cycle must have left a spawn-marked meta next to its brief.
+const orderedMeta = JSON.parse(await readFile(ordered.briefPath.replace(/\.md$/, '.meta.json'), 'utf8'))
+if (orderedMeta.task !== 'ordered cycle' || orderedMeta.originSession !== 'origin-session'
+  || orderedMeta.spawnedAt === undefined || orderedMeta.target.path !== targetCwd) {
+  throw new Error(`spawned cycle must leave a marked meta: ${JSON.stringify(orderedMeta)}`)
+}
+
+// A handoff whose brief never completes: the watcher times out, queues the
+// failure notice that teaches the bare-/handoff retry, and leaves the sidecar
+// unspawned next to a partial brief.
+followups.length = 0
+created = null
+renamed = null
+const slowHandled = registered.handler({ rawInput: 'slow cycle', agent, signal: null })
+let slowPick = null
+for (let i = 0; i < 40 && slowPick === null; i += 1) {
+  const listed = await channel('pending', {})
+  if (listed.requests.length > 0) slowPick = listed.requests[0]
+  else await new Promise(resolve => setTimeout(resolve, 10))
+}
+if (slowPick === null) throw new Error('slow cycle never published a pick')
+await channel('choose', { requestId: slowPick.id, choice: { kind: 'inherit', workspace: 'origin' } })
+const slowAnswer = await slowHandled
+if (slowAnswer.kind !== 'success') throw new Error(`slow cycle failed: ${JSON.stringify(slowAnswer)}`)
+const slowBriefPath = followups[0].content[0].text.match(/\S+handoff\.md/)?.[0]
+if (slowBriefPath === undefined) throw new Error('slow cycle instruction names no file')
+await mkdir(dirname(slowBriefPath), { recursive: true })
+await writeFile(slowBriefPath, '# Goal\nslow\n', 'utf8')
+const slowMetaPath = slowBriefPath.replace(/\.md$/, '.meta.json')
+let slowMeta = JSON.parse(await readFile(slowMetaPath, 'utf8'))
+if (slowMeta.task !== 'slow cycle' || slowMeta.spawnedAt !== undefined) {
+  throw new Error(`timed-out handoff must leave an unspawned meta: ${JSON.stringify(slowMeta)}`)
+}
+let notice = null
+for (let i = 0; i < 450 && notice === null; i += 1) {
+  if (followups.length >= 2 && followups[1].content[0].text.includes('交接未完成')) notice = followups[1]
+  else await new Promise(resolve => setTimeout(resolve, 10))
+}
+if (notice === null) throw new Error('the timed-out watcher never queued the failure notice')
+if (!notice.content[0].text.includes('不带参数的 /handoff')) {
+  throw new Error('failure notice does not teach the bare-/handoff retry')
+}
+console.log('timeout notice queued')
+
+// Bare /handoff resumes it: the published pick carries the previous picks as
+// defaults, and the origin agent is told to CONTINUE the same file (no new
+// timestamp beside it).
+followups.length = 0
+created = null
+const retryHandled = registered.handler({ rawInput: '   ', agent, signal: null })
+let retryPick = null
+for (let i = 0; i < 40 && retryPick === null; i += 1) {
+  const listed = await channel('pending', {})
+  if (listed.requests.length > 0) retryPick = listed.requests[0]
+  else await new Promise(resolve => setTimeout(resolve, 10))
+}
+if (retryPick === null) throw new Error('bare /handoff never published a pick')
+if (retryPick.previous?.choice?.kind !== 'inherit' || retryPick.previous?.workspaceId !== 'ws-origin') {
+  throw new Error(`retry pick lacks the previous defaults: ${JSON.stringify(retryPick.previous)}`)
+}
+if (!retryPick.task.includes('slow cycle')) {
+  throw new Error(`retry pick does not show the recovered task: ${retryPick.task}`)
+}
+await channel('choose', {
+  requestId: retryPick.id,
+  choice: { kind: 'model', provider: 'picked-provider', model: 'picked-model', workspace: 'origin' },
+})
+const retryAnswer = await retryHandled
+if (retryAnswer.kind !== 'success' || !retryAnswer.text.includes('resumed')) {
+  throw new Error(`bare /handoff retry failed: ${JSON.stringify(retryAnswer)}`)
+}
+const resumeInstruction = followups[0].content[0].text
+if (!resumeInstruction.includes('补完') || !resumeInstruction.includes(slowBriefPath)) {
+  throw new Error('retry must continue the same brief file in place')
+}
+// Completing the file now spawns as usual, and the meta gets its spawn mark
+// plus the re-resolved choice.
+await writeFile(slowBriefPath, '# Goal\nslow\n\n## Task\nslow cycle\n<!-- handoff:complete -->\n', 'utf8')
+for (let i = 0; i < 200 && created === null; i += 1) await new Promise(resolve => setTimeout(resolve, 10))
+if (created === null) throw new Error('the retried watcher never spawned')
+if (renamed !== 'Handoff: slow cycle') throw new Error(`retry spawn title wrong: ${renamed}`)
+slowMeta = JSON.parse(await readFile(slowMetaPath, 'utf8'))
+if (slowMeta.spawnedAt === undefined) throw new Error('spawn must mark the retried meta')
+if (slowMeta.choice.provider !== 'picked-provider') throw new Error('retry must record the re-resolved choice')
+if (!spawnedFollowups[0].content[0].text.includes('origin-session')) {
+  throw new Error('retry bootstrap prompt must name the original origin session')
+}
+console.log('retry (continue in place) spawned; meta marked')
+
+// A second timeout, then the brief completes AFTER the watcher died (a lost
+// watch / dsh restart): the file carries the marker while the meta stays
+// unspawned. A fully flagged retry then spawns straight from the file — no
+// dialog, no briefing turn.
+followups.length = 0
+created = null
+renamed = null
+const lostHandled = registered.handler({ rawInput: 'lost watch cycle', agent, signal: null })
+let lostPick = null
+for (let i = 0; i < 40 && lostPick === null; i += 1) {
+  const listed = await channel('pending', {})
+  if (listed.requests.length > 0) lostPick = listed.requests[0]
+  else await new Promise(resolve => setTimeout(resolve, 10))
+}
+if (lostPick === null) throw new Error('lost-watch cycle never published a pick')
+await channel('choose', { requestId: lostPick.id, choice: { kind: 'inherit', workspace: 'origin' } })
+const lostAnswer = await lostHandled
+if (lostAnswer.kind !== 'success') throw new Error(`lost-watch cycle failed: ${JSON.stringify(lostAnswer)}`)
+const lostBriefPath = followups[0].content[0].text.match(/\S+handoff\.md/)?.[0]
+await mkdir(dirname(lostBriefPath), { recursive: true })
+await writeFile(lostBriefPath, '# Goal\nlost\n', 'utf8')
+for (let i = 0; i < 450 && followups.length < 2; i += 1) {
+  await new Promise(resolve => setTimeout(resolve, 10))
+}
+if (followups.length < 2) throw new Error('lost-watch cycle never timed out')
+await writeFile(lostBriefPath, '# Goal\nlost\n<!-- handoff:complete -->\n', 'utf8')
+await new Promise(resolve => setTimeout(resolve, 100))
+if (created !== null) throw new Error('no watcher should be alive after the timeout')
+
+followups.length = 0
+const directHandled = await registered.handler({
+  rawInput: '--model picked-provider/picked-model --workspace Origin Space --retry',
+  agent,
+  signal: null,
+})
+if (directHandled.kind !== 'success' || !directHandled.text.includes('already complete')) {
+  throw new Error(`complete-file retry must spawn directly: ${JSON.stringify(directHandled)}`)
+}
+if (followups.length !== 0) throw new Error('complete-file retry must not queue a briefing turn')
+if (created === null) throw new Error('complete-file retry did not spawn')
+if (renamed !== 'Handoff: lost watch cycle') throw new Error(`direct retry title wrong: ${renamed}`)
+const lostMeta = JSON.parse(await readFile(lostBriefPath.replace(/\.md$/, '.meta.json'), 'utf8'))
+if (lostMeta.spawnedAt === undefined) throw new Error('direct retry must mark the meta spawned')
+console.log('retry (direct spawn from complete file) OK')
 
 for (const dispose of [...flowDisposers, ...disposers]) dispose()
 await rm(cwd, { recursive: true, force: true })

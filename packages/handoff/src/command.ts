@@ -4,13 +4,16 @@
  *
  * @module dsh-handoff/command
  */
+import { readFile } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CommandDefinition, CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-user-questions'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { COMMAND_NAME, DEFAULT_BRIEF_DIR, PACKAGE_NAME } from './identity.js'
-import { briefInstruction, startHandoffWatch, timestampSlug, type HandoffRuntime, type ModelChoice, type PendingHandoff } from './brief.js'
+import { spawnHandoff } from './spawn.js'
+import { COMMAND_NAME, COMPLETE_MARKER, DEFAULT_BRIEF_DIR, PACKAGE_NAME } from './identity.js'
+import { briefInstruction, continueInstruction, startHandoffWatch, timestampSlug, type HandoffRuntime, type ModelChoice, type PendingHandoff } from './brief.js'
+import { findLatestUnspawned, metaPathFor, writeMeta, type RecoveredHandoff } from './meta.js'
 import type { WorkspacePick } from './channel.js'
 import {
   consumeTitleSpec,
@@ -42,6 +45,8 @@ const WORKSPACE_MENU_LIMIT = 50
 const MODEL_FLAG = '--model'
 /** Prefix flag selecting the target workspace without a dialog. */
 const WORKSPACE_FLAG = '--workspace'
+/** Bare flag resuming the newest unfinished handoff; same as empty input. */
+const RETRY_FLAG = '--retry'
 
 function ok(text: string): CommandResult {
   return { kind: 'success', text }
@@ -159,6 +164,12 @@ async function listModelRoutes(ctx: Context): Promise<ModelRoute[]> {
 type AskOutcome =
   | { kind: 'choice'; choice: ModelChoice; workspace: WorkspacePick }
   | { kind: 'cancel'; reason?: string }
+
+/** Retry defaults recovered from a previous attempt's sidecar meta. */
+interface PreviousDefaults {
+  readonly choice: ModelChoice
+  readonly workspaceId?: WorkspacePick
+}
 
 /** The model card's own outcome (the workspace verdict is asked separately). */
 type ModelAskOutcome = { kind: 'choice'; choice: ModelChoice } | { kind: 'cancel'; reason?: string }
@@ -350,6 +361,9 @@ function routeText(label: string, summary: RouteSummary | undefined): string {
  * `modelFixed` means the model came from `--model`; the browser then starts
  * (and the card path skips) the model step, and the returned choice is a
  * placeholder the caller overrides with the flag's route.
+ *
+ * `previous` (retries only) forwards the last attempt's picks so the picker
+ * can mark them as the defaults; the card fallback path ignores it.
  */
 async function resolveChoice(
   rt: HandoffRuntime,
@@ -358,6 +372,7 @@ async function resolveChoice(
   roster: WorkspaceRoster,
   needWorkspace: boolean,
   modelFixed: boolean,
+  previous?: PreviousDefaults,
 ): Promise<AskOutcome> {
   const { ctx, config } = rt
   const inherited = sessionRoute(ctx, agent)
@@ -378,6 +393,7 @@ async function resolveChoice(
             ...(modelFixed ? { modelFixed: true } : {}),
           }
           : {}),
+        ...(previous === undefined ? {} : { previous }),
       },
       rt.pickTimeoutMs,
     )
@@ -423,20 +439,32 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
   const { ctx, config } = rt
   return {
     name: COMMAND_NAME,
-    description: 'summarize this session into a self-contained brief, then start a fresh session on the task',
-    input: { hint: '[--model provider/model] [--workspace <title|path>] <task description>' },
+    description: 'summarize this session into a self-contained brief, then start a fresh session on the task; a bare /handoff retries the last unfinished handoff',
+    input: { hint: '[--model provider/model] [--workspace <title|path>] [--retry] <task description>' },
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
       const agent = invocation.agent
       let task = invocation.rawInput.trim()
-      const usage = `Usage: /handoff [${MODEL_FLAG} provider/model] [${WORKSPACE_FLAG} <title|path>] <task description>`
+      const usage = `Usage: /handoff [${MODEL_FLAG} provider/model] [${WORKSPACE_FLAG} <title|path>] [${RETRY_FLAG}] <task description>`
 
       // Leading flags (`--model provider/model`, `--workspace <title|path>`)
       // skip their dialog step; flags may appear in either order. A workspace
       // title may contain spaces, so `--workspace` first tries the longest
       // registered-title prefix before falling back to a single token (path).
+      // `--retry` takes no value and resumes the newest unfinished handoff.
       let flagChoice: ModelChoice | undefined
       let flagWorkspaceSpec: string | undefined
+      let retryFlag = false
       for (;;) {
+        if (task === RETRY_FLAG) {
+          retryFlag = true
+          task = ''
+          break
+        }
+        if (task.startsWith(`${RETRY_FLAG} `)) {
+          retryFlag = true
+          task = task.slice(RETRY_FLAG.length + 1).trim()
+          continue
+        }
         const flag = task.startsWith(`${MODEL_FLAG} `)
           ? MODEL_FLAG
           : task.startsWith(`${WORKSPACE_FLAG} `)
@@ -466,7 +494,13 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         }
         task = rest.slice(space + 1).trim()
       }
-      if (task.length === 0) return fail(usage)
+      if (retryFlag && task.length > 0) {
+        return fail(
+          `${RETRY_FLAG} 与任务描述互斥：重试上一次交接时不写任务（沿用原任务），发起新交接时才写任务描述。\n${usage}`,
+        )
+      }
+      // A bare /handoff (empty input) is the retry entry.
+      const retry = retryFlag || task.length === 0
 
       const key = keyOf(agent)
       if (rt.pending.has(key)) {
@@ -490,13 +524,56 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       const roster = await snapshotRoster(ctx, cwd)
       const needWorkspace = flagTarget === undefined && roster.others.some((row) => !row.missing)
 
+      const workspace = cwd.replace(/\/+$/, '')
+      const dir = config.dir?.startsWith('/') === true
+        ? config.dir.replace(/\/+$/, '')
+        : `${workspace}/${config.dir ?? DEFAULT_BRIEF_DIR}`
+
+      // --- retry recovery -------------------------------------------------
+      // The sidecar meta is the only state that survives a timeout, a dsh
+      // restart, or a spawn crash: the newest record without `spawnedAt` is
+      // the handoff a bare /handoff resumes.
+      let recovered: RecoveredHandoff | undefined
+      if (retry) {
+        recovered = await findLatestUnspawned(dir)
+        if (recovered === undefined) {
+          return fail(`没有可重试的交接：${dir} 里没有未完成的记录。发起新交接请写 /handoff <任务描述>。`)
+        }
+      }
+      let existingBrief: string | undefined
+      if (recovered !== undefined) {
+        try {
+          existingBrief = await readFile(recovered.briefPath, 'utf8')
+        } catch {
+          // Never written: the retry re-issues the full briefing instruction.
+        }
+      }
+
+      const briefPath = recovered?.briefPath ?? `${dir}/${timestampSlug(new Date())}-handoff.md`
+      const metaPath = metaPathFor(briefPath)
+      const taskText = recovered?.meta.task ?? task
+      const originSession = recovered?.meta.originSession ?? key
+      const createdAt = recovered?.meta.createdAt ?? Date.now()
+      const previous: PreviousDefaults | undefined = recovered === undefined
+        ? undefined
+        : { choice: recovered.meta.choice, workspaceId: recovered.meta.target.workspaceId ?? 'origin' }
+      const notOrigin = String(agent.id) !== originSession
+
       let choice: ModelChoice
       let target: HandoffTarget
       if (flagChoice !== undefined && flagTarget !== undefined) {
         choice = flagChoice
         target = flagTarget
       } else if (config.confirm !== false) {
-        const outcome = await resolveChoice(rt, agent, task, roster, needWorkspace, flagChoice !== undefined)
+        const outcome = await resolveChoice(
+          rt,
+          agent,
+          retry ? `重试：${taskText}` : taskText,
+          roster,
+          needWorkspace,
+          flagChoice !== undefined,
+          previous,
+        )
         if (outcome.kind === 'cancel') {
           return outcome.reason === undefined ? ok('Handoff cancelled.') : fail(outcome.reason)
         }
@@ -504,6 +581,16 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         const resolved = flagTarget !== undefined ? flagTarget : await resolvePick(ctx, roster, outcome.workspace)
         if ('error' in resolved) return fail(resolved.error)
         target = resolved
+      } else if (previous !== undefined) {
+        // Dialog-free retry: the previous picks stand in for the defaults.
+        choice = flagChoice ?? previous.choice
+        if (flagTarget !== undefined) {
+          target = flagTarget
+        } else if (previous.workspaceId !== undefined && previous.workspaceId !== 'origin') {
+          target = (await resolveTargetById(ctx, previous.workspaceId)) ?? targetForOrigin(roster)
+        } else {
+          target = targetForOrigin(roster)
+        }
       } else {
         choice = flagChoice ?? { kind: 'inherit' }
         target = flagTarget ?? targetForOrigin(roster)
@@ -511,27 +598,72 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       const crossWorkspace = target.path !== roster.origin.path
       const choiceText = describeChoice(choice, sessionRoute(ctx, agent), defaultRoute(ctx))
 
-      const workspace = cwd.replace(/\/+$/, '')
-      const dir = config.dir?.startsWith('/') === true
-        ? config.dir.replace(/\/+$/, '')
-        : `${workspace}/${config.dir ?? DEFAULT_BRIEF_DIR}`
-      const briefPath = `${dir}/${timestampSlug(new Date())}-handoff.md`
+      // The sidecar is the retry contract — task, picks, and the spawn
+      // record. A failed write only costs retryability, never the handoff;
+      // on a retry it also keeps the record truthful about re-resolved picks.
+      try {
+        await writeMeta(metaPath, { version: 1, task: taskText, originSession, target, choice, createdAt })
+      } catch (error) {
+        ctx.logger(PACKAGE_NAME).warn('meta write failed; this handoff will not be retryable', {
+          error: String(error),
+          metaPath,
+        })
+      }
+
+      // A brief that already carries the completion marker means the watch
+      // was lost (timeout race, dsh restart, spawn crash): no briefing turn,
+      // spawn straight from the file.
+      if (existingBrief !== undefined && existingBrief.includes(COMPLETE_MARKER)) {
+        const pending: PendingHandoff = {
+          agent,
+          cwd,
+          target,
+          crossWorkspace,
+          briefPath,
+          task: taskText,
+          originLabel: originSession,
+          choice,
+          startedAt: Date.now(),
+          stop: () => {},
+        }
+        try {
+          await spawnHandoff(rt, pending, existingBrief)
+        } catch (error) {
+          ctx.logger(PACKAGE_NAME).warn('retry spawn failed', { error: String(error), briefPath })
+          return fail(`重试失败：新会话创建未成功（${String(error)}）。记录未标记，可再次执行 /handoff 重试。`)
+        }
+        ctx.logger(PACKAGE_NAME).info('handoff resumed; brief already complete', {
+          session: key,
+          briefPath,
+          choice: choiceText,
+          target: target.path,
+        })
+        return ok(
+          [
+            'Handoff resumed — the brief was already complete, so the fresh session has been spawned.',
+            `- Brief: \`${briefPath}\`（发起于 ${new Date(createdAt).toLocaleString('zh-CN')}）`,
+            `- Model: ${choiceText}`,
+            ...(crossWorkspace ? [`- Target workspace: ${target.title} (\`${target.path}\`)`] : []),
+          ].join('\n'),
+        )
+      }
 
       // Queue the briefing turn on the CURRENT agent. followup parks a normal
       // next-turn message, so a busy agent writes the brief after its current
       // turn finishes. The brief always lands origin-side: that is the one
       // place the origin agent can write under every sandbox mode.
+      const instruction = existingBrief === undefined
+        ? briefInstruction(briefPath, taskText, rt.maxBriefChars, crossWorkspace ? { title: target.title } : undefined)
+        : continueInstruction(briefPath, taskText, rt.maxBriefChars, crossWorkspace ? { title: target.title } : undefined)
+      const notOriginNote = notOrigin
+        ? `[handoff] 本次为重试，原会话是 ${originSession}；你并非原会话，无法从你的历史确认的内容不要臆造，写进 Open questions。\n`
+        : ''
       agent.followup(
         createUserMessage({
           content: [
             {
               type: 'text',
-              text: briefInstruction(
-                briefPath,
-                task,
-                rt.maxBriefChars,
-                crossWorkspace ? { title: target.title } : undefined,
-              ),
+              text: notOriginNote + instruction,
             },
           ],
           source: { kind: 'user' },
@@ -544,7 +676,8 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         target,
         crossWorkspace,
         briefPath,
-        task,
+        task: taskText,
+        ...(recovered === undefined ? {} : { originLabel: originSession }),
         choice,
         startedAt: Date.now(),
         stop: () => {},
@@ -552,16 +685,21 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       rt.pending.set(key, pending)
       startHandoffWatch(rt, pending)
 
-      ctx.logger(PACKAGE_NAME).info('handoff requested', {
+      ctx.logger(PACKAGE_NAME).info(recovered === undefined ? 'handoff requested' : 'handoff retry started', {
         session: key,
         briefPath,
         choice: choiceText,
         target: target.path,
       })
+      const resumeNote = recovered === undefined
+        ? undefined
+        : existingBrief === undefined
+          ? 'Handoff resumed — the brief was never written, so the briefing instruction was re-issued.'
+          : 'Handoff resumed — the existing partial brief will be completed in place.'
       return ok(
         [
-          'Handoff started.',
-          `- Brief target: \`${briefPath}\``,
+          resumeNote ?? 'Handoff started.',
+          `- Brief target: \`${briefPath}\`${recovered === undefined ? '' : ' (retry)'}`,
           `- Model: ${choiceText}`,
           ...(crossWorkspace ? [`- Target workspace: ${target.title} (\`${target.path}\`)`] : []),
           crossWorkspace
