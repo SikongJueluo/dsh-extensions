@@ -1,0 +1,106 @@
+# dsh-triggers
+
+**结构化交接触发器**：把两个普通 session 绑成一个「执行 ↔ 审核」循环。执行者收尾时调用
+`trigger_signal` 工具提交交付信号；其回合**正常结束后**，宿主把审核 prompt 排进审核者
+（原始讨论 session）的队列；审核者以 `rework` / `pass` / `needs_user` 回签，返工意见排回
+**同一个执行 session**。轮次有预算、可暂停/恢复/取消，一切推进都在宿主进程里完成——
+浏览器关着、没人盯着也不中断。
+
+产品形态是通用的「事件 + 模板 + 目标 session」：执行—审核循环是首个预设（一个规则组的
+两条方向行共享生命周期与轮次预算），模板可编辑复用。
+
+## 循环语义
+
+```text
+启动（handoff 交接 或 UI「启动运行」）
+  └─ 第 N 轮：phase=awaiting-delivery（执行者工作）
+       执行者调用 trigger_signal(runId, deliver, summary)   ← 工具结果落日志，回合随即结束
+       turn/end(completed) → 审核 prompt 队列投给审核者，phase=awaiting-review
+  └─ 审核者调用 trigger_signal(runId, rework|pass|needs_user, summary)
+       rework 且 N < max  → 返工 prompt 排回执行者，N+1 轮开始
+       rework 且 N = max  → paused-budget（保留待发返工意见；加预算可续）
+       pass               → completed（执行者收到一条完成通知）
+       needs_user         → paused-user（双方任一方都可提出）
+```
+
+硬性规则：
+
+- **信号只认工具**。普通回复、step 结束、中间输出都不推进；模型忘叫工具 ≠ 通过。
+- **只认本回合**。信号绑定其所在 turn；该 turn 以 `aborted` / `error` 等非 `completed`
+  结束 → `paused-error`，绝不按已交付推进。同回合重复同信号是幂等 no-op，换结论则拒绝。
+- **迟到即拒绝**。暂停/取消/完成后的 run 拒绝一切信号，旧轮次的信号叫不醒任何人。
+- **最后一轮仍完整送审**。预算挡的是「第 N+1 次执行」，不是第 N 次审核。
+- **暂停 ≠ 打断**。暂停/预算用尽只停自动交接，不 cancel 正在跑的 agent。
+
+## 可靠投递
+
+每次投递先持久化一条 Delivery（含一次性铸造的 `requestId`）再调
+`ctx.sessionController.prompt(mode: 'queue')`；宿主对已入队/已记录的 `requestId`
+返回原接受而不重复插入，因此重启补投与手动「重投」天然幂等。发送失败（队列拒绝/超时）
+标记 failed 并把 run 置 `paused-error`，由用户核对后重投——不盲目重发。
+
+插件重启时的恢复扫描：带未决信号的 active run 置 `paused-error`（错过 turn/end、无法
+确认回合结局，交用户判断）；pending 状态的投递按原 `requestId` 补发。
+
+状态只存宿主 `storageDomain`（`triggers` 域：templates / bindings / runs / deliveries）；
+模型看到的一切（工具结果、投递 prompt）都在正常 session 日志里。
+
+## GUI
+
+两个入口，同一套编辑器（`/dsh-triggers` 通道，全部状态读写走宿主，无第二写路径）：
+
+- **侧边栏「触发器」**：规则组表格、模板、运行与投递记录。
+- **会话标题操作区 chip**：本 session 参与的运行状态（如「触发 · 第 2/5 轮 · 等待审核」），
+  点开有暂停/恢复/续一轮/取消。
+
+规则组表格（无「当…则…」句式，单元格下拉可搜索）：
+
+| 来源 Session | 触发事件 | 目标 Session | Prompt 模板 | 启用 |
+| --- | --- | --- | --- | --- |
+| 执行 Session | 本轮交付完成 | 原始 Parent | 审核实现结果 | ✓ |
+| 原始 Parent | 审核要求返工 | 执行 Session | 根据审核意见返工 | |
+
+行展开是运行状态、控制按钮、历史与最近投递（失败可重投）。模板正文单独编辑，变量
+（`{{summary}}` `{{task}}` `{{round}}` `{{maxRounds}}`）用标签按钮插入。内置模板可改
+正文不可删；对运行中的 run，模板/规则编辑不生效（run 启动时已快照双侧 session、预算与
+模板正文）。
+
+移动端：全部点按操作、≥44px 目标、`min(px, vw)` 宽度、表格横向滚动，无 hover-only 行为。
+
+## 与 dsh-handoff 的接入
+
+handoff 选择界面可勾选「执行完成后自动交回当前 Session 审核」；spawn 流程在发出首条
+执行 prompt **之前** 调用本插件的 `triggerBindings` 服务建好绑定并启动 run（顺序：创建
+session → 持久关联 → 建绑定 → 首条 prompt），执行者拿到的首条 prompt 自带 runId 与
+信号说明。详见 dsh-handoff README。默认关闭，不勾选时 handoff 行为与从前完全一致。
+
+## 安装
+
+```sh
+pnpm build
+dsh plugin --profile <name> add ./packages/triggers
+```
+
+或开发 overlay：`dsh --profile web --patch $PWD/packages/triggers/dev.patch.yml --no-open --port <端口>`。
+
+## 配置
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `deliverTimeoutMs` | `120000` | 单次队列投递的等待预算；超时记 failed 并暂停 run |
+
+## 依赖面
+
+- 宿主运行时 peer：`@deepseek-ai/cordis`、`dsh-llm`（defineTool 类型）、`dsh-storage-domain`
+  （+ zod，宿主自带）、`dsh-tools`、`schemastery`；`dsh-agent` / `dsh-session` /
+  `dsh-api-session-controller` / `dsh-client-connection` / `dsh-host-webserver` 为 type-only。
+- 浏览器 half：`client/client.js`（React.createElement，无 JSX），slot：
+  `main`、`sidebar.panellist`、`conversation.session.header.actions`；通信走 `/dsh-triggers`
+  前缀路由（connection 信封 + webServer）。
+- 发布可选服务 `triggerBindings`（`ctx.get('triggerBindings')`）；无 handoff 的组装照常加载。
+
+## Roadmap（未实现）
+
+- 上下文压力阈值暂停（按两边 session 实际窗口占用分别观察）。
+- 单向通知类规则（只有一条方向行的规则组）。
+- 运行详情页跳转对方 session。
