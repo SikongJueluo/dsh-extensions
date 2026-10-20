@@ -17,3 +17,7 @@ lib/
 
 # Vibe
 .dsh/
+
+# pnpm runtime-dir workaround (sandbox)
+.pnpm-run/
+.pnpm-state/

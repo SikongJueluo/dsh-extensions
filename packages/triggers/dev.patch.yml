@@ -1,0 +1,7 @@
+# Development overlay: the locally built plugin entry, by absolute path.
+# Rebuild first (`pnpm build`) so lib/ is current, then restart dsh and refresh
+# the page. Use with the global flag, e.g.
+#   dsh --profile web --patch ./packages/triggers/dev.patch.yml --no-open --port <port>
+- insert:
+    - id: triggers
+      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/triggers/lib/index.js'

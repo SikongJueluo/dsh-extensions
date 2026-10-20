@@ -1,0 +1,11 @@
+# dsh-triggers bundle layer: a single host plugin row.
+#
+# The plugin hard-injects the host `tools`, `sessionController`, and
+# `storageDomain` services (the loop is dead without any of them) and
+# soft-injects `connection` + `webServer` for the browser channel. It publishes
+# the optional `triggerBindings` service that dsh-handoff consumes via
+# ctx.get(); compositions without handoff simply never read it. No isolate
+# realm, mounts cleanly beside the stock `web` profile.
+- insert:
+    - id: triggers
+      name: dsh-triggers
