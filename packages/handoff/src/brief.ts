@@ -60,6 +60,12 @@ export interface PendingHandoff {
   readonly originLabel?: string
   /** Model route chosen in the dialog or via --model; preset inheritance follows it. */
   readonly choice: ModelChoice
+  /**
+   * The auto-review opt-in: bind a dsh-triggers loop (this origin reviews,
+   * the fresh session executes) before the first prompt. Absent = plain
+   * handoff, exactly the pre-review behavior.
+   */
+  readonly review?: { readonly maxRounds: number }
   /** Epoch milliseconds when the command ran. */
   readonly startedAt: number
   /** Stops the watch (idempotent). Assigned by {@link startHandoffWatch}. */
@@ -164,8 +170,18 @@ export function continueInstruction(
   ].join('\n')
 }
 
+/** The executor-side signal rules a review-loop handoff must carry up front. */
+export function reviewBootstrapSection(runId: string, maxRounds: number): string {
+  return [
+    '',
+    '---',
+    `[triggers] 本次任务带自动审核循环（预算 ${maxRounds} 轮）：每轮实现与自查（含测试/构建验证）完成后，调用 trigger_signal 工具提交交付——runId=${runId}、outcome=deliver、summary 写明改了什么、如何验证、证据在哪里——然后结束回合等待审核意见（会作为下一条用户消息送达）；需要用户决定时 outcome=needs_user。`,
+    '未调用工具的普通回复不会推进流程；审核者的返工意见只处理阻塞本轮目标的部分。',
+  ].join('\n')
+}
+
 /** The first prompt of the fresh session: the brief plus bootstrap guidance. */
-export function bootstrapPrompt(pending: PendingHandoff, brief: string): string {
+export function bootstrapPrompt(pending: PendingHandoff, brief: string, review?: { runId: string; maxRounds: number }): string {
   const crossNote = pending.crossWorkspace
     ? `本次交接来自另一个工作区（${pending.cwd}）：简报中的原路径对你只读，写入一律在当前工作区进行；简报与当前工作区不符时以当前工作区为准。`
     : ''
@@ -175,6 +191,7 @@ export function bootstrapPrompt(pending: PendingHandoff, brief: string): string 
     '---',
     brief,
     '---',
+    ...(review === undefined ? [] : [reviewBootstrapSection(review.runId, review.maxRounds)]),
   ].join('\n')
 }
 

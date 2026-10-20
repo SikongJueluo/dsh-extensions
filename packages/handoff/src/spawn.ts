@@ -19,7 +19,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
 import { bootstrapPrompt, type HandoffRuntime, type PendingHandoff } from './brief.js'
-import { markSpawned, metaPathFor } from './meta.js'
+import { markSpawned, metaPathFor, writeReviewBound } from './meta.js'
 import { targetBriefDir } from './workspace.js'
 import { defaultRoute, sessionRoute, toAgentOptions } from './selection.js'
 
@@ -168,6 +168,63 @@ async function copyBriefToTarget(rt: HandoffRuntime, pending: PendingHandoff, fu
 }
 
 /**
+ * Bind the auto-review loop BEFORE the first prompt, so the executor can
+ * never finish before its reviewer exists: create session → persist spawn →
+ * attach → BIND → first followup. A missing triggers plugin or a failed bind
+ * degrades to a plain handoff with a visible notice on the origin session —
+ * the executor still runs; nobody is left orphaned.
+ */
+async function bindReview(
+  rt: HandoffRuntime,
+  pending: PendingHandoff,
+  sessionId: string,
+): Promise<{ runId: string; maxRounds: number } | undefined> {
+  const triggers = rt.ctx.get('triggerBindings')
+  const maxRounds = pending.review?.maxRounds ?? 5
+  if (pending.review === undefined) return undefined
+  if (triggers === undefined) {
+    rt.ctx.logger(PACKAGE_NAME).warn('auto-review requested but dsh-triggers is not mounted; spawning a plain handoff')
+    notifyOrigin(rt, pending, '[handoff] 已按普通交接执行：请求了自动审核，但未挂载 dsh-triggers 插件。')
+    return undefined
+  }
+  try {
+    const bound = await triggers.bindReviewLoop({
+      task: pending.task,
+      executorSession: String(sessionId),
+      parentSession: String(pending.agent.id),
+      maxRounds,
+    })
+    await writeReviewBound(metaPathFor(pending.briefPath), { bindingId: bound.bindingId, runId: bound.runId, maxRounds })
+    rt.ctx.logger(PACKAGE_NAME).info('auto-review loop bound', {
+      bindingId: bound.bindingId,
+      runId: bound.runId,
+      executor: String(sessionId),
+      parent: String(pending.agent.id),
+      maxRounds,
+    })
+    return { runId: bound.runId, maxRounds }
+  } catch (error) {
+    rt.ctx.logger(PACKAGE_NAME).warn('auto-review bind failed; spawning a plain handoff', { error: String(error) })
+    notifyOrigin(rt, pending, `[handoff] 自动审核绑定失败（${String(error)}），本次按普通交接执行。`)
+    return undefined
+  }
+}
+
+/** Queue one visible notice line on the origin session (best effort). */
+function notifyOrigin(rt: HandoffRuntime, pending: PendingHandoff, text: string): void {
+  try {
+    pending.agent.followup(
+      createUserMessage({
+        content: [{ type: 'text', text }],
+        source: { kind: 'user' },
+      }),
+    )
+  } catch {
+    // The origin agent may already be disposed; the log entry above stands.
+  }
+}
+
+/**
  * Create the fresh session and hand it the brief as its first turn.
  *
  * @returns the new session id.
@@ -203,10 +260,13 @@ export async function spawnHandoff(rt: HandoffRuntime, pending: PendingHandoff, 
   // this brief. A missing sidecar (older briefs) is a silent no-op.
   await markSpawned(metaPathFor(pending.briefPath))
   await attachToWorkspace(rt, pending, sessionId)
+  // The review binding must exist before the executor's first prompt: a fast
+  // executor could otherwise deliver into a loop that nobody is watching.
+  const review = await bindReview(rt, pending, sessionId)
 
   handle.agent.followup(
     createUserMessage({
-      content: [{ type: 'text', text: bootstrapPrompt(pending, brief) }],
+      content: [{ type: 'text', text: bootstrapPrompt(pending, brief, review) }],
       source: { kind: 'user' },
     }),
   )

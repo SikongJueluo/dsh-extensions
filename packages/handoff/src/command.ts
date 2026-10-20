@@ -14,7 +14,7 @@ import { spawnHandoff } from './spawn.js'
 import { COMMAND_NAME, COMPLETE_MARKER, DEFAULT_BRIEF_DIR, PACKAGE_NAME } from './identity.js'
 import { briefInstruction, continueInstruction, startHandoffWatch, timestampSlug, type HandoffRuntime, type ModelChoice, type PendingHandoff } from './brief.js'
 import { findLatestUnspawned, metaPathFor, writeMeta, type RecoveredHandoff } from './meta.js'
-import type { WorkspacePick } from './channel.js'
+import type { ReviewPick, WorkspacePick } from './channel.js'
 import {
   consumeTitleSpec,
   resolveFlagTarget,
@@ -47,6 +47,12 @@ const MODEL_FLAG = '--model'
 const WORKSPACE_FLAG = '--workspace'
 /** Bare flag resuming the newest unfinished handoff; same as empty input. */
 const RETRY_FLAG = '--retry'
+/** Bare flag binding an auto-review loop (dsh-triggers) to the handoff. */
+const REVIEW_FLAG = '--review'
+/** Prefix flag setting the auto-review round budget; implies --review. */
+const REVIEW_ROUNDS_FLAG = '--review-rounds'
+/** Round budget offered by default when the user just ticks the toggle. */
+export const DEFAULT_REVIEW_ROUNDS = 5
 
 function ok(text: string): CommandResult {
   return { kind: 'success', text }
@@ -162,7 +168,7 @@ async function listModelRoutes(ctx: Context): Promise<ModelRoute[]> {
 
 /** Dialog outcome: a resolved choice plus its workspace verdict, or a cancellation. */
 type AskOutcome =
-  | { kind: 'choice'; choice: ModelChoice; workspace: WorkspacePick }
+  | { kind: 'choice'; choice: ModelChoice; workspace: WorkspacePick; review?: ReviewPick }
   | { kind: 'cancel'; reason?: string }
 
 /** Retry defaults recovered from a previous attempt's sidecar meta. */
@@ -352,6 +358,48 @@ function routeText(label: string, summary: RouteSummary | undefined): string {
   return `${summary.provider}/${summary.model}${effort}${label === LABEL_DEFAULT ? '（全局默认）' : '（本会话）'}`
 }
 
+/** The shipped review question of the card path: off unless the user opts in. */
+async function askReviewCard(
+  ctx: Context,
+  agent: Agent,
+  defaultRounds: number,
+): Promise<{ enabled: boolean; rounds: number }> {
+  const userQuestions = ctx.get('userQuestions')
+  if (userQuestions === undefined) return { enabled: false, rounds: defaultRounds }
+  try {
+    const ask = userQuestions.ask({
+      questions: [
+        {
+          id: 'review',
+          header: 'Handoff',
+          question: `执行完成后自动交回当前会话审核？（${defaultRounds} 轮预算，可在触发器面板调整）`,
+          options: [
+            { label: '开启自动审核', description: `交付后自动送审，返工意见自动发回执行会话，最多 ${defaultRounds} 轮` },
+            { label: '关闭', description: '普通交接，行为与从前一致' },
+          ],
+        },
+      ],
+      agent,
+    })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<'timeout'>(resolve => {
+      timer = setTimeout(() => resolve('timeout'), CONFIRM_TIMEOUT_MS)
+    })
+    let answer: Awaited<typeof ask> | 'timeout'
+    try {
+      answer = await Promise.race([ask, timeout])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+    if (answer === 'timeout') return { enabled: false, rounds: defaultRounds }
+    const selected = answer.answers[0]?.selected[0]
+    return { enabled: selected === '开启自动审核', rounds: defaultRounds }
+  } catch {
+    // Dismissed card or answerer failure: plain handoff.
+    return { enabled: false, rounds: defaultRounds }
+  }
+}
+
 /**
  * Resolve the fresh session's model and workspace: prefer the browser picker
  * (a searchable, provider-grouped dropdown backed by the same catalog as the
@@ -364,6 +412,10 @@ function routeText(label: string, summary: RouteSummary | undefined): string {
  *
  * `previous` (retries only) forwards the last attempt's picks so the picker
  * can mark them as the defaults; the card fallback path ignores it.
+ *
+ * `reviewOffer` (present = dsh-triggers mounted and the flag did not decide)
+ * surfaces the auto-review toggle on the picker's final step, or as one extra
+ * card on the card path.
  */
 async function resolveChoice(
   rt: HandoffRuntime,
@@ -373,6 +425,7 @@ async function resolveChoice(
   needWorkspace: boolean,
   modelFixed: boolean,
   previous?: PreviousDefaults,
+  reviewOffer?: { defaultRounds: number; enabled?: boolean },
 ): Promise<AskOutcome> {
   const { ctx, config } = rt
   const inherited = sessionRoute(ctx, agent)
@@ -394,6 +447,7 @@ async function resolveChoice(
           }
           : {}),
         ...(previous === undefined ? {} : { previous }),
+        ...(reviewOffer === undefined ? {} : { review: reviewOffer }),
       },
       rt.pickTimeoutMs,
     )
@@ -405,14 +459,41 @@ async function resolveChoice(
     const routes = config.modelMenu !== false ? await listModelRoutes(ctx) : []
     const model = await askChoiceCard(ctx, agent, routes, inherited, fallback)
     if (model.kind === 'cancel') return model
+    if (!needWorkspace && reviewOffer !== undefined) {
+      const review = await askReviewCard(ctx, agent, reviewOffer.defaultRounds)
+      return {
+        kind: 'choice',
+        choice: model.choice,
+        workspace: 'origin',
+        ...(review.enabled ? { review: { enabled: true, rounds: review.rounds } } : {}),
+      }
+    }
     if (!needWorkspace) return { kind: 'choice', choice: model.choice, workspace: 'origin' }
     const workspace = await askWorkspaceCard(ctx, agent, roster)
     if (workspace.kind === 'cancel') return workspace
+    if (reviewOffer !== undefined) {
+      const review = await askReviewCard(ctx, agent, reviewOffer.defaultRounds)
+      return {
+        kind: 'choice',
+        choice: model.choice,
+        workspace: workspace.pick,
+        ...(review.enabled ? { review: { enabled: true, rounds: review.rounds } } : {}),
+      }
+    }
     return { kind: 'choice', choice: model.choice, workspace: workspace.pick }
   }
   if (!needWorkspace) return { kind: 'choice', choice: { kind: 'inherit' }, workspace: 'origin' }
   const workspace = await askWorkspaceCard(ctx, agent, roster)
   if (workspace.kind === 'cancel') return workspace
+  if (reviewOffer !== undefined) {
+    const review = await askReviewCard(ctx, agent, reviewOffer.defaultRounds)
+    return {
+      kind: 'choice',
+      choice: { kind: 'inherit' },
+      workspace: workspace.pick,
+      ...(review.enabled ? { review: { enabled: true, rounds: review.rounds } } : {}),
+    }
+  }
   return { kind: 'choice', choice: { kind: 'inherit' }, workspace: workspace.pick }
 }
 
@@ -440,20 +521,24 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
   return {
     name: COMMAND_NAME,
     description: 'summarize this session into a self-contained brief, then start a fresh session on the task; a bare /handoff retries the last unfinished handoff',
-    input: { hint: '[--model provider/model] [--workspace <title|path>] [--retry] <task description>' },
+    input: { hint: '[--model provider/model] [--workspace <title|path>] [--retry] [--review] [--review-rounds <n>] <task description>' },
     handler: async (invocation: CommandInvocation): Promise<CommandResult> => {
       const agent = invocation.agent
       let task = invocation.rawInput.trim()
-      const usage = `Usage: /handoff [${MODEL_FLAG} provider/model] [${WORKSPACE_FLAG} <title|path>] [${RETRY_FLAG}] <task description>`
+      const usage = `Usage: /handoff [${MODEL_FLAG} provider/model] [${WORKSPACE_FLAG} <title|path>] [${RETRY_FLAG}] [${REVIEW_FLAG}] [${REVIEW_ROUNDS_FLAG} <n>] <task description>`
 
       // Leading flags (`--model provider/model`, `--workspace <title|path>`)
       // skip their dialog step; flags may appear in either order. A workspace
       // title may contain spaces, so `--workspace` first tries the longest
       // registered-title prefix before falling back to a single token (path).
+      // `--review` takes no value and binds the auto-review loop;
+      // `--review-rounds <n>` sets its budget and implies `--review`.
       // `--retry` takes no value and resumes the newest unfinished handoff.
       let flagChoice: ModelChoice | undefined
       let flagWorkspaceSpec: string | undefined
       let retryFlag = false
+      let reviewFlag = false
+      let reviewRoundsFlag: number | undefined
       for (;;) {
         if (task === RETRY_FLAG) {
           retryFlag = true
@@ -463,6 +548,27 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         if (task.startsWith(`${RETRY_FLAG} `)) {
           retryFlag = true
           task = task.slice(RETRY_FLAG.length + 1).trim()
+          continue
+        }
+        if (task === REVIEW_FLAG) {
+          reviewFlag = true
+          task = ''
+          break
+        }
+        if (task.startsWith(`${REVIEW_FLAG} `)) {
+          reviewFlag = true
+          task = task.slice(REVIEW_FLAG.length + 1).trim()
+          continue
+        }
+        if (task.startsWith(`${REVIEW_ROUNDS_FLAG} `)) {
+          const rest = task.slice(REVIEW_ROUNDS_FLAG.length + 1).trim()
+          const space = rest.indexOf(' ')
+          const token = space === -1 ? rest : rest.slice(0, space)
+          const rounds = Number.parseInt(token, 10)
+          if (!Number.isInteger(rounds) || rounds < 1 || rounds > 50) return fail(usage)
+          reviewFlag = true
+          reviewRoundsFlag = rounds
+          task = space === -1 ? '' : rest.slice(space + 1).trim()
           continue
         }
         const flag = task.startsWith(`${MODEL_FLAG} `)
@@ -559,8 +665,20 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         : { choice: recovered.meta.choice, workspaceId: recovered.meta.target.workspaceId ?? 'origin' }
       const notOrigin = String(agent.id) !== originSession
 
+      // The auto-review toggle is offered when dsh-triggers is mounted and
+      // the flags did not already decide it; a retry pre-checks last time's
+      // verdict.
+      const triggersMounted = ctx.get('triggerBindings') !== undefined
+      const reviewOffer = reviewFlag || !triggersMounted
+        ? undefined
+        : {
+          defaultRounds: recovered?.meta.review?.maxRounds ?? DEFAULT_REVIEW_ROUNDS,
+          ...(recovered?.meta.review !== undefined ? { enabled: true } : {}),
+        }
+
       let choice: ModelChoice
       let target: HandoffTarget
+      let dialogReview: ReviewPick | undefined
       if (flagChoice !== undefined && flagTarget !== undefined) {
         choice = flagChoice
         target = flagTarget
@@ -573,11 +691,13 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
           needWorkspace,
           flagChoice !== undefined,
           previous,
+          reviewOffer,
         )
         if (outcome.kind === 'cancel') {
           return outcome.reason === undefined ? ok('Handoff cancelled.') : fail(outcome.reason)
         }
         choice = flagChoice ?? outcome.choice
+        dialogReview = outcome.review
         const resolved = flagTarget !== undefined ? flagTarget : await resolvePick(ctx, roster, outcome.workspace)
         if ('error' in resolved) return fail(resolved.error)
         target = resolved
@@ -598,11 +718,30 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       const crossWorkspace = target.path !== roster.origin.path
       const choiceText = describeChoice(choice, sessionRoute(ctx, agent), defaultRoute(ctx))
 
+      // Final review verdict: flags win, the dialog verdict second, and the
+      // retry default (previous meta) rides inside reviewOffer/dialogReview.
+      const reviewEnabled = reviewFlag || dialogReview?.enabled === true
+      const review = reviewEnabled
+        ? {
+          maxRounds: reviewFlag
+            ? (reviewRoundsFlag ?? DEFAULT_REVIEW_ROUNDS)
+            : (dialogReview?.rounds ?? DEFAULT_REVIEW_ROUNDS),
+        }
+        : undefined
+
       // The sidecar is the retry contract — task, picks, and the spawn
       // record. A failed write only costs retryability, never the handoff;
       // on a retry it also keeps the record truthful about re-resolved picks.
       try {
-        await writeMeta(metaPath, { version: 1, task: taskText, originSession, target, choice, createdAt })
+        await writeMeta(metaPath, {
+          version: 1,
+          task: taskText,
+          originSession,
+          target,
+          choice,
+          createdAt,
+          ...(review === undefined ? {} : { review }),
+        })
       } catch (error) {
         ctx.logger(PACKAGE_NAME).warn('meta write failed; this handoff will not be retryable', {
           error: String(error),
@@ -623,6 +762,7 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
           task: taskText,
           originLabel: originSession,
           choice,
+          ...(review === undefined ? {} : { review }),
           startedAt: Date.now(),
           stop: () => {},
         }
@@ -644,6 +784,7 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
             `- Brief: \`${briefPath}\`（发起于 ${new Date(createdAt).toLocaleString('zh-CN')}）`,
             `- Model: ${choiceText}`,
             ...(crossWorkspace ? [`- Target workspace: ${target.title} (\`${target.path}\`)`] : []),
+            ...(review === undefined ? [] : [`- Auto review: 开启（最多 ${review.maxRounds} 轮，交付自动交回本会话审核）`]),
           ].join('\n'),
         )
       }
@@ -679,6 +820,7 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         task: taskText,
         ...(recovered === undefined ? {} : { originLabel: originSession }),
         choice,
+        ...(review === undefined ? {} : { review }),
         startedAt: Date.now(),
         stop: () => {},
       }
@@ -702,6 +844,7 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
           `- Brief target: \`${briefPath}\`${recovered === undefined ? '' : ' (retry)'}`,
           `- Model: ${choiceText}`,
           ...(crossWorkspace ? [`- Target workspace: ${target.title} (\`${target.path}\`)`] : []),
+          ...(review === undefined ? [] : [`- Auto review: 开启（最多 ${review.maxRounds} 轮，交付自动交回本会话审核）`]),
           crossWorkspace
             ? `The new session appears in workspace "${target.title}" once the brief is complete (timeout ${Math.round(rt.timeoutMs / 1000)}s).`
             : `The new session appears in this workspace's sidebar (title "Handoff: …") once the brief is complete (timeout ${Math.round(rt.timeoutMs / 1000)}s).`,

@@ -30,6 +30,23 @@ export interface HandoffMeta {
   readonly createdAt: number
   /** Epoch ms when the fresh session was created; absent = never spawned. */
   readonly spawnedAt?: number
+  /**
+   * The auto-review loop bound to this handoff. Present once the user opted
+   * in; `bindingId`/`runId` join at bind time (absent = not yet bound).
+   */
+  readonly review?: HandoffReviewMeta
+}
+
+/** Review-loop facts persisted beside the handoff record. */
+export interface HandoffReviewMeta {
+  /** Round budget chosen at command time. */
+  readonly maxRounds: number
+  /** The dsh-triggers binding; set once the loop is bound (pre first prompt). */
+  readonly bindingId?: string
+  /** The active run id the executor signals against. */
+  readonly runId?: string
+  /** Epoch ms when the loop was bound. */
+  readonly boundAt?: number
 }
 
 /** What a retry scan recovered: the record plus its two file paths. */
@@ -52,6 +69,25 @@ export async function writeMeta(metaPath: string, meta: HandoffMeta): Promise<vo
   await writeFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`, 'utf8')
 }
 
+/** Narrow the review section of an untrusted record. */
+function coerceReview(value: unknown): HandoffReviewMeta | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const record = value as Record<string, unknown>
+  if (typeof record.maxRounds !== 'number' || !Number.isInteger(record.maxRounds) || record.maxRounds < 1) return undefined
+  const bindingId = record.bindingId
+  const runId = record.runId
+  const boundAt = record.boundAt
+  if (bindingId !== undefined && typeof bindingId !== 'string') return undefined
+  if (runId !== undefined && typeof runId !== 'string') return undefined
+  if (boundAt !== undefined && typeof boundAt !== 'number') return undefined
+  return {
+    maxRounds: record.maxRounds,
+    ...(bindingId === undefined ? {} : { bindingId }),
+    ...(runId === undefined ? {} : { runId }),
+    ...(boundAt === undefined ? {} : { boundAt }),
+  }
+}
+
 /** Narrow one untrusted JSON document into a record; corrupt files read as absent. */
 function coerceMeta(value: unknown): HandoffMeta | undefined {
   if (typeof value !== 'object' || value === null) return undefined
@@ -71,6 +107,8 @@ function coerceMeta(value: unknown): HandoffMeta | undefined {
   if (typeof record.createdAt !== 'number') return undefined
   const spawnedAt = record.spawnedAt
   if (spawnedAt !== undefined && typeof spawnedAt !== 'number') return undefined
+  const review = record.review === undefined ? undefined : coerceReview(record.review)
+  if (record.review !== undefined && review === undefined) return undefined
   return {
     version: 1,
     task: record.task,
@@ -83,6 +121,7 @@ function coerceMeta(value: unknown): HandoffMeta | undefined {
     choice,
     createdAt: record.createdAt,
     ...(spawnedAt === undefined ? {} : { spawnedAt }),
+    ...(review === undefined ? {} : { review }),
   }
 }
 
@@ -127,5 +166,20 @@ export async function markSpawned(metaPath: string): Promise<boolean> {
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * Record that the review loop is bound (runId in hand), so the sidecar tells
+ * the truth about an auto-review handoff even if dsh dies right after. Never
+ * throws: the loop itself is already live, this only costs inspectability.
+ */
+export async function writeReviewBound(metaPath: string, review: { bindingId: string; runId: string; maxRounds: number }): Promise<void> {
+  try {
+    const meta = coerceMeta(JSON.parse(await readFile(metaPath, 'utf8')))
+    if (meta === undefined) return
+    await writeFile(metaPath, `${JSON.stringify({ ...meta, review: { ...review, boundAt: Date.now() } }, null, 2)}\n`, 'utf8')
+  } catch {
+    // Cosmetic durability: the binding is live on the triggers side already.
   }
 }

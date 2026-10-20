@@ -185,6 +185,15 @@ window.__ModuleLoader__.load({
       var wsState = React.useState(null);
       var wsFor = wsState[0];
       var setWsFor = wsState[1];
+      // Auto-review toggle state (offered on the final step when the host
+      // attached request.review — i.e. dsh-triggers is mounted).
+      var reviewOffer = request.review || null;
+      var reviewState = React.useState({
+        enabled: !!(reviewOffer && reviewOffer.enabled === true),
+        rounds: reviewOffer ? reviewOffer.defaultRounds : 5
+      });
+      var review = reviewState[0];
+      var setReview = reviewState[1];
 
       var modelFixed = request.modelFixed === true;
       var previous = request.previous || null;
@@ -229,12 +238,13 @@ window.__ModuleLoader__.load({
         return function () { alive = false; };
       }, [request === null ? "" : request.id]);
 
-      /** Send the final verdict to the host: model choice plus workspace pick. */
+      /** Send the final verdict to the host: model choice, workspace pick, review toggle. */
       function finalize(choice, workspace) {
         setBusy(true);
         var payload = workspace === undefined
           ? choice
           : Object.assign({}, choice, { workspace: workspace });
+        if (reviewOffer) payload.review = { enabled: review.enabled, rounds: review.rounds };
         operations.choose(request.id, payload).then(function (result) {
           if (result && result.ok) {
             props.onSettled();
@@ -246,6 +256,45 @@ window.__ModuleLoader__.load({
           setBusy(false);
           setError(String(err && err.message ? err.message : err));
         });
+      }
+
+      /** The auto-review toggle riding the final step (tap-friendly). */
+      function reviewToggle() {
+        if (!reviewOffer) return null;
+        return React.createElement("div", {
+          key: "review",
+          style: {
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+            padding: "10px 12px", margin: "0 0 10px",
+            border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.35))",
+            borderRadius: 12
+          }
+        },
+          React.createElement("label", {
+            style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", minHeight: 44, fontSize: 13 }
+          },
+            React.createElement("input", {
+              type: "checkbox", style: { width: 20, height: 20 },
+              checked: review.enabled,
+              onChange: function (event) { setReview({ enabled: event.target.checked, rounds: review.rounds }); }
+            }),
+            React.createElement("span", null, "执行完成后自动交回当前会话审核")
+          ),
+          review.enabled ? React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6 } },
+            [1, 2, 3, 5, 8].map(function (n) {
+              return React.createElement("button", {
+                key: n, type: "button",
+                style: Object.assign({}, button, {
+                  minHeight: 36, minWidth: 44, padding: "4px 10px", fontSize: 13,
+                  background: review.rounds === n ? "var(--dsw-alias-accent-major, #4c6ef5)" : button.background,
+                  color: review.rounds === n ? "#fff" : button.color
+                }),
+                onClick: function () { setReview({ enabled: true, rounds: n }); }
+              }, String(n));
+            }),
+            React.createElement("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary, #9a9aa2)" } }, "轮预算")
+          ) : null
+        );
       }
 
       function submit(choice) {
@@ -423,6 +472,7 @@ window.__ModuleLoader__.load({
             onChange: function (event) { setQuery(event.target.value); }
           }),
           React.createElement("div", { key: "body", style: body }, wsRows),
+          reviewToggle(),
           error !== null
             ? React.createElement("div", { key: "error", style: errorLine }, error)
             : null,
@@ -570,6 +620,10 @@ window.__ModuleLoader__.load({
         error !== null
           ? React.createElement("div", { key: "error", style: errorLine }, error)
           : null,
+        // The model list is the FINAL step only when no workspace step
+        // follows; the toggle rides it then (otherwise it waits for the
+        // workspace step).
+        !needsWorkspace() ? reviewToggle() : null,
         React.createElement("div", { key: "footer", style: footer },
           React.createElement("button", { type: "button", style: button, disabled: busy, onClick: cancel }, "取消")
         )

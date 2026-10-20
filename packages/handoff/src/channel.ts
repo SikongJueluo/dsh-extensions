@@ -65,20 +65,34 @@ export interface ChoiceRequestWire {
     readonly choice: ModelChoice
     readonly workspaceId?: WorkspacePick
   }
+  /**
+   * Offer the auto-review toggle (present = dsh-triggers is mounted): the
+   * picker shows it on its final step and returns the verdict with the
+   * choice. `enabled` pre-checks the box (a retry's previous verdict).
+   */
+  readonly review?: {
+    readonly defaultRounds: number
+    readonly enabled?: boolean
+  }
 }
 
 /** The workspace verdict riding a choice: `'origin'` or a registry id. */
 export type WorkspacePick = 'origin' | (string & {})
 
+/** The auto-review verdict riding a choice. */
+export interface ReviewPick {
+  readonly enabled: boolean
+  readonly rounds: number
+}
+
 /** The user's verdict on one pending pick. */
 export type ChoiceOutcome =
-  | { kind: 'choice'; choice: ModelChoice; workspace: WorkspacePick }
+  | { kind: 'choice'; choice: ModelChoice; workspace: WorkspacePick; review?: ReviewPick }
   | { kind: 'cancel' }
 
 interface PendingChoice extends ChoiceRequestWire {
   settle: (outcome: ChoiceOutcome) => void
 }
-
 /** The package's browser-facing pick channel. */
 export interface HandoffChannel {
   /**
@@ -96,18 +110,35 @@ function parseModelChoice(record: Record<string, unknown>): ModelChoice | undefi
 }
 
 /**
+ * Narrow the review verdict of an untrusted browser payload: absent means
+ * "not offered / left off".
+ */
+function parseReview(value: unknown, defaultRounds: number): ReviewPick | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const record = value as Record<string, unknown>
+  if (typeof record.enabled !== 'boolean') return undefined
+  const rounds = record.rounds === undefined ? defaultRounds : record.rounds
+  if (typeof rounds !== 'number' || !Number.isInteger(rounds) || rounds < 1 || rounds > 50) return undefined
+  return { enabled: record.enabled, rounds }
+}
+
+/**
  * Narrow untrusted browser payloads into a choice plus its workspace verdict.
  * An absent workspace field means `'origin'` (single-workspace deployments and
  * flag-resolved targets never run the browser step).
  */
-function parseChoice(value: unknown): { choice: ModelChoice; workspace: WorkspacePick } | undefined {
+function parseChoice(value: unknown, defaultReviewRounds?: number): { choice: ModelChoice; workspace: WorkspacePick; review?: ReviewPick } | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const record = value as Record<string, unknown>
   const choice = parseModelChoice(record)
   if (choice === undefined) return undefined
   const raw = record.workspace
   if (raw !== undefined && (typeof raw !== 'string' || raw.length === 0)) return undefined
-  return { choice, workspace: raw === undefined ? 'origin' : raw }
+  const review = record.review === undefined || defaultReviewRounds === undefined
+    ? undefined
+    : parseReview(record.review, defaultReviewRounds)
+  if (record.review !== undefined && defaultReviewRounds !== undefined && review === undefined) return undefined
+  return { choice, workspace: raw === undefined ? 'origin' : raw, ...(review === undefined ? {} : { review }) }
 }
 
 /**
@@ -145,15 +176,17 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
           ...(entry.pickWorkspace === undefined ? {} : { pickWorkspace: entry.pickWorkspace }),
           ...(entry.modelFixed === undefined ? {} : { modelFixed: entry.modelFixed }),
           ...(entry.previous === undefined ? {} : { previous: entry.previous }),
+          ...(entry.review === undefined ? {} : { review: entry.review }),
         }))
         return { requests }
       }
       case 'choose': {
         const id = payload.requestId
         if (typeof id !== 'string') return { ok: false, message: 'missing requestId' }
-        const parsed = parseChoice(payload.choice)
+        const entry = pending.get(id)
+        const parsed = parseChoice(payload.choice, entry?.review?.defaultRounds)
         if (parsed === undefined) return { ok: false, message: 'invalid choice' }
-        const settled = settlePending(id, { kind: 'choice', choice: parsed.choice, workspace: parsed.workspace })
+        const settled = settlePending(id, { kind: 'choice', choice: parsed.choice, workspace: parsed.workspace, ...(parsed.review === undefined ? {} : { review: parsed.review }) })
         return settled ? { ok: true } : { ok: false, message: 'request is no longer pending' }
       }
       case 'cancel': {

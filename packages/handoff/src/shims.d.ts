@@ -25,11 +25,28 @@ export interface AgentDefaultModelShim {
   currentSelection(): { provider: string; model: string; reasoningEffort?: string }
 }
 
+/**
+ * Minimal `ctx.triggerBindings` surface (dsh-triggers). Present when that
+ * plugin is mounted; without it the auto-review option degrades to a plain
+ * handoff with a visible notice.
+ */
+export interface TriggerBindingsShim {
+  bindReviewLoop(request: {
+    task: string
+    executorSession: string
+    parentSession: string
+    maxRounds?: number
+    deliverStart?: boolean
+  }): Promise<{ bindingId: string; runId: string }>
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Present in compositions that mount the preset registry (the stock web profile does). */
     agentPresets?: AgentPresetsShim
     /** Present in compositions that mount the default-model selection service. */
     agentDefaultModel?: AgentDefaultModelShim
+    /** Present when the dsh-triggers plugin is mounted. */
+    triggerBindings?: TriggerBindingsShim
   }
 }
