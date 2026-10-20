@@ -295,7 +295,9 @@ export function resumeRun(
     return { ok: false, code: 'run-not-resumable', message: '运行已结束，不能恢复。' }
   }
   if (run.status === 'paused-budget') {
-    const target = Math.max(options.newMaxRounds ?? run.round + 1, run.round + 1)
+    // Never shrink: an explicit number wins only above both the deferred
+    // round and the budget already on record.
+    const target = Math.max(options.newMaxRounds ?? 0, run.round + 1, run.maxRounds)
     const pending = run.pendingRework
     const resumed: RunRecord = withHistory(
       {

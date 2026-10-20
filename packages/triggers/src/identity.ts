@@ -14,8 +14,9 @@ export const TOOL_NAME = 'trigger_signal'
 export const SERVICE_NAME = 'triggerBindings'
 /** This package's browser channel prefix (web-server route). */
 export const RPC_CHANNEL = '/dsh-triggers'
-/** The storage domain holding templates, bindings, runs, and deliveries. */
-export const DOMAIN_NAME = 'dsh-triggers'
+/** The storage domain holding templates, bindings, runs, and deliveries
+ *  (storage-domain unit names admit no hyphens). */
+export const DOMAIN_NAME = 'triggers'
 /** Ids of the seeded built-in templates (stable; bodies editable, rows not deletable). */
 export const BUILTIN_START_TEMPLATE = 'builtin-loop-start'
 export const BUILTIN_REVIEW_TEMPLATE = 'builtin-loop-review'
