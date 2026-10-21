@@ -198,6 +198,51 @@ describe('fail-closed validation', () => {
     expect(result.issues[0]?.reason).toBe('floor-path')
   })
 
+  it('refuses the WHOLE home through a symlinked HOME spelling (P1 regression)', () => {
+    // HOME=/home/link -> /data/u; an explicit grant naming the home SPELLING
+    // resolves to the whole /data/u — the canonical-home floor must refuse
+    // it instead of binding every file under HOME (including .ssh/.config).
+    const table: Record<string, Entry> = {
+      '/': { dir: true },
+      '/home/link': { target: '/data/u' },
+      '/data/u': { dir: true },
+    }
+    const result = resolveGrants({
+      presets: ['uv-cache'],
+      overrides: { uvCache: '/home/link' },
+      env: { ...ENV, home: '/home/link' },
+      workspaceRoots: [],
+      fs: fakeFs(table),
+    })
+    expect(result.binds).toEqual([])
+    expect(result.issues[0]?.reason).toBe('floor-path')
+    expect(result.issues[0]?.message).toContain('home directory itself')
+  })
+
+  it('real filesystem: symlinked HOME cannot be granted whole (reviewer fixture)', async () => {
+    const { mkdtempSync, mkdirSync, symlinkSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { nodeGrantFs, resolveGrants: resolve } = await import('../src/index.js')
+    const root = mkdtempSync(join(tmpdir(), 'tca-home-'))
+    try {
+      const actual = join(root, 'actual-home')
+      mkdirSync(actual, { recursive: true })
+      symlinkSync(actual, join(root, 'home-link'))
+      const result = resolve({
+        presets: ['uv-cache'],
+        overrides: { uvCache: join(root, 'home-link') },
+        env: { home: join(root, 'home-link'), uid: process.getuid?.() ?? -1 },
+        workspaceRoots: [],
+        fs: nodeGrantFs(),
+      })
+      expect(result.binds).toEqual([])
+      expect(result.issues[0]?.reason).toBe('floor-path')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('refuses credential and token trees, including via symlinks and runtime-dir spellings', () => {
     const direct = plan(
       ['uv-cache'],
@@ -263,19 +308,43 @@ describe('fail-closed validation', () => {
     expect(fileResult.issues[0]?.reason).toBe('not-owner-writable')
   })
 
-  it('refuses pnpm-runtime-locks when the runtime dir is not owner-writable', () => {
-    // pnpm 12.8.2+ falls back to /tmp for locks when $XDG_RUNTIME_DIR is
-    // not owner-writable — the bind would then cover a directory pnpm
-    // never uses and the shared lock domain would silently split.
-    const result = plan(
+  it('refuses pnpm-runtime-locks when the runtime dir fails pnpm\'s own conditions', () => {
+    // pnpm 12.8.2+ falls back to /tmp for locks unless $XDG_RUNTIME_DIR is
+    // a directory of this uid that the owner can write AND search, with
+    // group/other write bits clear — the bind must cover the lock domain
+    // pnpm actually uses, not merely a directory that exists.
+    const groupWritable = plan(
       ['pnpm-runtime-locks'],
       {
-        '/run/user/1000': { dir: true, mode: 0o555 },
+        '/run/user/1000': { dir: true, mode: 0o775 },
         '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
       },
     )
-    expect(result.binds).toEqual([])
-    expect(result.issues[0]?.reason).toBe('runtime-dir-unwritable')
+    expect(groupWritable.binds).toEqual([])
+    expect(groupWritable.issues[0]?.reason).toBe('runtime-dir-unwritable')
+
+    const notSearchable = plan(
+      ['pnpm-runtime-locks'],
+      { '/run/user/1000': { dir: true, mode: 0o600 } },
+    )
+    expect(notSearchable.issues[0]?.reason).toBe('runtime-dir-unwritable')
+
+    const foreign = plan(
+      ['pnpm-runtime-locks'],
+      { '/run/user/1000': { dir: true, mode: 0o700, uid: 0 } },
+    )
+    expect(foreign.issues[0]?.reason).toBe('runtime-dir-unwritable')
+
+    // The standard systemd layout passes.
+    const standard = plan(
+      ['pnpm-runtime-locks'],
+      {
+        '/run/user/1000': { dir: true, mode: 0o700 },
+        '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
+      },
+    )
+    expect(standard.issues).toEqual([])
+    expect(standard.binds.map((bind) => bind.source)).toEqual(['/run/user/1000/pnpm-store-operation-locks-1000'])
   })
 
   it('a HOME with a trailing slash or a symlinked HOME still derives defaults', () => {

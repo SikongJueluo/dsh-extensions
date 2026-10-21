@@ -73,6 +73,6 @@ allow = [ "rtk" ];
 1. `dsh --profile web --dump-config` 出现 `toolchain-sandbox` 行、`sandbox` 行 disabled(注意该命令会写 profile 运行时文件,属宿主动作)。
 2. 会话内 `bash: uv cache dir` 应答 `~/.cache/uv`;`uv sync` 不再 EROFS、不需要 `sandbox_permissions`。
 3. `cargo fetch`(真依赖项目)不 EROFS;`~/.cargo/credentials.toml` 仍不可写(`test -w` 应失败)。
-4. `pnpm run`(pin 与运行版本不一致的项目)不再报 `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK`;`/run/user/1000/pnpm-store-operation-locks-1000/` 出现 `all-stores.lock`。
+4. `pnpm run`(pin 与运行版本不一致的项目)不再报 `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK`;`/run/user/1000/pnpm-store-operation-locks-1000/` 出现 `all-stores.lock`。若你自定义过 `XDG_RUNTIME_DIR`:它必须满足 pnpm 自己的条件(本 uid 属主、属主可写可搜索、group/other 不可写——0775 会被 pnpm 拒绝并回退 `/tmp`),否则预设会 fail-closed 报错而不是静默绑一个 pnpm 不用的目录;可用 `strace -e trace=file pnpm --version 2>&1 | grep lock` 确认锁文件落在该目录而非 `/tmp`。
 5. Settings → `toolchain-sandbox` 分区可见 presets/paths 表单;改 presets 保存后 provider 重挂(非 volatile)。
 6. 提权抽查:模型对 `cargo build` 的 Full access 请求应弹窗(cmd-permit 不再白名单)或被 v3 判官 DEFER,而非自动放行。

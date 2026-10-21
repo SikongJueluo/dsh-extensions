@@ -175,27 +175,6 @@ const FLOOR_PREFIXES = Object.freeze([
 ])
 
 /**
- * Paths a grant may never BE, even though paths below them may be fine:
- * `/home` itself (all users' homes) versus `/home/<user>/…`; `/run` and
- * `/run/user` versus a lock directory inside them; mount roots whose
- * children an operator may still name explicitly. Plus this user's
- * `/run/user/<uid>` — the runtime dir holds session sockets (agent,
- * wayland), and making it wholesale writable is never a cache grant.
- */
-function exactFloors(env: GrantEnv): readonly string[] {
-  return Object.freeze([
-    '/',
-    '/home',
-    '/mnt',
-    '/opt',
-    '/run',
-    '/run/user',
-    joinDir('/run/user', String(env.uid)),
-    ...FLOOR_PREFIXES,
-  ])
-}
-
-/**
  * Path segments that mark credential or token trees. A grant whose path
  * crosses one is refused: cache presets must never make secrets, tokens or
  * tool config writable (reads stay confined-but-allowed, exactly as
@@ -223,11 +202,63 @@ function isAbsolute(path: string): boolean {
 }
 
 /**
+ * Paths a grant may never BE, even though paths below them may be fine:
+ * `/home` itself (all users' homes) versus `/home/<user>/…`; `/run` and
+ * `/run/user` versus a lock directory inside them; mount roots whose
+ * children an operator may still name explicitly. Plus this user's home —
+ * both its CURRENT spelling and its canonical (realpath) form, so a
+ * symlinked HOME cannot smuggle a whole-home grant past the exact check —
+ * and their `/run/user/<uid>` (the runtime dir holds session sockets such
+ * as the agent and wayland; making it wholesale writable is never a cache
+ * grant).
+ */
+function exactFloors(env: GrantEnv, canonicalHome: string): readonly string[] {
+  return Object.freeze([
+    '/',
+    '/home',
+    '/mnt',
+    '/opt',
+    '/run',
+    '/run/user',
+    joinDir('/run/user', String(env.uid)),
+    env.home,
+    canonicalHome,
+    ...FLOOR_PREFIXES,
+  ])
+}
+
+/** The verdict for one (canonical) path: which rule refuses it, if any. */
+export type PathRefusal = 'floor-path' | 'credential-segment'
+
+/**
+ * The ONE home of the floor/credential judgment, used by both the final
+ * grant validation and the controlled-preparation pre-flight — one
+ * implementation so the two rule sets can never drift apart. `path` is
+ * canonical (post-realpath); `canonicalHome` is the realpath'd HOME.
+ */
+export function pathRefusal(path: string, env: GrantEnv, canonicalHome: string): PathRefusal | undefined {
+  if (FLOOR_PREFIXES.some((floor) => pathCovers(floor, path))) return 'floor-path'
+  if (exactFloors(env, canonicalHome).includes(path)) return 'floor-path'
+  if (path.split(sep).some((segment) => CREDENTIAL_SEGMENTS.has(segment))) return 'credential-segment'
+  return undefined
+}
+
+/** The realpath'd HOME (falls back to the normalized spelling). */
+function canonicalHomeOf(env: GrantEnv, fs: GrantFs): string {
+  try {
+    return fs.realpath(env.home)
+  } catch {
+    return env.home
+  }
+}
+
+/**
  * Pre-flight for controlled preparation: would creating `entry.path` land
  * inside a system floor or a credential tree? Resolves the nearest EXISTING
  * ancestor (the base being a symlink then points at the real target) and
- * applies the same floor/credential checks to the resolved ancestor plus
- * the still-missing segments. Returns true when creation must NOT happen.
+ * applies the SAME refusal rules as the final validation to the resolved
+ * ancestor plus the still-missing segments. Returns true when creation
+ * must NOT happen.
  */
 function preflightRejects(entry: NamedPath, env: GrantEnv, fs: GrantFs): boolean {
   let ancestor = entry.path
@@ -246,10 +277,7 @@ function preflightRejects(entry: NamedPath, env: GrantEnv, fs: GrantFs): boolean
   const effective = missing.length === 0
     ? resolved!
     : `${resolved === '/' ? '' : resolved}${sep}${missing.join(sep)}`
-  if (FLOOR_PREFIXES.some((floor) => pathCovers(floor, effective))) return true
-  if (exactFloors(env).includes(effective)) return true
-  if (effective === env.home) return true
-  return effective.split(sep).some((segment) => CREDENTIAL_SEGMENTS.has(segment))
+  return pathRefusal(effective, env, canonicalHomeOf(env, fs)) !== undefined
 }
 
 /** `child === parent` or `child` sits below `parent` (both canonical, absolute). */
@@ -442,6 +470,9 @@ export function resolveGrants(input: {
   }
   const { named, issues } = derivePaths(presets, overrides, env)
   const notes: GrantNote[] = []
+  // The realpath'd HOME: every whole-home floor comparison happens in this
+  // canonical space so `HOME=/link -> /real` cannot grant `/real` wholesale.
+  const canonicalHome = canonicalHomeOf(env, fs)
 
   // pnpm 12.8.2+ uses $XDG_RUNTIME_DIR for its operation locks only when
   // the runtime dir is OWNER-WRITABLE; otherwise it silently falls back to
@@ -457,14 +488,24 @@ export function resolveGrants(input: {
   if (needsRuntimeDirCheck && env.xdgRuntimeDir !== undefined) {
     try {
       const runtimeStat = fs.stat(env.xdgRuntimeDir)
-      const ownerWritable = runtimeStat.isDirectory && runtimeStat.uid === env.uid && (runtimeStat.mode & 0o200) !== 0
-      if (!ownerWritable) {
+      // Replicate pnpm's OWN runtime-root conditions exactly
+      // (secure_temp_lock.rs): a directory owned by this uid that the owner
+      // can write AND search, with group/other write bits clear. Anything
+      // less and pnpm silently falls back to /tmp — inside the sandbox a
+      // private per-call tmpfs — so a passing grant would cover a lock
+      // domain pnpm never uses (verified: a 0775 runtime dir is refused by
+      // pnpm even when the lock directory inside it exists).
+      const pnpmUsable = runtimeStat.isDirectory
+        && runtimeStat.uid === env.uid
+        && (runtimeStat.mode & 0o300) === 0o300
+        && (runtimeStat.mode & 0o022) === 0
+      if (!pnpmUsable) {
         runtimeDirBroken = true
         issues.push({
           preset: 'pnpm-runtime-locks',
           path: env.xdgRuntimeDir,
           reason: 'runtime-dir-unwritable',
-          message: `pnpm-runtime-locks: ${env.xdgRuntimeDir} is not an owner-writable directory of uid ${env.uid}; pnpm would fall back to a private /tmp lock dir inside the sandbox (split lock domain) — fix the runtime dir or configure paths.pnpmRuntimeLocks explicitly`,
+          message: `pnpm-runtime-locks: ${env.xdgRuntimeDir} fails pnpm's runtime-root conditions (directory, uid ${env.uid}, owner write+search, group/other not writable); pnpm would fall back to a private /tmp lock dir inside the sandbox (split lock domain) — fix the runtime dir or configure paths.pnpmRuntimeLocks explicitly`,
         })
       }
     } catch {
@@ -552,42 +593,29 @@ export function resolveGrants(input: {
         continue
       }
     }
-    // Floors are judged on the canonical target: a symlink must not smuggle
-    // a grant into a system tree. Prefix floors exclude the whole subtree;
-    // exact floors exclude only the named root (children may be grantable).
-    if (FLOOR_PREFIXES.some((floor) => pathCovers(floor, canonical))) {
+    // Floors and credential trees are judged on the canonical target via
+    // the shared refusal rules (also used by the preparation pre-flight),
+    // with the realpath'd HOME in scope so a symlinked HOME cannot bypass
+    // the whole-home floor.
+    const refusal = pathRefusal(canonical, env, canonicalHome)
+    if (refusal === 'floor-path') {
+      const isHome = canonical === env.home || canonical === canonicalHome
       issues.push({
         preset: entry.preset,
         path: entry.path,
         reason: 'floor-path',
-        message: `${entry.preset}: ${entry.path} resolves to ${canonical}, inside a shared system root — never grantable`,
+        message: isHome
+          ? `${entry.preset}: ${entry.path} resolves to the home directory itself — grant the specific cache directories instead`
+          : `${entry.preset}: ${entry.path} resolves to ${canonical}, a shared or session root — grant the specific directory inside it instead`,
       })
       continue
     }
-    if (exactFloors(env).includes(canonical)) {
-      issues.push({
-        preset: entry.preset,
-        path: entry.path,
-        reason: 'floor-path',
-        message: `${entry.preset}: ${entry.path} resolves to ${canonical}, a shared or session root — grant the specific directory inside it instead`,
-      })
-      continue
-    }
-    if (canonical.split(sep).some((segment) => CREDENTIAL_SEGMENTS.has(segment))) {
+    if (refusal === 'credential-segment') {
       issues.push({
         preset: entry.preset,
         path: entry.path,
         reason: 'credential-segment',
         message: `${entry.preset}: ${entry.path} crosses a credential/configuration tree (${canonical}) — cache grants must not make secrets or tool config writable`,
-      })
-      continue
-    }
-    if (canonical === env.home) {
-      issues.push({
-        preset: entry.preset,
-        path: entry.path,
-        reason: 'floor-path',
-        message: `${entry.preset}: ${entry.path} resolves to the home directory itself — grant the specific cache directories instead`,
       })
       continue
     }

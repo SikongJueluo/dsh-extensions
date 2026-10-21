@@ -56,11 +56,20 @@ sandbox adapter               （super.confine() 官方行为原样保留）
 
 ## 宿主准备（缺失目录怎么办）
 
-首次使用前，预设路径必须已存在（属主为当前用户，建议 0755/0700）。建议由
-Nix 声明式预置（`systemd.tmpfiles` 或 activation），见
-[docs/plan-dsh-toolchain-access.md](../../docs/plan-dsh-toolchain-access.md)。
-`~/.cargo/.package-cache` 由 Cargo 自建；沙箱内无法创建它，需宿主侧
-`touch ~/.cargo/.package-cache` 一次或由 Nix 预置。
+分两类：
+
+- **默认推导路径**（未设 `paths` 覆盖、也未导出对应锚点变量）：confine 时**受控
+  自建**——按各工具自己的语义创建（缓存目录 0755、pnpm 共享锁目录 0700、
+  Cargo 锁文件空文件 0644）。`/run/user` 是 tmpfs、重启即清空，锁目录靠这条
+  自建自愈，无需任何手工准备。
+- **显式配置路径**（`paths` 覆盖或宿主导出的 `UV_CACHE_DIR`/`CARGO_HOME`/
+  `PNPM_HOME` 等锚点指向的路径）：操作者声明了确切位置，插件**不代建**——缺
+  失即 fail-closed 报错。可按需由 Nix 声明式预置（`systemd.tmpfiles` 或
+  activation），见
+  [docs/plan-dsh-toolchain-access.md](../../docs/plan-dsh-toolchain-access.md)。
+
+所有路径（含自建后）都必须通过校验：本 uid 属主、属主可写、非 group/world
+可写、不在底线/凭据树内。
 
 ## 后端限制
 

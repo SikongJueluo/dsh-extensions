@@ -125,7 +125,7 @@ export interface Config extends LocalSandboxConfig {
  */
 export const configFields = {
   runnerCommand: Schema.array(Schema.string()).default([]).description(
-    'Override the runner argv (stock sandbox-local field restated; bwrap-compatible profile arguments are appended). A non-empty override asserts full enforcement and skips built-in selection and probing — and directory grants fail closed under it, because a wrapper layout is not the pinned stock shape.',
+    'Override the runner argv (stock sandbox-local field restated; bwrap-compatible profile arguments are appended). The verdict for directory grants is on the FINAL argv layout: a wrapper whose resulting layout is not the pinned stock bwrap shape fails closed, while one indistinguishable from stock (a bare [bwrap]) is spliced normally.',
   ),
   runnerFailureSignatures: Schema.array(Schema.string()).default([]).description(
     'Case-insensitive stderr substrings for a configured runnerCommand refusing its profile (stock sandbox-local field restated; required with runnerCommand, rejected without it).',
