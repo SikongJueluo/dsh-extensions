@@ -112,22 +112,32 @@ function sameBashCall(a: BashCall, b: BashCall): boolean {
 }
 
 /**
- * Record one parsed bash call under its exact execution id.
+ * Claim one execution id from a `tool/call` / `tool/ptc-dispatch-start` row.
  *
- * Ids are unique per execution in a healthy log. A second record under an
- * id that agrees with the first is an idempotent replay (kept); one that
- * DISAGREES is a conflict — the entry is dropped permanently, because the
- * log no longer pins down which command the id refers to, and an approval
- * must never guess between them.
+ * Ids are unique per execution in a healthy log, so a SECOND record under an
+ * id — whatever its shape — means the log no longer pins down one command:
+ *
+ * - the only benign duplicate is an idempotent replay of the identical bash
+ *   record (kept);
+ * - a bash record that disagrees with the stored one, a bash payload that
+ *   does not parse (missing command, wrong types, …), or a record naming
+ *   another tool taints the id permanently — the entry is dropped and can
+ *   never yield evidence again, because an approval must never guess which
+ *   of the contradicting records the id refers to.
  */
-function recordCall(
+function claimCall(
   calls: Map<string, BashCall>,
-  conflicted: Set<string>,
+  tainted: Set<string>,
   id: string,
+  bash: boolean,
   parsed: BashCall | undefined,
 ): void {
-  if (parsed === undefined) return
-  if (conflicted.has(id)) return
+  if (!bash || parsed === undefined) {
+    calls.delete(id)
+    tainted.add(id)
+    return
+  }
+  if (tainted.has(id)) return
   const existing = calls.get(id)
   if (existing === undefined) {
     calls.set(id, parsed)
@@ -135,13 +145,13 @@ function recordCall(
   }
   if (!sameBashCall(existing, parsed)) {
     calls.delete(id)
-    conflicted.add(id)
+    tainted.add(id)
   }
 }
 
 function fold(events: readonly SessionEvent[]): Folded {
   const calls = new Map<string, BashCall>()
-  const conflicted = new Set<string>()
+  const tainted = new Set<string>()
   const asked = new Map<string, { toolName: string; callId?: string }>()
   const decided = new Map<string, string>()
   const prompts: string[] = []
@@ -155,14 +165,24 @@ function fold(events: readonly SessionEvent[]): Folded {
     switch (type) {
       case 'tool/call': {
         if (typeof data.callId !== 'string' || typeof data.name !== 'string') break
-        if (data.name !== 'bash') break
-        recordCall(calls, conflicted, data.callId, parseBashArguments(data.arguments))
+        claimCall(
+          calls,
+          tainted,
+          data.callId,
+          data.name === 'bash',
+          data.name === 'bash' ? parseBashArguments(data.arguments) : undefined,
+        )
         break
       }
       case 'tool/ptc-dispatch-start': {
         if (typeof data.subCallId !== 'string' || typeof data.name !== 'string') break
-        if (data.name !== 'bash') break
-        recordCall(calls, conflicted, data.subCallId, parseBashArguments(data.arguments))
+        claimCall(
+          calls,
+          tainted,
+          data.subCallId,
+          data.name === 'bash',
+          data.name === 'bash' ? parseBashArguments(data.arguments) : undefined,
+        )
         break
       }
       case 'approval/asked': {

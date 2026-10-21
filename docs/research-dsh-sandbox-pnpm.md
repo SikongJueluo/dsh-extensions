@@ -85,3 +85,11 @@ uv 的缓存这一层是单一可重定向根，文档明确“uv 总是需要�
 - **推断（有源码/ strace 支撑，未端到端）**：冷 engine 安装在仅改 `XDG_RUNTIME_DIR=/tmp` 时仍会因 `~/.local/share/pnpm/package-manager-store` 或 `global/v11` 写入失败；`_tmp` 的 EROFS 是同一类 HOME 写路径。
 - **未测**：直接用 12.3.4 binary（不经过 12.9.0 switch）在 sandbox 下运行；冷 engine 安装的完整链路；`pnpm install` 在额外可写 root 下的行为；12.9.1+ 是否改动；PTC 审批的端到端。
 - **不建议**：全局 Full access、泛开 `~/.cache` 或整个 HOME、把 `XDG_RUNTIME_DIR` 永久指向仓库、为绕过锁而永久关闭版本管理。若要做宿主级修复，应只授权实际需要的 runtime 锁目录（冷安装还需 engine store），或由包装器按命令设置 `XDG_RUNTIME_DIR`；这属于 DSH/Nix 层，不在本仓改配置的范围。
+
+## 8. 附注（2026-10-21 实现会话）：`--fix-lockfile` 的波及范围
+
+审查指出 kwquspxq 的 lockfile 变化不止加 vitest：还移除了 `zod@4.6.5` 快照（基线中它有完整条目，并非悬空），把全部 zod peer 上下文收敛到 `4.4.3`，并重整了一批 peer variant 键。补充实测与结论：
+
+- **窄化不可行**：把 lockfile 恢复到基线（mpslzsvq）后重跑 `pnpm install`（12.3.4，XDG_RUNTIME_DIR 重定向），稳定复现 `Broken Lockfile: missing snapshot for vitest@3.2.7`——尽管基线里 `vitest@3.2.7` 的裸快照与 peer 后缀快照（`vitest@3.2.7(@types/node@24.19.0)(yaml@2.9.1)`）都存在。即基线 lockfile 在 importer 变更后本身就无法被 12.3.4 引擎安装，`--fix-lockfile` 的全局 peer 重解析是唯一可用修复路径，zod 收敛是其副作用，不是可选缩小的部分。
+- **为什么收敛到 4.4.3 是安全的**：仓库唯一直接钉的 zod 就是 triggers 的精确 `4.4.3`（peer + dev）；此前 peer 上下文里出现 4.6.5 是旧一次解析的产物。此 lockfile 只喂本仓 dev/typecheck/test 与 `dsh plugin add` 前的本地构建；profile 安装按 bundle 的 peer 声明在 profile 内独立解析，不受本 lockfile 影响。修复后全仓 241 项测试与 `pnpm check` 均绿。
+- **状态**：已接受保留（kwquspxq），记录于此供后续审查；若未来想恢复 zod 4.6.5 上下文，需在上游 pnpm 修复“missing snapshot”误判后重新生成，而不应手工回滚条目。

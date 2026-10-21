@@ -109,6 +109,56 @@ describe('pending-call recovery', () => {
     expect(evidence.call).toBeUndefined()
   })
 
+  it('invalidates evidence when the second record under an id is a malformed bash payload', () => {
+    const evidence = collectEvidence(sessionOf([
+      ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+      ptcStart(2, 'root:ptc:1', { command: 42 }),
+    ]), 'root:ptc:1')
+    expect(evidence.call).toBeUndefined()
+  })
+
+  it('invalidates evidence when the second record under an id names another tool', () => {
+    const evidence = collectEvidence(sessionOf([
+      ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+      ptcStart(2, 'root:ptc:1', { file_path: 'a.txt' }, { name: 'read' }),
+    ]), 'root:ptc:1')
+    expect(evidence.call).toBeUndefined()
+  })
+
+  it('invalidates evidence when a malformed record claimed the id first', () => {
+    const evidence = collectEvidence(sessionOf([
+      ptcStart(1, 'root:ptc:1', { command: 42 }),
+      ptcStart(2, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+    ]), 'root:ptc:1')
+    expect(evidence.call).toBeUndefined()
+  })
+
+  it('invalidates evidence when another tool claimed the id first', () => {
+    const evidence = collectEvidence(sessionOf([
+      ptcStart(1, 'root:ptc:1', { file_path: 'a.txt' }, { name: 'read' }),
+      ptcStart(2, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+    ]), 'root:ptc:1')
+    expect(evidence.call).toBeUndefined()
+  })
+
+  it('keeps an idempotent replay of the identical record recoverable', () => {
+    const args = { command: 'uv sync', sandbox_permissions: 'workspace-write' }
+    const evidence = collectEvidence(sessionOf([
+      ptcStart(1, 'root:ptc:1', args),
+      ptcStart(2, 'root:ptc:1', { ...args }),
+      directCall(3, 'root:ptc:1', 'bash', args),
+    ]), 'root:ptc:1')
+    expect(evidence.call?.command).toBe('uv sync')
+  })
+
+  it('keeps unrelated non-bash calls from tainting their own ids only', () => {
+    const evidence = collectEvidence(sessionOf([
+      ptcStart(1, 'root:ptc:1', { file_path: 'a.txt' }, { name: 'read' }),
+      ptcStart(2, 'root:ptc:2', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+    ]), 'root:ptc:2')
+    expect(evidence.call?.command).toBe('uv sync')
+  })
+
   it('leaves malformed PTC arguments unrecoverable, never guessed', () => {
     for (const bad of [
       {},
