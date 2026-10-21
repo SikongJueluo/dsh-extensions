@@ -83,24 +83,29 @@ node packages/auto-permit/test/notice-order.mjs
 它用真实 `Session` 重放失败会话的事件顺序，断言 `assistant(tool_calls)` 后面
 紧跟配对的 `tool` 消息；surface-append 路径失败，`agent.inject()` 路径通过。
 
-## 判官判据（v2）
+## 判官判据（v3）
 
-除 v1 的显式意图 + 等价两判据外，v2 新增两类（解决 cargo/direnv/nix 这类
-构建工具反复弹窗的问题）：
+v3（2026-10-21，随 [dsh-toolchain-access](../toolchain-access/) 迁移）收敛 v2
+的缓存判据：**缓存写入不再是提权的批准理由**。
 
-1. **工具链缓存副作用**：命令是用户意图覆盖的常规构建/包管理/环境操作
-   （cargo、nix、direnv、pnpm、npm、uv、go、gradle…），且越界写入只指向
-   该工具链公开缓存/registry 目录（~/.cargo、~/.cache、/nix/store、.direnv、
-   ~/.npm、~/.pnpm-store、~/.uv…）→ 效果可重建，可 ALLOW。工具的显式输出
-   目标（--out、--target-dir 别处、重定向）不在此列。
-2. **同族命令等价**：同 session 批准过任一同族命令后，后续命令仅差子命令
-   组合（fmt/check/clippy/build/test）、输出截断包装（tail/head/grep）、
-   env 前缀、重复幂等执行 → 视为等价可 ALLOW。
+1. **显式意图**（不变）：用户明确意图点名/唯一识别每个操作的目标与效果、
+   覆盖其完整范围、效果可恢复 → 可 ALLOW。
+2. **同族命令等价**（收紧）：同 session 批准过同族命令后，仅差子命令组合、
+   输出截断包装、env 前缀、重复幂等执行仍视为等价——但前提是该次提权本身
+   依判据 1 独立成立，且缓存上限（下条）不适用。
+3. **缓存上限（新增，覆盖前两条）**：越界写工具链公开缓存/registry/store
+   （~/.cargo、~/.cache、~/.npm、~/.pnpm-store、~/.uv…）是**沙箱层**的事，
+   不是审批层的事。当输入的越界效果**只有**缓存写入时——即使用户意图明确
+   覆盖运行该工具——返回 DEFER：正确修复是启用 toolchain-access 目录授权
+   （可重建正是长期目录授权的合理性），而不是按命令放宽沙箱。以缓存为由的
+   提权请求一律 DEFER，同族等价也不能越过这条。
 
-背景：模型每次生成的命令字符串几乎总有微小差异（tail -25 vs -8、带不带
-clippy），精确记忆命中率低；v1 判据又要求用户意图显式覆盖每个操作的目标
-与效果，而 ~/.cargo 这类工具隐式副作用永远不会被 prompt 提及——两层叠加
-导致 cargo 类审批全部 defer。v2 两个判据分别修这两层。
+历史背景：v2（2026-10-02）为解决 cargo 类反复弹窗引入了「缓存副作用可
+ALLOW」，当时目录授权尚不存在，按命令提权是唯一出口。如今缓存需求由
+toolchain-access 的 `cargo-cache` 等预设承担，继续按缓存理由批准 Full
+access 只会把刚收窄的白名单从判官这条路又放出去。判官 prompt 版本
+`dsh-auto-permit-v3`；exact-repeat 记忆语义不变（用户真实批准过的精确命令
+照旧放行，新 session 从零开始），`approval/request` 链序与失败回落不变。
 
 ## 配置
 

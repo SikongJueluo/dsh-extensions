@@ -45,7 +45,7 @@ export { Config } from './settings.js'
 export type { AutoPermitSettings } from './settings.js'
 export { collectEvidence } from './evidence.js'
 export { isHighRisk } from './rules.js'
-export { judge, buildJudgeMessage, PROMPT_VERSION } from './judge.js'
+export { judge, buildJudgeMessage, PROMPT_VERSION, SYSTEM_PROMPT } from './judge.js'
 export { buildNoticeMessage } from './notice.js'
 
 export const inject = ['llm']
