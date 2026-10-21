@@ -1,0 +1,26 @@
+# Development / deployment overlay: the locally built plugin entry, by
+# absolute path. Equivalent to the bundle layer in cordis.patch.yml, for
+# the two flows that mount entries directly instead of installing the
+# bundle:
+#
+#   - dev:    dsh --profile web --patch ./packages/toolchain-access/dev.patch.yml \
+#               --no-open --port <port>
+#   - deploy: the NixOS dsh module's programs.dsh.extraPatches (see
+#             docs/plan-dsh-toolchain-access.md for the suggested wiring)
+#
+# Rebuild first (`pnpm build`) so lib/ is current, then restart dsh. Paths
+# must stay quoted strings: a bare path literal would be copied into the
+# Nix store at eval time and later rebuilds would never be seen.
+#
+# Enable the presets this machine needs — this overlay deliberately mirrors
+# the bundle's empty default so no dev/deploy instance widens silently.
+- id: sandbox
+  name: '@deepseek-ai/dsh-sandbox-local'
+  disabled: true
+
+- insert:
+    - id: toolchain-sandbox
+      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/toolchain-access/lib/index.js'
+      config:
+        presets: []
+        paths: {}

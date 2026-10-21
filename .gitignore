@@ -22,3 +22,6 @@ lib/
 .pnpm-run/
 .pnpm-state/
 .dsmoke/
+
+# bwrap/toolchain-access verification fixtures (sandbox)
+.bw-fixture/

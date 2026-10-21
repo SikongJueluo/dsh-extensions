@@ -1,0 +1,28 @@
+# dsh-toolchain-access bundle layer.
+#
+# Replaces the stock sandbox provider: the `sandbox` row is disabled (patch
+# layers cannot rename a row, so the stock row goes dark and this one is
+# appended) and the `toolchain-sandbox` row mounts a LocalSandboxProvider
+# subclass that adds exact writable binds for enabled toolchain-cache
+# presets to every workspace-write wrap. Runner selection, probing,
+# enforcement reporting and the fail-closed path stay the stock class's.
+#
+# The `name` on the disable entry is a guard: if a later deployment already
+# swapped the sandbox row for something else, this patch skips itself
+# instead of disabling an unknown provider.
+#
+# `presets` defaults to empty — the bundle never widens a sandbox silently.
+# Enable the presets this machine actually needs (see README for the
+# per-preset trust notes; pnpm-engine in particular is a separate decision).
+# A later layer can override this row by id; config is replaced wholesale,
+# so restate `presets` and `paths` when overriding.
+- id: sandbox
+  name: '@deepseek-ai/dsh-sandbox-local'
+  disabled: true
+
+- insert:
+    - id: toolchain-sandbox
+      name: dsh-toolchain-access
+      config:
+        presets: []
+        paths: {}
