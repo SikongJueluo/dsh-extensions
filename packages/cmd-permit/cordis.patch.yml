@@ -17,15 +17,18 @@
       name: dsh-cmd-permit
       config:
         enabled: true
-        # Seed audit 2026-10-21 (toolchain-access migration): `cargo` and
-        # `direnv` were seeded only to bypass HOME cache writes; that job
-        # now belongs to dsh-toolchain-access's directory grants
-        # (cargo-cache preset etc.), so the seed no longer auto-escalates
-        # them to full access. `rtk` stays: it fronts nearly every
-        # rewritten command and its own state writes are not covered by any
-        # cache preset. Users who want cargo/direnv full-access back add
-        # them in Settings — an explicit choice, not a default.
-        allow: [rtk]
+        # Seed audit 2026-10-21 (toolchain-access migration), tightened
+        # 2026-10-22 after review: the seed is now EMPTY. `cargo`/`direnv`
+        # existed only to bypass HOME cache writes — that job belongs to
+        # dsh-toolchain-access directory grants. `rtk` turned out to be the
+        # same exit in disguise: cmd-permit matches command HEADS, so
+        # `rtk cargo build` hit the rtk entry and got Full access before
+        # the v3 judge could see it — rtk proxies arbitrary commands, so
+        # trusting it by default is not narrower than trusting cargo.
+        # Add entries you have audited (Settings or a later layer); rtk's
+        # own state writes should be solved at the rtk layer (point its DB
+        # into the workspace, or a future preset), not by head-matching.
+        allow: []
         allowPattern: []
         denyShape: []
         maxMode: danger-full-access

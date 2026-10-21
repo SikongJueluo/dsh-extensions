@@ -7,12 +7,14 @@ answerer**——配置内命令族的 sandbox 提权不再弹窗，也不消耗 
 追加，并以 `ctx.cmdPermit` 服务暴露给 auto-permit 的 judge 复用——一张表管两条
 路径。
 
-> 种子迁移（2026-10-21）：随 [dsh-toolchain-access](../toolchain-access/) 落地，
-> 种子白名单从 `rtk,cargo,direnv` 收敛为 `rtk`。`cargo`/`direnv` 当初只为绕过
-> HOME 缓存写（cargo registry/git/.package-cache、direnv allow 记录），这层需求
-> 现在由目录授权预设承担，不再默认放行 Full access。`rtk` 保留：它改写后几乎
-> 前置每条命令，且其自身状态写入不被任何缓存预设覆盖。已装 profile 的存量配置
-> 不受种子变化影响；要迁移见
+> 种子迁移（2026-10-21，2026-10-22 按审查收紧）：随
+> [dsh-toolchain-access](../toolchain-access/) 落地，种子白名单从
+> `rtk,cargo,direnv` 收敛为**空**。`cargo`/`direnv` 当初只为绕过 HOME 缓存写
+> （cargo registry/git/锁、direnv allow 记录），这层需求现在由目录授权预设承
+> 担。`rtk` 复审后同样移除：本插件按**命令头**匹配，`rtk cargo build` 会命中
+> `rtk` 条目、在判官之前拿到 Full access——rtk 代理任意命令，默认信任它不比
+> 默认信任 cargo 窄。rtk 自身状态写入应在 rtk 层解决（DB 指进 workspace，或
+> 未来的专用预设）。已装 profile 的存量配置不受种子变化影响；迁移说明见
 > [plan-dsh-toolchain-access.md](../../docs/plan-dsh-toolchain-access.md)。
 
 ## 行为
@@ -51,7 +53,7 @@ answerer**——配置内命令族的 sandbox 提权不再弹窗，也不消耗 
 | 字段 | 默认 | 含义 |
 |---|---|---|
 | `enabled` | `true` | 总开关；关闭即整链回落 |
-| `allow` | `[]`（bundle 种子 `rtk`） | 命令名；复合命令每段都须命中 |
+| `allow` | `[]`（bundle 种子也为空） | 命令名；复合命令每段都须命中 |
 | `allowPattern` | `[]` | 正则；一条匹配整段即可 |
 | `denyShape` | `[]` | 追加的高危形状，两条路径都生效 |
 | `maxMode` | `danger-full-access` | 自动放行的最高档；更宽请求交人工 |

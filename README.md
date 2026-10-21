@@ -7,7 +7,7 @@ Out-of-tree [DeepSeek Harness](https://www.deepseek.com/harness/en/) 插件 bund
 | [`dsh-oauth-providers`](packages/oauth-providers/) | OAuth 认证的 LLM 厂商集（当前：ChatGPT 订阅），无需 API Key |
 | [`dsh-plan-usage`](packages/plan-usage/) | GLM / OpenAI Codex / MiniMax / OpenCode Go 套餐配额查询，`planUsage` 服务 + 设置页分区 |
 | [`dsh-auto-permit`](packages/auto-permit/) | 审批瀑布上的 AI 判官：小模型在弹窗之前决定是否放行 bash 提权（精确记忆 → 高危形状让路 → 判官调用） |
-| [`dsh-cmd-permit`](packages/cmd-permit/) | 同一瀑布上的确定性白名单：配置内的命令族提权不弹窗也不耗判官调用（种子收敛为 `rtk`；缓存类绕行改走 toolchain-access 目录授权）；`denyShape` 高危表以 `ctx.cmdPermit` 共享给上面那位 |
+| [`dsh-cmd-permit`](packages/cmd-permit/) | 同一瀑布上的确定性白名单：配置内的命令族提权不弹窗也不耗判官调用（种子为空——缓存类绕行改走 toolchain-access 目录授权，rtk 代理任意命令也不再默认 Full access）；`denyShape` 高危表以 `ctx.cmdPermit` 共享给上面那位 |
 | [`dsh-execution-guard`](packages/execution-guard/) | 参数预检（审批与副作用**之前**、同批整体校验）+ 重复 `INVALID_ARGS` 纠偏提示（原生 repeat-reminder 只认完全相同的参数，抓不到"值在变、形状没变"） |
 | [`dsh-task-anchor`](packages/task-anchor/) | `checkpoint_task` 恢复锚点：记 jj 工作层 / goal 身份 / 阶段 / 归属文件 / 验证摘要，恢复时比对并报告一致或漂移（只报告，不 rebase、不 resume goal） |
 | [`dsh-auto-env`](packages/auto-env/) | 按 session 工作区自动加载 direnv / devenv 环境 |

@@ -45,15 +45,17 @@ dsh 归 nix 管。**注意:本插件不能进 `programs.dsh.plugins` 列表**—
 
 ## 3. cmd-permit 配置迁移(用户决策)
 
-宿主 `plugins.nix` 现声明 `allow = [ "rtk" "cargo" "direnv" ]`(存量,种子变化不影响它)。建议:
+宿主 `plugins.nix` 现声明 `allow = [ "rtk" "cargo" "direnv" ]`(存量,种子变化不影响它)。审查确认按命令头匹配时,`rtk cargo build` 仍命中 `rtk` 条目拿 Full access、绕过 v3 判官——所以建议与仓库种子一致:
 
 ```nix
-allow = [ "rtk" ];
+allow = [ ];
 ```
 
 - `cargo`:缓存需求已由 `cargo-cache` 预设覆盖;Full access 自动放行应移除。
-- `direnv`:`direnv allow` 写 `~/.local/share/direnv/allow`,但 `direnv`/`direnv exec` 会执行 `.envrc` 任意代码,不是「常规缓存」命令;环境加载已由 auto-env 在宿主侧完成,模型侧 direnv 少见。若你仍想让步,保留它是一个显式选择。
-- `rtk`:保留(改写后前置几乎每条命令;其自身状态写不被预设覆盖)。
+- `direnv`:模型侧 `direnv`/`direnv exec` 会执行 `.envrc` 任意代码,不是"常规缓存"命令;环境加载已由 auto-env 宿主侧完成。
+- `rtk`:rtk 代理任意命令,`rtk <x>` 命中即 `<x>` 的 Full access,默认信任它不比默认信任 cargo 窄。若确需放行,建议 `maxMode: "workspace-write"` 或用 `allowPattern` 限定到审计过的具体子命令;rtk 自身状态写(其 DB)应在 rtk 层解决(指向 workspace,见 rtk 调研 §4.1,或未来加专用预设)。
+
+以上均为**新增默认**的建议;你在 Settings/声明里显式保留的宽信任不被任何升级覆盖。
 
 ## 4. auto-permit 判官 v3(无需宿主动作)
 
