@@ -20,6 +20,14 @@ DSH 的 AI 自动审批判官：在 `approval/request` waterfall 上插队一个
    agent 声称的意图）+ 本会话已批准命令列表。`VERDICT: allow` → 放行；
    其余一切（defer / 超时 / 解析失败）→ 回落到人工弹窗。
 
+证据来源：待批命令从会话日志恢复，两种形态等价——直接调用读顶层
+`tool/call`（`callId` + JSON 字符串参数），`run_code`（PTC）子调用读宿主
+执行**前**写入的 `tool/ptc-dispatch-start`（`subCallId` + 对象参数；批准
+发生时它是唯一已落盘的审计行，执行后的 `tool/ptc-dispatch` 不读）。两路
+共用同一份按精确调用 id 的索引，历史批准与精确记忆随之 direct/PTC 互通；
+畸形参数、同 id 内容冲突、缺 start 事件的旧宿主一律视为证据不可恢复 →
+`next()` 交人工，绝不猜测。
+
 判官**永不返回 rejected**——AI 的保守误报不能伪装成用户的明确拒绝；
 任何插件自身故障也都回落人工（fail-open 向人），坏了最多退回原生行为。
 
@@ -68,6 +76,7 @@ tool 结果落盘、下一个 step 边界被领取时才写成 surface 的 `user
 回归检查（无需 API key、不发网络请求）：
 
 ```sh
+pnpm -C packages/auto-permit test             # vitest：证据 fold + 审批链集成
 node packages/auto-permit/test/notice-order.mjs
 ```
 

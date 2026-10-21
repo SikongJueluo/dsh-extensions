@@ -2,12 +2,25 @@
  * Session-log evidence for one approval request.
  *
  * Everything the judge sees is folded from the requesting session's own event
- * log (`Session.snapshotEvents()`): the exact `tool/call` arguments for the
- * pending call (bash command + description + escalation request), the user
- * prompts (`user/message` with a human source), and this session's prior
- * approval decisions (`approval/asked`/`approval/decided` pairs — the
- * service's own audit trail, so the "approved before" memory needs no
- * dedicated storage).
+ * log (`Session.snapshotEvents()`). A bash call arrives there in one of two
+ * durable shapes, and both must yield the SAME evidence:
+ *
+ * - a directly dispatched call: `tool/call` with the call's id and its
+ *   arguments as a JSON string;
+ * - a PTC sub-call (bash dispatched from inside `run_code`): the host
+ *   appends `tool/ptc-dispatch-start` — with the sub-call's exact execution
+ *   id (`subCallId`, the id the approval request carries) and the arguments
+ *   as a normalized JSON object — BEFORE it schedules the dispatch. That
+ *   start event is therefore all the evidence there is at approval time;
+ *   the post-execution `tool/ptc-dispatch` row is deliberately NOT read
+ *   (hosts that predate the start event simply fall back to the human).
+ *
+ * The fold also collects the user prompts (`user/message` with a human
+ * source) and this session's prior approval decisions
+ * (`approval/asked`/`approval/decided` pairs — the service's own audit
+ * trail, so the "approved before" memory needs no dedicated storage). All
+ * call records live in ONE id-keyed index, so direct and PTC calls share
+ * history and exact-repeat memory instead of each having its own.
  */
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 
@@ -38,10 +51,11 @@ export const MAX_APPROVED = 8
 export const MAX_APPROVED_CHARS = 400
 export const MAX_COMMAND_CHARS = 8000
 
-interface ParsedBashCall {
-  name: string
-  command: string
-  sandboxPermissions?: string
+interface Folded {
+  calls: Map<string, BashCall>
+  asked: Map<string, { toolName: string; callId?: string }>
+  decided: Map<string, string>
+  prompts: string[]
 }
 
 function textOf(content: readonly unknown[]): string {
@@ -58,12 +72,23 @@ function textOf(content: readonly unknown[]): string {
   return parts.join('\n')
 }
 
-function parseBashArguments(raw: string): BashCall | undefined {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return undefined
+/**
+ * Parse one bash arguments payload into a `BashCall`.
+ *
+ * Direct `tool/call` rows carry the arguments as a JSON string; PTC
+ * `tool/ptc-dispatch-start` rows carry the host's normalized JSON object.
+ * Both go through here; any other shape, malformed JSON, or a missing
+ * command yields undefined — the caller then treats the call as
+ * unrecoverable and defers, never guesses.
+ */
+function parseBashArguments(raw: unknown): BashCall | undefined {
+  let parsed: unknown = raw
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return undefined
+    }
   }
   if (typeof parsed !== 'object' || parsed === null) return undefined
   const args = parsed as Record<string, unknown>
@@ -78,31 +103,66 @@ function parseBashArguments(raw: string): BashCall | undefined {
   }
 }
 
-function fold(events: readonly SessionEvent[]): {
-  calls: Map<string, ParsedBashCall>
-  asked: Map<string, { toolName: string; callId?: string }>
-  decided: Map<string, string>
-  prompts: string[]
-} {
-  const calls = new Map<string, ParsedBashCall>()
+/** Structural identity for the duplicate-id conflict check. */
+function sameBashCall(a: BashCall, b: BashCall): boolean {
+  return a.command === b.command
+    && (a.description ?? '') === (b.description ?? '')
+    && (a.sandboxPermissions ?? '') === (b.sandboxPermissions ?? '')
+    && (a.justification ?? '') === (b.justification ?? '')
+}
+
+/**
+ * Record one parsed bash call under its exact execution id.
+ *
+ * Ids are unique per execution in a healthy log. A second record under an
+ * id that agrees with the first is an idempotent replay (kept); one that
+ * DISAGREES is a conflict — the entry is dropped permanently, because the
+ * log no longer pins down which command the id refers to, and an approval
+ * must never guess between them.
+ */
+function recordCall(
+  calls: Map<string, BashCall>,
+  conflicted: Set<string>,
+  id: string,
+  parsed: BashCall | undefined,
+): void {
+  if (parsed === undefined) return
+  if (conflicted.has(id)) return
+  const existing = calls.get(id)
+  if (existing === undefined) {
+    calls.set(id, parsed)
+    return
+  }
+  if (!sameBashCall(existing, parsed)) {
+    calls.delete(id)
+    conflicted.add(id)
+  }
+}
+
+function fold(events: readonly SessionEvent[]): Folded {
+  const calls = new Map<string, BashCall>()
+  const conflicted = new Set<string>()
   const asked = new Map<string, { toolName: string; callId?: string }>()
   const decided = new Map<string, string>()
   const prompts: string[] = []
   for (const event of events) {
     const data = event.data as Record<string, unknown> | undefined
     if (data === undefined) continue
-    switch (event.type) {
+    // The pinned dsh-session types predate `tool/ptc-dispatch-start`; the
+    // live host appends it, so dispatch on the widened string and ignore
+    // unknown types as before.
+    const type: string = event.type
+    switch (type) {
       case 'tool/call': {
-        if (typeof data.callId !== 'string' || typeof data.name !== 'string'
-          || typeof data.arguments !== 'string') break
+        if (typeof data.callId !== 'string' || typeof data.name !== 'string') break
         if (data.name !== 'bash') break
-        const parsed = parseBashArguments(data.arguments)
-        if (parsed === undefined) break
-        calls.set(data.callId, {
-          name: data.name,
-          command: parsed.command,
-          sandboxPermissions: parsed.sandboxPermissions,
-        })
+        recordCall(calls, conflicted, data.callId, parseBashArguments(data.arguments))
+        break
+      }
+      case 'tool/ptc-dispatch-start': {
+        if (typeof data.subCallId !== 'string' || typeof data.name !== 'string') break
+        if (data.name !== 'bash') break
+        recordCall(calls, conflicted, data.subCallId, parseBashArguments(data.arguments))
         break
       }
       case 'approval/asked': {
@@ -182,16 +242,9 @@ export function collectEvidence(session: Session, callId: string): Evidence {
   }
 
   // The pending call's full arguments (description/justification included)
-  // come from a second scan of the log for the exact callId event.
-  let call: BashCall | undefined
-  for (const event of session.snapshotEvents()) {
-    if (event.type !== 'tool/call') continue
-    const data = event.data as Record<string, unknown>
-    if (data.callId === callId && typeof data.arguments === 'string') {
-      call = parseBashArguments(data.arguments)
-      break
-    }
-  }
+  // come from the same unified index — one snapshot, one id, whether the
+  // host dispatched the call directly or through PTC.
+  const call = pending
 
   const promptWindow: string[] = []
   let budget = MAX_PROMPT_CHARS

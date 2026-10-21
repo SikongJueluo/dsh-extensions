@@ -60,5 +60,7 @@ dsh-auto-permit（见 [dev.patch.yml](dev.patch.yml) 注释）。
 ## 测试
 
 ```sh
-pnpm build && node packages/cmd-permit/smoke.mjs
+pnpm build   # cmd-permit 经 dsh-auto-permit 的编译产物取 collectEvidence
+pnpm -C packages/cmd-permit test              # vitest：直接 / PTC 两路审批集成
+node packages/cmd-permit/smoke.mjs
 ```

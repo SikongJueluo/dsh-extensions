@@ -140,6 +140,18 @@ ptc {"callRecovered":false}
 
 它应单独修复并补回归测试，但不能用来解释原窗口为何没有任何 bash 审批请求。若修复，必须在执行前的可信审计事件中按精确子调用 id 恢复参数，不应从任意文本或执行后的结果猜命令。
 
+> **状态更新（2026-10-21，实现层 `kwquspxq`）**：本节缺陷已在仓库内修复。
+> `evidence.ts` 的 fold 现统一读取两种来源——顶层 `tool/call`（JSON 字符串
+> 参数，按 `callId` 索引）与 `tool/ptc-dispatch-start`（对象参数，按
+> `subCallId` 索引）——归一为同一份 id 索引的完整 `BashCall`（含
+> description / justification / mode），历史批准与 exactRepeat 记忆也随之
+> direct/PTC 互通；删除了原先第二轮只扫顶层 `tool/call` 的恢复逻辑。同 id
+> 出现内容不一致的重复记录按冲突丢弃（证据不可恢复 → 人工），畸形参数、
+> 非 bash、缺 start 事件的旧宿主一律保守回落。回归覆盖见
+> `packages/auto-permit/test/evidence.test.ts`、两包
+> `test/approval.test.ts`（经真实 `approval/request` 监听器）。本文其余
+> 调研事实不变；生产 profile 的真实审批端到端仍未测试（见第 6 节边界）。
+
 ## 6. 建议顺序与安全边界（未实施）
 
 1. **先补审批闭环与可观测性。** agent 遇到明确拒绝，应按工具返回的流程对同一命令请求一次合适的更宽权限，而不是误以为 auto-permit 已授予目录写权；补 PTC 证据兼容测试。自动审批可以保留人工 fallback，不承诺每条 uv 命令必然通过。
