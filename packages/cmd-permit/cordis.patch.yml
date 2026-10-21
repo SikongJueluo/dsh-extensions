@@ -17,7 +17,15 @@
       name: dsh-cmd-permit
       config:
         enabled: true
-        allow: [rtk, cargo, direnv]
+        # Seed audit 2026-10-21 (toolchain-access migration): `cargo` and
+        # `direnv` were seeded only to bypass HOME cache writes; that job
+        # now belongs to dsh-toolchain-access's directory grants
+        # (cargo-cache preset etc.), so the seed no longer auto-escalates
+        # them to full access. `rtk` stays: it fronts nearly every
+        # rewritten command and its own state writes are not covered by any
+        # cache preset. Users who want cargo/direnv full-access back add
+        # them in Settings — an explicit choice, not a default.
+        allow: [rtk]
         allowPattern: []
         denyShape: []
         maxMode: danger-full-access
