@@ -18,6 +18,7 @@ Out-of-tree [DeepSeek Harness](https://www.deepseek.com/harness/en/) 插件 bund
 | [`dsh-remote-exec`](packages/remote-exec/) | 白名单远端容器执行工具：在固定 SSH 主机的固定 Docker 容器里跑 fish 命令，ssh 走宿主侧 spawn，跳板链与 agent 转发原样生效 |
 | [`dsh-rtk-rewrite`](packages/rtk-rewrite/) | rtk 命令改写执行器：模型跑 `git status`、实际执行 `rtk git status`，用确定性压缩输出降低上下文压力 |
 | [`dsh-search-integrator`](packages/search-integrator/) | 多源检索 + 整合模型一次成文：`web_research` 吃整个问题，去重排序后返回带引文校验的综合答案与覆盖说明 |
+| [`dsh-toolchain-access`](packages/toolchain-access/) | 沙箱窄目录授权：workspace-write 下精确 bind uv/Cargo/pnpm 缓存与共享锁目录（钉版 bwrap 布局、fail-closed），替代"撞 EROFS 再提权 Full access"；接入见 [plan-dsh-toolchain-access.md](docs/plan-dsh-toolchain-access.md) |
 
 ## 安装
 

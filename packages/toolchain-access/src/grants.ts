@@ -512,8 +512,24 @@ export function resolveGrants(input: {
       continue
     }
     if (!entry.explicit) {
-      const bases = defaultBaseTrees(env)
-      const base = bases.find((candidate) => pathCovers(candidate, canonical))
+      // Match bases in canonical space too: on a host whose HOME is itself a
+      // symlink (e.g. /home/user -> /data/user), the canonical grant path
+      // sits under the REAL base while the derived spelling does not — an
+      // un-canonicalized comparison would refuse every default there. A
+      // base that cannot be resolved falls back to its spelling (a missing
+      // base simply matches nothing, the conservative outcome).
+      const canonicalOf = (candidate: string): string => {
+        try {
+          return fs.realpath(candidate)
+        } catch {
+          return candidate
+        }
+      }
+      const spelled = defaultBaseTrees(env)
+      const canonicalBases = spelled.map(canonicalOf)
+      const homeBase = canonicalOf(env.home)
+      const base = canonicalBases.find((candidate) => pathCovers(candidate, canonical))
+        ?? spelled.find((candidate) => pathCovers(candidate, canonical))
       if (base === undefined) {
         issues.push({
           preset: entry.preset,
@@ -527,7 +543,8 @@ export function resolveGrants(input: {
       // itself is not grantable); HOME needs two (so `~/.cache` or `~/.cargo`
       // as a whole stay out, `~/.cache/uv` and `~/.cargo/registry` pass).
       const depth = canonical.slice(base.length + 1).split(sep).filter((part) => part !== '').length
-      if (base === env.home ? depth < 2 : depth < 1) {
+      const isHomeBase = base === homeBase || base === env.home
+      if (isHomeBase ? depth < 2 : depth < 1) {
         issues.push({
           preset: entry.preset,
           path: entry.path,
