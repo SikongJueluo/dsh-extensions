@@ -104,8 +104,14 @@ v3（2026-10-21，随 [dsh-toolchain-access](../toolchain-access/) 迁移）收�
 ALLOW」，当时目录授权尚不存在，按命令提权是唯一出口。如今缓存需求由
 toolchain-access 的 `cargo-cache` 等预设承担，继续按缓存理由批准 Full
 access 只会把刚收窄的白名单从判官这条路又放出去。判官 prompt 版本
-`dsh-auto-permit-v3`；exact-repeat 记忆语义不变（用户真实批准过的精确命令
-照旧放行，新 session 从零开始），`approval/request` 链序与失败回落不变。
+`dsh-auto-permit-v3`；`approval/request` 链序与失败回落不变。
+
+**exact-repeat 记忆的来源门控（2026-10-22，按审查收紧）**：审计事件
+（`approval/decided`）只记录结果、不记录批准者，日志里的「批准过」无法证明
+来自用户还是旧插件规则。因此重放条件收紧为「**本进程**观察到该批准来自链路
+后方（人工弹窗或重新考量过的其他 answerer）」；本插件自己给出的自动批准
+（判官/白名单/记忆）不再可被重放——v2 时代的缓存批准不会升级为持续授权。
+进程重启后观察记录为空，历史批准一律交 v3 判官/人工重新决定。
 
 ## 配置
 

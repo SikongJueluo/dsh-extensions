@@ -40,8 +40,15 @@ export interface Evidence {
   prompts: readonly string[]
   /** Commands this session already had allowed (bash), newest last, bounded. */
   approved: readonly string[]
-  /** Exact-repeat memory: same command + escalation mode already allowed. */
+  /**
+   * Exact-repeat memory (log-derived): same command + escalation mode was
+   * already allowed in this session. The audit trail does NOT record WHO
+   * allowed it, so this is only a candidate — the listener decides whether
+   * an approval's source makes it replayable (see index.ts).
+   */
   exactRepeat: boolean
+  /** Call ids of the prior allowed-once approvals the exact-repeat matched. */
+  exactRepeatSources: readonly string[]
 }
 
 /** Upper bounds mirroring the pi ai-bash-judge calibration (evidence windows). */
@@ -242,10 +249,12 @@ export function collectEvidence(session: Session, callId: string): Evidence {
   }
 
   const pending = calls.get(callId)
-  let exactRepeat = false
+  const repeatSources: string[] = []
   if (pending !== undefined) {
     // Exact-repeat memory: the same command escalated to the same mode was
     // already allowed in this session (the pending ask itself excluded).
+    // Collect every matching prior approval's call id so the listener can
+    // decide per-source whether it may be replayed.
     const mode = pending.sandboxPermissions ?? ''
     for (const [id, ask] of asked) {
       if (ask.toolName !== 'bash' || ask.callId === undefined) continue
@@ -255,8 +264,7 @@ export function collectEvidence(session: Session, callId: string): Evidence {
       if (prior === undefined) continue
       if (prior.command === pending.command
         && (prior.sandboxPermissions ?? '') === mode) {
-        exactRepeat = true
-        break
+        repeatSources.push(ask.callId)
       }
     }
   }
@@ -283,6 +291,7 @@ export function collectEvidence(session: Session, callId: string): Evidence {
     call: call === undefined ? undefined : { ...call, command: clip(call.command, MAX_COMMAND_CHARS) },
     prompts: promptWindow,
     approved: approved.slice(-MAX_APPROVED).map((command) => clip(command, MAX_APPROVED_CHARS)),
-    exactRepeat,
+    exactRepeat: repeatSources.length > 0,
+    exactRepeatSources: repeatSources,
   }
 }

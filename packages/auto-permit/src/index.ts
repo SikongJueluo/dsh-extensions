@@ -142,6 +142,21 @@ function notify(
 export function apply(ctx: Context, config: RowConfig): void {
   const readSettings = registerSettings(ctx, config)
 
+  // Per-process, per-session source memory for exact-repeat replay. The
+  // audit trail (`approval/decided`) records only the outcome — never WHO
+  // decided — so a log-derived "approved before" cannot prove the approval
+  // came from the user rather than a plugin auto-answer (e.g. a pre-v3
+  // cache-rule allowance). Replay is therefore gated on what this process
+  // observed: approvals this plugin ITSELF granted are never replayed
+  // (they must stand on their own each time under the current rules);
+  // approvals that arrived through `next()` — the human dialog, or another
+  // answerer that reconsidered the repeat — may be replayed. A restart
+  // empties both sets, so historical approvals fall to the judge/human,
+  // never to silent replay.
+  const selfAllowed = new Set<string>()
+  const chainApproved = new Set<string>()
+  const keyOf = (sessionId: string, callId: string): string => `${sessionId}:${callId}`
+
   ctx.on(
     'approval/request',
     async (req: ApprovalRequest, next: () => Promise<ApprovalOutcome>) => {
@@ -153,9 +168,19 @@ export function apply(ctx: Context, config: RowConfig): void {
         const session = sessionOf(ctx, req.agent)
         if (session === undefined) return next()
         const agent = req.agent as unknown as NoticeAgent
+        const recordChain = (outcome: ApprovalOutcome): ApprovalOutcome => {
+          if (outcome === 'allowed-once' && req.callId !== undefined) {
+            chainApproved.add(keyOf(session.id, req.callId))
+          }
+          return outcome
+        }
+        const rest = async (): Promise<ApprovalOutcome> => recordChain(await next())
+        const rememberSelf = (): void => {
+          if (req.callId !== undefined) selfAllowed.add(keyOf(session.id, req.callId))
+        }
 
         const evidence = collectEvidence(session, req.callId)
-        if (evidence.call === undefined) return next()
+        if (evidence.call === undefined) return rest()
 
         const command = evidence.call.command.slice(0, 160)
 
@@ -171,7 +196,7 @@ export function apply(ctx: Context, config: RowConfig): void {
             command,
           )
           notify(agent, 'high-risk', command)
-          return next()
+          return rest()
         }
 
         // Shared allowlist decision, BEFORE memory and judge: the allowlist
@@ -192,15 +217,27 @@ export function apply(ctx: Context, config: RowConfig): void {
             command,
           )
           notify(agent, 'allowed-by-cmd-permit', command, claim.via)
+          rememberSelf()
           return 'allowed-once'
         }
 
-        if (evidence.exactRepeat) {
+        // Exact-repeat memory, source-gated: replay only an approval this
+        // process saw arrive through the rest of the chain (the human
+        // dialog). Our own earlier auto-allowances are deliberately NOT
+        // replayable — a pre-v3 cache-rule allowance must not become a
+        // standing grant, and post-v3 allowances stand on their own merits
+        // each time.
+        const replayable = evidence.exactRepeatSources.some(
+          (priorCallId) => chainApproved.has(keyOf(session.id, priorCallId))
+            && !selfAllowed.has(keyOf(session.id, priorCallId)),
+        )
+        if (replayable) {
           ctx.logger.info(
-            'auto-permit: exact repeat of an allowed command, allowing: %s',
+            'auto-permit: exact repeat of a chain-approved command, allowing: %s',
             command,
           )
           notify(agent, 'allowed-by-memory', command)
+          rememberSelf()
           return 'allowed-once'
         }
 
@@ -217,6 +254,7 @@ export function apply(ctx: Context, config: RowConfig): void {
             command,
           )
           notify(agent, 'allowed', command, result.reason)
+          rememberSelf()
           return 'allowed-once'
         }
         ctx.logger.info(
@@ -225,7 +263,7 @@ export function apply(ctx: Context, config: RowConfig): void {
           result.reason ?? 'no reason recorded',
         )
         notify(agent, 'deferred', command, result.reason)
-        return next()
+        return rest()
       } catch (error) {
         // Any surprise (log read failure, agent shape drift, …) goes to the
         // human dialog; never reject on the judge's behalf.

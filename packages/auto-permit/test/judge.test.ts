@@ -15,7 +15,7 @@ const prompt = SYSTEM_PROMPT
 describe('judge prompt v3', () => {
   it('carries the v3 version marker into every judge message', () => {
     expect(PROMPT_VERSION).toBe('dsh-auto-permit-v3')
-    const evidence: Evidence = { call: undefined, prompts: [], approved: [], exactRepeat: false }
+    const evidence: Evidence = { call: undefined, prompts: [], approved: [], exactRepeat: false, exactRepeatSources: [] }
     const message = buildJudgeMessage(evidence)
     const text = message.content[0]?.type === 'text' ? message.content[0].text : ''
     expect(text).toContain(`prompt_version: ${PROMPT_VERSION}`)

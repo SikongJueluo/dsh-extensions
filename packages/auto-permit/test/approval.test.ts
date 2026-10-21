@@ -20,15 +20,21 @@ interface Fixture {
   injected: { source?: { kind?: string; summary?: string } }[]
   appended: unknown[]
   llmCalls: { messages: { content: { type: string; text?: string }[] }[] }[]
-  answer(callId: string, toolName?: string): Promise<{ outcome: ApprovalOutcome; fellThrough: boolean }>
+  answer(callId: string, toolName?: string, chainOutcome?: ApprovalOutcome): Promise<{ outcome: ApprovalOutcome; fellThrough: boolean }>
+  /** Queue the fake judge's next verdict texts (consumed one per call). */
+  judgeVerdicts(verdicts: string[]): void
 }
 
-function makeFixture(cmdPermit?: unknown): Fixture {
+function makeFixture(
+  cmdPermit?: unknown,
+  options: { verdicts?: string[] } = {},
+): Fixture {
   const listeners: { type: string; fn: (...args: unknown[]) => Promise<ApprovalOutcome>; prepend: boolean }[] = []
   const events: { type: string; data: unknown }[] = []
   const injected: unknown[] = []
   const appended: unknown[] = []
   const llmCalls: unknown[] = []
+  const verdictQueue: string[] = [...(options.verdicts ?? [])]
   const session = {
     id: 'sess-1',
     snapshotEvents: () => [...events],
@@ -47,7 +53,10 @@ function makeFixture(cmdPermit?: unknown): Fixture {
     llm: {
       stream: (request: unknown) => {
         llmCalls.push(request)
-        return (async function* () {})()
+        const verdict = verdictQueue.shift()
+        return (async function* () {
+          if (verdict !== undefined) yield { type: 'text-delta', index: 0, text: verdict }
+        })()
       },
     },
   }
@@ -56,7 +65,7 @@ function makeFixture(cmdPermit?: unknown): Fixture {
     provider: vol('test-provider'),
     model: vol('test-model'),
   } as Config)
-  const answer = (callId: string, toolName = 'bash') => {
+  const answer = (callId: string, toolName = 'bash', chainOutcome: ApprovalOutcome = 'rejected') => {
     const entry = listeners.find((item) => item.type === 'approval/request')
     if (entry === undefined) throw new Error('no approval/request listener registered')
     let fellThrough = false
@@ -64,7 +73,7 @@ function makeFixture(cmdPermit?: unknown): Fixture {
       { agent, toolName, callId, signal: undefined },
       async () => {
         fellThrough = true
-        return 'rejected' as const
+        return chainOutcome
       },
     )
     return outcome.then((value) => ({ outcome: value, fellThrough }))
@@ -75,6 +84,9 @@ function makeFixture(cmdPermit?: unknown): Fixture {
     appended,
     llmCalls: llmCalls as Fixture['llmCalls'],
     answer,
+    judgeVerdicts: (verdicts: string[]) => {
+      verdictQueue.push(...verdicts)
+    },
   }
 }
 
@@ -119,15 +131,61 @@ describe('auto-permit answerer over PTC evidence', () => {
     expect(fixture.injected.some((message) => message.source?.summary?.includes('irreversible'))).toBe(true)
   })
 
-  it('allows a PTC exact repeat of a directly-approved command without a model call', async () => {
+  it('does NOT replay a log-only prior approval: the judge must see it (v3 migration)', async () => {
+    // The audit trail cannot prove WHO allowed the prior call. A pre-v3
+    // cache-rule allowance looks identical to a human approval in the log,
+    // so a log-derived exact repeat is no longer auto-allowed — the judge
+    // (under the current rules) or the human decides again.
     const fixture = makeFixture()
     priorDirectAllowed(fixture, 'd1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }, 'a1')
     ptcBash(fixture, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' })
     const { outcome, fellThrough } = await fixture.answer('root:ptc:1')
-    expect(outcome).toBe('allowed-once')
-    expect(fellThrough).toBe(false)
-    expect(fixture.llmCalls).toHaveLength(0)
+    expect(fixture.llmCalls).toHaveLength(1)
+    expect(fellThrough).toBe(true)
+    expect(outcome).toBe('rejected') // the next() sentinel, i.e. the human dialog
+    expect(fixture.injected.some((message) => message.source?.summary?.includes('seen this session'))).toBe(false)
+  })
+
+  it('replays an exact repeat that this process saw the CHAIN approve', async () => {
+    // First ask: the judge defers and the human (next()) allows. The repeat
+    // of a human-approved command is a genuine standing authorization.
+    const fixture = makeFixture()
+    ptcBash(fixture, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' })
+    const first = await fixture.answer('root:ptc:1', 'bash', 'allowed-once')
+    expect(first.outcome).toBe('allowed-once')
+    expect(first.fellThrough).toBe(true)
+    // The approved pair is now in the log (as the host would write it).
+    fixture.events.push(
+      { type: 'approval/asked', data: { id: 'a1', toolName: 'bash', callId: 'root:ptc:1' } },
+      { type: 'approval/decided', data: { id: 'a1', outcome: 'allowed-once' } },
+    )
+    ptcBash(fixture, 'root:ptc:2', { command: 'uv sync', sandbox_permissions: 'workspace-write' })
+    const second = await fixture.answer('root:ptc:2')
+    expect(second.outcome).toBe('allowed-once')
+    expect(second.fellThrough).toBe(false)
+    expect(fixture.llmCalls).toHaveLength(1) // only the first ask reached the judge
     expect(fixture.injected.some((message) => message.source?.summary?.includes('seen this session'))).toBe(true)
+  })
+
+  it('does NOT replay its own judge allowance: each ask stands on its own', async () => {
+    // First ask: the judge allows. The identical repeat must go back to the
+    // judge (which may now defer) instead of the old allowance compounding
+    // into a standing grant.
+    const fixture = makeFixture(undefined, { verdicts: ['VERDICT: allow', 'VERDICT: defer'] })
+    ptcBash(fixture, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' })
+    const first = await fixture.answer('root:ptc:1')
+    expect(first.outcome).toBe('allowed-once')
+    expect(first.fellThrough).toBe(false)
+    fixture.events.push(
+      { type: 'approval/asked', data: { id: 'a1', toolName: 'bash', callId: 'root:ptc:1' } },
+      { type: 'approval/decided', data: { id: 'a1', outcome: 'allowed-once' } },
+    )
+    ptcBash(fixture, 'root:ptc:2', { command: 'uv sync', sandbox_permissions: 'workspace-write' })
+    const second = await fixture.answer('root:ptc:2')
+    expect(fixture.llmCalls).toHaveLength(2)
+    expect(second.fellThrough).toBe(true)
+    expect(second.outcome).toBe('rejected')
+    expect(fixture.injected.filter((message) => message.source?.summary?.includes('seen this session'))).toHaveLength(0)
   })
 
   it('hands the judge the full PTC evidence and defers when it defers', async () => {

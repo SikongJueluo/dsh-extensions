@@ -57,7 +57,9 @@ allow = [ "rtk" ];
 
 ## 4. auto-permit 判官 v3(无需宿主动作)
 
-判官 prompt 随插件行加载,`dsh-auto-permit` 的行声明不变。版本 `dsh-auto-permit-v3` 生效即新判据。**exact-repeat 记忆是 session 内的**:旧 session 里已批准过的精确命令仍会放行(那是当场的真实授权),新 session 从零开始,不会跨 session 复用旧的缓存类批准。
+判官 prompt 随插件行加载,`dsh-auto-permit` 的行声明不变。版本 `dsh-auto-permit-v3` 生效即新判据。
+
+**exact-repeat 记忆已按审查收紧**:审计日志不记录批准者,历史 `allowed-once` 无法证明来自用户还是 v2 缓存规则,所以日志里的旧批准不再直接重放。重放条件 = 本进程观察到该批准来自链路后方(人工弹窗);插件自身的自动批准与重启前的历史批准一律交 v3 判官/人工重新决定。效果:**旧 session 的缓存类自动批准不会跨插件重启复用**;真正的人工批准在同进程内照旧免弹窗。
 
 ## 5. 已知边界(如实,不粉饰)
 
