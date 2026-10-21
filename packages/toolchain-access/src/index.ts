@@ -58,7 +58,7 @@ import LocalSandboxProvider from '@deepseek-ai/dsh-sandbox-local'
 import type { Config as LocalSandboxConfig } from '@deepseek-ai/dsh-sandbox-local'
 import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
-import { insertGrantBinds } from './bwrap.js'
+import { GrantArgvError, insertGrantBinds } from './bwrap.js'
 import { PRESET_IDS, resolveGrants } from './grants.js'
 import type { GrantEnv, GrantFs, GrantIssue, GrantOverrides, GrantPlan, PresetId } from './grants.js'
 
@@ -286,6 +286,14 @@ export class ToolchainAccessSandboxProvider extends LocalSandboxProvider {
     policy: SandboxPolicy,
     signal?: AbortSignal,
   ): Promise<ConfinedArgv> {
+    if (this.grantPresets.length > 0 && policy.mode === 'workspace-write' && process.platform !== 'linux') {
+      // Refuse BEFORE super.confine(): another platform's rung (windows-acl)
+      // materializes its own side effects (ACEs, temp dirs) inside confine,
+      // and this package only ever edits the pinned Linux bwrap layout.
+      throw new GrantArgvError(
+        `directory grants are only implemented for the stock Linux bwrap backend, not ${process.platform}`,
+      )
+    }
     const base = await super.confine(argv, policy, signal)
     if (this.grantPresets.length === 0) return base
     if (policy.mode !== 'workspace-write') return base

@@ -25,10 +25,10 @@ interface Entry {
   mode?: number
 }
 
-/** Deterministic in-memory fs: table-driven realpath + stat. */
-function fakeFs(entries: Record<string, Entry>): GrantFs {
+/** Deterministic in-memory fs over ONE table the test (and its ensure) mutates. */
+function fakeFs(table: Record<string, Entry>): GrantFs {
   const stat = (path: string) => {
-    const entry = entries[path]
+    const entry = table[path]
     if (entry === undefined) throw new Error(`ENOENT: ${path}`)
     return {
       isDirectory: entry.dir ?? false,
@@ -42,7 +42,7 @@ function fakeFs(entries: Record<string, Entry>): GrantFs {
     realpath: (path: string): string => {
       let current = path
       for (let hop = 0; hop < 16; hop += 1) {
-        const entry = entries[current]
+        const entry = table[current]
         if (entry === undefined) throw new Error(`ENOENT: ${current}`)
         if (entry.target === undefined) return current
         current = entry.target
@@ -69,11 +69,12 @@ function plan(
     prepare?: boolean
   } = {},
 ) {
+  const table: Record<string, Entry> = { '/': { dir: true }, ...entries }
   const ensured: Array<{ path: string; kind: string }> = []
-  const fs: GrantFs = fakeFs(entries)
+  const fs: GrantFs = fakeFs(table)
   fs.ensure = (path, kind) => {
     ensured.push({ path, kind })
-    entries[path] = kind === 'lock-file' ? { file: true, mode: 0o644 } : { dir: true, mode: kind === 'lock-dir' ? 0o700 : 0o755 }
+    table[path] = kind === 'lock-file' ? { file: true, mode: 0o644 } : { dir: true, mode: kind === 'lock-dir' ? 0o700 : 0o755 }
   }
   const result = resolveGrants({
     presets,
@@ -97,8 +98,11 @@ describe('default derivation', () => {
         '/home/u/.cargo/registry': dir(),
         '/home/u/.cargo/git': dir(),
         '/home/u/.cargo/.package-cache': { file: true, mode: 0o644 },
+        '/home/u/.cargo/.package-cache-mutate': { file: true, mode: 0o644 },
+        '/home/u/.cargo/.global-cache': { file: true, mode: 0o644 },
         '/home/u/.local/share/pnpm/store': dir(),
         '/home/u/.local/share/pnpm': dir(),
+        '/run/user/1000': { dir: true, mode: 0o700 },
         '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
       },
     )
@@ -111,6 +115,8 @@ describe('default derivation', () => {
       '/home/u/.cargo/registry',
       '/home/u/.cargo/git',
       '/home/u/.cargo/.package-cache',
+      '/home/u/.cargo/.package-cache-mutate',
+      '/home/u/.cargo/.global-cache',
       '/run/user/1000/pnpm-store-operation-locks-1000',
       '/home/u/.local/share/pnpm',
     ])
@@ -123,6 +129,8 @@ describe('default derivation', () => {
         '/data/cargo/registry': dir(),
         '/data/cargo/git': dir(),
         '/data/cargo/.package-cache': { file: true, mode: 0o644 },
+        '/data/cargo/.package-cache-mutate': { file: true, mode: 0o644 },
+        '/data/cargo/.global-cache': { file: true, mode: 0o644 },
         '/data/pnpm/store': dir(),
       },
       { env: { cargoHome: '/data/cargo', pnpmHome: '/data/pnpm' } },
@@ -132,6 +140,8 @@ describe('default derivation', () => {
       '/data/cargo/registry',
       '/data/cargo/git',
       '/data/cargo/.package-cache',
+      '/data/cargo/.package-cache-mutate',
+      '/data/cargo/.global-cache',
       '/data/pnpm/store',
     ])
   })
@@ -188,13 +198,122 @@ describe('fail-closed validation', () => {
     expect(result.issues[0]?.reason).toBe('floor-path')
   })
 
-  it('refuses credential and tool-config trees', () => {
+  it('refuses credential and token trees, including via symlinks and runtime-dir spellings', () => {
+    const direct = plan(
+      ['uv-cache'],
+      { '/home/u/.netrc': { file: true, mode: 0o600 } },
+      { overrides: { uvCache: '/home/u/.netrc' } },
+    )
+    expect(direct.issues[0]?.reason).toBe('credential-segment')
+
+    const linked = plan(
+      ['uv-cache'],
+      {
+        '/home/u/.cache/uv': { target: '/home/u/.ssh/uv' },
+        '/home/u/.ssh/uv': { dir: true },
+      },
+    )
+    expect(linked.issues[0]?.reason).toBe('credential-segment')
+
+    for (const path of ['/home/u/.git-credentials', '/home/u/.npmrc', '/run/user/1000/gnupg']) {
+      const table: Record<string, Entry> = {
+        '/home/u/.git-credentials': { file: true, mode: 0o600 },
+        '/home/u/.npmrc': { file: true, mode: 0o600 },
+        '/run/user/1000/gnupg': { dir: true, mode: 0o700 },
+      }
+      const result = resolveGrants({
+        presets: ['uv-cache'],
+        overrides: { uvCache: path },
+        env: ENV,
+        workspaceRoots: [],
+        fs: fakeFs(table),
+      })
+      expect(result.issues[0]?.reason, path).toBe('credential-segment')
+    }
+  })
+
+  it('binds the canonical target, not the spelling, for symlinked grants', () => {
     const result = plan(
       ['uv-cache'],
-      { '/home/u/.ssh/uv': dir() },
-      { overrides: { uvCache: '/home/u/.ssh/uv' } },
+      {
+        '/data/uv-real': dir(),
+        '/home/u/.cache/uv': { target: '/data/uv-real' },
+      },
+      { overrides: { uvCache: '/home/u/.cache/uv' } },
     )
-    expect(result.issues[0]?.reason).toBe('credential-segment')
+    expect(result.issues).toEqual([])
+    expect(result.binds).toEqual([
+      { source: '/data/uv-real', destination: '/data/uv-real', preset: 'uv-cache' },
+    ])
+  })
+
+  it('rejects paths the owner cannot write (a grant must keep the tool working)', () => {
+    const dirResult = plan(['uv-cache'], { '/home/u/.cache/uv': dir({ mode: 0o555 }) })
+    expect(dirResult.issues[0]?.reason).toBe('not-owner-writable')
+    const fileResult = plan(
+      ['cargo-cache'],
+      {
+        '/home/u/.cargo/registry': dir(),
+        '/home/u/.cargo/git': dir(),
+        '/home/u/.cargo/.package-cache': { file: true, mode: 0o444 },
+        '/home/u/.cargo/.package-cache-mutate': { file: true, mode: 0o644 },
+        '/home/u/.cargo/.global-cache': { file: true, mode: 0o644 },
+      },
+    )
+    expect(fileResult.issues[0]?.reason).toBe('not-owner-writable')
+  })
+
+  it('refuses pnpm-runtime-locks when the runtime dir is not owner-writable', () => {
+    // pnpm 12.8.2+ falls back to /tmp for locks when $XDG_RUNTIME_DIR is
+    // not owner-writable — the bind would then cover a directory pnpm
+    // never uses and the shared lock domain would silently split.
+    const result = plan(
+      ['pnpm-runtime-locks'],
+      {
+        '/run/user/1000': { dir: true, mode: 0o555 },
+        '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
+      },
+    )
+    expect(result.binds).toEqual([])
+    expect(result.issues[0]?.reason).toBe('runtime-dir-unwritable')
+  })
+
+  it('a HOME with a trailing slash or a symlinked HOME still derives defaults', () => {
+    const trailing = plan(['uv-cache'], { '/home/u/.cache/uv': dir() }, { env: { home: '/home/u/' } })
+    expect(trailing.issues).toEqual([])
+    expect(trailing.binds.map((bind) => bind.source)).toEqual(['/home/u/.cache/uv'])
+
+    const symlinked = resolveGrants({
+      presets: ['uv-cache'],
+      overrides: {},
+      env: { ...ENV, home: '/home/link' },
+      workspaceRoots: [],
+      fs: fakeFs({
+        '/': { dir: true },
+        '/home/link': { target: '/data/u' },
+        '/home/link/.cache': { target: '/data/u/.cache' },
+        '/home/link/.cache/uv': { target: '/data/u/.cache/uv' },
+        '/data/u/.cache': { dir: true },
+        '/data/u/.cache/uv': { dir: true },
+      }),
+    })
+    expect(symlinked.issues).toEqual([])
+    expect(symlinked.binds.map((bind) => bind.source)).toEqual(['/data/u/.cache/uv'])
+  })
+
+  it('one bad preset poisons the whole plan (no partial grants)', () => {
+    const result = plan(
+      ['uv-cache', 'cargo-cache'],
+      {
+        '/home/u/.cache/uv': dir(),
+        '/home/u/.cargo/registry': dir(),
+        '/home/u/.cargo/git': dir(),
+        // .package-cache* files missing entirely and prepare not requested
+      },
+    )
+    expect(result.binds).toEqual([])
+    expect(result.issues.length).toBeGreaterThanOrEqual(3)
+    expect(result.issues.every((issue) => issue.reason === 'missing')).toBe(true)
   })
 
   it('refuses non-absolute paths', () => {
@@ -233,18 +352,20 @@ describe('explicit overrides', () => {
     expect(result.binds.map((bind) => bind.source)).toEqual(['/data/uv-cache'])
   })
 
-  it('cargoHome override anchors all three cargo grants', () => {
+  it('cargoHome override anchors all five cargo grants', () => {
     const result = plan(
       ['cargo-cache'],
       {
         '/data/cargo/registry': dir(),
         '/data/cargo/git': dir(),
         '/data/cargo/.package-cache': { file: true, mode: 0o644 },
+        '/data/cargo/.package-cache-mutate': { file: true, mode: 0o644 },
+        '/data/cargo/.global-cache': { file: true, mode: 0o644 },
       },
       { overrides: { cargoHome: '/data/cargo' } },
     )
     expect(result.issues).toEqual([])
-    expect(result.binds).toHaveLength(3)
+    expect(result.binds).toHaveLength(5)
   })
 })
 
@@ -288,7 +409,7 @@ describe('dedupe and workspace subtraction', () => {
 
 describe('controlled preparation (confine time only)', () => {
   it('creates a missing default lock dir as 0700 (reboot-wiped /run/user)', () => {
-    const result = plan(['pnpm-runtime-locks'], {}, { prepare: true })
+    const result = plan(['pnpm-runtime-locks'], { '/run/user/1000': { dir: true, mode: 0o700 } }, { prepare: true })
     expect(result.issues).toEqual([])
     expect(result.binds.map((bind) => bind.source)).toEqual(['/run/user/1000/pnpm-store-operation-locks-1000'])
     expect(result.ensured).toEqual([
@@ -296,7 +417,7 @@ describe('controlled preparation (confine time only)', () => {
     ])
   })
 
-  it('creates missing default cache dirs and the cargo lock file with the right kinds', () => {
+  it('creates missing default cache dirs and the cargo lock files with the right kinds', () => {
     const result = plan(['uv-cache', 'cargo-cache'], {}, { prepare: true })
     expect(result.issues).toEqual([])
     expect(result.ensured).toEqual([
@@ -304,6 +425,8 @@ describe('controlled preparation (confine time only)', () => {
       { path: '/home/u/.cargo/registry', kind: 'cache-dir' },
       { path: '/home/u/.cargo/git', kind: 'cache-dir' },
       { path: '/home/u/.cargo/.package-cache', kind: 'lock-file' },
+      { path: '/home/u/.cargo/.package-cache-mutate', kind: 'lock-file' },
+      { path: '/home/u/.cargo/.global-cache', kind: 'lock-file' },
     ])
   })
 
@@ -322,6 +445,64 @@ describe('controlled preparation (confine time only)', () => {
     const result = plan(['uv-cache'], {})
     expect(result.ensured).toEqual([])
     expect(result.issues[0]?.reason).toBe('missing')
+  })
+
+  it('a concurrent creator racing the ensure still resolves (EEXIST is success)', () => {
+    // The lock file appears between our failed realpath and ensure — the
+    // ensure then throws EEXIST, which must NOT surface as missing.
+    const table: Record<string, Entry> = {
+      '/': { dir: true },
+      '/home/u/.cargo': { dir: true },
+      '/home/u/.cargo/registry': { dir: true },
+      '/home/u/.cargo/git': { dir: true },
+      // The "other creator" won the race and made all three files:
+      '/home/u/.cargo/.package-cache': { file: true, mode: 0o644 },
+      '/home/u/.cargo/.package-cache-mutate': { file: true, mode: 0o644 },
+      '/home/u/.cargo/.global-cache': { file: true, mode: 0o644 },
+    }
+    const fs = fakeFs(table)
+    fs.ensure = () => {
+      throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' })
+    }
+    const result = resolveGrants({
+      presets: ['cargo-cache'],
+      overrides: {},
+      env: ENV,
+      workspaceRoots: [],
+      fs,
+      prepare: true,
+    })
+    expect(result.issues).toEqual([])
+    expect(result.binds.map((bind) => bind.source)).toContain('/home/u/.cargo/.package-cache')
+  })
+
+  it('refuses to create a default under a symlinked base pointing at a system tree', () => {
+    // ~/.cache -> /var/cache: creating ~/.cache/uv would write into /var
+    // BEFORE the floor check could refuse the grant. Pre-flight must reject
+    // without any creation.
+    const table: Record<string, Entry> = {
+      '/': { dir: true },
+      '/home/u': { dir: true },
+      '/home/u/.cache': { target: '/var/cache' },
+      '/var/cache': { dir: true },
+    }
+    const ensured: string[] = []
+    const fs = fakeFs(table)
+    fs.ensure = (path) => {
+      ensured.push(path)
+      table[path] = { dir: true }
+    }
+    const result = resolveGrants({
+      presets: ['uv-cache'],
+      overrides: {},
+      env: ENV,
+      workspaceRoots: [],
+      fs,
+      prepare: true,
+    })
+    expect(ensured).toEqual([])
+    expect(result.binds).toEqual([])
+    expect(result.issues[0]?.reason).toBe('floor-path')
   })
 })
 

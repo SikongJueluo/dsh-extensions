@@ -33,7 +33,7 @@ dsh 归 nix 管。**注意:本插件不能进 `programs.dsh.plugins` 列表**—
         paths: {}
 ```
 
-`plugins.nix` 的 `extraPatches` 追加一项 `./toolchain.patch.yml`(同 `subagents.patch.yml` 的 `${./...}` 写法)。改预设 → 编辑此文件 → `home-manager switch` → 重启 dsh。
+`plugins.nix` 的 `extraPatches` 追加一项 `${./toolchain-access.patch.yml}`（同 `subagents.patch.yml` 的 `${./...}` 写法）。改预设 → 编辑此文件 → `home-manager switch` → 重启 dsh。
 
 ### 方案 B:直接用仓库的 dev.patch.yml
 

@@ -120,12 +120,14 @@ export interface GrantIssue {
     | 'missing'
     | 'not-dir-or-file'
     | 'not-owner'
+    | 'not-owner-writable'
     | 'group-or-world-writable'
     | 'floor-path'
     | 'credential-segment'
     | 'outside-default-bases'
     | 'not-strictly-inside-base'
     | 'runtime-dir-unset'
+    | 'runtime-dir-unwritable'
   readonly message: string
 }
 
@@ -194,23 +196,60 @@ function exactFloors(env: GrantEnv): readonly string[] {
 }
 
 /**
- * Path segments that mark credential or tool-configuration trees. A grant
- * whose path crosses one is refused: cache presets must never make secrets
- * or tool config writable (reads stay confined-but-allowed, exactly as
+ * Path segments that mark credential or token trees. A grant whose path
+ * crosses one is refused: cache presets must never make secrets, tokens or
+ * tool config writable (reads stay confined-but-allowed, exactly as
  * before — this layer adds write grants only).
  */
 const CREDENTIAL_SEGMENTS = new Set([
   '.ssh',
   '.gnupg',
+  'gnupg',
   '.aws',
+  '.azure',
+  '.gcloud',
   '.kube',
   '.docker',
   '.config',
+  '.netrc',
+  '_netrc',
+  '.git-credentials',
+  '.npmrc',
   'credentials',
 ])
 
 function isAbsolute(path: string): boolean {
   return path.startsWith('/')
+}
+
+/**
+ * Pre-flight for controlled preparation: would creating `entry.path` land
+ * inside a system floor or a credential tree? Resolves the nearest EXISTING
+ * ancestor (the base being a symlink then points at the real target) and
+ * applies the same floor/credential checks to the resolved ancestor plus
+ * the still-missing segments. Returns true when creation must NOT happen.
+ */
+function preflightRejects(entry: NamedPath, env: GrantEnv, fs: GrantFs): boolean {
+  let ancestor = entry.path
+  const missing: string[] = []
+  let resolved: string | undefined
+  while (resolved === undefined) {
+    try {
+      resolved = fs.realpath(ancestor)
+    } catch {
+      if (ancestor === '/') return true
+      const index = ancestor.lastIndexOf(sep)
+      missing.unshift(ancestor.slice(index + 1))
+      ancestor = index === 0 ? '/' : ancestor.slice(0, index)
+    }
+  }
+  const effective = missing.length === 0
+    ? resolved!
+    : `${resolved === '/' ? '' : resolved}${sep}${missing.join(sep)}`
+  if (FLOOR_PREFIXES.some((floor) => pathCovers(floor, effective))) return true
+  if (exactFloors(env).includes(effective)) return true
+  if (effective === env.home) return true
+  return effective.split(sep).some((segment) => CREDENTIAL_SEGMENTS.has(segment))
 }
 
 /** `child === parent` or `child` sits below `parent` (both canonical, absolute). */
@@ -299,7 +338,17 @@ function derivePaths(
         for (const [segment, kind] of [
           ['registry', 'cache-dir'],
           ['git', 'cache-dir'],
+          // Cargo 1.74+ carries TWO global cache locks — the shared
+          // download lock and the mutate lock guarding MutateExclusive
+          // operations (auto-gc). Binding only the first makes cargo's
+          // mutate-lock open fail EROFS and SILENTLY degrade to running
+          // unlocked, which quietly dissolves mutual exclusion with
+          // concurrent host-side cargo. .global-cache is the use-tracking
+          // sqlite (degrades with a warning when read-only); granting it
+          // keeps auto-gc accounting working.
           ['.package-cache', 'lock-file'],
+          ['.package-cache-mutate', 'lock-file'],
+          ['.global-cache', 'lock-file'],
         ] as const) {
           push(preset, joinDir(cargoHome, segment), explicitHome, cargoHome, explicitHome ? 'none' : kind)
         }
@@ -373,9 +422,61 @@ export function resolveGrants(input: {
   fs: GrantFs
   prepare?: boolean
 }): GrantPlan {
-  const { presets, overrides, env, workspaceRoots, fs } = input
+  const { presets, overrides, workspaceRoots, fs, prepare } = input
+  // Normalize the ambient anchors first: a trailing-slash HOME (real on
+  // some hosts — os.homedir() returns it verbatim) would otherwise make
+  // every path-cover comparison miss and refuse all defaults fail-closed.
+  const stripSlashes = (path: string): string => {
+    const stripped = path.replace(/\/+$/u, '')
+    return stripped === '' ? '/' : stripped
+  }
+  const env: GrantEnv = {
+    ...input.env,
+    home: stripSlashes(input.env.home),
+    ...(input.env.xdgCacheHome === undefined ? {} : { xdgCacheHome: stripSlashes(input.env.xdgCacheHome) }),
+    ...(input.env.xdgDataHome === undefined ? {} : { xdgDataHome: stripSlashes(input.env.xdgDataHome) }),
+    ...(input.env.xdgRuntimeDir === undefined ? {} : { xdgRuntimeDir: stripSlashes(input.env.xdgRuntimeDir) }),
+    ...(input.env.cargoHome === undefined ? {} : { cargoHome: stripSlashes(input.env.cargoHome) }),
+    ...(input.env.pnpmHome === undefined ? {} : { pnpmHome: stripSlashes(input.env.pnpmHome) }),
+    ...(input.env.uvCache === undefined ? {} : { uvCache: stripSlashes(input.env.uvCache) }),
+  }
   const { named, issues } = derivePaths(presets, overrides, env)
   const notes: GrantNote[] = []
+
+  // pnpm 12.8.2+ uses $XDG_RUNTIME_DIR for its operation locks only when
+  // the runtime dir is OWNER-WRITABLE; otherwise it silently falls back to
+  // /tmp — which inside the sandbox is a private tmpfs, splitting the very
+  // lock domain this preset exists to keep shared. Validate the condition
+  // pnpm itself checks, not just the lock directory; a broken runtime dir
+  // also suppresses the preset's default-derived entries below (the issue
+  // already fails the whole plan).
+  let runtimeDirBroken = false
+  const needsRuntimeDirCheck = named.some(
+    (entry) => entry.preset === 'pnpm-runtime-locks' && !entry.explicit,
+  )
+  if (needsRuntimeDirCheck && env.xdgRuntimeDir !== undefined) {
+    try {
+      const runtimeStat = fs.stat(env.xdgRuntimeDir)
+      const ownerWritable = runtimeStat.isDirectory && runtimeStat.uid === env.uid && (runtimeStat.mode & 0o200) !== 0
+      if (!ownerWritable) {
+        runtimeDirBroken = true
+        issues.push({
+          preset: 'pnpm-runtime-locks',
+          path: env.xdgRuntimeDir,
+          reason: 'runtime-dir-unwritable',
+          message: `pnpm-runtime-locks: ${env.xdgRuntimeDir} is not an owner-writable directory of uid ${env.uid}; pnpm would fall back to a private /tmp lock dir inside the sandbox (split lock domain) — fix the runtime dir or configure paths.pnpmRuntimeLocks explicitly`,
+        })
+      }
+    } catch {
+      runtimeDirBroken = true
+      issues.push({
+        preset: 'pnpm-runtime-locks',
+        path: env.xdgRuntimeDir,
+        reason: 'runtime-dir-unwritable',
+        message: `pnpm-runtime-locks: ${env.xdgRuntimeDir} does not exist — pnpm would fall back to a private /tmp lock dir inside the sandbox (split lock domain)`,
+      })
+    }
+  }
 
   interface Resolved extends NamedPath {
     canonical: string
@@ -383,6 +484,11 @@ export function resolveGrants(input: {
   const resolved: Resolved[] = []
 
   for (const entry of named) {
+    if (runtimeDirBroken && entry.preset === 'pnpm-runtime-locks' && !entry.explicit) {
+      // The runtime-dir issue above already fails the plan; skip the
+      // entries pnpm would not actually use.
+      continue
+    }
     if (!isAbsolute(entry.path)) {
       issues.push({
         preset: entry.preset,
@@ -398,28 +504,41 @@ export function resolveGrants(input: {
     } catch {
       // Controlled preparation, only for implicit defaults of a preset (the
       // operator enabled the preset, which names exactly these paths), never
-      // for explicit overrides or exported anchors, and only when the caller
-      // asked to act (confine time — plugin load stays side-effect-free).
-      // `/run/user/<uid>` is tmpfs: pnpm's lock dir vanishes every reboot,
-      // so without this the preset would fail closed until someone ran pnpm
-      // outside the sandbox once.
-      let prepared = false
-      if (input.prepare === true && !entry.explicit && entry.prepare !== 'none' && fs.ensure !== undefined) {
-        try {
-          fs.ensure(entry.path, entry.prepare)
-          prepared = true
-        } catch {
-          prepared = false
-        }
-      }
-      if (!prepared) {
-        issues.push({
-          preset: entry.preset,
-          path: entry.path,
-          reason: 'missing',
-          message: `${entry.preset}: ${entry.path} does not exist on the host — prepare it (see the package README's host-prep section) or disable the preset; the sandbox will not run with a configured grant it cannot honor`,
-        })
+      // for explicit overrides or full-path env anchors, and only when the
+      // caller asked to act (confine time — plugin load stays
+      // side-effect-free). `/run/user/<uid>` is tmpfs: pnpm's lock dir
+      // vanishes every reboot, so without this the preset would fail closed
+      // until someone ran pnpm outside the sandbox once.
+      //
+      // Pre-flight BEFORE creating anything: resolve the nearest EXISTING
+      // ancestor and run the floor/credential checks against it plus the
+      // remaining segments, so a symlinked base (say ~/.cache -> /var/x)
+      // is rejected without ever writing into the never-grantable target.
+      const preflight = preflightRejects(entry, env, fs)
+      const kind = entry.prepare === 'none' ? undefined : entry.prepare
+      const guarded = prepare === true && !entry.explicit && kind !== undefined && fs.ensure !== undefined
+        && preflight === false
+      if (!guarded || kind === undefined) {
+        issues.push(preflight === true
+          ? {
+              preset: entry.preset,
+              path: entry.path,
+              reason: 'floor-path',
+              message: `${entry.preset}: ${entry.path} resolves into a system or credential tree — refusing to create or grant it`,
+            }
+          : {
+              preset: entry.preset,
+              path: entry.path,
+              reason: 'missing',
+              message: `${entry.preset}: ${entry.path} does not exist on the host — prepare it (see the package README's host-prep section) or disable the preset; the sandbox will not run with a configured grant it cannot honor`,
+            })
         continue
+      }
+      try {
+        fs.ensure?.(entry.path, kind)
+      } catch {
+        // A concurrent creator (another confine, or the tool itself) may
+        // have made the path first — EEXIST is success for our purpose.
       }
       try {
         canonical = fs.realpath(entry.path)
@@ -511,6 +630,18 @@ export function resolveGrants(input: {
       })
       continue
     }
+    // Owner-write is part of the promise: a 0555 cache directory would
+    // pass the checks above and then EROFS/EACCES at first use, failing
+    // the tool in exactly the way this plugin exists to prevent.
+    if ((stat.mode & 0o200) === 0) {
+      issues.push({
+        preset: entry.preset,
+        path: entry.path,
+        reason: 'not-owner-writable',
+        message: `${entry.preset}: ${entry.path} is not owner-writable — a grant over it would still fail the tool's writes`,
+      })
+      continue
+    }
     if (!entry.explicit) {
       // Match bases in canonical space too: on a host whose HOME is itself a
       // symlink (e.g. /home/user -> /data/user), the canonical grant path
@@ -586,5 +717,9 @@ export function resolveGrants(input: {
     .filter((entry) => keptCanonical.has(entry.canonical))
     .map((entry) => ({ source: entry.canonical, destination: entry.canonical, preset: entry.preset }))
 
+  // All-or-nothing: with any issue the caller fails the confined command,
+  // so a plan carrying binds alongside issues would only invite partial
+  // consumption. An honest plan is either fully grantable or empty.
+  if (issues.length > 0) return { binds: [], issues, notes }
   return { binds, issues, notes }
 }

@@ -30,13 +30,17 @@ function fakeCtx() {
 
 /** Deterministic grant filesystem: identity realpath over a stat table. */
 function fakeGrantFs(entries: Record<string, { dir?: boolean; file?: boolean; uid?: number; mode?: number }>): GrantFs {
+  const table: Record<string, { dir?: boolean; file?: boolean; uid?: number; mode?: number }> = {
+    '/': { dir: true },
+    ...entries,
+  }
   return {
     realpath: (path) => {
-      if (!(path in entries)) throw new Error(`ENOENT: ${path}`)
+      if (!(path in table)) throw new Error(`ENOENT: ${path}`)
       return path
     },
     stat: (path) => {
-      const entry = entries[path]
+      const entry = table[path]
       if (entry === undefined) throw new Error(`ENOENT: ${path}`)
       return {
         isDirectory: entry.dir ?? false,

@@ -25,9 +25,9 @@ sandbox adapter               （super.confine() 官方行为原样保留）
 | 预设 | 授权路径（默认） | 说明 |
 |---|---|---|
 | `uv-cache` | `$XDG_CACHE_HOME`/`~/.cache` 下 `uv/` | uv 唯一的共享缓存根 |
-| `cargo-cache` | `CARGO_HOME`/`~/.cargo` 下 `registry/`、`git/`、`.package-cache` | registry/git 缓存 + 全局锁文件；**不是**整个 `~/.cargo`（credentials、config 保持只读） |
+| `cargo-cache` | `CARGO_HOME`/`~/.cargo` 下 `registry/`、`git/`、`.package-cache`、`.package-cache-mutate`、`.global-cache` | registry/git 缓存 + Cargo 1.74+ 的**两把**全局锁（共享下载锁与 mutate 锁——只绑第一把时 mutate 锁 EROFS，cargo 会**静默降级为无锁**，与宿主侧并发 cargo 互斥失效）+ use-tracking sqlite；**不是**整个 `~/.cargo`（credentials、config 保持只读） |
 | `pnpm-store` | pnpm home 下 `store/` | 共享包 store（本仓这类 store 在 workspace 内的项目会自动按「已覆盖」扣除） |
-| `pnpm-runtime-locks` | `$XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>` | pnpm 12 的 operation lock 域。**必须**绑定宿主原目录：绑到私有 `/tmp` 会拆散共享锁域（终端与两个 DSH 会话各持私锁共享同一 store）。`XDG_RUNTIME_DIR` 未设置时预设直接拒绝（pnpm 回退 `/tmp` 即私有 tmpfs） |
+| `pnpm-runtime-locks` | `$XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>` | pnpm 12 的 operation lock 域。**必须**绑定宿主原目录：绑到私有 `/tmp` 会拆散共享锁域。要求 `$XDG_RUNTIME_DIR` 为当前用户属主且可写（pnpm 12.8.2+ 否则自行回退 `/tmp`）；未设置或不可写时预设拒绝。`/run/user` 是 tmpfs，重启清空——confine 时受控自建 0700 锁目录 |
 | `pnpm-engine` | 整个 pnpm home（`~/.local/share/pnpm`） | 冷装其他版本 pnpm 需要写 `package-manager-store/`、`global/v11`、`_tmp`。**含可执行 engine 副本**，属单独信任决定，默认不启用；热缓存场景不需要它 |
 
 `paths` 可显式覆盖各锚点（`uvCache` / `cargoHome` / `pnpmHome` / `pnpmStore` /
@@ -42,11 +42,14 @@ sandbox adapter               （super.confine() 官方行为原样保留）
   的 HOME/XDG/`CARGO_HOME` 等）。**agent 的 command/justification、仓库文件、
   项目 `.envrc`（auto-env 叠加的会话环境）都不是授权来源**——项目把
   `UV_CACHE_DIR` 指向别处不会获得授权，只会继续 EROFS，直到操作者显式配置。
-- 校验（全部 fail-closed，confine 拒绝执行并给出原因）：路径必须已存在、是本
-  uid 拥有的目录或普通文件、非 group/world-writable、realpath 后不落在系统
-  底线根（`/`、`/home`、`/tmp`、`/etc`、`/run` …）或凭据/工具配置树
-  （`.ssh`、`.gnupg`、`.aws`、`.config`…）；纯默认推导的路径还必须在用户基
-  底树内。显式 `paths` 可以越过基底树（操作者声明），但永远不能越过底线。
+- 校验（全部 fail-closed，confine 拒绝执行并给出原因；issues 非空时整个 plan
+  不产出任何 bind——全有或全无）：路径必须已存在（或可受控自建，见下）、是本
+  uid 拥有且**属主可写**的目录或普通文件、非 group/world-writable、realpath
+  后不落在系统底线根（`/`、`/home`、`/tmp`、`/etc`、`/run` …）或凭据/令牌树
+  （`.ssh`、`.gnupg`、`.netrc`、`.git-credentials`、`.npmrc`、`.config`…）；
+  纯默认推导的路径还必须在用户基底树内（基底与 HOME 均按 realpath 对齐，
+  HOME 为符号链接或带尾斜杠的宿主不受影响）。显式 `paths` 可以越过基底树
+  （操作者声明），但永远不能越过底线。
 - 缺失目录**不会**放宽父目录来迁就；也不会用 `--bind-try` 静默漏挂。要么在
   宿主准备好目录（见下），要么关预设。
 - `read-only` 模式不加任何写授权；无预设时行为与官方逐字节一致。
@@ -62,10 +65,12 @@ Nix 声明式预置（`systemd.tmpfiles` 或 activation），见
 ## 后端限制
 
 - 只编辑 **Linux / stock bwrap** 布局（钉版 `dsh-sandbox-local` 0.2.0-rc.2 的
-  profile 形状，见 [src/bwrap.ts](src/bwrap.ts)）。配置了 `runnerCommand`
-  包装器、链路选中 Landlock/Seatbelt/ACL，或未来 dsh 改了 profile——需要
-  授权的调用**明确失败**（`GrantArgvError`），不猜 unfamiliar 布局、不静默
-  去掉授权。升级 dsh 后跑本包测试即可暴露布局漂移。
+  profile 形状，见 [src/bwrap.ts](src/bwrap.ts)）。需要授权的调用在以下情形
+  **明确失败**（`GrantArgvError`），不猜 unfamiliar 布局、不静默去掉授权：非
+  Linux 平台（在 super.confine 之前拒绝，不产生其他后端如 windows-acl 的副作
+  用）、链路选中 Landlock/Seatbelt/ACL、配置了**形状非 stock** 的
+  `runnerCommand`（恰好等于裸 `['bwrap']` 的 wrapper 与 stock 不可区分、可正
+  常拼接）。升级 dsh 后跑本包测试即可暴露布局漂移。
 - 单文件 bind（如 `.package-cache`）绑定的是当前 inode；宿主侧删除重建会造
   成 inode 分叉。目录 bind 无此问题（目录内容动态可见）。Cargo 不删除重建
   `.package-cache`，预设按现状支持；若未来 Cargo 行为变化，以真实并发测试为
