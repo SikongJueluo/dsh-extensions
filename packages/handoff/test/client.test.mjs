@@ -18,6 +18,12 @@ let currentInstance = null
 const React = {
   Fragment: Symbol('Fragment'),
   createElement(type, props, ...children) {
+    // React's style prop must be an object (react.dev/errors/62); enforce it
+    // here so a text/style mixup fails the tests instead of only real browsers.
+    const style = (props ?? {}).style
+    if (style !== undefined && (typeof style !== 'object' || style === null || Array.isArray(style))) {
+      throw new Error(`style contract violated for <${typeof type === 'string' ? type : 'component'}>: style must be an object, got ${typeof style} "${String(style)}"`)
+    }
     const flat = []
     const push = (child) => {
       if (Array.isArray(child)) child.forEach(push)
@@ -358,6 +364,36 @@ test('flag-fixed fields display 命令指定, offer no 更改, and the review ve
   assert.equal(JSON.stringify(choices[0].choice), JSON.stringify({
     kind: 'inherit',
     review: { enabled: true, rounds: 8 },
+  }))
+})
+
+test('a retry pre-fills the previous workspace and submits exactly what the card shows', async () => {
+  const choices = []
+  const request = {
+    id: 'req-retry', sessionId: 'session-1', task: '重试任务',
+    inherited: { provider: 'prov', model: 'reasoner' },
+    fallback: { provider: 'prov', model: 'simple' },
+    origin: { id: 'origin', title: 'Origin', path: '/home/u/project', missing: false },
+    workspaces: [{ id: 'ws-1', title: 'Other', path: '/home/u/other', missing: false }],
+    pickWorkspace: true,
+    previous: { choice: { kind: 'inherit' }, workspaceId: 'ws-1' },
+    review: { defaultRounds: 5 },
+  }
+  const props = { request, operations: operations(choices), onSettled: () => {} }
+  const inst = mount(H.Picker, props)
+  await settle(inst, props)
+
+  const text = textOf(inst.tree)
+  assert.ok(text.includes('Other（/home/u/other）'), 'the card pre-fills the previous workspace')
+  assert.ok(!text.includes('原工作区（/home/u/project）'), 'the summary must not claim the origin')
+
+  // Submit WITHOUT touching anything: the payload must match the summary.
+  submit(inst.tree).props.onClick()
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(JSON.stringify(choices[0].choice), JSON.stringify({
+    kind: 'inherit', workspace: 'ws-1',
+    review: { enabled: false, rounds: 5 },
   }))
 })
 

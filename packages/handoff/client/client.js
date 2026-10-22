@@ -119,7 +119,7 @@ window.__ModuleLoader__.load({
     var divider = { height: "1px", background: "var(--dsw-alias-border-l2, rgba(255,255,255,.12))", margin: "8px 8px" };
     var footer = { display: "flex", justifyContent: "flex-end", gap: "8px", padding: "10px 20px 16px" };
     var button = {
-      font: "inherit", fontSize: "13px", padding: "7px 14px", borderRadius: "10px", cursor: "pointer",
+      font: "inherit", fontSize: "13px", minHeight: 44, padding: "8px 14px", borderRadius: "10px", cursor: "pointer",
       color: "var(--dsw-alias-label-primary, #e8e8ea)",
       background: "transparent",
       border: "1px solid var(--dsw-alias-border-l4, rgba(255,255,255,.16))"
@@ -227,6 +227,19 @@ window.__ModuleLoader__.load({
           && request.workspaces && request.workspaces.length > 0;
       }
 
+      /** The ONE effective workspace verdict, shared by the summary row AND
+       * the submit payload: this pick → the retry's previous pick (when it is
+       * still in the roster) → origin. Display and payload must never
+       * disagree — a card that shows "Other" must not submit "origin". */
+      function effectiveWorkspace() {
+        if (wsPick !== undefined) return wsPick;
+        if (prevWorkspace !== undefined && (prevWorkspace === "origin"
+          || (request.workspaces || []).some(function (w) { return w.id === prevWorkspace; }))) {
+          return prevWorkspace;
+        }
+        return "origin";
+      }
+
       React.useEffect(function () {
         if (request === null) return undefined;
         setQuery("");
@@ -253,7 +266,7 @@ window.__ModuleLoader__.load({
         if (busy) return;
         setBusy(true);
         var payload = Object.assign({}, modelFixed ? { kind: "inherit" } : effectiveChoice);
-        if (needsWorkspace()) payload.workspace = wsPick === undefined ? "origin" : wsPick;
+        if (needsWorkspace()) payload.workspace = effectiveWorkspace();
         if (reviewOffer) payload.review = { enabled: review.enabled, rounds: review.rounds };
         operations.choose(request.id, payload).then(function (result) {
           if (result && result.ok) {
@@ -523,7 +536,7 @@ window.__ModuleLoader__.load({
         });
         var wsTitleCounts = {};
         wsList.forEach(function (w) { wsTitleCounts[w.title] = (wsTitleCounts[w.title] || 0) + 1; });
-        var effectiveWs = wsPick !== undefined ? wsPick : (prevWorkspace === undefined ? "origin" : prevWorkspace);
+        var effectiveWs = effectiveWorkspace();
         var wsRows = [
           React.createElement(Entry, {
             key: "origin",
@@ -608,7 +621,7 @@ window.__ModuleLoader__.load({
         wsValue = fixedWorkspace.title + "（" + fixedWorkspace.path + "）";
         wsChangeable = false;
       } else if (needsWorkspace()) {
-        var effectiveCard = wsPick !== undefined ? wsPick : (prevWorkspace === undefined ? "origin" : prevWorkspace);
+        var effectiveCard = effectiveWorkspace();
         var wsListCard = request.workspaces || [];
         var pickedCard = wsListCard.find(function (w) { return w.id === effectiveCard; });
         wsValue = pickedCard
@@ -620,8 +633,11 @@ window.__ModuleLoader__.load({
         wsChangeable = false;
       }
 
-      /** One summary row: label, value (may carry a badge), optional 更改. */
-      function fieldRow(key, label, value, badge, changeable, onOpen) {
+      /** One summary row: label, value (may carry a badge), optional 更改.
+       * The badge TEXT is `badgeText`; the style is the module-level `badge`
+       * object — keep the names apart: handing text to style breaks React's
+       * style contract (react.dev/errors/62) and can take the card down. */
+      function fieldRow(key, label, value, badgeText, changeable, onOpen) {
         return React.createElement("div", {
           key: key,
           style: {
@@ -634,12 +650,12 @@ window.__ModuleLoader__.load({
             key: "value",
             style: { flex: "1 1 auto", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
           },
-            badge ? React.createElement("span", { key: "badge", style: badge }, badge) : null,
+            badgeText ? React.createElement("span", { key: "badge", style: badge }, badgeText) : null,
             value
           ),
           changeable ? React.createElement("button", {
             key: "change", type: "button",
-            style: Object.assign({}, button, { minHeight: 36, padding: "4px 12px", flex: "0 0 auto" }),
+            style: Object.assign({}, button, { padding: "4px 14px", flex: "0 0 auto" }),
             disabled: busy,
             onClick: onOpen
           }, "更改") : null
