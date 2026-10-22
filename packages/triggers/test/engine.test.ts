@@ -13,6 +13,7 @@ import {
   renderTemplate,
   resumeRun,
   roleOf,
+  signalBelongsTo,
   startRun,
   submitSignal,
 } from '../src/engine.js'
@@ -45,7 +46,7 @@ function freshRun(maxRounds = 5): RunRecord {
 function deliver(run: RunRecord, turn: number, now: number): { run: RunRecord } {
   const accepted = submitSignal(run, EXECUTOR, 'deliver', `第 ${run.round} 轮交付`, turn, now)
   if (!accepted.ok) throw new Error(`deliver rejected: ${accepted.code}`)
-  const ended = commitTurnEnd(accepted.run, turn, 'completed', now)
+  const ended = commitTurnEnd(accepted.run, EXECUTOR, turn, 'completed', now)
   if (ended.kind !== 'advance') throw new Error(`deliver turn end: ${ended.kind}`)
   return { run: ended.run }
 }
@@ -66,7 +67,8 @@ describe('happy loop', () => {
     expect(accepted.ok).toBe(true)
     if (!accepted.ok) return
     expect(accepted.run.pendingSignal?.turn).toBe(3)
-    const ended = commitTurnEnd(accepted.run, 3, 'completed', 1200)
+    expect(accepted.run.pendingSignal?.session).toBe(EXECUTOR)
+    const ended = commitTurnEnd(accepted.run, EXECUTOR, 3, 'completed', 1200)
     expect(ended.kind).toBe('advance')
     if (ended.kind !== 'advance') return
     expect(ended.run.phase).toBe('awaiting-review')
@@ -78,7 +80,7 @@ describe('happy loop', () => {
     const { run } = deliver(freshRun(), 3, 1200)
     const accepted = submitSignal(run, PARENT, 'rework', 'fix tests', 7, 1300)
     if (!accepted.ok) throw new Error(`rejected: ${accepted.code}`)
-    const ended = commitTurnEnd(accepted.run, 7, 'completed', 1400)
+    const ended = commitTurnEnd(accepted.run, PARENT, 7, 'completed', 1400)
     if (ended.kind !== 'advance') throw new Error(ended.kind)
     expect(ended.run.phase).toBe('awaiting-delivery')
     expect(ended.run.round).toBe(2)
@@ -88,8 +90,8 @@ describe('happy loop', () => {
   it('pass → completed with a terminal notice to the executor', () => {
     const { run } = deliver(freshRun(), 3, 1200)
     const accepted = submitSignal(run, PARENT, 'pass', 'looks good', 7, 1300)
-    if (!accepted.ok) throw new Error(`rejected: ${accepted.code}`)
-    const ended = commitTurnEnd(accepted.run, 7, 'completed', 1400)
+    if (!accepted.ok) throw new Error('rejected')
+    const ended = commitTurnEnd(accepted.run, PARENT, 7, 'completed', 1400)
     if (ended.kind !== 'advance') throw new Error(ended.kind)
     expect(ended.run.status).toBe('completed')
     expect(ended.run.endedAt).toBe(1400)
@@ -117,13 +119,42 @@ describe('role and phase validation', () => {
 
 describe('ordinary turns never advance', () => {
   it('a turn end without a signal is ignored', () => {
-    expect(commitTurnEnd(freshRun(), 9, 'completed', 1200)).toEqual({ kind: 'ignored' })
+    expect(commitTurnEnd(freshRun(), EXECUTOR, 9, 'completed', 1200)).toEqual({ kind: 'ignored' })
   })
 
   it('a turn end for a different turn is ignored', () => {
     const accepted = submitSignal(freshRun(), EXECUTOR, 'deliver', 'done', 4, 1100)
     if (!accepted.ok) throw new Error('rejected')
-    expect(commitTurnEnd(accepted.run, 5, 'completed', 1200)).toEqual({ kind: 'ignored' })
+    expect(commitTurnEnd(accepted.run, EXECUTOR, 5, 'completed', 1200)).toEqual({ kind: 'ignored' })
+  })
+})
+
+describe('session-scoped signal ownership', () => {
+  it('the counterpart ending its own same-numbered turn never commits the signal', () => {
+    const accepted = submitSignal(freshRun(), EXECUTOR, 'deliver', 'done', 1, 1100)
+    if (!accepted.ok) throw new Error('rejected')
+    // The reviewer's turn numbering is independent: its turn 1 ending first
+    // must not advance — or even abort — the executor's pending signal.
+    expect(commitTurnEnd(accepted.run, PARENT, 1, 'completed', 1200)).toEqual({ kind: 'ignored' })
+    expect(commitTurnEnd(accepted.run, PARENT, 1, 'aborted', 1200)).toEqual({ kind: 'ignored' })
+    expect(accepted.run.pendingSignal).toBeDefined()
+    // The submitting session's turn end commits exactly once.
+    const ended = commitTurnEnd(accepted.run, EXECUTOR, 1, 'completed', 1300)
+    expect(ended.kind).toBe('advance')
+  })
+
+  it('an outsider session is never the signal owner', () => {
+    const accepted = submitSignal(freshRun(), EXECUTOR, 'deliver', 'done', 1, 1100)
+    if (!accepted.ok) throw new Error('rejected')
+    expect(signalBelongsTo(accepted.run.pendingSignal!, accepted.run, OUTSIDER)).toBe(false)
+    expect(commitTurnEnd(accepted.run, OUTSIDER, 1, 'completed', 1200)).toEqual({ kind: 'ignored' })
+  })
+
+  it('legacy pending signals without a session still commit from either bound side', () => {
+    const accepted = submitSignal(freshRun(), EXECUTOR, 'deliver', 'done', 1, 1100)
+    if (!accepted.ok) throw new Error('rejected')
+    const legacy = { ...accepted.run, pendingSignal: { ...accepted.run.pendingSignal!, session: undefined } }
+    expect(commitTurnEnd(legacy, PARENT, 1, 'completed', 1200).kind).toBe('advance')
   })
 })
 
@@ -131,7 +162,7 @@ describe('failed or cancelled signal turns', () => {
   it('an aborted turn parks the run in paused-error without advancing', () => {
     const accepted = submitSignal(freshRun(), EXECUTOR, 'deliver', 'done', 2, 1100)
     if (!accepted.ok) throw new Error('rejected')
-    const ended = commitTurnEnd(accepted.run, 2, 'aborted', 1200)
+    const ended = commitTurnEnd(accepted.run, EXECUTOR, 2, 'aborted', 1200)
     expect(ended.kind).toBe('aborted')
     if (ended.kind !== 'aborted') return
     expect(ended.run.status).toBe('paused-error')
@@ -142,7 +173,7 @@ describe('failed or cancelled signal turns', () => {
   it('an errored turn behaves the same', () => {
     const accepted = submitSignal(freshRun(), EXECUTOR, 'deliver', 'done', 2, 1100)
     if (!accepted.ok) throw new Error('rejected')
-    expect(commitTurnEnd(accepted.run, 2, 'error', 1200).kind).toBe('aborted')
+    expect(commitTurnEnd(accepted.run, EXECUTOR, 2, 'error', 1200).kind).toBe('aborted')
   })
 })
 
@@ -158,7 +189,7 @@ describe('duplicate and late signals', () => {
     const { run } = deliver(freshRun(), 3, 1200)
     const passed = submitSignal(run, PARENT, 'pass', 'ok', 7, 1300)
     if (!passed.ok) throw new Error('rejected')
-    const ended = commitTurnEnd(passed.run, 7, 'completed', 1400)
+    const ended = commitTurnEnd(passed.run, PARENT, 7, 'completed', 1400)
     if (ended.kind !== 'advance') throw new Error(ended.kind)
     expect(submitSignal(ended.run, EXECUTOR, 'deliver', 'late', 9, 1500)).toMatchObject({ ok: false, code: 'run-not-active' })
     const paused = pauseRun(freshRun(), 1500)
@@ -174,7 +205,7 @@ describe('round budget', () => {
     run = step.run
     const accepted = submitSignal(run, PARENT, 'rework', 'more', 5, 1300)
     if (!accepted.ok) throw new Error(`rejected: ${accepted.code}`)
-    const ended = commitTurnEnd(accepted.run, 5, 'completed', 1400)
+    const ended = commitTurnEnd(accepted.run, PARENT, 5, 'completed', 1400)
     if (ended.kind !== 'advance') throw new Error(ended.kind)
     // round 1 rework advanced to round 2; now deliver round 2 and rework again
     expect(ended.run.round).toBe(2)
@@ -182,7 +213,7 @@ describe('round budget', () => {
     const verdict = submitSignal(second.run, PARENT, 'rework', 'again', 10, 1600)
     expect(verdict.ok).toBe(true)
     if (!verdict.ok) return
-    const final = commitTurnEnd(verdict.run, 10, 'completed', 1700)
+    const final = commitTurnEnd(verdict.run, PARENT, 10, 'completed', 1700)
     if (final.kind !== 'advance') throw new Error(final.kind)
     expect(final.run.status).toBe('paused-budget')
     expect(final.run.pendingRework).toEqual({ summary: 'again', round: 2 })
@@ -195,7 +226,7 @@ describe('round budget', () => {
     run = step.run
     const verdict = submitSignal(run, PARENT, 'rework', 'again', 5, 1300)
     if (!verdict.ok) throw new Error('rejected')
-    const ended = commitTurnEnd(verdict.run, 5, 'completed', 1400)
+    const ended = commitTurnEnd(verdict.run, PARENT, 5, 'completed', 1400)
     if (ended.kind !== 'advance') throw new Error(ended.kind)
     expect(ended.run.status).toBe('paused-budget')
     const resumed = resumeRun(ended.run, {}, 2000)
@@ -216,7 +247,7 @@ describe('needs_user and manual control', () => {
   it('executor needs_user pauses with the note going to the parent', () => {
     const accepted = submitSignal(freshRun(), EXECUTOR, 'needs_user', '哪个分支？', 2, 1100)
     if (!accepted.ok) throw new Error('rejected')
-    const ended = commitTurnEnd(accepted.run, 2, 'completed', 1200)
+    const ended = commitTurnEnd(accepted.run, EXECUTOR, 2, 'completed', 1200)
     if (ended.kind !== 'advance') throw new Error(ended.kind)
     expect(ended.run.status).toBe('paused-user')
     expect(ended.run.pausedBy).toBe('executor')
@@ -227,7 +258,7 @@ describe('needs_user and manual control', () => {
     const { run } = deliver(freshRun(), 3, 1200)
     const accepted = submitSignal(run, PARENT, 'needs_user', '缩小范围？', 5, 1300)
     if (!accepted.ok) throw new Error('rejected')
-    const ended = commitTurnEnd(accepted.run, 5, 'completed', 1400)
+    const ended = commitTurnEnd(accepted.run, PARENT, 5, 'completed', 1400)
     if (ended.kind !== 'advance') throw new Error(ended.kind)
     expect(ended.run.pausedBy).toBe('parent')
     expect(ended.intents).toEqual([{ runId: 'run-1', round: 1, to: EXECUTOR, kind: 'notice' }])
@@ -243,6 +274,15 @@ describe('needs_user and manual control', () => {
     if (!resumed.ok) return
     expect(resumed.run.status).toBe('active')
     expect(resumed.intents).toEqual([{ runId: 'run-1', round: 1, to: EXECUTOR, kind: 'resume' }])
+  })
+
+  it('resume clears the pause provenance so stale notes do not linger', () => {
+    const parked: RunRecord = { ...freshRun(), status: 'paused-error', endNote: '投递失败（review → parent）：boom' }
+    const resumed = resumeRun(parked, {}, 1700)
+    if (!resumed.ok) throw new Error('resume failed')
+    expect(resumed.run.status).toBe('active')
+    expect(resumed.run.endNote).toBeUndefined()
+    expect(resumed.run.pausedBy).toBeUndefined()
   })
 
   it('cancel works from every non-terminal status and clears pending state', () => {

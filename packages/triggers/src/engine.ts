@@ -22,6 +22,7 @@
 import type {
   BindingRecord,
   DeliveryKind,
+  PendingSignal,
   RunHistoryEntry,
   RunPhase,
   RunRecord,
@@ -78,6 +79,17 @@ export function roleOf(run: RunRecord, callerSession: string): 'executor' | 'par
   if (callerSession === run.executor) return 'executor'
   if (callerSession === run.parent) return 'parent'
   return undefined
+}
+
+/**
+ * Whether a pending signal was submitted by this session. The two sides
+ * number their turns independently, so turn equality across sessions means
+ * nothing: only the submitting session's own `turn/end` may commit (or abort)
+ * its signal. Legacy records without `session` accept either bound side.
+ */
+export function signalBelongsTo(pending: PendingSignal, run: RunRecord, sessionId: string): boolean {
+  if (pending.session !== undefined) return pending.session === sessionId
+  return run.executor === sessionId || run.parent === sessionId
 }
 
 /** Mint a run in its first execution round. Pure: caller supplies ids and clock. */
@@ -163,18 +175,20 @@ export function submitSignal(
   return {
     ok: true,
     duplicate: false,
-    run: { ...accepted, pendingSignal: { outcome, summary, turn, at: now } },
+    run: { ...accepted, pendingSignal: { outcome, summary, session: callerSession, turn, at: now } },
   }
 }
 
 /**
- * Fold one session-log `turn/end` into a run. Only the turn the pending
- * signal belongs to, ending `completed`, commits; anything else with a
- * pending signal parks the run in `paused-error` instead of guessing.
+ * Fold one session-log `turn/end` into a run. Only the session that submitted
+ * the pending signal, on the exact turn it belongs to, ending `completed`,
+ * commits; anything else with a pending signal parks the run in `paused-error`
+ * instead of guessing.
  */
-export function commitTurnEnd(run: RunRecord, turn: number, reasonKind: string, now: number): TurnEndResult {
+export function commitTurnEnd(run: RunRecord, sessionId: string, turn: number, reasonKind: string, now: number): TurnEndResult {
   const pending = run.pendingSignal
   if (pending === undefined || pending.turn !== turn) return { kind: 'ignored' }
+  if (!signalBelongsTo(pending, run, sessionId)) return { kind: 'ignored' }
   const base = { ...run, pendingSignal: undefined }
   if (reasonKind !== 'completed') {
     return {
@@ -307,6 +321,8 @@ export function resumeRun(
         round: run.round + 1,
         maxRounds: target,
         pendingRework: undefined,
+        endNote: undefined,
+        pausedBy: undefined,
       },
       { at: now, kind: 'resume', detail: `budget ${run.maxRounds} → ${target}, round ${run.round + 1}` },
     )
@@ -317,14 +333,15 @@ export function resumeRun(
       : []
     return { ok: true, run: resumed, intents }
   }
+  // `pausedBy` records the ROLE that asked; map it back to its session id
+  // before the resume clears the pause provenance.
+  const pausedByRole = run.pausedBy ?? (run.phase === 'awaiting-delivery' ? 'executor' : 'parent')
   const resumed: RunRecord = withHistory(
-    { ...run, status: 'active' },
+    { ...run, status: 'active', endNote: undefined, pausedBy: undefined },
     { at: now, kind: 'resume' },
   )
   if (options.message === undefined || options.message.length === 0) return { ok: true, run: resumed, intents: [] }
-  // `pausedBy` records the ROLE that asked; map it back to its session id.
-  const role = run.pausedBy ?? (run.phase === 'awaiting-delivery' ? 'executor' : 'parent')
-  const to = role === 'executor' ? run.executor : run.parent
+  const to = pausedByRole === 'executor' ? run.executor : run.parent
   return {
     ok: true,
     run: resumed,

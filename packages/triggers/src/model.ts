@@ -58,7 +58,13 @@ export type RunStatus =
 export interface PendingSignal {
   readonly outcome: SignalOutcome
   readonly summary: string
-  /** The session-log turn the signal belongs to; only its matching `turn/end` commits it. */
+  /** The session that submitted the signal; only ITS turn end commits it. */
+  readonly session?: string
+  /**
+   * The session-log turn the signal belongs to; only its matching `turn/end`
+   * commits it. `session` is optional only for records persisted before
+   * session-scoped matching existed (either bound side may commit those).
+   */
   readonly turn: number
   readonly at: number
 }
@@ -165,6 +171,8 @@ const schemaRunPhase = z.enum(['awaiting-delivery', 'awaiting-review'])
 const schemaPendingSignal = z.object({
   outcome: schemaSignalOutcome,
   summary: z.string(),
+  // Optional: legacy rows predate session-scoped signal matching.
+  session: z.string().optional(),
   turn: z.number().int(),
   at: z.number(),
 })

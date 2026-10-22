@@ -26,8 +26,10 @@
 硬性规则：
 
 - **信号只认工具**。普通回复、step 结束、中间输出都不推进；模型忘叫工具 ≠ 通过。
-- **只认本回合**。信号绑定其所在 turn；该 turn 以 `aborted` / `error` 等非 `completed`
-  结束 → `paused-error`，绝不按已交付推进。同回合重复同信号是幂等 no-op，换结论则拒绝。
+- **只认本会话本回合**。信号记录提交者 session 与其 turn；只有**该 session 自己**的对应
+  turn 结束才算数（双方回合号各自独立，对方同编号回合结束不推进也不打断）。该 turn 以
+  `aborted` / `error` 等非 `completed` 结束 → `paused-error`，绝不按已交付推进。同回合重复同
+  信号是幂等 no-op，换结论则拒绝；一个 session 的一个回合只能为一个 run 提交信号。
 - **迟到即拒绝**。暂停/取消/完成后的 run 拒绝一切信号，旧轮次的信号叫不醒任何人。
 - **最后一轮仍完整送审**。预算挡的是「第 N+1 次执行」，不是第 N 次审核。
 - **暂停 ≠ 打断**。暂停/预算用尽只停自动交接，不 cancel 正在跑的 agent。
@@ -37,7 +39,8 @@
 每次投递先持久化一条 Delivery（含一次性铸造的 `requestId`）再调
 `ctx.sessionController.prompt(mode: 'queue')`；宿主对已入队/已记录的 `requestId`
 返回原接受而不重复插入，因此重启补投与手动「重投」天然幂等。发送失败（队列拒绝/超时）
-标记 failed 并把 run 置 `paused-error`，由用户核对后重投——不盲目重发。
+标记 failed 并把 run 置 `paused-error`；手动重投成功会**同时恢复 run 为 active**（补投 ≠
+恢复曾导致审核者收到 prompt 却被拒绝回签），重投仍失败则维持暂停由用户处理。
 
 插件重启时的恢复扫描：带未决信号的 active run 置 `paused-error`（错过 turn/end、无法
 确认回合结局，交用户判断）；pending 状态的投递按原 `requestId` 补发。
