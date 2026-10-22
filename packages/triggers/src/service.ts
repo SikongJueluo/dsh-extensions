@@ -34,7 +34,9 @@ import {
   cancelRun,
   commitTurnEnd,
   extendBudget,
+  kindLabel,
   pauseRun,
+  phaseLabel,
   resumeRun,
   signalBelongsTo,
   startRun,
@@ -560,6 +562,20 @@ export class TriggerService extends Service implements TriggerBindingsService {
       }
       if (run.status !== 'active' && run.status !== 'paused-error') {
         throw new Error(`运行处于「${statusLabel(run.status)}」状态；请先恢复运行，再重投。`)
+      }
+      // A delivery is actionable only for the round and side the run is
+      // CURRENTLY waiting on: re-sending a stale round's prompt would wake
+      // the counterpart with outdated instructions whose verdict could then
+      // corrupt the new round (a stale review accepted as this round's).
+      const expectedPhase = delivery.kind === 'review'
+        ? 'awaiting-review'
+        : delivery.kind === 'start' || delivery.kind === 'rework'
+          ? 'awaiting-delivery'
+          : undefined // notice/resume are informational; the round alone gates
+      if (delivery.round !== run.round || (expectedPhase !== undefined && run.phase !== expectedPhase)) {
+        throw new Error(
+          `该投递属于第 ${delivery.round} 轮的${kindLabel(delivery.kind)}，当前运行在第 ${run.round} 轮（${phaseLabel(run.phase)}）；过期投递不可重投。`,
+        )
       }
       // Resume BEFORE sending: once the prompt lands, the counterpart may
       // answer immediately, and a run still parked by the earlier failure

@@ -658,10 +658,9 @@ window.__ModuleLoader__.load({
               return React.createElement("div", { key: d.id, style: Object.assign({}, S.row, { marginTop: 4, alignItems: "flex-start" }) },
                 React.createElement("span", { style: S.chip }, kindT(t, d.kind)),
                 React.createElement("span", { style: S.muted }, t("deliveryTo", { to: shortId(d.to) }) + " · " + fmtTime(d.createdAt) + " · " + deliveryStateT(t, d.state)),
-                // Redelivery wakes the counterpart: the server refuses
-                // terminal and user-paused runs, so the button mirrors the
-                // same condition instead of showing a dead control.
-                canRedeliver(run.status, d.state) ? React.createElement("button", {
+                // Redelivery wakes the counterpart: the button mirrors the
+                // server's gating instead of showing a dead control.
+                canRedeliver(run, d) ? React.createElement("button", {
                   type: "button", style: S.button, disabled: busy,
                   onClick: function () { control(d.runId, "redeliver", { deliveryId: d.id }); }
                 }, t("redeliver")) : null,
@@ -677,10 +676,16 @@ window.__ModuleLoader__.load({
 
     /** Redelivery is offered only when the server would accept it: the run is
      * active (retry the send) or parked by that delivery's failure (resume +
-     * resend). Terminal and user/budget-paused runs refuse it server-side. */
-    function canRedeliver(runStatus, deliveryState) {
-      return deliveryState === "failed"
-        && (runStatus === "active" || runStatus === "paused-error");
+     * resend), AND the delivery belongs to the round and side the run is
+     * currently waiting on. Terminal runs, user/budget pauses, and stale
+     * rounds are all refused server-side. */
+    function canRedeliver(run, delivery) {
+      if (delivery.state !== "failed") return false;
+      if (run.status !== "active" && run.status !== "paused-error") return false;
+      if (delivery.round !== run.round) return false;
+      if (delivery.kind === "review") return run.phase === "awaiting-review";
+      if (delivery.kind === "start" || delivery.kind === "rework") return run.phase === "awaiting-delivery";
+      return true;
     }
 
     // --- template editor ----------------------------------------------------

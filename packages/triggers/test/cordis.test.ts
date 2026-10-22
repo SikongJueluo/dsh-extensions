@@ -197,6 +197,33 @@ describe('cross-plugin service through the Cordis proxy', () => {
     // (no root.dispose in cordis 4.0.4; fibers clean up with the context)
   })
 
+  it('a stale round\'s failed delivery is refused, not re-sent', async () => {
+    const { root, host } = await boot({ queueFails: true })
+    const svc = root.get('triggerBindings')!
+    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT, maxRounds: 5 })
+    // Round 1: the review delivery fails and parks the run.
+    emit(root, EXECUTOR, { type: 'turn/start', data: { turn: 1 } })
+    await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 'r1' })
+    emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+    await until(() => (host.rows('runs') as RunRecord[])[0]!.status === 'paused-error', 'parked run')
+    const stale = (host.rows('deliveries') as DeliveryRecord[]).find(d => d.state === 'failed')!
+
+    // The user resumes with a note and the loop moves on to round 2.
+    host.ctx.sessionController.prompt = async () => ({ accepted: true as const })
+    await svc.controlRun(bound.runId, 'resume', { message: '继续' })
+    emit(root, PARENT, { type: 'turn/start', data: { turn: 5 } })
+    await svc.signal(PARENT, { runId: bound.runId, outcome: 'rework', summary: '改一版' })
+    emit(root, PARENT, { type: 'turn/end', data: { turn: 5, reason: { kind: 'completed' } } })
+    await until(() => (host.rows('runs') as RunRecord[])[0]!.round === 2, 'round 2')
+    const promptsBefore = host.prompts.length
+
+    // The round-1 review delivery is now stale: re-sending it would wake the
+    // reviewer with outdated instructions whose verdict could corrupt round 2.
+    await expect(svc.controlRun(bound.runId, 'redeliver', { deliveryId: stale.id })).rejects.toThrow('过期投递')
+    expect(host.prompts.length).toBe(promptsBefore)
+    // (no root.dispose in cordis 4.0.4; fibers clean up with the context)
+  })
+
   it('redelivery resumes before sending, so an immediate answer is accepted; a cancelled run refuses redelivery', async () => {
     const { root, host } = await boot({ queueFails: true })
     const svc = root.get('triggerBindings')!

@@ -376,3 +376,15 @@ export function statusLabel(status: RunStatus): string {
 export function phaseLabel(phase: RunPhase): string {
   return phase === 'awaiting-delivery' ? '等待执行者交付' : '等待审核'
 }
+
+/** Human label of a delivery kind (error copy shares it). */
+export function kindLabel(kind: string): string {
+  switch (kind) {
+    case 'start': return '开工'
+    case 'review': return '送审'
+    case 'rework': return '返工'
+    case 'notice': return '通知'
+    case 'resume': return '恢复'
+    default: return kind
+  }
+}

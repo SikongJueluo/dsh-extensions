@@ -470,6 +470,21 @@ describe('run controls detail', () => {
     })
   })
 
+  it('a stale round\'s failed delivery offers no redeliver button', () => {
+    const run = {
+      id: 'run-11', bindingId: 'bnd-1', task: '第 2 轮', status: 'active', phase: 'awaiting-delivery',
+      round: 2, maxRounds: 5, executor: 'session-2', parent: 'session-1',
+      templates: { start: '', review: '', rework: '' }, startedAt: 100,
+      history: [{ at: 100, kind: 'started' }],
+    }
+    const deliveries = [{
+      id: 'dlv-3', runId: 'run-11', round: 1, to: 'session-1', kind: 'review',
+      requestId: 'trg-z', state: 'failed', content: '…', createdAt: 300, error: 'queue refused',
+    }]
+    const inst = mount(T.RunControls, { t, runs: [run], deliveries, onAction: () => Promise.resolve(true) })
+    expect(byText(inst.tree, 'button', t('redeliver'))).toBeUndefined()
+  })
+
   it('a cancelled run offers no redeliver button even with a failed delivery', () => {
     const run = {
       id: 'run-10', bindingId: 'bnd-1', task: '已取消', status: 'cancelled', phase: 'awaiting-review',
