@@ -244,6 +244,7 @@ const draftBinding = () => ({
   parent: '',
   maxRounds: 5,
   enabled: true,
+  autoDeliver: false,
   templates: {
     start: 'builtin-loop-start',
     review: 'builtin-loop-review',
@@ -338,6 +339,52 @@ describe('draft binding form', () => {
     })
     const save = byText(inst.tree, 'button', t('saveGroup'))!
     expect(save.props.disabled).toBe(true)
+  })
+
+  it('the auto-deliver toggle rides the save payload both ways', async () => {
+    const actions: { endpoint: string, payload: Record<string, unknown> }[] = []
+    let draft = { ...draftBinding(), executor: 'session-1', parent: 'session-2' }
+    const onDraftChange = (value: unknown): void => { draft = value as never }
+    const onAction = (request: { endpoint: string, payload: Record<string, unknown> }): Promise<boolean> => {
+      actions.push(request)
+      return Promise.resolve(true)
+    }
+    const inst = mount(T.DraftEditor, { t, data: DATA, sessions: SESSIONS, draft, onAction, onDraftChange })
+
+    const checkbox = byType(inst.tree, 'input').find(input => input.props.type === 'checkbox')!
+    expect(checkbox).toBeDefined()
+    expect(checkbox.props.checked).toBe(false)
+    ;(checkbox.props.onChange as (e: { target: { checked: boolean } }) => void)({ target: { checked: true } })
+    expect(draft.autoDeliver).toBe(true)
+
+    inst.render({ t, data: DATA, sessions: SESSIONS, draft, onAction, onDraftChange })
+    ;(byText(inst.tree, 'button', t('saveGroup'))!.props.onClick as () => void)()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(actions[0]!.payload).toMatchObject({ autoDeliver: true })
+
+    // Untoggled drafts keep the tool-only contract explicit.
+    actions.length = 0
+    draft = { ...draftBinding(), executor: 'session-1', parent: 'session-2', autoDeliver: false }
+    const second = mount(T.DraftEditor, { t, data: DATA, sessions: SESSIONS, draft, onAction, onDraftChange })
+    ;(byText(second.tree, 'button', t('saveGroup'))!.props.onClick as () => void)()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(actions[0]!.payload).toMatchObject({ autoDeliver: false })
+  })
+
+  it('an auto-deliver binding shows its badge in the summary row', () => {
+    const binding = {
+      id: 'bnd-1', name: '循环', executor: 'session-1', parent: 'session-2',
+      maxRounds: 5, enabled: true, autoDeliver: true,
+      templates: { start: 'builtin-loop-start', review: 'builtin-loop-review', rework: 'builtin-loop-rework' },
+      createdAt: 1, updatedAt: 1,
+    }
+    const inst = mount(T.BindingGroup, {
+      t, binding, data: { ...DATA, bindings: [binding] }, sessions: SESSIONS, onAction: () => Promise.resolve(true),
+    })
+    const texts = JSON.stringify(inst.tree)
+    expect(texts).toContain(t('autoBadge'))
   })
 })
 

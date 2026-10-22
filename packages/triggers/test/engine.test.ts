@@ -6,8 +6,10 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  autoDeliver,
   cancelRun,
   commitTurnEnd,
+  dueNudge,
   extendBudget,
   pauseRun,
   renderTemplate,
@@ -308,5 +310,65 @@ describe('templates', () => {
       maxRounds: '5',
       summary: '通过',
     })).toBe('第 2/5 轮：通过 {{typo}}')
+  })
+})
+
+describe('turn-end auto-delivery', () => {
+  it('snapshots the binding autoDeliver flag at run start', () => {
+    expect(startRun(binding(), BODIES, '任务', 'run-1', 1).autoDeliver).toBeUndefined()
+    expect(startRun({ ...binding(), autoDeliver: true }, BODIES, '任务', 'run-1', 1).autoDeliver).toBe(true)
+  })
+
+  it('submits a completed executor turn with a non-empty reply as a delivery', () => {
+    const run = startRun({ ...binding(), autoDeliver: true }, BODIES, '任务', 'run-1', 1000)
+    const outcome = autoDeliver(run, EXECUTOR, 4, '实现完成，测试全绿', 1100)
+    expect(outcome.kind).toBe('advance')
+    if (outcome.kind !== 'advance') return
+    expect(outcome.run.phase).toBe('awaiting-review')
+    expect(outcome.run.pendingSignal).toBeUndefined()
+    expect(outcome.intents).toEqual([{ runId: 'run-1', round: 1, to: PARENT, kind: 'review' }])
+    expect(outcome.run.history.at(-2)).toMatchObject({ kind: 'signal', detail: expect.stringContaining('auto') })
+  })
+
+  it('refuses anything but a completed executor delivery turn', () => {
+    const run = startRun({ ...binding(), autoDeliver: true }, BODIES, '任务', 'run-1', 1000)
+    // empty reply, other session, wrong phase, pending signal, inactive run
+    expect(autoDeliver(run, EXECUTOR, 4, '', 1100).kind).toBe('ignored')
+    expect(autoDeliver(run, PARENT, 4, 'hi', 1100).kind).toBe('ignored')
+    expect(autoDeliver(run, OUTSIDER, 4, 'hi', 1100).kind).toBe('ignored')
+    const reviewing = submitSignal(run, EXECUTOR, 'deliver', 'x', 4, 1100)
+    if (!reviewing.ok) throw new Error('signal rejected')
+    expect(autoDeliver(reviewing.run, EXECUTOR, 4, 'again', 1100).kind).toBe('ignored')
+    const cancelled = cancelRun(run, 1050)
+    if (!cancelled.ok) throw new Error('cancel failed')
+    expect(autoDeliver(cancelled.run, EXECUTOR, 4, 'hi', 1100).kind).toBe('ignored')
+  })
+})
+
+describe('bounded nudges', () => {
+  it('mints one deliver nudge per round for the executor side', () => {
+    const run = startRun({ ...binding(), autoDeliver: true }, BODIES, '任务', 'run-1', 1000)
+    const first = dueNudge(run, 'deliver', 1100)
+    expect(first).toMatchObject({ ok: true })
+    if (!first.ok) return
+    expect(first.intent).toEqual({ runId: 'run-1', round: 1, to: EXECUTOR, kind: 'nudge' })
+    expect(first.run.nudgeState).toEqual({ deliver: 1 })
+    // second attempt in the same round is bounded away…
+    expect(dueNudge(first.run, 'deliver', 1200).ok).toBe(false)
+    // …and a new round earns exactly one more
+    const reworked: RunRecord = { ...first.run, phase: 'awaiting-delivery', round: 2 }
+    expect(dueNudge(reworked, 'deliver', 1300)).toMatchObject({ ok: true })
+  })
+
+  it('mints one review nudge per round for the reviewer side, phase-gated', () => {
+    const { run } = deliver(startRun({ ...binding(), autoDeliver: true }, BODIES, '任务', 'run-1', 1000), 3, 1100)
+    expect(dueNudge({ ...run, phase: 'awaiting-delivery' }, 'review', 1200).ok).toBe(false)
+    const nudged = dueNudge(run, 'review', 1200)
+    expect(nudged).toMatchObject({ ok: true })
+    if (!nudged.ok) return
+    expect(nudged.intent).toEqual({ runId: 'run-1', round: 1, to: PARENT, kind: 'nudge' })
+    expect(dueNudge(nudged.run, 'review', 1300).ok).toBe(false)
+    // sides are bounded independently within one round
+    expect(dueNudge(nudged.run, 'deliver', 1300).ok).toBe(false)
   })
 })

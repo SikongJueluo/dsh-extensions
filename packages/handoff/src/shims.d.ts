@@ -37,6 +37,8 @@ export interface TriggerBindingsShim {
     parentSession: string
     maxRounds?: number
     deliverStart?: boolean
+    /** Auto-submit the executor's completed turns (handoff passes true). */
+    autoDeliver?: boolean
   }): Promise<{ bindingId: string; runId: string }>
 }
 

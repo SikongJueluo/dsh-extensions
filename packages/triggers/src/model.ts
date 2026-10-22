@@ -67,6 +67,16 @@ export interface PendingSignal {
    */
   readonly turn: number
   readonly at: number
+  /** Set on the synthetic deliver signal a turn-end auto-delivery mints. */
+  readonly auto?: true
+}
+
+/** Which sides have already been nudged in their current round (bounded once per round). */
+export interface NudgeState {
+  /** Last round a deliver-side nudge was sent to the executor. */
+  readonly deliver?: number
+  /** Last round a review-side nudge was sent to the reviewer. */
+  readonly review?: number
 }
 
 /** The deferred rework a `paused-budget` run holds until the budget grows. */
@@ -79,7 +89,7 @@ export interface PendingRework {
 /** One compact history line (bounded; the session logs stay the full record). */
 export interface RunHistoryEntry {
   readonly at: number
-  readonly kind: 'started' | 'signal' | 'advance' | 'pause' | 'resume' | 'end' | 'note' | 'delivery'
+  readonly kind: 'started' | 'signal' | 'advance' | 'pause' | 'resume' | 'end' | 'note' | 'delivery' | 'nudge'
   readonly detail?: string
 }
 
@@ -104,8 +114,16 @@ export interface RunRecord {
   readonly executor: string
   readonly parent: string
   readonly templates: RunTemplateBodies
+  /**
+   * Snapshot at run start: the executor's turn that ends `completed` (with no
+   * explicit signal and no active goal in its session) is auto-submitted for
+   * review using the turn's final assistant text. Absent = tool-only delivery.
+   */
+  readonly autoDeliver?: boolean
   readonly pendingSignal?: PendingSignal
   readonly pendingRework?: PendingRework
+  /** Bounded missing-conclusion reminders already sent in their round. */
+  readonly nudgeState?: NudgeState
   /** Which side a `needs_user` pause came from (resume notes go there). */
   readonly pausedBy?: 'executor' | 'parent'
   readonly startedAt: number
@@ -129,6 +147,8 @@ export interface BindingRecord {
   readonly parent: string
   readonly maxRounds: number
   readonly enabled: boolean
+  /** Whether runs of this group auto-submit the executor's completed turns (handoff binds default on, UI binds default off). */
+  readonly autoDeliver?: boolean
   readonly templates: BindingTemplateRefs
   readonly createdAt: number
   readonly updatedAt: number
@@ -144,7 +164,7 @@ export interface TemplateRecord {
   readonly updatedAt: number
 }
 
-export type DeliveryKind = 'start' | 'review' | 'rework' | 'notice' | 'resume'
+export type DeliveryKind = 'start' | 'review' | 'rework' | 'notice' | 'resume' | 'nudge'
 
 /** One queued prompt intent with its idempotency key. */
 export interface DeliveryRecord {
@@ -175,6 +195,12 @@ const schemaPendingSignal = z.object({
   session: z.string().optional(),
   turn: z.number().int(),
   at: z.number(),
+  auto: z.literal(true).optional(),
+})
+
+const schemaNudgeState = z.object({
+  deliver: z.number().int().positive().optional(),
+  review: z.number().int().positive().optional(),
 })
 
 const schemaPendingRework = z.object({
@@ -184,7 +210,7 @@ const schemaPendingRework = z.object({
 
 const schemaHistoryEntry = z.object({
   at: z.number(),
-  kind: z.enum(['started', 'signal', 'advance', 'pause', 'resume', 'end', 'note', 'delivery']),
+  kind: z.enum(['started', 'signal', 'advance', 'pause', 'resume', 'end', 'note', 'delivery', 'nudge']),
   detail: z.string().optional(),
 })
 
@@ -205,8 +231,10 @@ const schemaRun = z.object({
   executor: z.string().min(1),
   parent: z.string().min(1),
   templates: schemaTemplateBodies,
+  autoDeliver: z.boolean().optional(),
   pendingSignal: schemaPendingSignal.optional(),
   pendingRework: schemaPendingRework.optional(),
+  nudgeState: schemaNudgeState.optional(),
   pausedBy: z.enum(['executor', 'parent']).optional(),
   startedAt: z.number(),
   endedAt: z.number().optional(),
@@ -235,6 +263,7 @@ const schemaBinding = z.object({
   parent: z.string().min(1),
   maxRounds: z.number().int().min(1).max(50),
   enabled: z.boolean(),
+  autoDeliver: z.boolean().optional(),
   templates: schemaTemplateRefs,
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -258,7 +287,7 @@ const schemaDelivery = z.object({
   runId: z.string().min(1),
   round: z.number().int().positive(),
   to: z.string().min(1),
-  kind: z.enum(['start', 'review', 'rework', 'notice', 'resume']),
+  kind: z.enum(['start', 'review', 'rework', 'notice', 'resume', 'nudge']),
   requestId: z.string().min(1),
   state: z.enum(['pending', 'sent', 'failed']),
   content: z.string(),

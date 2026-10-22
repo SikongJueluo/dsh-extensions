@@ -242,6 +242,7 @@ test('flag path: --review binds the loop before the first prompt and the loop cl
     assert.equal(run.status, 'active')
     assert.equal(run.phase, 'awaiting-delivery')
     assert.equal(run.maxRounds, 5)
+    assert.equal(run.autoDeliver, true, 'handoff binds auto-deliver runs')
 
     const metaPath = briefPath.replace(/\.md$/, '.meta.json')
     await until(async () => {

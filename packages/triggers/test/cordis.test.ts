@@ -163,6 +163,49 @@ describe('cross-plugin service through the Cordis proxy', () => {
     // (no root.dispose in cordis 4.0.4; fibers clean up with the context)
   })
 
+  it('an autoDeliver run submits the executor final reply through the proxy without any tool call', async () => {
+    const { root, host } = await boot()
+    const svc = root.get('triggerBindings')!
+    const bound = await svc.bindReviewLoop({ task: '任务', executorSession: EXECUTOR, parentSession: PARENT, autoDeliver: true })
+    const runBefore = (host.rows('runs') as RunRecord[])[0]!
+    expect(runBefore.autoDeliver).toBe(true)
+
+    // The executor streams its work and simply ends the turn: no tool call.
+    emit(root, EXECUTOR, { type: 'assistant/message', data: { turn: 2, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '完成；测试 20/20' }] } } })
+    emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
+    await until(() => host.prompts.length === 1, 'auto review delivery')
+    expect(host.prompts[0]!.sessionId).toBe(PARENT)
+    expect(host.prompts[0]!.text).toContain('完成；测试 20/20')
+    expect(host.prompts[0]!.text).toContain('你是审核者')
+    expect((host.rows('runs') as RunRecord[])[0]!.phase).toBe('awaiting-review')
+
+    // A replayed turn/end (restart replay) must not re-deliver: the reply
+    // text was consumed with the first event.
+    emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(host.prompts).toHaveLength(1)
+    // (no root.dispose in cordis 4.0.4; fibers clean up with the context)
+  })
+
+  it('an active goal holds the auto-delivery until the goal settles', async () => {
+    const { root, host } = await boot()
+    const svc = root.get('triggerBindings')!
+    const bound = await svc.bindReviewLoop({ task: '任务', executorSession: EXECUTOR, parentSession: PARENT })
+    emit(root, EXECUTOR, { type: 'goal/change', data: { kind: 'goal/change', version: 1, operation: 'create', goal: { phase: 'active' }, roundsStarted: 1, createdAt: 1, updatedAt: 1 } })
+    emit(root, EXECUTOR, { type: 'assistant/message', data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '中途进展' }] } } })
+    emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(host.prompts).toHaveLength(0) // no premature delivery, and no nudge either
+
+    emit(root, EXECUTOR, { type: 'goal/change', data: { kind: 'goal/change', version: 1, operation: 'complete', goal: { phase: 'complete' }, roundsStarted: 2, createdAt: 1, updatedAt: 2 } })
+    emit(root, EXECUTOR, { type: 'assistant/message', data: { turn: 2, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '目标完成交付' }] } } })
+    emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
+    await until(() => host.prompts.length === 1, 'auto review delivery after goal settled')
+    expect(host.prompts[0]!.text).toContain('目标完成交付')
+    expect((host.rows('runs') as RunRecord[])[0]!.phase).toBe('awaiting-review')
+    // (no root.dispose in cordis 4.0.4; fibers clean up with the context)
+  })
+
   it('a foreign same-numbered turn never commits the pending signal', async () => {
     const { root, host } = await boot()
     const svc = root.get('triggerBindings')!
@@ -209,7 +252,10 @@ describe('cross-plugin service through the Cordis proxy', () => {
     const stale = (host.rows('deliveries') as DeliveryRecord[]).find(d => d.state === 'failed')!
 
     // The user resumes with a note and the loop moves on to round 2.
-    host.ctx.sessionController.prompt = async () => ({ accepted: true as const })
+    host.ctx.sessionController.prompt = async (request: { requestId: string, sessionId: string, mode: string, content: { text: string }[] }) => {
+      host.prompts.push({ requestId: request.requestId, sessionId: request.sessionId, mode: request.mode, text: request.content[0]?.text ?? '' })
+      return { accepted: true as const }
+    }
     await svc.controlRun(bound.runId, 'resume', { message: '继续' })
     emit(root, PARENT, { type: 'turn/start', data: { turn: 5 } })
     await svc.signal(PARENT, { runId: bound.runId, outcome: 'rework', summary: '改一版' })

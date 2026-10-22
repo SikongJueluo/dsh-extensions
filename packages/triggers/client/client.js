@@ -52,13 +52,15 @@ window.__ModuleLoader__.load({
     var zh = {
       panel: "触发器",
       title: "触发器",
-      intro: "把两个会话绑成一个「执行 → 审核」循环：执行者用 trigger_signal 交付，宿主自动把审核意见送达双方。所有自动交接由宿主推进，不依赖本页开着。",
+      intro: "把两个会话绑成一个「执行 → 审核」循环：执行者交付（自动送审的组里正常结束回合即可），宿主自动把审核意见送达双方。所有自动交接由宿主推进，不依赖本页开着。",
       refresh: "刷新", refreshing: "加载中…", fetchFailed: "读取失败：{message}",
       groups: "规则组", newGroup: "新建规则组", emptyGroups: "还没有规则组。点「新建规则组」把两个会话绑成一对。",
       colGroup: "规则组", colPair: "执行者 → 审核者", colStatus: "运行 / 预算", colEnabled: "启用", colOps: "操作",
       executorLabel: "执行者", reviewerLabel: "审核者",
       namePlaceholder: "规则组名称（可空）", roundsLabel: "轮数预算",
       draftHint: "选择执行与审核两个会话（须不同），保存后在详情里启动运行。",
+      autoDeliverLabel: "自动送审：执行者回合正常结束即交付（需要用户决定时仍用 trigger_signal 提交 needs_user）",
+      autoBadge: "自动送审",
       saveGroup: "保存规则组", cancelDraft: "取消", needBoth: "执行与审核会话都不能为空。",
       builtinBadge: "内置", expand: "详情", collapse: "收起",
       editSettings: "设置", startRun: "启动运行", running: "进行中", paused: "已暂停",
@@ -80,7 +82,7 @@ window.__ModuleLoader__.load({
       deliveries: "投递记录", emptyDeliveries: "暂无投递。",
       deliveryTo: "→ {to}", redeliver: "重投",
       statePending: "待发送", stateSent: "已送达", stateFailed: "失败",
-      kindStart: "开工", kindReview: "送审", kindRework: "返工", kindNotice: "通知", kindResume: "恢复",
+      kindStart: "开工", kindReview: "送审", kindRework: "返工", kindNotice: "通知", kindResume: "恢复", kindNudge: "提醒",
       pickSession: "选择会话…", searchSession: "搜索会话", pickTemplate: "选择模板…",
       sessionMissing: "（会话不在列表中）", loadSessions: "会话列表加载中…",
       headerIdle: "触发", headerMenu: "触发器运行",
@@ -93,13 +95,15 @@ window.__ModuleLoader__.load({
     var en = {
       panel: "Triggers",
       title: "Triggers",
-      intro: "Bind two sessions into an execute → review loop: the executor delivers via trigger_signal and the host ferries verdicts between both sides. All handoffs advance on the host; this page staying open is not required.",
+      intro: "Bind two sessions into an execute → review loop: the executor delivers (auto-deliver groups simply end their turn) and the host ferries verdicts between both sides. All handoffs advance on the host; this page staying open is not required.",
       refresh: "Refresh", refreshing: "Loading…", fetchFailed: "Fetch failed: {message}",
       groups: "Rule groups", newGroup: "New group", emptyGroups: "No groups yet. Click \"New group\" to bind two sessions.",
       colGroup: "Group", colPair: "Executor → reviewer", colStatus: "Run / budget", colEnabled: "On", colOps: "Actions",
       executorLabel: "Executor", reviewerLabel: "Reviewer",
       namePlaceholder: "Group name (optional)", roundsLabel: "Round budget",
       draftHint: "Pick the executor and reviewer sessions (they must differ); start runs from the detail view after saving.",
+      autoDeliverLabel: "Auto-deliver: the executor's normally-ended turn is the delivery (needs_user still goes through trigger_signal)",
+      autoBadge: "auto-deliver",
       saveGroup: "Save group", cancelDraft: "Cancel", needBoth: "Executor and review sessions are both required.",
       builtinBadge: "built-in", expand: "Details", collapse: "Collapse",
       editSettings: "Settings", startRun: "Start run", running: "running", paused: "paused",
@@ -121,7 +125,7 @@ window.__ModuleLoader__.load({
       deliveries: "Deliveries", emptyDeliveries: "No deliveries.",
       deliveryTo: "→ {to}", redeliver: "Resend",
       statePending: "pending", stateSent: "sent", stateFailed: "failed",
-      kindStart: "start", kindReview: "review", kindRework: "rework", kindNotice: "notice", kindResume: "resume",
+      kindStart: "start", kindReview: "review", kindRework: "rework", kindNotice: "notice", kindResume: "resume", kindNudge: "nudge",
       pickSession: "Pick a session…", searchSession: "Search sessions", pickTemplate: "Pick a template…",
       sessionMissing: "(session not in list)", loadSessions: "loading sessions…",
       headerIdle: "Trigger", headerMenu: "Trigger runs",
@@ -150,7 +154,7 @@ window.__ModuleLoader__.load({
       "paused-error": "statusPausedError", "completed": "statusCompleted", "cancelled": "statusCancelled"
     };
     var PHASE_KEYS = { "awaiting-delivery": "phaseAwaitingDelivery", "awaiting-review": "phaseAwaitingReview" };
-    var KIND_KEYS = { "start": "kindStart", "review": "kindReview", "rework": "kindRework", "notice": "kindNotice", "resume": "kindResume" };
+    var KIND_KEYS = { "start": "kindStart", "review": "kindReview", "rework": "kindRework", "notice": "kindNotice", "resume": "kindResume", "nudge": "kindNudge" };
     var DELIVERY_STATE_KEYS = { "pending": "statePending", "sent": "stateSent", "failed": "stateFailed" };
 
     function statusT(t, status) { return t(STATUS_KEYS[status] || status); }
@@ -337,6 +341,7 @@ window.__ModuleLoader__.load({
             parent: draft.parent,
             maxRounds: draft.maxRounds,
             name: draft.name,
+            autoDeliver: !!draft.autoDeliver,
             templates: draft.templates
           }
         }).then(function (ok) {
@@ -384,6 +389,15 @@ window.__ModuleLoader__.load({
                 patch({ maxRounds: isNaN(n) ? draft.maxRounds : Math.min(50, Math.max(1, n)) });
               }
             })
+          )
+        ),
+        React.createElement("div", { style: Object.assign({}, S.row, { marginTop: 8, alignItems: "center", flexWrap: "wrap" }) },
+          React.createElement("label", { style: Object.assign({}, S.row, { cursor: "pointer", minHeight: 44, flex: "1 1 100%" }) },
+            React.createElement("input", {
+              type: "checkbox", checked: !!draft.autoDeliver, style: { width: 20, height: 20 },
+              onChange: function (event) { patch({ autoDeliver: event.target.checked }); }
+            }),
+            React.createElement("span", { style: { fontSize: 13 } }, t("autoDeliverLabel"))
           )
         ),
         React.createElement("div", { style: Object.assign({}, S.row, { marginTop: 10 }) },
@@ -434,6 +448,7 @@ window.__ModuleLoader__.load({
           maxRounds: binding.maxRounds,
           executor: binding.executor,
           parent: binding.parent,
+          autoDeliver: !!binding.autoDeliver,
           templates: binding.templates
         });
         setTask("");
@@ -465,7 +480,12 @@ window.__ModuleLoader__.load({
           React.createElement("td", { style: S.td },
             React.createElement("span", { style: S.cellLabel }, binding.name)
           ),
-          React.createElement("td", { style: S.td }, pairText),
+          React.createElement("td", { style: S.td },
+            React.createElement("div", { style: S.row },
+              React.createElement("span", null, pairText),
+              binding.autoDeliver ? React.createElement("span", { style: S.chip }, t("autoBadge")) : null
+            )
+          ),
           React.createElement("td", { style: S.td },
             activeRun
               ? React.createElement("span", { style: S.chip },
@@ -543,6 +563,15 @@ window.__ModuleLoader__.load({
               React.createElement("button", {
                 type: "button", style: S.button, disabled: busy, onClick: saveEdit
               }, t("save"))
+            ),
+            React.createElement("div", { style: Object.assign({}, S.row, { marginTop: 8, alignItems: "center" }) },
+              React.createElement("label", { style: Object.assign({}, S.row, { cursor: "pointer", minHeight: 44 }) },
+                React.createElement("input", {
+                  type: "checkbox", checked: !!edit.autoDeliver, style: { width: 20, height: 20 },
+                  onChange: function (event) { setEdit(Object.assign({}, edit, { autoDeliver: event.target.checked })); }
+                }),
+                React.createElement("span", { style: { fontSize: 13 } }, t("autoDeliverLabel"))
+              )
             ),
             React.createElement("div", { style: Object.assign({}, S.row, { marginTop: 8 }) },
               [ ["start", "tplStart"], ["review", "tplReview"], ["rework", "tplRework"] ].map(function (pair) {
@@ -626,6 +655,7 @@ window.__ModuleLoader__.load({
           React.createElement("div", { style: S.row },
             React.createElement("span", { style: S.chip }, statusT(t, run.status)),
             React.createElement("span", { style: S.chip }, t("runRound", { round: run.round, max: run.maxRounds })),
+            run.autoDeliver ? React.createElement("span", { style: S.chip }, t("autoBadge")) : null,
             run.status === "active" ? React.createElement("span", { style: S.chip }, phaseT(t, run.phase)) : null,
             React.createElement("span", { style: S.muted }, fmtTime(run.startedAt))
           ),
@@ -871,7 +901,7 @@ window.__ModuleLoader__.load({
                 onClick: function () {
                   setDraft({
                     id: undefined, name: "", executor: "", parent: "",
-                    maxRounds: 5, enabled: true,
+                    maxRounds: 5, enabled: true, autoDeliver: false,
                     templates: { start: "builtin-loop-start", review: "builtin-loop-review", rework: "builtin-loop-rework" }
                   });
                 }

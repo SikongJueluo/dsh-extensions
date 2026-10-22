@@ -193,6 +193,9 @@ async function bindReview(
       executorSession: String(sessionId),
       parentSession: String(pending.agent.id),
       maxRounds,
+      // A handoff executor is single-purpose: its normally-ended turn IS the
+      // delivery (the reviewer still verdicts through the tool).
+      autoDeliver: true,
     })
     await writeReviewBound(metaPathFor(pending.briefPath), { bindingId: bound.bindingId, runId: bound.runId, maxRounds })
     rt.ctx.logger(PACKAGE_NAME).info('auto-review loop bound', {

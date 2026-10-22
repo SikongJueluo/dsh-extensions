@@ -10,7 +10,15 @@
  * call; retries (crash recovery, manual redeliver) reuse the same requestId,
  * which the controller dedupes against already-queued/logged messages. A
  * failed or timed-out send parks the run in `paused-error` instead of
- * guessing.
+ * guessing. Nudges are the one exception: they are informational and bounded
+ * (once per round per side), so a failed nudge only logs.
+ *
+ * Turn-event automation (autoDeliver runs, handoff binds by default): the
+ * executor's turn that ends `completed` with no explicit signal, no active
+ * goal in its session, and a non-empty final assistant reply is submitted for
+ * review with that reply as the delivery summary — the executor finishes its
+ * answer and the loop moves on its own. Missing conclusions (either side) get
+ * ONE bounded reminder per round; verdicts always require the tool.
  *
  * @module dsh-triggers/service
  */
@@ -31,8 +39,10 @@ import {
   type TemplateRecord,
 } from './model.js'
 import {
+  autoDeliver,
   cancelRun,
   commitTurnEnd,
+  dueNudge,
   extendBudget,
   kindLabel,
   pauseRun,
@@ -44,7 +54,7 @@ import {
   submitSignal,
   type DeliveryIntent,
 } from './engine.js'
-import { composeDeliveryPrompt } from './prompts.js'
+import { composeDeliveryPrompt, nudgeLine } from './prompts.js'
 import { openStore, type TriggerStore } from './store.js'
 
 /** Plugin-row configuration. */
@@ -63,6 +73,11 @@ export interface BindReviewLoopRequest {
   readonly maxRounds?: number
   /** Queue the start prompt to the executor (standalone starts); handoff sends its own brief. */
   readonly deliverStart?: boolean
+  /**
+   * Auto-submit the executor's completed turns (default true): a handoff
+   * executor is single-purpose, so its normal turn end IS its delivery.
+   */
+  readonly autoDeliver?: boolean
 }
 
 /** Handoff-facing surface (structural, so handoff needs no type import). */
@@ -83,6 +98,20 @@ export interface SessionRow {
 const MAX_ROUNDS_LIMIT = 50
 const SNAPSHOT_RUN_LIMIT = 50
 const SNAPSHOT_DELIVERY_LIMIT = 120
+/** Ceiling for the executor reply text reused as an auto-delivery summary. */
+const AUTO_SUMMARY_LIMIT = 6000
+
+/** Pull the plain text out of one message content block list (join with newlines). */
+function contentText(content: unknown): string {
+  if (!Array.isArray(content)) return ''
+  const parts: string[] = []
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue
+    const { type, text } = block as { type?: unknown, text?: unknown }
+    if (type === 'text' && typeof text === 'string' && text.length > 0) parts.push(text)
+  }
+  return parts.join('\n')
+}
 
 /** The full UI snapshot the channel serves. */
 export interface TriggerSnapshot {
@@ -109,6 +138,19 @@ export class TriggerService extends Service implements TriggerBindingsService {
   private readyPromise: Promise<void>
   /** Current turn per session, maintained from `turn/start` events. */
   private currentTurn = new Map<string, number>()
+  /**
+   * Latest assistant reply per session (from `assistant/message` events),
+   * EMPTY final messages included. Consumed at `turn/end`: the last assistant
+   * message of a completed turn is the auto-delivery summary — empty means no
+   * deliverable final reply (nudge), never an earlier intermediate message.
+   */
+  private lastReply = new Map<string, { turn: number, text: string }>()
+  /**
+   * Sessions whose current goal is in durable phase `active` (folded from
+   * `goal/change` events): a goal driver may continue the session with more
+   * rounds after this turn, so its turn ends must not auto-deliver.
+   */
+  private goalActive = new Set<string>()
   /** Per-session promise chain keeping turn-end commits serial. */
   private chains = new Map<string, Promise<void>>()
 
@@ -162,9 +204,11 @@ export class TriggerService extends Service implements TriggerBindingsService {
       if (delivery.state === 'pending') resend.push(delivery)
     }
     // Runs inside init: the store is handed in, since sendQueued's own
-    // readiness wait would deadlock on the very init calling it.
+    // readiness wait would deadlock on the very init calling it. Nudges keep
+    // their best-effort semantics here too: a reminder that fails to re-send
+    // must not park an otherwise healthy run.
     for (const delivery of resend) {
-      await this.sendQueued(delivery, store)
+      await this.sendQueued(delivery, store, delivery.kind === 'nudge')
     }
     if (resend.length > 0) {
       this.ctx.logger(PACKAGE_NAME).info('re-sent pending deliveries after restart', { count: resend.length })
@@ -179,16 +223,40 @@ export class TriggerService extends Service implements TriggerBindingsService {
       if (typeof turn === 'number') this.currentTurn.set(sessionId, turn)
       return
     }
+    if (event.type === 'assistant/message') {
+      const data = event.data as { turn?: unknown, message?: { content?: unknown } } | undefined
+      const turn = data?.turn
+      if (typeof turn !== 'number') return
+      // Track EVERY assistant message of the turn, empty ones included: the
+      // LAST one decides whether the turn has a deliverable final reply, and
+      // an empty final message must not fall back to an earlier intermediate
+      // text.
+      this.lastReply.set(sessionId, { turn, text: contentText(data?.message?.content) })
+      return
+    }
+    if (event.type === 'goal/change') {
+      // GoalChangeMeta: operation 'clear' drops the goal; otherwise phase
+      // 'active' means a continuation round may follow this turn.
+      const data = event.data as { operation?: unknown, goal?: { phase?: unknown } } | undefined
+      if (data?.operation !== 'clear' && data?.goal?.phase === 'active') this.goalActive.add(sessionId)
+      else this.goalActive.delete(sessionId)
+      return
+    }
     if (event.type !== 'turn/end') return
     const data = event.data as { turn?: unknown, reason?: { kind?: unknown } } | undefined
     const turn = data?.turn
     const reasonKind = data?.reason?.kind
     if (typeof turn !== 'number' || typeof reasonKind !== 'string') return
     this.currentTurn.delete(sessionId)
+    // Consume the tracked reply synchronously: a replayed turn/end must not
+    // see (and re-deliver) the same final answer twice.
+    const tracked = this.lastReply.get(sessionId)
+    const reply = tracked !== undefined && tracked.turn === turn ? tracked : undefined
+    this.lastReply.delete(sessionId)
     // Chain per session so a fast next turn can never interleave a commit.
     const chained = (this.chains.get(sessionId) ?? Promise.resolve())
       .then(async () => {
-        await this.commitTurnEnd(sessionId, turn, reasonKind)
+        await this.commitTurnEnd(sessionId, turn, reasonKind, reply)
       })
       .catch((error: unknown) => {
         this.ctx.logger(PACKAGE_NAME).warn('turn-end commit failed', { sessionId, turn, error: String(error) })
@@ -204,36 +272,169 @@ export class TriggerService extends Service implements TriggerBindingsService {
    * turn. Session identity matters: the two sides number their turns
    * independently, so the counterpart ending its own same-numbered turn must
    * never commit (or abort) a signal it did not submit.
+   *
+   * After the explicit-signal pass, a `completed` turn may still move runs
+   * forward on its own: an autoDeliver run submits the executor's final reply
+   * as the delivery, and either side's missing conclusion earns one bounded
+   * nudge per round. Nothing here touches a turn that ended abnormally — an
+   * aborted/blocked/error end is user-visible and never a delivery.
    */
-  private async commitTurnEnd(sessionId: string, turn: number, reasonKind: string): Promise<void> {
+  private async commitTurnEnd(
+    sessionId: string,
+    turn: number,
+    reasonKind: string,
+    reply: { readonly turn: number, readonly text: string } | undefined,
+  ): Promise<void> {
     const store = await this.ready()
+    const now = Date.now()
+    // Snapshot BEFORE the commit pass clears pending signals: whether this
+    // (session, turn) already carried an explicit signal decides if the
+    // automation pass may look at the turn at all.
+    const turnSpokenFor = [...store.runs.entries()].some(([, run]) =>
+      run.pendingSignal !== undefined && run.pendingSignal.session === sessionId && run.pendingSignal.turn === turn)
+    // One turn advances at most ONE run. The auto pass may only claim a turn
+    // that no explicit signal owns AND that exactly one autoDeliver run is
+    // waiting on: with several candidates the same reply cannot tell which
+    // task it delivers, so none is advanced (each candidate instead gets its
+    // bounded missing-signal nudge — the executor must then signal the run it
+    // actually delivered for).
+    const autoCandidates = turnSpokenFor
+      ? []
+      : [...store.runs.entries()]
+        .filter(([, run]) => run.status === 'active' && run.pendingSignal === undefined
+          && sessionId === run.executor && run.phase === 'awaiting-delivery' && run.autoDeliver === true)
+        .map(([id]) => id)
+    const autoWinner = autoCandidates.length === 1 ? autoCandidates[0]! : undefined
+    const autoAmbiguous = autoCandidates.length > 1
     for (const [id, run] of store.runs.entries()) {
-      if (run.status !== 'active' || run.pendingSignal === undefined) continue
-      if (!signalBelongsTo(run.pendingSignal, run, sessionId)) continue
-      if (run.pendingSignal.turn !== turn) continue
-      const summary = run.pendingSignal.summary
-      const outcome = commitTurnEnd(run, sessionId, turn, reasonKind, Date.now())
-      if (outcome.kind === 'ignored') continue
-      await store.runs.put(id, outcome.run)
-      if (outcome.kind === 'aborted') {
-        this.ctx.logger(PACKAGE_NAME).warn('signal turn ended abnormally; run parked', {
-          runId: id,
-          reason: reasonKind,
-        })
+      if (run.status !== 'active') continue
+      if (run.pendingSignal !== undefined) {
+        if (!signalBelongsTo(run.pendingSignal, run, sessionId)) continue
+        if (run.pendingSignal.turn !== turn) continue
+        const summary = run.pendingSignal.summary
+        const outcome = commitTurnEnd(run, sessionId, turn, reasonKind, now)
+        if (outcome.kind === 'ignored') continue
+        await store.runs.put(id, outcome.run)
+        if (outcome.kind === 'aborted') {
+          this.ctx.logger(PACKAGE_NAME).warn('signal turn ended abnormally; run parked', {
+            runId: id,
+            reason: reasonKind,
+          })
+          continue
+        }
+        for (const intent of outcome.intents) {
+          await this.deliver(intent, outcome.run, intent.kind === 'start' ? undefined : summary)
+        }
         continue
       }
-      for (const intent of outcome.intents) {
-        await this.deliver(intent, outcome.run, intent.kind === 'start' ? undefined : summary)
+      if (reasonKind !== 'completed') continue
+      if (sessionId === run.executor && run.phase === 'awaiting-delivery') {
+        // Mid-goal turns look exactly like finished ones at turn/end; the
+        // driver may continue, so hold automation until the goal settles.
+        if (this.goalActive.has(sessionId)) continue
+        if (run.autoDeliver === true) {
+          // The turn was spent on another run's explicit signal: nothing to
+          // interpret here, and no reminder either — the executor already
+          // spoke for one loop this turn.
+          if (turnSpokenFor) continue
+          // Several auto runs are waiting on this one session: the reply
+          // cannot be attributed; ask for an explicit signal per run. The
+          // reminder must carry its own instructions — the standing block of
+          // an autoDeliver run promises a normal turn end delivers itself,
+          // which would cancel out the required recovery path.
+          if (autoAmbiguous) {
+            await this.sendDeliverNudge(store, run, id, now, 'deliver-ambiguous')
+            continue
+          }
+          if (autoWinner === id) {
+            const summary = this.autoSummary(reply, turn)
+            if (summary.length > 0) {
+              const outcome = autoDeliver(run, sessionId, turn, summary, now)
+              if (outcome.kind === 'advance') {
+                await store.runs.put(id, outcome.run)
+                this.ctx.logger(PACKAGE_NAME).info('executor turn auto-delivered', { runId: id, turn })
+                for (const intent of outcome.intents) {
+                  await this.deliver(intent, outcome.run, summary)
+                }
+              }
+              continue
+            }
+            // The turn's LAST assistant message carried no deliverable text
+            // (empty, whitespace-only, or none at all): never fall back to an
+            // earlier intermediate message.
+            await this.sendDeliverNudge(store, run, id, now, 'deliver-empty')
+            continue
+          }
+          // Not the winner and not ambiguous (this run wasn't an eligible
+          // candidate for this turn at all): leave it untouched.
+          continue
+        }
+        await this.sendDeliverNudge(store, run, id, now, 'deliver-missing-signal')
+        continue
+      }
+      if (sessionId === run.parent && run.phase === 'awaiting-review') {
+        // Only nudge once the review prompt itself has landed; a turn that
+        // ended before the delivery was sent never saw the material.
+        const reviewSent = [...store.deliveries.entries()]
+          .some(([, delivery]) => delivery.runId === id && delivery.round === run.round
+            && delivery.kind === 'review' && delivery.state === 'sent')
+        if (!reviewSent || this.goalActive.has(sessionId)) continue
+        const nudge = dueNudge(run, 'review', now)
+        if (!nudge.ok) continue
+        await store.runs.put(id, nudge.run)
+        this.ctx.logger(PACKAGE_NAME).info('review nudge sent', { runId: id, round: run.round })
+        await this.deliver(nudge.intent, nudge.run, nudgeLine(nudge.run, 'review'), true)
       }
     }
   }
 
+  /**
+   * The auto-delivery summary of this turn: the tracked LAST assistant message
+   * of the turn, trimmed. Empty when the turn had no assistant text at all or
+   * its final message was empty/whitespace-only — an intermediate message from
+   * an earlier step must never stand in for a missing final reply.
+   */
+  private autoSummary(reply: { readonly turn: number, readonly text: string } | undefined, turn: number): string {
+    if (reply === undefined || reply.turn !== turn) return ''
+    const text = reply.text.trim()
+    if (text.length === 0) return ''
+    return text.length > AUTO_SUMMARY_LIMIT
+      ? `${text.slice(0, AUTO_SUMMARY_LIMIT)}\n…（执行者回复超长，已截断；完整内容见执行会话日志）`
+      : text
+  }
+
+  /** One bounded executor-side reminder (missing signal / empty final reply / ambiguous attribution). */
+  private async sendDeliverNudge(
+    store: TriggerStore,
+    run: RunRecord,
+    runId: string,
+    now: number,
+    line: 'deliver-missing-signal' | 'deliver-empty' | 'deliver-ambiguous',
+  ): Promise<void> {
+    const nudge = dueNudge(run, 'deliver', now)
+    if (!nudge.ok) return
+    await store.runs.put(runId, nudge.run)
+    this.ctx.logger(PACKAGE_NAME).info('deliver nudge sent', { runId, round: run.round, line })
+    await this.deliver(nudge.intent, nudge.run, nudgeLine(nudge.run, line), true, line === 'deliver-ambiguous')
+  }
+
   // ── delivery ─────────────────────────────────────────────────────────────
 
-  /** Persist the intent, then send it; a failed send parks the run. */
-  private async deliver(intent: DeliveryIntent, run: RunRecord, summary: string | undefined): Promise<void> {
+  /**
+   * Persist the intent, then send it; a failed send parks the run — unless
+   * `bestEffort` (nudges): a bounded reminder failing to queue must not freeze
+   * an otherwise healthy loop. `standalone` keeps the composed prompt free of
+   * the standing instructions block (see composeDeliveryPrompt).
+   */
+  private async deliver(
+    intent: DeliveryIntent,
+    run: RunRecord,
+    summary: string | undefined,
+    bestEffort = false,
+    standalone = false,
+  ): Promise<void> {
     const store = await this.ready()
-    const content = composeDeliveryPrompt(intent, run, summary)
+    const content = composeDeliveryPrompt(intent, run, summary, standalone)
     const delivery: DeliveryRecord = {
       id: crypto.randomUUID(),
       runId: intent.runId,
@@ -246,11 +447,11 @@ export class TriggerService extends Service implements TriggerBindingsService {
       createdAt: Date.now(),
     }
     await store.deliveries.put(delivery.id, delivery)
-    await this.sendQueued(delivery)
+    await this.sendQueued(delivery, undefined, bestEffort)
   }
 
   /** One idempotent send attempt for a persisted delivery record. */
-  private async sendQueued(delivery: DeliveryRecord, storeOverride?: TriggerStore): Promise<boolean> {
+  private async sendQueued(delivery: DeliveryRecord, storeOverride?: TriggerStore, bestEffort = false): Promise<boolean> {
     const store = storeOverride ?? await this.ready()
     const timeoutMs = this.config.deliverTimeoutMs ?? 120_000
     let error: string | undefined
@@ -272,6 +473,14 @@ export class TriggerService extends Service implements TriggerBindingsService {
       return true
     }
     await store.deliveries.put(delivery.id, { ...delivery, state: 'failed', error })
+    if (bestEffort) {
+      this.ctx.logger(PACKAGE_NAME).warn('nudge delivery failed (best effort; run untouched)', {
+        deliveryId: delivery.id,
+        runId: delivery.runId,
+        error,
+      })
+      return false
+    }
     // A delivery the queue refused leaves the run's state undecidable: park it
     // for the user instead of re-sending blindly.
     const run = store.runs.get(delivery.runId)
@@ -351,6 +560,8 @@ export class TriggerService extends Service implements TriggerBindingsService {
       request.parentSession,
       request.maxRounds,
       undefined,
+      undefined,
+      request.autoDeliver ?? true,
     )
     if (request.deliverStart === true) {
       await this.deliver({ runId: run.id, round: 1, to: run.executor, kind: 'start' }, run, undefined)
@@ -366,6 +577,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
     maxRounds: number | undefined,
     bindingName: string | undefined,
     templateRefs?: { start: string, review: string, rework: string },
+    autoDeliver = false,
   ): Promise<{ binding: BindingRecord, run: RunRecord }> {
     const store = await this.ready()
     const now = Date.now()
@@ -376,6 +588,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
       parent,
       maxRounds: Math.min(MAX_ROUNDS_LIMIT, Math.max(1, Math.round(maxRounds ?? DEFAULT_MAX_ROUNDS))),
       enabled: true,
+      ...(autoDeliver ? { autoDeliver: true } : {}),
       templates: templateRefs ?? defaultTemplateRefs(),
       createdAt: now,
       updatedAt: now,
@@ -483,6 +696,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
     parent: unknown
     maxRounds?: unknown
     enabled?: unknown
+    autoDeliver?: unknown
     templates?: unknown
   }): Promise<BindingRecord> {
     const store = await this.ready()
@@ -498,6 +712,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
       return typeof raw === 'string' && store.templates.get(raw) !== undefined ? raw : defaults[key]
     }
     const refs = { start: pickRef('start'), review: pickRef('review'), rework: pickRef('rework') }
+    const autoDeliver = typeof input.autoDeliver === 'boolean' ? input.autoDeliver : (existing?.autoDeliver ?? false)
     const now = Date.now()
     const record: BindingRecord = {
       id: existing?.id ?? `bnd-${crypto.randomUUID()}`,
@@ -506,6 +721,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
       parent,
       maxRounds: Math.min(MAX_ROUNDS_LIMIT, Math.max(1, Math.round(typeof input.maxRounds === 'number' ? input.maxRounds : (existing?.maxRounds ?? DEFAULT_MAX_ROUNDS)))),
       enabled: typeof input.enabled === 'boolean' ? input.enabled : (existing?.enabled ?? true),
+      ...(autoDeliver ? { autoDeliver: true } : {}),
       templates: refs,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -571,7 +787,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
         ? 'awaiting-review'
         : delivery.kind === 'start' || delivery.kind === 'rework'
           ? 'awaiting-delivery'
-          : undefined // notice/resume are informational; the round alone gates
+          : undefined // notice/resume/nudge are informational; the round alone gates
       if (delivery.round !== run.round || (expectedPhase !== undefined && run.phase !== expectedPhase)) {
         throw new Error(
           `该投递属于第 ${delivery.round} 轮的${kindLabel(delivery.kind)}，当前运行在第 ${run.round} 轮（${phaseLabel(run.phase)}）；过期投递不可重投。`,
@@ -580,7 +796,8 @@ export class TriggerService extends Service implements TriggerBindingsService {
       // Resume BEFORE sending: once the prompt lands, the counterpart may
       // answer immediately, and a run still parked by the earlier failure
       // would reject that answer. A re-send that fails again re-parks the
-      // run (sendQueued parks active runs), so no window is left open.
+      // run (sendQueued parks active runs), so no window is left open —
+      // except nudges, which keep their best-effort semantics everywhere.
       let current = run
       if (run.status === 'paused-error') {
         const resumed = resumeRun(run, {}, now)
@@ -589,7 +806,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
         current = resumed.run
         this.ctx.logger(PACKAGE_NAME).info('run re-activated before redelivery', { runId })
       }
-      await this.sendQueued(delivery)
+      await this.sendQueued(delivery, undefined, delivery.kind === 'nudge')
       return store.runs.get(runId) ?? current
     }
     if (action === 'pause') {

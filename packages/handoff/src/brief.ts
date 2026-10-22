@@ -170,13 +170,13 @@ export function continueInstruction(
   ].join('\n')
 }
 
-/** The executor-side signal rules a review-loop handoff must carry up front. */
+/** The executor-side loop rules a review-loop handoff must carry up front. */
 export function reviewBootstrapSection(runId: string, maxRounds: number): string {
   return [
     '',
     '---',
-    `[triggers] 本次任务带自动审核循环（预算 ${maxRounds} 轮）：每轮实现与自查（含测试/构建验证）完成后，调用 trigger_signal 工具提交交付——runId=${runId}、outcome=deliver、summary 写明改了什么、如何验证、证据在哪里——然后结束回合等待审核意见（会作为下一条用户消息送达）；需要用户决定时 outcome=needs_user。`,
-    '未调用工具的普通回复不会推进流程；审核者的返工意见只处理阻塞本轮目标的部分。',
+    `[triggers] 本次任务带自动审核循环（预算 ${maxRounds} 轮）：每轮实现与自查（含测试/构建验证）完成后，直接以最终回复交付——写明改了什么、如何验证、证据在哪里，正常结束回合即自动送审，无需调用工具（也可显式调用 trigger_signal 提交 deliver）。`,
+    `需要用户决定时，调用 trigger_signal 工具提交（runId=${runId}、outcome=needs_user、summary 写明所需决定），此时不要正常收尾——正常结束会被当作交付。审核意见会作为下一条用户消息送达；返工意见只处理阻塞本轮目标的部分。`,
   ].join('\n')
 }
 

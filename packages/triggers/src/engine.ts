@@ -22,6 +22,7 @@
 import type {
   BindingRecord,
   DeliveryKind,
+  NudgeState,
   PendingSignal,
   RunHistoryEntry,
   RunPhase,
@@ -111,6 +112,7 @@ export function startRun(
     executor: binding.executor,
     parent: binding.parent,
     templates,
+    ...(binding.autoDeliver === true ? { autoDeliver: true } : {}),
     startedAt: now,
     history: [{ at: now, kind: 'started', detail: `round budget ${binding.maxRounds}` }],
   }
@@ -259,6 +261,78 @@ export function commitTurnEnd(run: RunRecord, sessionId: string, turn: number, r
   }
 }
 
+/**
+ * Fold one executor turn that ended `completed` with NO explicit signal into
+ * an auto-delivery: mint the synthetic pending signal (the runtime supplies
+ * the turn's final assistant text as the summary) and commit it in the same
+ * step — the turn is already over, so there is nothing left to wait for.
+ *
+ * Refuses (returns `ignored`) unless the run is active, the caller is the
+ * executor, the phase expects a delivery, no explicit signal is pending, and
+ * the summary is non-empty — an empty final reply has nothing to review, so
+ * the runtime nudges instead of delivering noise.
+ */
+export function autoDeliver(
+  run: RunRecord,
+  sessionId: string,
+  turn: number,
+  summary: string,
+  now: number,
+): TurnEndResult {
+  if (run.status !== 'active' || run.phase !== 'awaiting-delivery') return { kind: 'ignored' }
+  if (sessionId !== run.executor) return { kind: 'ignored' }
+  if (run.pendingSignal !== undefined || summary.length === 0) return { kind: 'ignored' }
+  const staged = withHistory(run, {
+    at: now,
+    kind: 'signal',
+    detail: `executor:deliver (auto, turn ${turn})`,
+  })
+  return commitTurnEnd(
+    { ...staged, pendingSignal: { outcome: 'deliver', summary, session: sessionId, turn, at: now, auto: true } },
+    sessionId,
+    turn,
+    'completed',
+    now,
+  )
+}
+
+/** Which side a missing-conclusion nudge targets and which nudgeState slot bounds it. */
+export type NudgeKind = 'deliver' | 'review'
+
+/**
+ * Mint the ONE bounded missing-conclusion reminder a round may carry per side:
+ * `deliver` reminds an executor whose completed turn carried no delivery,
+ * `review` reminds a reviewer whose turn ended without a verdict. The nudge
+ * records its round in `nudgeState`, so a second eligible turn-end in the same
+ * round is silently ignored — reminders never loop.
+ */
+export function dueNudge(
+  run: RunRecord,
+  kind: NudgeKind,
+  now: number,
+): { ok: true; run: RunRecord; intent: DeliveryIntent } | { ok: false } {
+  if (run.status !== 'active') return { ok: false }
+  if (kind === 'deliver') {
+    if (run.phase !== 'awaiting-delivery') return { ok: false }
+    if (run.nudgeState?.deliver === run.round) return { ok: false }
+  } else {
+    if (run.phase !== 'awaiting-review') return { ok: false }
+    if (run.nudgeState?.review === run.round) return { ok: false }
+  }
+  const nudgeState: NudgeState = kind === 'deliver'
+    ? { ...run.nudgeState, deliver: run.round }
+    : { ...run.nudgeState, review: run.round }
+  const nudged: RunRecord = withHistory(
+    { ...run, nudgeState },
+    { at: now, kind: 'nudge', detail: `${kind} reminder round ${run.round}` },
+  )
+  return {
+    ok: true,
+    run: nudged,
+    intent: { runId: run.id, round: run.round, to: kind === 'deliver' ? run.executor : run.parent, kind: 'nudge' },
+  }
+}
+
 /** Manually pause an active run (the waiting side keeps waiting; nothing is cancelled). */
 export function pauseRun(run: RunRecord, now: number): { ok: true; run: RunRecord } | { ok: false; message: string } {
   if (run.status !== 'active') return { ok: false, message: `运行已处于 ${statusLabel(run.status)} 状态。` }
@@ -385,6 +459,7 @@ export function kindLabel(kind: string): string {
     case 'rework': return '返工'
     case 'notice': return '通知'
     case 'resume': return '恢复'
+    case 'nudge': return '提醒'
     default: return kind
   }
 }
