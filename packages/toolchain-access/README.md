@@ -27,7 +27,7 @@ sandbox adapter               （super.confine() 官方行为原样保留）
 | `uv-cache` | `$XDG_CACHE_HOME`/`~/.cache` 下 `uv/` | uv 唯一的共享缓存根 |
 | `cargo-cache` | `CARGO_HOME`/`~/.cargo` 下 `registry/`、`git/`、`.package-cache`、`.package-cache-mutate`、`.global-cache` | registry/git 缓存 + Cargo 1.74+ 的**两把**全局锁（共享下载锁与 mutate 锁——只绑第一把时 mutate 锁 EROFS，cargo 会**静默降级为无锁**，与宿主侧并发 cargo 互斥失效）+ use-tracking sqlite；**不是**整个 `~/.cargo`（credentials、config 保持只读） |
 | `pnpm-store` | pnpm home 下 `store/` | 共享包 store（本仓这类 store 在 workspace 内的项目会自动按「已覆盖」扣除） |
-| `pnpm-runtime-locks` | `$XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>` | pnpm 12 的 operation lock 域。**必须**绑定宿主原目录：绑到私有 `/tmp` 会拆散共享锁域。要求 `$XDG_RUNTIME_DIR` 为当前用户属主且可写（pnpm 12.8.2+ 否则自行回退 `/tmp`）；未设置或不可写时预设拒绝。`/run/user` 是 tmpfs，重启清空——confine 时受控自建 0700 锁目录 |
+| `pnpm-runtime-locks` | `$XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>` | pnpm 12 的 operation lock 域。**必须**绑定宿主原目录：绑到私有 `/tmp` 会拆散共享锁域。要求 `$XDG_RUNTIME_DIR` 满足 pnpm 自己的条件（本 uid 目录、属主可写可搜索、group/other 不可写——0775 会被 pnpm 拒绝回退 `/tmp`）；未设置或不合格时预设拒绝，且 **`paths.pnpmRuntimeLocks` 不能代为修复/迁移**（pnpm 的锁目录只由 `XDG_RUNTIME_DIR` 决定，override 只允许换拼写、不允许换位置）。`/run/user` 是 tmpfs，重启清空——confine 时受控自建 0700 锁目录 |
 | `pnpm-engine` | 整个 pnpm home（`~/.local/share/pnpm`） | 冷装其他版本 pnpm 需要写 `package-manager-store/`、`global/v11`、`_tmp`。**含可执行 engine 副本**，属单独信任决定，默认不启用；热缓存场景不需要它 |
 
 `paths` 可显式覆盖各锚点（`uvCache` / `cargoHome` / `pnpmHome` / `pnpmStore` /

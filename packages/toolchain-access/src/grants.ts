@@ -128,6 +128,7 @@ export interface GrantIssue {
     | 'not-strictly-inside-base'
     | 'runtime-dir-unset'
     | 'runtime-dir-unwritable'
+    | 'lock-dir-mismatch'
   readonly message: string
 }
 
@@ -392,23 +393,21 @@ function derivePaths(
         break
       }
       case 'pnpm-runtime-locks': {
+        // pnpm derives its lock dir from $XDG_RUNTIME_DIR alone (plus its
+        // own validity conditions) — no pnpm setting and nothing in this
+        // plugin can redirect it. The runtime-root validation therefore
+        // lives in resolveGrants and runs for EXPLICIT overrides too; here
+        // we only name the candidate path (the override spelling, or
+        // pnpm's derived one).
         const override = overrides.pnpmRuntimeLocks
         if (override !== undefined && override !== '') {
           push(preset, override, true, '', 'none')
         } else if (env.xdgRuntimeDir !== undefined && env.xdgRuntimeDir !== '') {
           // pnpm's secure_user_lock_dir(): $XDG_RUNTIME_DIR + name + "-<uid>".
-          // Without XDG_RUNTIME_DIR pnpm falls back to /tmp — inside the
-          // sandbox that is a private per-call tmpfs, which would split the
-          // shared lock domain this preset exists to preserve. Refuse.
           push(preset, joinDir(env.xdgRuntimeDir, `pnpm-store-operation-locks-${env.uid}`), false, env.xdgRuntimeDir, 'lock-dir')
-        } else {
-          issues.push({
-            preset,
-            path: '<unset>',
-            reason: 'runtime-dir-unset',
-            message: 'pnpm-runtime-locks needs XDG_RUNTIME_DIR on the host (pnpm otherwise locks a private sandbox /tmp, splitting the shared lock domain); set it or configure paths.pnpmRuntimeLocks explicitly',
-          })
         }
+        // XDG unset: resolveGrants rejects the preset below (an explicit
+        // override cannot help — pnpm would still lock /tmp).
         break
       }
       case 'pnpm-engine': {
@@ -474,48 +473,69 @@ export function resolveGrants(input: {
   // canonical space so `HOME=/link -> /real` cannot grant `/real` wholesale.
   const canonicalHome = canonicalHomeOf(env, fs)
 
-  // pnpm 12.8.2+ uses $XDG_RUNTIME_DIR for its operation locks only when
-  // the runtime dir is OWNER-WRITABLE; otherwise it silently falls back to
-  // /tmp — which inside the sandbox is a private tmpfs, splitting the very
-  // lock domain this preset exists to keep shared. Validate the condition
-  // pnpm itself checks, not just the lock directory; a broken runtime dir
-  // also suppresses the preset's default-derived entries below (the issue
-  // already fails the whole plan).
+  // pnpm 12.8.2+ chooses its lock dir from $XDG_RUNTIME_DIR alone, and
+  // only when the runtime dir passes pnpm's own conditions; otherwise it
+  // silently falls back to /tmp — inside the sandbox a private per-call
+  // tmpfs. Nothing in this plugin (and nothing in pnpm's own settings)
+  // can redirect that choice, so EVERY pnpm-runtime-locks grant — explicit
+  // override included — must satisfy: (a) the runtime root exists and
+  // passes pnpm's conditions, and (b) the granted path IS the lock dir
+  // pnpm will actually use. An override may only re-spell that path (a
+  // symlink), never relocate it; a broken runtime root cannot be "fixed"
+  // by configuring a path.
   let runtimeDirBroken = false
-  const needsRuntimeDirCheck = named.some(
-    (entry) => entry.preset === 'pnpm-runtime-locks' && !entry.explicit,
-  )
-  if (needsRuntimeDirCheck && env.xdgRuntimeDir !== undefined) {
-    try {
-      const runtimeStat = fs.stat(env.xdgRuntimeDir)
-      // Replicate pnpm's OWN runtime-root conditions exactly
-      // (secure_temp_lock.rs): a directory owned by this uid that the owner
-      // can write AND search, with group/other write bits clear. Anything
-      // less and pnpm silently falls back to /tmp — inside the sandbox a
-      // private per-call tmpfs — so a passing grant would cover a lock
-      // domain pnpm never uses (verified: a 0775 runtime dir is refused by
-      // pnpm even when the lock directory inside it exists).
-      const pnpmUsable = runtimeStat.isDirectory
-        && runtimeStat.uid === env.uid
-        && (runtimeStat.mode & 0o300) === 0o300
-        && (runtimeStat.mode & 0o022) === 0
-      if (!pnpmUsable) {
+  let pnpmLockCanonical: string | undefined
+  const runtimePresetEnabled = presets.includes('pnpm-runtime-locks')
+  if (runtimePresetEnabled) {
+    if (env.xdgRuntimeDir === undefined) {
+      runtimeDirBroken = true
+      issues.push({
+        preset: 'pnpm-runtime-locks',
+        path: '<unset>',
+        reason: 'runtime-dir-unset',
+        message: 'pnpm-runtime-locks needs a valid XDG_RUNTIME_DIR on the host: pnpm otherwise locks /tmp, which inside the sandbox is a private per-call tmpfs (split lock domain). Setting paths.pnpmRuntimeLocks cannot redirect pnpm — fix the runtime dir instead.',
+      })
+    } else {
+      try {
+        const runtimeStat = fs.stat(env.xdgRuntimeDir)
+        // Replicate pnpm's OWN runtime-root conditions exactly
+        // (secure_temp_lock.rs): a directory owned by this uid that the
+        // owner can write AND search, with group/other write bits clear.
+        // Anything less and pnpm falls back to /tmp — a grant would cover
+        // a lock domain pnpm never uses (verified: a 0775 runtime dir is
+        // refused by pnpm even when the lock directory inside it exists).
+        const pnpmUsable = runtimeStat.isDirectory
+          && runtimeStat.uid === env.uid
+          && (runtimeStat.mode & 0o300) === 0o300
+          && (runtimeStat.mode & 0o022) === 0
+        if (!pnpmUsable) {
+          runtimeDirBroken = true
+          issues.push({
+            preset: 'pnpm-runtime-locks',
+            path: env.xdgRuntimeDir,
+            reason: 'runtime-dir-unwritable',
+            message: `pnpm-runtime-locks: ${env.xdgRuntimeDir} fails pnpm's runtime-root conditions (directory, uid ${env.uid}, owner write+search, group/other not writable); pnpm would fall back to a private /tmp lock dir inside the sandbox (split lock domain) — fix the runtime dir itself, an explicit paths.pnpmRuntimeLocks cannot redirect pnpm`,
+          })
+        } else {
+          // pnpm's actual lock dir, canonicalized with the same fallback
+          // the grant paths get, so the comparison below is like-for-like
+          // even before the dir has been created.
+          const derived = joinDir(env.xdgRuntimeDir, `pnpm-store-operation-locks-${env.uid}`)
+          try {
+            pnpmLockCanonical = fs.realpath(derived)
+          } catch {
+            pnpmLockCanonical = derived
+          }
+        }
+      } catch {
         runtimeDirBroken = true
         issues.push({
           preset: 'pnpm-runtime-locks',
           path: env.xdgRuntimeDir,
           reason: 'runtime-dir-unwritable',
-          message: `pnpm-runtime-locks: ${env.xdgRuntimeDir} fails pnpm's runtime-root conditions (directory, uid ${env.uid}, owner write+search, group/other not writable); pnpm would fall back to a private /tmp lock dir inside the sandbox (split lock domain) — fix the runtime dir or configure paths.pnpmRuntimeLocks explicitly`,
+          message: `pnpm-runtime-locks: ${env.xdgRuntimeDir} does not exist — pnpm would fall back to a private /tmp lock dir inside the sandbox (split lock domain); an explicit paths.pnpmRuntimeLocks cannot redirect pnpm`,
         })
       }
-    } catch {
-      runtimeDirBroken = true
-      issues.push({
-        preset: 'pnpm-runtime-locks',
-        path: env.xdgRuntimeDir,
-        reason: 'runtime-dir-unwritable',
-        message: `pnpm-runtime-locks: ${env.xdgRuntimeDir} does not exist — pnpm would fall back to a private /tmp lock dir inside the sandbox (split lock domain)`,
-      })
     }
   }
 
@@ -525,9 +545,9 @@ export function resolveGrants(input: {
   const resolved: Resolved[] = []
 
   for (const entry of named) {
-    if (runtimeDirBroken && entry.preset === 'pnpm-runtime-locks' && !entry.explicit) {
-      // The runtime-dir issue above already fails the plan; skip the
-      // entries pnpm would not actually use.
+    if (runtimeDirBroken && entry.preset === 'pnpm-runtime-locks') {
+      // The runtime-root issue above already fails the plan; skip the
+      // entries pnpm would not actually use (explicit overrides included).
       continue
     }
     if (!isAbsolute(entry.path)) {
@@ -616,6 +636,20 @@ export function resolveGrants(input: {
         path: entry.path,
         reason: 'credential-segment',
         message: `${entry.preset}: ${entry.path} crosses a credential/configuration tree (${canonical}) — cache grants must not make secrets or tool config writable`,
+      })
+      continue
+    }
+    // The pnpm lock-dir grant must be the dir pnpm will ACTUALLY use:
+    // pnpm derives it from $XDG_RUNTIME_DIR alone, so an explicit override
+    // may re-spell that path but never relocate it — a grant over any other
+    // directory would cover a lock domain pnpm ignores while the real locks
+    // land in a private sandbox /tmp.
+    if (entry.preset === 'pnpm-runtime-locks' && pnpmLockCanonical !== undefined && canonical !== pnpmLockCanonical) {
+      issues.push({
+        preset: entry.preset,
+        path: entry.path,
+        reason: 'lock-dir-mismatch',
+        message: `${entry.preset}: ${entry.path} resolves to ${canonical}, but pnpm will lock ${pnpmLockCanonical} (derived from $XDG_RUNTIME_DIR, which pnpm cannot be redirected from) — grant that directory or fix the runtime dir`,
       })
       continue
     }

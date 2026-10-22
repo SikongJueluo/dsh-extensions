@@ -152,6 +152,51 @@ describe('default derivation', () => {
     expect(result.issues).toHaveLength(1)
     expect(result.issues[0]?.reason).toBe('runtime-dir-unset')
   })
+
+  it('an explicit lock-dir override does NOT skip the runtime-root validation', () => {
+    // pnpm picks its lock dir from $XDG_RUNTIME_DIR regardless of what this
+    // plugin configures: an override cannot rescue an invalid runtime root
+    // (pnpm would still lock a private sandbox /tmp).
+    const groupWritable = plan(
+      ['pnpm-runtime-locks'],
+      {
+        '/run/user/1000': { dir: true, mode: 0o775 },
+        '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
+      },
+      { overrides: { pnpmRuntimeLocks: '/run/user/1000/pnpm-store-operation-locks-1000' } },
+    )
+    expect(groupWritable.binds).toEqual([])
+    expect(groupWritable.issues[0]?.reason).toBe('runtime-dir-unwritable')
+
+    const unset = plan(
+      ['pnpm-runtime-locks'],
+      { '/data/my-locks': dir() },
+      { env: { xdgRuntimeDir: undefined }, overrides: { pnpmRuntimeLocks: '/data/my-locks' } },
+    )
+    expect(unset.binds).toEqual([])
+    expect(unset.issues[0]?.reason).toBe('runtime-dir-unset')
+  })
+
+  it('an explicit lock-dir override must BE the dir pnpm actually locks', () => {
+    const standard = {
+      '/run/user/1000': { dir: true, mode: 0o700 },
+      '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
+    } as const
+    // Re-spelling pnpm's own lock dir: fine.
+    const sameDir = plan(['pnpm-runtime-locks'], { ...standard }, {
+      overrides: { pnpmRuntimeLocks: '/run/user/1000/pnpm-store-operation-locks-1000' },
+    })
+    expect(sameDir.issues).toEqual([])
+    expect(sameDir.binds.map((bind) => bind.source)).toEqual(['/run/user/1000/pnpm-store-operation-locks-1000'])
+
+    // Relocating it: pnpm cannot be redirected, so the grant is refused.
+    const relocated = plan(['pnpm-runtime-locks'], { ...standard, '/data/my-locks': dir() }, {
+      overrides: { pnpmRuntimeLocks: '/data/my-locks' },
+    })
+    expect(relocated.binds).toEqual([])
+    expect(relocated.issues[0]?.reason).toBe('lock-dir-mismatch')
+    expect(relocated.issues[0]?.message).toContain('/run/user/1000/pnpm-store-operation-locks-1000')
+  })
 })
 
 describe('fail-closed validation', () => {

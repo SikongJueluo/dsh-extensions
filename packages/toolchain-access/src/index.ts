@@ -141,7 +141,7 @@ export const configFields = {
     cargoHome: Schema.string().description('Explicit CARGO_HOME anchor for cargo-cache (default: $CARGO_HOME, else ~/.cargo).'),
     pnpmHome: Schema.string().description('Explicit pnpm home anchor for pnpm-store/pnpm-engine (default: $PNPM_HOME, else <XDG_DATA_HOME|~/.local/share>/pnpm).'),
     pnpmStore: Schema.string().description('Explicit package-store directory for pnpm-store (default: <pnpm home>/store).'),
-    pnpmRuntimeLocks: Schema.string().description('Explicit shared operation-lock directory for pnpm-runtime-locks (default: $XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>).'),
+    pnpmRuntimeLocks: Schema.string().description('Explicit spelling of pnpm\'s shared operation-lock directory (default: $XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>). pnpm derives this from XDG_RUNTIME_DIR and cannot be redirected: an override may re-spell the same directory (e.g. via symlink) but is refused if it points anywhere else, and it never bypasses the runtime-root validation.'),
   }).default({}).description(
     'Explicit grant paths. Every entry must be an absolute path to an existing, user-owned directory (or lock file) that is not group-writable; a preset whose path is missing or refuses validation fails closed.',
   ),
