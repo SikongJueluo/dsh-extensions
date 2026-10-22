@@ -112,6 +112,24 @@ async function boot({ withTriggers = true, queueFails = false, config } = {}) {
   return { root, host }
 }
 
+
+/** boot with extra provided services (e.g. a workspace registry). */
+async function bootWithServices(config, extra) {
+  const host = makeHost({})
+  const root = new Context()
+  root.provide('tools', host.tools)
+  root.provide('sessionController', host.sessionController)
+  root.provide('storageDomain', host.storageDomain)
+  root.provide('commands', host.commands)
+  root.provide('agents', host.agents)
+  root.provide('connection', host.connection)
+  root.provide('webServer', host.webServer)
+  for (const [name, value] of Object.entries(extra)) root.provide(name, value)
+  await root.plugin(triggersPlugin, {})
+  await root.plugin(handoffPlugin, { ...config })
+  return { root, host }
+}
+
 const emit = (root, sessionId, event) => root.emit('session/event', { id: sessionId }, event)
 
 /** One channel call exactly as the browser half sends it. */
@@ -324,5 +342,52 @@ test('no triggers mounted: --review degrades to a plain handoff with a visible n
     assert.ok(notice, 'the degradation notice is queued on the origin session')
   } finally {
     await rm(new URL('./.smoke-review-ws/plain', import.meta.url), { recursive: true, force: true })
+  }
+})
+
+test('flag-fixed summary: --workspace + --review reaches the card with the real target and verdict', async () => {
+  const config = handoffPlugin.Config ? handoffPlugin.Config({}) : {}
+  // A two-workspace registry so --workspace resolves a non-origin target.
+  const registry = {
+    list: () => [
+      { id: 'ws-origin', title: 'Origin Space', path: '/int/origin', status: async () => 'ok' },
+      { id: 'ws-other', title: 'Other Space', path: '/int/other', status: async () => 'ok' },
+    ],
+    get: (id) => (id === 'ws-other'
+      ? { id: 'ws-other', title: 'Other Space', path: '/int/other', status: async () => 'ok' }
+      : id === 'ws-origin'
+        ? { id: 'ws-origin', title: 'Origin Space', path: '/int/origin', status: async () => 'ok' }
+        : undefined),
+    resolveByPath: async () => undefined,
+  }
+  try {
+    const { host: host2 } = await bootWithServices(config, { workspaceRegistry: registry })
+    const command = host2.state.commandDefs.get('handoff')
+    const { agent } = await originFixture(host2, 'flags')
+    await channel(host2, 'pending', {})
+    const handled = command.handler({
+      rawInput: '--workspace Other Space --review flag summary task',
+      agent,
+      signal: null,
+    })
+    const pick = await until(async () => (await channel(host2, 'pending', {})).requests[0], 3000, 'pending pick')
+    // The card's summary must state what will actually run: the flag target
+    // and the flag-decided review verdict, not the defaults.
+    assert.equal(pick.fixedWorkspace?.id, 'ws-other', `fixedWorkspace: ${JSON.stringify(pick.fixedWorkspace)}`)
+    assert.equal(pick.fixedWorkspace?.path, '/int/other')
+    assert.equal(pick.review?.fixed, true, `review: ${JSON.stringify(pick.review)}`)
+    assert.equal(pick.review?.enabled, true)
+    assert.equal(pick.review?.defaultRounds, 5)
+    const chosen = await channel(host2, 'choose', { requestId: pick.id, choice: { kind: 'inherit' } })
+    assert.equal(chosen.ok, true, JSON.stringify(chosen))
+    const answer = await handled
+    assert.equal(answer.kind, 'success', JSON.stringify(answer))
+    assert.ok(answer.text.includes('已请求'), answer.text)
+    const { briefPath } = await completeBrief(host2, 'origin-flags')
+    const meta = JSON.parse(await readFile(briefPath.replace(/\.md$/, '.meta.json'), 'utf8'))
+    assert.equal(meta.target?.path, '/int/other', 'the flag target actually runs')
+    assert.equal(meta.review?.maxRounds, 5)
+  } finally {
+    await rm(new URL('./.smoke-review-ws/flags', import.meta.url), { recursive: true, force: true })
   }
 })

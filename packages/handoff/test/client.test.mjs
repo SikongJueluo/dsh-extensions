@@ -159,7 +159,23 @@ function textOf(node) {
 const byType = (tree, type) => [...walk(tree)].filter(node => node.type === type)
 const byText = (tree, type, text) => [...walk(tree)].find(node => node.type === type && textOf(node).includes(text))
 const byLabel = (tree, label) => [...walk(tree)].find(node => node.props && node.props.label === label)
+
+// ══ tests ══════════════════════════════════════════════════════════════════
+
+const changeButtonFor = (tree, label) => {
+  let best
+  for (const holder of [...walk(tree)]) {
+    if (holder.type !== 'div') continue
+    if (!holder.children.some(child => textOf(child) === label)) continue
+    const buttons = byType(holder, 'button').filter(b => textOf(b) === '更改')
+    if (buttons.length !== 1) continue
+    const size = [...walk(holder)].length
+    if (best === undefined || size < best.size) best = { button: buttons[0], size }
+  }
+  return best === undefined ? undefined : best.button
+}
 const checkbox = (tree) => byType(tree, 'input').find(input => input.props.type === 'checkbox')
+const submit = (tree) => byText(tree, 'button', '开始交接')
 
 function operations(choices) {
   return {
@@ -188,48 +204,86 @@ function operations(choices) {
   }
 }
 
-// ══ tests ══════════════════════════════════════════════════════════════════
-
-test('model → effort → dedicated review step → confirm carries the verdict', async () => {
+test('the card opens with defaults filled and submits only on 开始交接', async () => {
   const choices = []
   const request = {
-    id: 'req-effort', sessionId: 'session-1', task: '修 README',
+    id: 'req-defaults', sessionId: 'session-1', task: '修 README',
+    inherited: { provider: 'prov', model: 'reasoner', reasoningEffort: 'low' },
+    fallback: { provider: 'prov', model: 'simple' },
+    origin: { id: 'origin', title: 'Origin', path: '/home/u/project', missing: false },
+    pickWorkspace: false, workspaces: [],
+    review: { defaultRounds: 5 },
+  }
+  const props = { request, operations: operations(choices), onSettled: () => {} }
+  const inst = mount(H.Picker, props)
+  await settle(inst, props)
+
+  const text = textOf(inst.tree)
+  assert.ok(text.includes('交接任务'), 'card title')
+  assert.ok(text.includes('继承当前会话'), 'model defaults to inherit')
+  assert.ok(text.includes('原工作区'), 'workspace defaults to origin')
+  assert.ok(text.includes(REVIEW_LABEL), 'the review block is visible on the card')
+  assert.ok(changeButtonFor(inst.tree, '模型'), 'model has a 更改 button')
+  assert.equal(changeButtonFor(inst.tree, '工作区'), undefined, 'no workspace selector without a roster')
+  assert.equal(choices.length, 0, 'nothing submitted by merely opening the card')
+
+  submit(inst.tree).props.onClick()
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(JSON.stringify(choices[0].choice), JSON.stringify({
+    kind: 'inherit',
+    review: { enabled: false, rounds: 5 },
+  }))
+})
+
+test('更改 flows: pick a model, adjust its effort, enable review with a 44px budget button', async () => {
+  const choices = []
+  const request = {
+    id: 'req-change', sessionId: 'session-1', task: '换脑任务',
     inherited: { provider: 'prov', model: 'reasoner', reasoningEffort: 'low' },
     fallback: { provider: 'prov', model: 'simple' },
     pickWorkspace: false, workspaces: [],
     review: { defaultRounds: 5 },
   }
-  const ops = operations(choices)
-  const props = { request, operations: ops, onSettled: () => {} }
+  const props = { request, operations: operations(choices), onSettled: () => {} }
   const inst = mount(H.Picker, props)
   await settle(inst, props)
 
-  assert.ok(textOf(inst.tree).includes('新会话使用哪个模型？'), 'model step first')
+  // 更改模型 → the selector replaces the card body; picking returns to the card.
+  changeButtonFor(inst.tree, '模型').props.onClick()
+  inst.render(props)
+  runEffects(inst)
+  assert.ok(textOf(inst.tree).includes('新会话使用哪个模型？'), 'model selector expanded')
   byLabel(inst.tree, 'Reasoner').props.onPick()
-  await settle(inst, props)
-  assert.ok(textOf(inst.tree).includes('思考强度'), 'effort step after a reasoning model')
-  byLabel(inst.tree, 'High').props.onPick()
-  await settle(inst, props)
-  assert.ok(textOf(inst.tree).includes('自动审核'), 'review step is reachable after effort')
-  assert.ok(textOf(inst.tree).includes(REVIEW_LABEL), 'review toggle label')
+  inst.render(props)
+  runEffects(inst)
+  const cardText = textOf(inst.tree)
+  assert.ok(cardText.includes('Reasoner'), 'the card shows the picked model')
+  assert.ok(cardText.includes('模型默认强度'), 'effort rides the model default until changed')
 
+  // 更改强度 → effort selector → back on the card with the effort named.
+  changeButtonFor(inst.tree, '思考强度').props.onClick()
+  inst.render(props)
+  runEffects(inst)
+  byLabel(inst.tree, 'High').props.onPick()
+  inst.render(props)
+  runEffects(inst)
+  assert.ok(textOf(inst.tree).includes('强度 High'), 'the card shows the chosen effort')
+
+  // Review on the card, with touch-sized budget buttons.
   checkbox(inst.tree).props.onChange({ target: { checked: true } })
   inst.render(props)
   runEffects(inst)
   const rounds8 = byText(inst.tree, 'button', '8')
   assert.ok(rounds8, 'round budget buttons')
+  assert.ok(Number(rounds8.props.style.minHeight) >= 44, `budget buttons must be ≥44px, got ${rounds8.props.style.minHeight}`)
   rounds8.props.onClick()
   inst.render(props)
   runEffects(inst)
-  byText(inst.tree, 'button', '继续').props.onClick()
-  inst.render(props)
-  runEffects(inst)
+  assert.ok(textOf(inst.tree).includes('执行者 = 新会话，审核者 = 当前会话'), 'the card names both roles')
 
-  assert.ok(textOf(inst.tree).includes('开始交接'), 'confirm step')
-  assert.ok(textOf(inst.tree).includes('最多 8 轮'), 'confirm shows the round budget')
-  assert.ok(textOf(inst.tree).includes('执行者 = 新会话，审核者 = 当前会话'), 'confirm names both roles')
-  assert.equal(choices.length, 0, 'nothing submitted before the fixed button')
-  byText(inst.tree, 'button', '开始交接').props.onClick()
+  assert.equal(choices.length, 0, 'selectors never submit')
+  submit(inst.tree).props.onClick()
   await Promise.resolve()
   await Promise.resolve()
   assert.equal(JSON.stringify(choices[0].choice), JSON.stringify({
@@ -238,42 +292,32 @@ test('model → effort → dedicated review step → confirm carries the verdict
   }))
 })
 
-test('workspace rows select; only 开始交接 submits', async () => {
+test('workspace 更改 selects and returns to the card; the submit carries the pick', async () => {
   const choices = []
   const request = {
     id: 'req-ws', sessionId: 'session-1', task: '跨区任务',
     origin: { id: 'origin', title: 'Origin', path: '/home/u/project', missing: false },
     workspaces: [{ id: 'ws-1', title: 'Other', path: '/home/u/other', missing: false }],
-    pickWorkspace: true, modelFixed: true,
+    pickWorkspace: true,
     review: { defaultRounds: 5 },
   }
-  const ops = operations(choices)
-  const props = { request, operations: ops, onSettled: () => {} }
+  const props = { request, operations: operations(choices), onSettled: () => {} }
   const inst = mount(H.Picker, props)
   await settle(inst, props)
 
-  assert.ok(textOf(inst.tree).includes('新会话开在哪个工作区？'), 'workspace step first for --model')
-  const next = byText(inst.tree, 'button', '继续')
-  assert.equal(next.props.disabled, true, '继续 disabled before a selection')
+  changeButtonFor(inst.tree, '工作区').props.onClick()
+  inst.render(props)
+  runEffects(inst)
+  assert.ok(textOf(inst.tree).includes('新会话开在哪个工作区？'), 'workspace selector expanded')
   byLabel(inst.tree, 'Other').props.onPick()
   await Promise.resolve()
-  assert.equal(choices.length, 0, 'a row click must not submit')
+  assert.equal(choices.length, 0, 'a selector pick must not submit')
 
   inst.render(props)
   runEffects(inst)
-  assert.ok(byLabel(inst.tree, 'Other').props.badge === '已选', 'selected row is marked')
-  const next2 = byText(inst.tree, 'button', '继续')
-  assert.equal(next2.props.disabled, false, '继续 enabled after selection')
-  next2.props.onClick()
-  inst.render(props)
-  runEffects(inst)
-  assert.ok(textOf(inst.tree).includes('自动审核'), 'review step after workspace')
-  byText(inst.tree, 'button', '继续').props.onClick()
-  inst.render(props)
-  runEffects(inst)
-  assert.ok(textOf(inst.tree).includes('Other（/home/u/other）'), 'confirm names the picked workspace')
+  assert.ok(textOf(inst.tree).includes('Other（/home/u/other）'), 'the card names the picked workspace')
 
-  byText(inst.tree, 'button', '开始交接').props.onClick()
+  submit(inst.tree).props.onClick()
   await Promise.resolve()
   await Promise.resolve()
   assert.equal(JSON.stringify(choices[0].choice), JSON.stringify({
@@ -282,7 +326,7 @@ test('workspace rows select; only 开始交接 submits', async () => {
   }))
 })
 
-test('--model without a workspace step starts at the review step and names the fixed model', async () => {
+test('flag-fixed fields display 命令指定, offer no 更改, and the review verdict shows fixed', async () => {
   const choices = []
   const request = {
     id: 'req-fixed', sessionId: 'session-1', task: '脚本任务',
@@ -290,33 +334,34 @@ test('--model without a workspace step starts at the review step and names the f
     fallback: { provider: 'prov', model: 'simple' },
     pickWorkspace: false, workspaces: [],
     modelFixed: true, fixedModel: { provider: 'flagged/provider', model: 'flagged-model' },
-    review: { defaultRounds: 5 },
+    fixedWorkspace: { id: 'ws-flag', title: 'Flagged Space', path: '/home/u/flagged', missing: false },
+    review: { defaultRounds: 8, enabled: true, fixed: true },
   }
-  const ops = operations(choices)
-  const props = { request, operations: ops, onSettled: () => {} }
+  const props = { request, operations: operations(choices), onSettled: () => {} }
   const inst = mount(H.Picker, props)
   await settle(inst, props)
 
-  assert.ok(!textOf(inst.tree).includes('新会话使用哪个模型？'), 'model list must be skipped')
-  assert.ok(textOf(inst.tree).includes('自动审核'), 'review step is the first step')
+  const text = textOf(inst.tree)
+  assert.ok(text.includes('flagged/provider/flagged-model'), 'the fixed route is shown')
+  assert.ok(text.includes('Flagged Space（/home/u/flagged）'), 'the fixed workspace is shown')
+  assert.ok(text.includes('自动审核 · 开启，最多 8 轮'), 'the flag-decided review verdict is shown')
+  const badges = (text.match(/命令指定/g) || []).length
+  assert.ok(badges >= 3, `model, workspace, and review each carry 命令指定, got ${badges}`)
+  assert.equal(changeButtonFor(inst.tree, '模型'), undefined, 'a fixed model offers no 更改')
+  assert.equal(changeButtonFor(inst.tree, '工作区'), undefined, 'a fixed workspace offers no 更改')
+  assert.equal(checkbox(inst.tree), undefined, 'a fixed review shows no toggle')
+  assert.equal(submit(inst.tree).props.disabled, false)
 
-  checkbox(inst.tree).props.onChange({ target: { checked: true } })
-  inst.render(props)
-  runEffects(inst)
-  byText(inst.tree, 'button', '继续').props.onClick()
-  inst.render(props)
-  runEffects(inst)
-  assert.ok(textOf(inst.tree).includes('flagged/provider/flagged-model'), 'confirm names the fixed route')
-  byText(inst.tree, 'button', '开始交接').props.onClick()
+  submit(inst.tree).props.onClick()
   await Promise.resolve()
   await Promise.resolve()
   assert.equal(JSON.stringify(choices[0].choice), JSON.stringify({
     kind: 'inherit',
-    review: { enabled: true, rounds: 5 },
+    review: { enabled: true, rounds: 8 },
   }))
 })
 
-test('no review offer: model pick goes straight to confirm, payload carries no review key', async () => {
+test('no review offer: the block is absent and the payload carries no review key', async () => {
   const choices = []
   const request = {
     id: 'req-plain', sessionId: 'session-1', task: '普通交接',
@@ -324,48 +369,13 @@ test('no review offer: model pick goes straight to confirm, payload carries no r
     fallback: { provider: 'prov', model: 'simple' },
     pickWorkspace: false, workspaces: [],
   }
-  const ops = operations(choices)
-  const props = { request, operations: ops, onSettled: () => {} }
+  const props = { request, operations: operations(choices), onSettled: () => {} }
   const inst = mount(H.Picker, props)
   await settle(inst, props)
 
-  byLabel(inst.tree, 'Simple').props.onPick()
-  await settle(inst, props)
-  assert.ok(textOf(inst.tree).includes('开始交接'), 'confirm directly after a plain model')
-  assert.ok(!textOf(inst.tree).includes(REVIEW_LABEL), 'no review UI without an offer')
-  byText(inst.tree, 'button', '开始交接').props.onClick()
+  assert.ok(!textOf(inst.tree).includes(REVIEW_LABEL), 'no review block without an offer')
+  submit(inst.tree).props.onClick()
   await Promise.resolve()
   await Promise.resolve()
-  assert.equal(JSON.stringify(choices[0].choice), JSON.stringify({ kind: 'model', provider: 'prov', model: 'simple' }))
-})
-
-test('back retraces the wizard steps instead of losing everything', async () => {
-  const choices = []
-  const request = {
-    id: 'req-back', sessionId: 'session-1', task: '返回测试',
-    origin: { id: 'origin', title: 'Origin', path: '/home/u/project', missing: false },
-    workspaces: [{ id: 'ws-1', title: 'Other', path: '/home/u/other', missing: false }],
-    pickWorkspace: true,
-    review: { defaultRounds: 5 },
-  }
-  const ops = operations(choices)
-  const props = { request, operations: ops, onSettled: () => {} }
-  const inst = mount(H.Picker, props)
-  await settle(inst, props)
-
-  byLabel(inst.tree, 'Simple').props.onPick()
-  await settle(inst, props)
-  assert.ok(textOf(inst.tree).includes('新会话开在哪个工作区？'), 'workspace step')
-  byLabel(inst.tree, 'Other').props.onPick()
-  inst.render(props)
-  runEffects(inst)
-  byText(inst.tree, 'button', '继续').props.onClick()
-  inst.render(props)
-  runEffects(inst)
-  assert.ok(textOf(inst.tree).includes('自动审核'), 'review step')
-  byText(inst.tree, 'button', '返回').props.onClick()
-  inst.render(props)
-  runEffects(inst)
-  assert.ok(textOf(inst.tree).includes('新会话开在哪个工作区？'), 'back returns to workspace')
-  assert.equal(byLabel(inst.tree, 'Other').props.badge, '已选', 'selection survives the round trip')
+  assert.equal(JSON.stringify(choices[0].choice), JSON.stringify({ kind: 'inherit' }))
 })

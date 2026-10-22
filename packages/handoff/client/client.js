@@ -44,9 +44,12 @@ window.__ModuleLoader__.load({
     // Retry requests carry the previous attempt's picks; matching rows wear
     // this badge so a retry starts one click from where it left off.
     var PREV_BADGE = "上次";
-    // The wizard's workspace step selects rows instead of submitting; the
-    // selected row wears this badge until 继续.
+    // The workspace selector selects rows instead of submitting; the
+    // selected row wears this badge until the card submits.
     var SELECTED_BADGE = "已选";
+    // Flag-decided fields display with this badge and no 更改 button, so the
+    // summary can never contradict what will actually run.
+    var FLAG_BADGE = "命令指定";
     var REVIEW_LABEL = "执行完成后自动交回当前会话审核";
 
     // Touch-primary devices (phones): hover feedback and autofocus are
@@ -94,7 +97,7 @@ window.__ModuleLoader__.load({
       letterSpacing: "0.04em", color: "var(--dsw-alias-label-tertiary, #9a9aa2)"
     };
     var row = {
-      display: "flex", flexDirection: "column", gap: "2px",
+      display: "flex", flexDirection: "column", gap: "2px", minHeight: 44, justifyContent: "center",
       width: "100%", textAlign: "left", cursor: "pointer",
       padding: "8px 10px", borderRadius: "12px",
       background: "transparent", border: "1px solid transparent",
@@ -163,11 +166,13 @@ window.__ModuleLoader__.load({
       ]);
     }
 
-    /** The picker itself, rendered only while a pick is pending.
-     * A five-step wizard: model → reasoning effort (when the model has
-     * efforts) → workspace (when offered) → auto-review settings (when
-     * dsh-triggers is mounted) → final confirmation. Row clicks only
-     * SELECT; nothing is submitted before the fixed 开始交接 button. */
+    /** The configuration card, rendered only while a pick is pending.
+     * ONE card, not a wizard: every field shows its effective value (defaults
+     * pre-filled — inherit model, origin workspace), 更改 expands that one
+     * field's selector in place, the auto-review block is always visible in
+     * its own section, and only the fixed 开始交接 button submits. Flag-fixed
+     * fields display with a 命令指定 badge and no 更改 button, so the summary
+     * can never contradict what will actually run. */
     function Picker(props) {
       var request = props.request;
       var operations = props.operations;
@@ -184,28 +189,21 @@ window.__ModuleLoader__.load({
       var errorState = React.useState(null);
       var error = errorState[0];
       var setError = errorState[1];
-      // The model whose reasoning efforts are being chosen (effort step).
-      var effortState = React.useState(null);
-      var effortFor = effortState[0];
-      var setEffortFor = effortState[1];
-      // The wizard: current step plus the stack of steps to 返回 to.
-      var STEP_MODEL = "model", STEP_EFFORT = "effort", STEP_WS = "workspace", STEP_REVIEW = "review", STEP_CONFIRM = "confirm";
-      var stepState = React.useState(null);
-      var step = stepState[0];
-      var setStep = stepState[1];
-      var historyState = React.useState([]);
-      var history = historyState[0];
-      var setHistory = historyState[1];
-      // The made model choice (null while undecided / modelFixed).
+      // The field whose selector is expanded: null = the summary card.
+      var sectionState = React.useState(null);
+      var section = sectionState[0];
+      var setSection = sectionState[1];
+      // The model choice in force (defaults to inherit / the retry's pick).
       var choiceState = React.useState(null);
       var choice = choiceState[0];
       var setChoice = choiceState[1];
-      // The selected workspace id (undefined until a row is picked).
+      // The selected workspace id (undefined = origin).
       var wsPickState = React.useState(undefined);
       var wsPick = wsPickState[0];
       var setWsPick = wsPickState[1];
-      // Auto-review verdict (offered only when request.review is present).
+      // Auto-review verdict: offered toggle or flag-fixed display.
       var reviewOffer = request.review || null;
+      var reviewFixed = !!(reviewOffer && reviewOffer.fixed === true);
       var reviewState = React.useState({
         enabled: !!(reviewOffer && reviewOffer.enabled === true),
         rounds: reviewOffer ? reviewOffer.defaultRounds : 5
@@ -215,62 +213,24 @@ window.__ModuleLoader__.load({
 
       var modelFixed = request.modelFixed === true;
       var fixedModel = request.fixedModel || null;
+      var fixedWorkspace = request.fixedWorkspace || null;
       var previous = request.previous || null;
       var prevChoice = previous ? previous.choice : null;
       var prevWorkspace = previous ? previous.workspaceId : undefined;
 
-      /** True when a session carries one pending step. */
+      var effectiveChoice = choice
+        || (prevChoice && (prevChoice.kind === "model" || prevChoice.kind === "default") ? prevChoice : null)
+        || { kind: "inherit" };
+
       function needsWorkspace() {
         return request.pickWorkspace === true
           && request.workspaces && request.workspaces.length > 0;
-      }
-      function hasReview() { return reviewOffer !== null; }
-
-      /** The first step for this request. */
-      function initialStep() {
-        if (!modelFixed) return STEP_MODEL;
-        if (needsWorkspace()) return STEP_WS;
-        return hasReview() ? STEP_REVIEW : STEP_CONFIRM;
-      }
-      if (step === null) {
-        step = initialStep();
-        setStep(step);
-      }
-
-      /** The step that follows a completed `after` step. */
-      function stepAfter(after) {
-        if (after === STEP_MODEL || after === STEP_EFFORT) {
-          if (needsWorkspace()) return STEP_WS;
-          return hasReview() ? STEP_REVIEW : STEP_CONFIRM;
-        }
-        if (after === STEP_WS) return hasReview() ? STEP_REVIEW : STEP_CONFIRM;
-        return STEP_CONFIRM;
-      }
-
-      function pushStep(next) {
-        setHistory(history.concat([step]));
-        setStep(next);
-        setQuery("");
-      }
-      function goNext(after) {
-        pushStep(stepAfter(after));
-      }
-      /** Back one step; from the first step, back means cancel. */
-      function back() {
-        if (busy) return;
-        if (history.length === 0) { cancel(); return; }
-        var previousSteps = history.slice(0, -1);
-        var target = history[history.length - 1];
-        setHistory(previousSteps);
-        setStep(target);
-        setQuery("");
       }
 
       React.useEffect(function () {
         if (request === null) return undefined;
         setQuery("");
         setError(null);
-        setEffortFor(null);
         var alive = true;
         // `ctx.remote.*` answers with the connection result envelope
         // ({ok:true, value} | {ok:false, error}); the catalog is inside `value`.
@@ -291,10 +251,8 @@ window.__ModuleLoader__.load({
       /** Send the final verdict to the host: model choice, workspace pick, review toggle. */
       function finalize() {
         if (busy) return;
-        var choiceOut = modelFixed ? { kind: "inherit" } : choice;
-        if (!choiceOut) return;
         setBusy(true);
-        var payload = Object.assign({}, choiceOut);
+        var payload = Object.assign({}, modelFixed ? { kind: "inherit" } : effectiveChoice);
         if (needsWorkspace()) payload.workspace = wsPick === undefined ? "origin" : wsPick;
         if (reviewOffer) payload.review = { enabled: review.enabled, rounds: review.rounds };
         operations.choose(request.id, payload).then(function (result) {
@@ -319,12 +277,13 @@ window.__ModuleLoader__.load({
       React.useEffect(function () {
         function onKey(event) {
           if (event.key !== "Escape") return;
-          // Escape steps back through the wizard; at the first step it cancels.
-          back();
+          // Escape collapses an expanded selector first; at the card it cancels.
+          if (section !== null) setSection(null);
+          else cancel();
         }
         window.addEventListener("keydown", onKey);
         return function () { window.removeEventListener("keydown", onKey); };
-      }, [request.id, busy, step, history]);
+      }, [request.id, busy, section]);
 
       var needle = query.trim().toLowerCase();
       var groups = [];
@@ -365,7 +324,7 @@ window.__ModuleLoader__.load({
         return effortId;
       }
 
-      /** Name a base option's route as the full catalog labels it, effort included. */
+      /** Name a route as the full catalog labels it, effort included. */
       function routeText(route, fallbackText) {
         if (!route) return fallbackText;
         var entry = catalogModel(route.provider, route.model);
@@ -382,193 +341,189 @@ window.__ModuleLoader__.load({
           && prevChoice.provider === provider && prevChoice.model === model);
       }
 
-      /** One model row: pick it, or step into its reasoning-effort choices. */
-      function chooseModel(provider, model) {
-        if (busy) return;
-        var reasoning = model.reasoning;
-        var efforts = reasoning && reasoning.efforts ? reasoning.efforts : [];
-        if (efforts.length === 0) {
-          setChoice({ kind: "model", provider: provider, model: model.id });
-          goNext(STEP_MODEL);
-          return;
-        }
-        // Picking the origin's own route preselects the effort it already runs;
-        // a retry's previous effort wins over that when it names this model.
-        var prevEffort = isPrevModel(provider, model.id) && prevChoice.reasoningEffort
-          ? prevChoice.reasoningEffort
-          : undefined;
-        var inherited = request.inherited;
-        var preferred = prevEffort !== undefined ? prevEffort
-          : inherited && inherited.provider === provider && inherited.model === model.id
-            ? inherited.reasoningEffort
-            : undefined;
-        setEffortFor({
-          provider: provider,
-          model: model.id,
-          name: model.name,
-          efforts: efforts,
-          defaultEffort: reasoning.defaultEffort,
-          preferred: preferred,
-          preferredIsPrev: prevEffort !== undefined
-        });
-        pushStep(STEP_EFFORT);
+      /** The route the effort section edits, when its model advertises efforts. */
+      function effortRoute() {
+        if (modelFixed) return fixedModel;
+        if (effectiveChoice.kind === "model") return effectiveChoice;
+        if (effectiveChoice.kind === "inherit") return request.inherited || null;
+        return request.fallback || null;
       }
 
-      var confirmReady = modelFixed || !!choice;
+      /** Adopt an effort for the current model choice. Inherit/default picks
+       * become explicit model choices: an inherited route with a changed
+       * effort is exactly that route with the effort spelled out. */
+      function pickEffort(effortId) {
+        var route = effortRoute();
+        if (!route) { setSection(null); return; }
+        setChoice({
+          kind: "model",
+          provider: route.provider,
+          model: route.model,
+          reasoningEffort: effortId
+        });
+        setSection(null);
+      }
 
-      // ── confirm step: the full summary, then the fixed submit button ──────
-      if (step === STEP_CONFIRM) {
-        var modelLine = modelFixed
-          ? (fixedModel ? routeText(fixedModel, "--model 指定的模型") + "（--model 指定）" : "由 --model 指定")
-          : choice && choice.kind === "model"
-            ? routeText(choice, choice.provider + "/" + choice.model)
-            : choice && choice.kind === "default"
-              ? routeText(request.fallback, DEFAULT_LABEL)
-              : routeText(request.inherited, INHERIT_LABEL);
-        var wsList = request.workspaces || [];
-        var picked = wsPick !== undefined ? wsList.find(function (w) { return w.id === wsPick; }) : undefined;
-        var wsLine = !needsWorkspace()
-          ? "原工作区"
-          : wsPick === "origin" || (wsPick === undefined && prevWorkspace === "origin")
-            ? "原工作区（" + (request.origin ? request.origin.path : "") + "）"
-            : picked ? picked.title + "（" + picked.path + "）" : "原工作区（" + (request.origin ? request.origin.path : "") + "）";
-        var reviewLine = !hasReview()
-          ? null
-          : review.enabled
-            ? "开启 · 最多 " + review.rounds + " 轮（执行者 = 新会话，审核者 = 当前会话；每轮交付自动送审）"
-            : "关闭（普通交接）";
+      var cardFooter = React.createElement("div", { key: "footer", style: footer },
+        [
+          React.createElement("button", {
+            key: "cancel", type: "button", style: button, disabled: busy, onClick: cancel
+          }, "取消"),
+          React.createElement("button", {
+            key: "go", type: "button",
+            style: Object.assign({}, button, {
+              background: "var(--dsw-alias-accent-major, #4c6ef5)",
+              color: "#fff", border: "1px solid transparent"
+            }),
+            disabled: busy,
+            onClick: finalize
+          }, "开始交接")
+        ]);
+
+      var errorLineEl = error !== null
+        ? React.createElement("div", { key: "error", style: errorLine }, error)
+        : null;
+
+      // ── expanded selectors (one field at a time, inside the same card) ────
+      if (section === "model") {
         return React.createElement("div", {
           style: backdrop,
           onClick: function (event) { if (event.target === event.currentTarget) cancel(); }
         }, React.createElement("div", { style: card }, [
           React.createElement("div", { key: "header", style: header }, [
-            React.createElement("div", { key: "title", style: title }, "开始交接"),
+            React.createElement("div", { key: "title", style: title }, "新会话使用哪个模型？"),
             React.createElement("div", { key: "task", style: subtitle }, request.task)
           ]),
-          React.createElement("div", { key: "body", style: body },
-            React.createElement("div", { style: { padding: "6px 8px", display: "flex", flexDirection: "column", gap: 10 } }, [
-              React.createElement("div", { key: "model", style: { display: "flex", flexDirection: "column", gap: 2 } }, [
-                React.createElement("span", { key: "l", style: groupTitle }, "模型"),
-                React.createElement("span", { key: "v", style: { fontSize: 13 } }, modelLine)
-              ]),
-              React.createElement("div", { key: "ws", style: { display: "flex", flexDirection: "column", gap: 2 } }, [
-                React.createElement("span", { key: "l", style: groupTitle }, "工作区"),
-                React.createElement("span", { key: "v", style: { fontSize: 13 } }, wsLine)
-              ]),
-              reviewLine === null ? null : React.createElement("div", { key: "review", style: { display: "flex", flexDirection: "column", gap: 2 } }, [
-                React.createElement("span", { key: "l", style: groupTitle }, "自动审核"),
-                React.createElement("span", { key: "v", style: { fontSize: 13 } }, reviewLine)
-              ]),
-              React.createElement("div", { key: "note", style: empty },
-                "点「开始交接」后，当前会话先写自包含简报，完成时在新工作区创建执行会话。")
-            ])
-          ),
-          error !== null
-            ? React.createElement("div", { key: "error", style: errorLine }, error)
-            : null,
+          React.createElement("input", {
+            key: "search",
+            style: search,
+            value: query,
+            placeholder: "搜索模型 / 厂商…",
+            autoFocus: !COARSE,
+            onChange: function (event) { setQuery(event.target.value); }
+          }),
+          React.createElement("div", { key: "body", style: body }, [
+            React.createElement(Entry, {
+              key: "inherit",
+              label: INHERIT_LABEL,
+              description: routeText(request.inherited, "沿用本会话的 preset 与模型"),
+              badge: prevChoice && prevChoice.kind === "inherit" ? PREV_BADGE : undefined,
+              busy: busy,
+              onPick: function () { setChoice({ kind: "inherit" }); setSection(null); }
+            }),
+            React.createElement(Entry, {
+              key: "default",
+              label: DEFAULT_LABEL,
+              description: routeText(request.fallback, "默认 preset + 全局默认模型"),
+              badge: prevChoice && prevChoice.kind === "default" ? PREV_BADGE : undefined,
+              busy: busy,
+              onPick: function () { setChoice({ kind: "default" }); setSection(null); }
+            }),
+            React.createElement("div", { key: "divider", style: divider })
+          ].concat(
+            catalog === null && error === null
+              ? [React.createElement("div", { key: "loading", style: empty }, "正在加载模型目录…")]
+              : groups.length === 0 && failures.length === 0
+                ? [React.createElement("div", { key: "none", style: empty }, needle.length > 0 ? "没有匹配的模型" : "没有可用的模型")]
+                : groups.map(function (group) {
+                    return React.createElement("div", { key: "g:" + group.id }, [
+                      React.createElement("div", { key: "gt", style: groupTitle }, group.name)
+                    ].concat(group.models.map(function (model) {
+                      var description = [];
+                      if (model.name !== model.id) description.push(model.id);
+                      if (model.description) description.push(model.description);
+                      if (model.reasoning && model.reasoning.defaultEffort) {
+                        var defaultName = model.reasoning.defaultEffort;
+                        for (var e = 0; e < model.reasoning.efforts.length; e += 1) {
+                          if (model.reasoning.efforts[e].id === model.reasoning.defaultEffort) {
+                            defaultName = model.reasoning.efforts[e].name;
+                            break;
+                          }
+                        }
+                        description.push("默认强度 " + defaultName);
+                      }
+                      return React.createElement(Entry, {
+                        key: "m:" + group.id + "/" + model.id,
+                        label: model.name,
+                        description: description.join(" · ") || undefined,
+                        badge: isPrevModel(group.id, model.id) ? PREV_BADGE : undefined,
+                        busy: busy,
+                        onPick: function () {
+                          // A model without efforts commits directly; one with
+                          // efforts keeps its default until 更改 强度.
+                          setChoice({ kind: "model", provider: group.id, model: model.id });
+                          setSection(null);
+                        }
+                      });
+                    })));
+                  }).concat(
+                    failures.length === 0
+                      ? []
+                      : [React.createElement("div", { key: "failures" }, [
+                          React.createElement("div", { key: "fht", style: groupTitle }, "不可用")
+                        ].concat(failures.map(function (failure) {
+                          return React.createElement("div", {
+                            key: "f:" + failure.id,
+                            style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "2px" }
+                          }, [
+                            React.createElement("span", { key: "n", style: rowLabel }, failure.name || failure.id),
+                            React.createElement("span", { key: "m", style: rowDesc }, failure.message)
+                          ]);
+                        })))]
+                  )
+          )),
+          errorLineEl,
           React.createElement("div", { key: "footer", style: footer },
-            [
-              React.createElement("button", {
-                key: "back", type: "button", style: button, disabled: busy,
-                onClick: back
-              }, "返回"),
-              React.createElement("button", {
-                key: "cancel", type: "button", style: button, disabled: busy, onClick: cancel
-              }, "取消"),
-              React.createElement("button", {
-                key: "go", type: "button",
-                style: Object.assign({}, button, {
-                  background: "var(--dsw-alias-accent-major, #4c6ef5)",
-                  color: "#fff", border: "1px solid transparent"
-                }),
-                disabled: busy || !confirmReady,
-                onClick: finalize
-              }, "开始交接")
-            ])
+            React.createElement("button", {
+              key: "back", type: "button", style: button, disabled: busy,
+              onClick: function () { setSection(null); }
+            }, "返回配置"))
         ]));
       }
 
-      // ── review step: the dedicated auto-review settings ──────────────────
-      if (step === STEP_REVIEW) {
+      if (section === "effort") {
+        var effortRouteNow = effortRoute();
+        var effortEntry = effortRouteNow ? catalogModel(effortRouteNow.provider, effortRouteNow.model) : null;
+        var efforts = effortEntry && effortEntry.reasoning && effortEntry.reasoning.efforts ? effortEntry.reasoning.efforts : [];
+        var currentEffort = effortRouteNow && effortRouteNow.reasoningEffort;
+        var effortRows = efforts.map(function (effort) {
+          var marker = effort.id === currentEffort ? "当前" : effort.id === (effortEntry.reasoning.defaultEffort) ? "默认" : undefined;
+          return React.createElement(Entry, {
+            key: "e:" + effort.id,
+            label: effort.name,
+            description: effort.description || undefined,
+            badge: marker,
+            busy: busy,
+            onPick: function () { pickEffort(effort.id); }
+          });
+        });
         return React.createElement("div", {
           style: backdrop,
           onClick: function (event) { if (event.target === event.currentTarget) cancel(); }
         }, React.createElement("div", { style: card }, [
           React.createElement("div", { key: "header", style: header }, [
-            React.createElement("div", { key: "title", style: title }, "自动审核"),
-            React.createElement("div", { key: "task", style: subtitle }, "执行完成后是否自动交回当前会话审核")
+            React.createElement("div", { key: "title", style: title }, "思考强度"),
+            React.createElement("div", { key: "task", style: subtitle }, request.task)
           ]),
-          React.createElement("div", { key: "body", style: body },
-            React.createElement("div", null, [
-              React.createElement("label", {
-                key: "toggle",
-                style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", minHeight: 44, fontSize: 13, padding: "4px 8px" }
-              },
-                React.createElement("input", {
-                  type: "checkbox", style: { width: 20, height: 20 },
-                  checked: review.enabled,
-                  onChange: function (event) { setReview({ enabled: event.target.checked, rounds: review.rounds }); }
-                }),
-                React.createElement("span", null, REVIEW_LABEL)
-              ),
-              review.enabled ? React.createElement("div", {
-                key: "rounds",
-                style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "6px 8px 10px" }
-              },
-                [1, 2, 3, 5, 8].map(function (n) {
-                  return React.createElement("button", {
-                    key: n, type: "button",
-                    style: Object.assign({}, button, {
-                      minHeight: 36, minWidth: 44, padding: "4px 10px", fontSize: 13,
-                      background: review.rounds === n ? "var(--dsw-alias-accent-major, #4c6ef5)" : button.background,
-                      color: review.rounds === n ? "#fff" : button.color
-                    }),
-                    onClick: function () { setReview({ enabled: true, rounds: n }); }
-                  }, String(n));
-                }),
-                React.createElement("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary, #9a9aa2)" } }, "轮预算")
-              ) : null,
-              React.createElement("div", { key: "hint", style: empty },
-                review.enabled
-                  ? "执行者 = 新会话，审核者 = 当前会话；每轮交付（trigger_signal）自动送审，返工意见自动发回执行者，直到通过 / 需要用户 / 轮次用尽。"
-                  : "不开启则与普通交接完全一致。")
-            ])
-          ),
-          error !== null
-            ? React.createElement("div", { key: "error", style: errorLine }, error)
-            : null,
+          React.createElement("div", { key: "body", style: body }, effortRows),
+          errorLineEl,
           React.createElement("div", { key: "footer", style: footer },
-            [
-              React.createElement("button", {
-                key: "back", type: "button", style: button, disabled: busy,
-                onClick: back
-              }, "返回"),
-              React.createElement("button", {
-                key: "cancel", type: "button", style: button, disabled: busy, onClick: cancel
-              }, "取消"),
-              React.createElement("button", {
-                key: "next", type: "button",
-                style: Object.assign({}, button, {
-                  background: "var(--dsw-alias-accent-major, #4c6ef5)",
-                  color: "#fff", border: "1px solid transparent"
-                }),
-                disabled: busy,
-                onClick: function () { goNext(STEP_REVIEW); }
-              }, "继续")
-            ])
+            React.createElement("button", {
+              key: "back", type: "button", style: button, disabled: busy,
+              onClick: function () { setSection(null); }
+            }, "返回配置"))
         ]));
       }
 
-      // ── workspace step: rows select; the footer continues ────────────────
-      if (step === STEP_WS) {
-        var wsList2 = request.workspaces || [];
+      if (section === "workspace") {
+        var wsList = request.workspaces || [];
         var wsNeedle = query.trim().toLowerCase();
-        var wsFiltered = wsList2.filter(function (w) {
+        var wsFiltered = wsList.filter(function (w) {
           return wsNeedle.length === 0 || (w.title + " " + w.path).toLowerCase().indexOf(wsNeedle) >= 0;
         });
         var wsTitleCounts = {};
-        wsList2.forEach(function (w) { wsTitleCounts[w.title] = (wsTitleCounts[w.title] || 0) + 1; });
-        var effectiveWs = wsPick !== undefined ? wsPick : (prevWorkspace === undefined ? undefined : prevWorkspace);
+        wsList.forEach(function (w) { wsTitleCounts[w.title] = (wsTitleCounts[w.title] || 0) + 1; });
+        var effectiveWs = wsPick !== undefined ? wsPick : (prevWorkspace === undefined ? "origin" : prevWorkspace);
         var wsRows = [
           React.createElement(Entry, {
             key: "origin",
@@ -576,7 +531,7 @@ window.__ModuleLoader__.load({
             badge: effectiveWs === "origin" ? SELECTED_BADGE : (prevWorkspace === "origin" ? PREV_BADGE : ORIGIN_BADGE),
             description: request.origin ? request.origin.path : undefined,
             busy: busy,
-            onPick: function () { setWsPick("origin"); }
+            onPick: function () { setWsPick("origin"); setSection(null); }
           }),
           React.createElement("div", { key: "divider", style: divider })
         ].concat(
@@ -594,7 +549,7 @@ window.__ModuleLoader__.load({
                   muted: w.missing === true,
                   badge: effectiveWs === w.id ? SELECTED_BADGE : (w.id === prevWorkspace ? PREV_BADGE : undefined),
                   busy: busy,
-                  onPick: function () { if (w.missing !== true) setWsPick(w.id); }
+                  onPick: function () { if (w.missing !== true) { setWsPick(w.id); setSection(null); } }
                 });
               })
         );
@@ -615,178 +570,161 @@ window.__ModuleLoader__.load({
             onChange: function (event) { setQuery(event.target.value); }
           }),
           React.createElement("div", { key: "body", style: body }, wsRows),
-          error !== null
-            ? React.createElement("div", { key: "error", style: errorLine }, error)
-            : null,
+          errorLineEl,
           React.createElement("div", { key: "footer", style: footer },
-            [
-              React.createElement("button", {
-                key: "back", type: "button", style: button, disabled: busy,
-                onClick: back
-              }, "返回"),
-              React.createElement("button", {
-                key: "cancel", type: "button", style: button, disabled: busy, onClick: cancel
-              }, "取消"),
-              React.createElement("button", {
-                key: "next", type: "button",
-                style: Object.assign({}, button, {
-                  background: "var(--dsw-alias-accent-major, #4c6ef5)",
-                  color: "#fff", border: "1px solid transparent",
-                  opacity: wsPick === undefined ? 0.6 : 1
-                }),
-                disabled: busy || wsPick === undefined,
-                onClick: function () { goNext(STEP_WS); }
-              }, "继续")
-            ])
-        ]));
-      }
-
-      // ── effort step: which reasoning effort the chosen model runs on ─────
-      if (step === STEP_EFFORT && effortFor !== null) {
-        var effortRows = effortFor.efforts.map(function (effort) {
-          var marker = effort.id === effortFor.preferred
-            ? (effortFor.preferredIsPrev ? PREV_BADGE : "当前会话")
-            : effort.id === effortFor.defaultEffort
-              ? "默认"
-              : undefined;
-          return React.createElement(Entry, {
-            key: "e:" + effort.id,
-            label: effort.name,
-            description: effort.description || undefined,
-            badge: marker,
-            busy: busy,
-            onPick: function () {
-              setChoice({
-                kind: "model",
-                provider: effortFor.provider,
-                model: effortFor.model,
-                reasoningEffort: effort.id
-              });
-              goNext(STEP_EFFORT);
-            }
-          });
-        });
-        return React.createElement("div", {
-          style: backdrop,
-          onClick: function (event) { if (event.target === event.currentTarget) cancel(); }
-        }, React.createElement("div", { style: card }, [
-          React.createElement("div", { key: "header", style: header }, [
-            React.createElement("div", { key: "title", style: title }, effortFor.name + " · 思考强度"),
-            React.createElement("div", { key: "task", style: subtitle }, "选择新会话的 reasoning effort")
-          ]),
-          React.createElement("div", { key: "body", style: body }, effortRows),
-          error !== null
-            ? React.createElement("div", { key: "error", style: errorLine }, error)
-            : null,
-          React.createElement("div", { key: "footer", style: footer }, [
             React.createElement("button", {
               key: "back", type: "button", style: button, disabled: busy,
-              onClick: back
-            }, "返回"),
-            React.createElement("button", {
-              key: "cancel", type: "button", style: button, disabled: busy, onClick: cancel
-            }, "取消")
-          ])
+              onClick: function () { setSection(null); }
+            }, "返回配置"))
         ]));
       }
 
-      // ── model step (first when the model is not flag-fixed) ──────────────
-      var children = [
-        React.createElement("div", { key: "header", style: header }, [
-          React.createElement("div", { key: "title", style: title }, "新会话使用哪个模型？"),
-          React.createElement("div", { key: "task", style: subtitle }, request.task)
-        ]),
-        React.createElement("input", {
-          key: "search",
-          style: search,
-          value: query,
-          placeholder: "搜索模型 / 厂商…",
-          autoFocus: !COARSE,
-          onChange: function (event) { setQuery(event.target.value); }
-        }),
-        React.createElement("div", { key: "body", style: body }, [
-          React.createElement(Entry, {
-            key: "inherit",
-            label: INHERIT_LABEL,
-            description: routeText(request.inherited, "沿用本会话的 preset 与模型"),
-            badge: prevChoice && prevChoice.kind === "inherit" ? PREV_BADGE : undefined,
-            busy: busy,
-            onPick: function () {
-              setChoice({ kind: "inherit" });
-              goNext(STEP_MODEL);
-            }
-          }),
-          React.createElement(Entry, {
-            key: "default",
-            label: DEFAULT_LABEL,
-            description: routeText(request.fallback, "默认 preset + 全局默认模型"),
-            badge: prevChoice && prevChoice.kind === "default" ? PREV_BADGE : undefined,
-            busy: busy,
-            onPick: function () {
-              setChoice({ kind: "default" });
-              goNext(STEP_MODEL);
-            }
-          }),
-          React.createElement("div", { key: "divider", style: divider })
-        ].concat(
-          catalog === null && error === null
-            ? [React.createElement("div", { key: "loading", style: empty }, "正在加载模型目录…")]
-            : groups.length === 0 && failures.length === 0
-              ? [React.createElement("div", { key: "none", style: empty }, needle.length > 0 ? "没有匹配的模型" : "没有可用的模型")]
-              : groups.map(function (group) {
-                  return React.createElement("div", { key: "g:" + group.id }, [
-                    React.createElement("div", { key: "gt", style: groupTitle }, group.name)
-                  ].concat(group.models.map(function (model) {
-                    var description = [];
-                    if (model.name !== model.id) description.push(model.id);
-                    if (model.description) description.push(model.description);
-                    if (model.reasoning && model.reasoning.defaultEffort) {
-                      var defaultName = model.reasoning.defaultEffort;
-                      for (var e = 0; e < model.reasoning.efforts.length; e += 1) {
-                        if (model.reasoning.efforts[e].id === model.reasoning.defaultEffort) {
-                          defaultName = model.reasoning.efforts[e].name;
-                          break;
-                        }
-                      }
-                      description.push("默认强度 " + defaultName);
-                    }
-                    return React.createElement(Entry, {
-                      key: "m:" + group.id + "/" + model.id,
-                      label: model.name,
-                      description: description.join(" · ") || undefined,
-                      badge: isPrevModel(group.id, model.id) ? PREV_BADGE : undefined,
-                      busy: busy,
-                      onPick: function () { chooseModel(group.id, model); }
-                    });
-                  })));
-                }).concat(
-                  failures.length === 0
-                    ? []
-                    : [React.createElement("div", { key: "failures" }, [
-                        React.createElement("div", { key: "fht", style: groupTitle }, "不可用")
-                      ].concat(failures.map(function (failure) {
-                        return React.createElement("div", {
-                          key: "f:" + failure.id,
-                          style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "2px" }
-                        }, [
-                          React.createElement("span", { key: "n", style: rowLabel }, failure.name || failure.id),
-                          React.createElement("span", { key: "m", style: rowDesc }, failure.message)
-                        ]);
-                      })))]
-                )
-        )),
-        error !== null
-          ? React.createElement("div", { key: "error", style: errorLine }, error)
-          : null,
-        React.createElement("div", { key: "footer", style: footer },
-          React.createElement("button", { type: "button", style: button, disabled: busy, onClick: cancel }, "取消")
-        )
-      ];
+      // ── the configuration card itself ─────────────────────────────────────
+      var modelValue = modelFixed
+        ? routeText(fixedModel, "由 --model 指定")
+        : effectiveChoice.kind === "model"
+          ? routeText(effectiveChoice, effectiveChoice.provider + "/" + effectiveChoice.model)
+          : effectiveChoice.kind === "default"
+            ? routeText(request.fallback, "默认 preset + 全局默认模型")
+            : routeText(request.inherited, "沿用本会话的 preset 与模型");
+      var modelLabel = modelFixed
+        ? FLAG_BADGE
+        : effectiveChoice.kind === "model" ? "已选模型"
+          : effectiveChoice.kind === "default" ? DEFAULT_LABEL : INHERIT_LABEL;
+
+      var effortRouteCard = effortRoute();
+      var effortEntryCard = effortRouteCard ? catalogModel(effortRouteCard.provider, effortRouteCard.model) : null;
+      var hasEfforts = !!(effortEntryCard && effortEntryCard.reasoning && effortEntryCard.reasoning.efforts
+        && effortEntryCard.reasoning.efforts.length > 0);
+      var effortValue = hasEfforts
+        ? (effortRouteCard && effortRouteCard.reasoningEffort
+            ? "强度 " + effortText(effortRouteCard.provider, effortRouteCard.model, effortRouteCard.reasoningEffort)
+            : "模型默认强度")
+        : null;
+
+      var wsValue;
+      var wsChangeable;
+      if (fixedWorkspace) {
+        wsValue = fixedWorkspace.title + "（" + fixedWorkspace.path + "）";
+        wsChangeable = false;
+      } else if (needsWorkspace()) {
+        var effectiveCard = wsPick !== undefined ? wsPick : (prevWorkspace === undefined ? "origin" : prevWorkspace);
+        var wsListCard = request.workspaces || [];
+        var pickedCard = wsListCard.find(function (w) { return w.id === effectiveCard; });
+        wsValue = pickedCard
+          ? pickedCard.title + "（" + pickedCard.path + "）"
+          : "原工作区（" + (request.origin ? request.origin.path : "") + "）";
+        wsChangeable = true;
+      } else {
+        wsValue = "原工作区（" + (request.origin ? request.origin.path : "") + "）";
+        wsChangeable = false;
+      }
+
+      /** One summary row: label, value (may carry a badge), optional 更改. */
+      function fieldRow(key, label, value, badge, changeable, onOpen) {
+        return React.createElement("div", {
+          key: key,
+          style: {
+            display: "flex", alignItems: "center", gap: 10, minHeight: 44,
+            padding: "6px 8px", borderTop: key === "first" ? "none" : "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))"
+          }
+        },
+          React.createElement("span", { key: "label", style: Object.assign({}, groupTitle, { flex: "0 0 88px", padding: 0 }) }, label),
+          React.createElement("span", {
+            key: "value",
+            style: { flex: "1 1 auto", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+          },
+            badge ? React.createElement("span", { key: "badge", style: badge }, badge) : null,
+            value
+          ),
+          changeable ? React.createElement("button", {
+            key: "change", type: "button",
+            style: Object.assign({}, button, { minHeight: 36, padding: "4px 12px", flex: "0 0 auto" }),
+            disabled: busy,
+            onClick: onOpen
+          }, "更改") : null
+        );
+      }
+
+      var reviewBlock = reviewOffer === null ? null : React.createElement("div", {
+        key: "review",
+        style: {
+          margin: "10px 8px 4px", padding: "8px 10px",
+          border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.35))",
+          borderRadius: 12
+        }
+      },
+        reviewFixed
+          ? [
+            React.createElement("div", {
+              key: "fixed", style: { display: "flex", alignItems: "center", gap: 8, minHeight: 44, fontSize: 13 }
+            },
+              React.createElement("span", { style: badge }, FLAG_BADGE),
+              React.createElement("span", null, "自动审核 · 开启，最多 " + review.rounds + " 轮")
+            ),
+            React.createElement("div", { key: "hint", style: empty },
+              "执行者 = 新会话，审核者 = 当前会话；每轮交付自动送审，返工意见自动发回执行者。")
+          ]
+          : [
+            React.createElement("label", {
+              key: "toggle",
+              style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", minHeight: 44, fontSize: 13 }
+            },
+              React.createElement("input", {
+                type: "checkbox", style: { width: 20, height: 20 },
+                checked: review.enabled,
+                onChange: function (event) { setReview({ enabled: event.target.checked, rounds: review.rounds }); }
+              }),
+              React.createElement("span", null, REVIEW_LABEL)
+            ),
+            review.enabled ? React.createElement("div", {
+              key: "rounds",
+              style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "2px 0 6px" }
+            },
+              [1, 2, 3, 5, 8].map(function (n) {
+                return React.createElement("button", {
+                  key: n, type: "button",
+                  style: Object.assign({}, button, {
+                    minHeight: 44, minWidth: 44, padding: "4px 10px", fontSize: 13,
+                    background: review.rounds === n ? "var(--dsw-alias-accent-major, #4c6ef5)" : button.background,
+                    color: review.rounds === n ? "#fff" : button.color
+                  }),
+                  onClick: function () { setReview({ enabled: true, rounds: n }); }
+                }, String(n));
+              }),
+              React.createElement("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary, #9a9aa2)" } }, "轮预算")
+            ) : null,
+            review.enabled ? React.createElement("div", { key: "hint", style: empty },
+              "执行者 = 新会话，审核者 = 当前会话；每轮交付（trigger_signal）自动送审，返工意见自动发回执行者，直到通过 / 需要用户 / 轮次用尽。")
+              : React.createElement("div", { key: "off", style: empty }, "不开启则与普通交接完全一致。")
+          ]
+      );
 
       return React.createElement("div", {
         style: backdrop,
         onClick: function (event) { if (event.target === event.currentTarget) cancel(); }
-      }, React.createElement("div", { style: card }, children));
+      }, React.createElement("div", { style: card }, [
+        React.createElement("div", { key: "header", style: header }, [
+          React.createElement("div", { key: "title", style: title }, "交接任务"),
+          React.createElement("div", { key: "task", style: subtitle }, request.task)
+        ]),
+        React.createElement("div", { key: "body", style: body },
+          React.createElement("div", { style: { display: "flex", flexDirection: "column" } },
+            [
+              fieldRow("first", "模型", modelValue, modelLabel, !modelFixed, function () { setSection("model"); }),
+              hasEfforts
+                ? fieldRow("effort", "思考强度", effortValue, undefined, !modelFixed, function () { setSection("effort"); })
+                : null,
+              fieldRow("ws", "工作区", wsValue, fixedWorkspace ? FLAG_BADGE : undefined, wsChangeable, function () { setSection("workspace"); }),
+              reviewBlock,
+              React.createElement("div", { key: "note", style: Object.assign({}, empty, { marginTop: 6 }) },
+                "点「开始交接」后，当前会话先写自包含简报，完成时在新工作区创建执行会话。")
+            ].filter(Boolean)
+          )
+        ),
+        errorLineEl,
+        cardFooter
+      ]));
     }
 
     /** Root overlay: polls the host channel and mounts the picker on demand. */

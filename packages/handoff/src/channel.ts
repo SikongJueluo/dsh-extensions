@@ -59,6 +59,8 @@ export interface ChoiceRequestWire {
   readonly modelFixed?: boolean
   /** The flag-fixed route, shown in the confirmation summary (`modelFixed` only). */
   readonly fixedModel?: RouteWire
+  /** The `--workspace` flag's resolved target, shown as fixed in the summary. */
+  readonly fixedWorkspace?: WorkspaceWire
   /**
    * Retry defaults from the previous attempt's sidecar meta: the picker marks
    * these as "上次" so a retry starts one click from where it left off.
@@ -68,13 +70,16 @@ export interface ChoiceRequestWire {
     readonly workspaceId?: WorkspacePick
   }
   /**
-   * Offer the auto-review toggle (present = dsh-triggers is mounted): the
-   * picker shows it on its final step and returns the verdict with the
-   * choice. `enabled` pre-checks the box (a retry's previous verdict).
+   * The auto-review block (present = dsh-triggers is mounted, or the flags
+   * already decided it): the card shows the toggle with these defaults and
+   * returns the verdict with the choice. `enabled` pre-checks the box (a
+   * retry's previous verdict); `fixed` marks a flag-decided verdict that the
+   * card displays read-only — the summary must never contradict the flags.
    */
   readonly review?: {
     readonly defaultRounds: number
     readonly enabled?: boolean
+    readonly fixed?: boolean
   }
 }
 
@@ -178,6 +183,7 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
           ...(entry.pickWorkspace === undefined ? {} : { pickWorkspace: entry.pickWorkspace }),
           ...(entry.modelFixed === undefined ? {} : { modelFixed: entry.modelFixed }),
           ...(entry.fixedModel === undefined ? {} : { fixedModel: entry.fixedModel }),
+          ...(entry.fixedWorkspace === undefined ? {} : { fixedWorkspace: entry.fixedWorkspace }),
           ...(entry.previous === undefined ? {} : { previous: entry.previous }),
           ...(entry.review === undefined ? {} : { review: entry.review }),
         }))
