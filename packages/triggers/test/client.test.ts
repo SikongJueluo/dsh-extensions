@@ -274,13 +274,17 @@ describe('session labels', () => {
 })
 
 describe('draft binding form', () => {
-  it('pickers write their own role; nothing is saved until 保存', async () => {
+  it('pickers write their own role; nothing is saved until 保存, and success closes the form', async () => {
     const actions: { endpoint: string, payload: Record<string, unknown> }[] = []
     let draft = draftBinding()
-    const onDraftChange = (value: unknown): void => { draft = value as never }
-    const onAction = (request: { endpoint: string, payload: Record<string, unknown> }): Promise<void> => {
+    let cleared = false
+    const onDraftChange = (value: unknown): void => {
+      if (value === null) cleared = true
+      else draft = value as never
+    }
+    const onAction = (request: { endpoint: string, payload: Record<string, unknown> }): Promise<boolean> => {
       actions.push(request)
-      return Promise.resolve()
+      return Promise.resolve(true)
     }
     const inst = mount(T.DraftEditor, {
       t, data: DATA, sessions: SESSIONS, draft: draftBinding(),
@@ -304,12 +308,33 @@ describe('draft binding form', () => {
     expect(actions).toHaveLength(1)
     expect(actions[0]!.endpoint).toBe('binding.save')
     expect(actions[0]!.payload).toMatchObject({ executor: 'session-1', parent: 'session-2' })
+    expect(cleared).toBe(true) // a successful save closes the form
+  })
+
+  it('a failed save keeps the filled draft for the retry', async () => {
+    let cleared = false
+    const onDraftChange = (value: unknown): void => {
+      if (value === null) cleared = true
+    }
+    // The panel's onAction resolves false when the RPC failed (the error
+    // banner is the panel's business); the form must keep every field.
+    const onAction = (): Promise<boolean> => Promise.resolve(false)
+    const inst = mount(T.DraftEditor, {
+      t, data: DATA, sessions: SESSIONS,
+      draft: { ...draftBinding(), executor: 'session-1', parent: 'session-2' },
+      onAction, onDraftChange,
+    })
+    const save = byText(inst.tree, 'button', t('saveGroup'))!
+    ;(save.props.onClick as () => void)()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(cleared).toBe(false) // the form must survive a failed save
   })
 
   it('save stays disabled while the pair is incomplete', () => {
     const inst = mount(T.DraftEditor, {
       t, data: DATA, sessions: SESSIONS, draft: draftBinding(),
-      onAction: () => Promise.resolve(), onDraftChange: () => {},
+      onAction: () => Promise.resolve(true), onDraftChange: () => {},
     })
     const save = byText(inst.tree, 'button', t('saveGroup'))!
     expect(save.props.disabled).toBe(true)
@@ -443,5 +468,20 @@ describe('run controls detail', () => {
       endpoint: 'run.control',
       payload: { runId: 'run-9', action: 'redeliver', deliveryId: 'dlv-1' },
     })
+  })
+
+  it('a cancelled run offers no redeliver button even with a failed delivery', () => {
+    const run = {
+      id: 'run-10', bindingId: 'bnd-1', task: '已取消', status: 'cancelled', phase: 'awaiting-review',
+      round: 1, maxRounds: 5, executor: 'session-2', parent: 'session-1',
+      templates: { start: '', review: '', rework: '' }, startedAt: 100,
+      history: [{ at: 100, kind: 'started' }],
+    }
+    const deliveries = [{
+      id: 'dlv-2', runId: 'run-10', round: 1, to: 'session-1', kind: 'review',
+      requestId: 'trg-y', state: 'failed', content: '…', createdAt: 300, error: 'queue refused',
+    }]
+    const inst = mount(T.RunControls, { t, runs: [run], deliveries, onAction: () => Promise.resolve(true) })
+    expect(byText(inst.tree, 'button', t('redeliver'))).toBeUndefined()
   })
 })

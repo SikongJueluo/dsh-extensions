@@ -197,7 +197,7 @@ describe('cross-plugin service through the Cordis proxy', () => {
     // (no root.dispose in cordis 4.0.4; fibers clean up with the context)
   })
 
-  it('a successful redeliver resumes the parked run so the reviewer can answer', async () => {
+  it('redelivery resumes before sending, so an immediate answer is accepted; a cancelled run refuses redelivery', async () => {
     const { root, host } = await boot({ queueFails: true })
     const svc = root.get('triggerBindings')!
     const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
@@ -205,23 +205,38 @@ describe('cross-plugin service through the Cordis proxy', () => {
     await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 's' })
     emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await until(() => (host.rows('runs') as RunRecord[])[0]!.status === 'paused-error', 'parked run')
+    const failed = (host.rows('deliveries') as DeliveryRecord[]).find(d => d.state === 'failed')!
 
-    // The queue heals; redelivering must both re-send AND re-activate the run.
+    // The counterpart answers the moment the prompt lands — DURING the send,
+    // before controlRun returns. The run must already accept signals by then.
+    let inlineAnswer: { ok: boolean } | undefined
     host.ctx.sessionController.prompt = async (request: { requestId: string, sessionId: string, mode: string, content: { text: string }[] }) => {
       host.prompts.push({ requestId: request.requestId, sessionId: request.sessionId, mode: request.mode, text: request.content[0]?.text ?? '' })
+      if (request.sessionId === PARENT) {
+        emit(root, PARENT, { type: 'turn/start', data: { turn: 5 } })
+        inlineAnswer = await svc.signal(PARENT, { runId: bound.runId, outcome: 'pass', summary: '即时通过' }) as { ok: boolean }
+      }
       return { accepted: true as const }
     }
-    const failed = (host.rows('deliveries') as DeliveryRecord[]).find(d => d.state === 'failed')!
-    expect(failed).toBeDefined()
     await svc.controlRun(bound.runId, 'redeliver', { deliveryId: failed.id })
     await until(() => host.prompts.length === 1, 're-sent delivery')
     expect(host.prompts[0]!.requestId).toBe(failed.requestId)
-    await until(() => (host.rows('runs') as RunRecord[])[0]!.status === 'active', 'resumed run')
+    expect((host.rows('runs') as RunRecord[])[0]!.status).toBe('active')
+    // The immediate answer was accepted — no paused-run rejection window.
+    expect(inlineAnswer).toMatchObject({ ok: true })
+    emit(root, PARENT, { type: 'turn/end', data: { turn: 5, reason: { kind: 'completed' } } })
+    await until(() => (host.rows('runs') as RunRecord[])[0]!.status === 'completed', 'run completion')
 
-    // The reviewer's answer is now accepted — the original user-visible bug.
-    emit(root, PARENT, { type: 'turn/start', data: { turn: 5 } })
-    const verdict = await svc.signal(PARENT, { runId: bound.runId, outcome: 'pass', summary: '通过' })
-    expect(verdict).toMatchObject({ ok: true })
+    // A cancelled run must never wake the counterpart again.
+    const second = await svc.bindReviewLoop({ task: 't2', executorSession: 'sess-exec-2', parentSession: PARENT })
+    host.ctx.sessionController.prompt = async () => { throw new Error('queue refused (drill)') }
+    emit(root, 'sess-exec-2', { type: 'turn/start', data: { turn: 1 } })
+    await svc.signal('sess-exec-2', { runId: second.runId, outcome: 'deliver', summary: 's' })
+    emit(root, 'sess-exec-2', { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+    await until(() => (host.rows('runs') as RunRecord[]).find(r => r.id === second.runId)!.status === 'paused-error', 'second parked run')
+    await svc.controlRun(second.runId, 'cancel')
+    const failedSecond = (host.rows('deliveries') as DeliveryRecord[]).filter(d => d.runId === second.runId).find(d => d.state === 'failed')!
+    await expect(svc.controlRun(second.runId, 'redeliver', { deliveryId: failedSecond.id })).rejects.toThrow('运行已结束')
     // (no root.dispose in cordis 4.0.4; fibers clean up with the context)
   })
 })

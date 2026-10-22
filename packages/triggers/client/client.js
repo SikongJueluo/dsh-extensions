@@ -339,8 +339,11 @@ window.__ModuleLoader__.load({
             name: draft.name,
             templates: draft.templates
           }
-        }).then(function () { onDraftChange(null); })
-          .finally(function () { setBusy(false); });
+        }).then(function (ok) {
+          // Keep the filled form on failure: the error banner explains why,
+          // and the operator's picks must survive the retry.
+          if (ok) onDraftChange(null);
+        }).finally(function () { setBusy(false); });
       };
 
       return React.createElement("div", { style: S.card },
@@ -655,7 +658,10 @@ window.__ModuleLoader__.load({
               return React.createElement("div", { key: d.id, style: Object.assign({}, S.row, { marginTop: 4, alignItems: "flex-start" }) },
                 React.createElement("span", { style: S.chip }, kindT(t, d.kind)),
                 React.createElement("span", { style: S.muted }, t("deliveryTo", { to: shortId(d.to) }) + " · " + fmtTime(d.createdAt) + " · " + deliveryStateT(t, d.state)),
-                d.state === "failed" ? React.createElement("button", {
+                // Redelivery wakes the counterpart: the server refuses
+                // terminal and user-paused runs, so the button mirrors the
+                // same condition instead of showing a dead control.
+                canRedeliver(run.status, d.state) ? React.createElement("button", {
                   type: "button", style: S.button, disabled: busy,
                   onClick: function () { control(d.runId, "redeliver", { deliveryId: d.id }); }
                 }, t("redeliver")) : null,
@@ -667,6 +673,14 @@ window.__ModuleLoader__.load({
           ) : null
         );
       }));
+    }
+
+    /** Redelivery is offered only when the server would accept it: the run is
+     * active (retry the send) or parked by that delivery's failure (resume +
+     * resend). Terminal and user/budget-paused runs refuse it server-side. */
+    function canRedeliver(runStatus, deliveryState) {
+      return deliveryState === "failed"
+        && (runStatus === "active" || runStatus === "paused-error");
     }
 
     // --- template editor ----------------------------------------------------
@@ -778,8 +792,11 @@ window.__ModuleLoader__.load({
         return function () { clearInterval(timer); };
       }, [load]);
 
-      /** One mutation → one RPC → reload; `meta.closeEditor` detaches the
-       * template editor after a delete, `meta.template` adopts the saved row. */
+      /** One mutation → one RPC → reload; resolves true on success, false on
+       * failure (the error banner is set either way). Callers that hold local
+       * state — like the draft form — clear it only on true.
+       * `meta.closeEditor` detaches the template editor after a delete,
+       * `meta.template` adopts the saved row. */
       var onAction = React.useCallback(function (request, meta) {
         setError(undefined);
         return callRpc(request.endpoint, request.payload)
@@ -790,10 +807,12 @@ window.__ModuleLoader__.load({
             if (request.endpoint === "template.delete" && meta && meta.closeEditor) {
               setEditing(undefined);
             }
-            return load();
+            load();
+            return true;
           })
           .catch(function (err) {
             setError(template(t("actionFailed"), { message: err && err.message ? err.message : String(err) }));
+            return false;
           });
       }, [load, t]);
 

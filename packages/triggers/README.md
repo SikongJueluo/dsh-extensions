@@ -39,8 +39,10 @@
 每次投递先持久化一条 Delivery（含一次性铸造的 `requestId`）再调
 `ctx.sessionController.prompt(mode: 'queue')`；宿主对已入队/已记录的 `requestId`
 返回原接受而不重复插入，因此重启补投与手动「重投」天然幂等。发送失败（队列拒绝/超时）
-标记 failed 并把 run 置 `paused-error`；手动重投成功会**同时恢复 run 为 active**（补投 ≠
-恢复曾导致审核者收到 prompt 却被拒绝回签），重投仍失败则维持暂停由用户处理。
+标记 failed 并把 run 置 `paused-error`。手动重投**先恢复运行、后补发**（同 requestId）——
+对方收到 prompt 的那一刻运行已在接收状态，不存在「回复被暂停的运行拒绝」的窗口；补发再
+失败会重新暂停。已结束（完成/取消）的运行拒绝重投（不再唤醒对方）；用户/预算暂停的运行
+需先显式恢复再重投。
 
 插件重启时的恢复扫描：带未决信号的 active run 置 `paused-error`（错过 turn/end、无法
 确认回合结局，交用户判断）；pending 状态的投递按原 `requestId` 补发。

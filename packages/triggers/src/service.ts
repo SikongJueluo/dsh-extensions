@@ -38,6 +38,7 @@ import {
   resumeRun,
   signalBelongsTo,
   startRun,
+  statusLabel,
   submitSignal,
   type DeliveryIntent,
 } from './engine.js'
@@ -550,19 +551,30 @@ export class TriggerService extends Service implements TriggerBindingsService {
       const delivery = store.deliveries.get(options.deliveryId)
       if (delivery === undefined || delivery.runId !== runId) throw new Error('投递记录不存在。')
       if (delivery.state === 'sent') return run
-      // Send first (same requestId → idempotent). A send that finally lands
-      // must also re-activate a run parked by THIS delivery's earlier failure:
-      // otherwise the counterpart receives the prompt but its answer is
-      // rejected by a run that no longer accepts signals.
-      const sent = await this.sendQueued(delivery)
-      if (!sent) return store.runs.get(runId) ?? run
-      const current = store.runs.get(runId) ?? run
-      if (current.status !== 'paused-error') return current
-      const resumed = resumeRun(current, {}, now)
-      if (!resumed.ok) throw new Error(resumed.message)
-      await store.runs.put(runId, resumed.run)
-      this.ctx.logger(PACKAGE_NAME).info('run re-activated after successful redelivery', { runId })
-      return resumed.run
+      // A redelivery wakes the counterpart, so the run must be in a state
+      // that both allows it and will accept the answer: terminal runs are
+      // refused outright, and a user/budget pause must be lifted deliberately
+      // (resume), not as a side effect of re-sending one prompt.
+      if (run.status === 'completed' || run.status === 'cancelled') {
+        throw new Error('运行已结束，重投会唤醒对方却没有可推进的循环；如需继续请重新启动一次运行。')
+      }
+      if (run.status !== 'active' && run.status !== 'paused-error') {
+        throw new Error(`运行处于「${statusLabel(run.status)}」状态；请先恢复运行，再重投。`)
+      }
+      // Resume BEFORE sending: once the prompt lands, the counterpart may
+      // answer immediately, and a run still parked by the earlier failure
+      // would reject that answer. A re-send that fails again re-parks the
+      // run (sendQueued parks active runs), so no window is left open.
+      let current = run
+      if (run.status === 'paused-error') {
+        const resumed = resumeRun(run, {}, now)
+        if (!resumed.ok) throw new Error(resumed.message)
+        await store.runs.put(runId, resumed.run)
+        current = resumed.run
+        this.ctx.logger(PACKAGE_NAME).info('run re-activated before redelivery', { runId })
+      }
+      await this.sendQueued(delivery)
+      return store.runs.get(runId) ?? current
     }
     if (action === 'pause') {
       const paused = pauseRun(run, now)
