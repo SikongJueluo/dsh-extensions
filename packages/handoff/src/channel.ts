@@ -57,6 +57,8 @@ export interface ChoiceRequestWire {
   readonly pickWorkspace?: boolean
   /** The model came from `--model`; the picker starts at the workspace step. */
   readonly modelFixed?: boolean
+  /** The flag-fixed route, shown in the confirmation summary (`modelFixed` only). */
+  readonly fixedModel?: RouteWire
   /**
    * Retry defaults from the previous attempt's sidecar meta: the picker marks
    * these as "上次" so a retry starts one click from where it left off.
@@ -175,6 +177,7 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
           ...(entry.workspaces === undefined ? {} : { workspaces: entry.workspaces }),
           ...(entry.pickWorkspace === undefined ? {} : { pickWorkspace: entry.pickWorkspace }),
           ...(entry.modelFixed === undefined ? {} : { modelFixed: entry.modelFixed }),
+          ...(entry.fixedModel === undefined ? {} : { fixedModel: entry.fixedModel }),
           ...(entry.previous === undefined ? {} : { previous: entry.previous }),
           ...(entry.review === undefined ? {} : { review: entry.review }),
         }))

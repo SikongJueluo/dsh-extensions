@@ -11,11 +11,16 @@ agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文
 ```text
 /handoff 修复 README 的安装一节
   │
-  ├─ 浏览器模态下拉：搜索 + 按厂商分组的模型列表（数据同 /model 弹窗）
-  │    首两项 = 继承当前会话 / 全局默认；选中带 reasoning 的模型再选「思考强度」
-  │    多工作区时再选「新会话开在哪个工作区？」：首项 = 原工作区（「当前」徽标），
-  │    其余可搜索；目录已不存在的灰显不可选。Esc 逐级回退、再按取消整个 handoff
-  │    （无浏览器 half 的部署回退到问题卡片；--model/--workspace 参数直接跳过对应选择）
+  ├─ 浏览器模态向导（行点击只选中，最后一步统一确认）：
+  │    ① 模型：搜索 + 按厂商分组（数据同 /model 弹窗）；首两项 = 继承当前会话 / 全局默认；
+  │       选中带 reasoning 的模型进入 ② 思考强度
+  │    ③ 工作区（注册了多个 workspace 且未给 --workspace 时）：首项「原工作区」（「当前」
+  │       徽标），其余可搜索；点选标「已选」，目录不存在的灰显不可选
+  │    ④ 自动审核（挂载 dsh-triggers 时出现）：独立开关 + 轮数预算
+  │    ⑤ 最终确认：模型 / 工作区 / 审核摘要（执行者=新会话、审核者=当前会话、轮预算），
+  │       固定「开始交接」按钮才提交
+  │    Esc／「返回」逐级回退（保留已选项），首步再退即取消整个 handoff
+  │    （无浏览器 half 的部署回退到问题卡片；--model/--workspace 参数跳过对应选择）
   ├─ 当前 agent 排队一个 turn：按六节模板写简报 + 末尾完成标记
   │    Goal / Current state / Key decisions / Files / Next steps / Open questions
   │    （跨区交接时额外提示：原路径对后继会话只读，关键内容自行内联进简报）
@@ -49,21 +54,25 @@ sidecar 记录 `<时间戳>-handoff.meta.json`（任务、原会话、当时的�
 
 ## 自动审核（可选，默认关闭）
 
-挂载 [dsh-triggers](../triggers/) 后，选择界面的最后一步会出现一行开关
-「执行完成后自动交回当前会话审核」与轮数预算（默认 5）：勾选后本次交接变成
-**执行—审核循环**——执行会话每轮交付（调用 `trigger_signal` 工具）后，审核 prompt 自动
-排队回**当前会话**（保留讨论上下文的 parent）；返工意见自动发回**同一个执行会话**，直到
-通过 / 需要用户决定 / 轮次用尽。循环由 triggers 插件在宿主推进，与 handoff 只在 spawn 时
+挂载 [dsh-triggers](../triggers/) 后，选择向导在最后一步「开始交接」之前有**独立的自动审核
+步骤**（开关 + 轮数预算，默认 5），最终确认页摘要写明「执行者 = 新会话，审核者 = 当前会话」。
+勾选后本次交接变成**执行—审核循环**——执行会话每轮交付（调用 `trigger_signal` 工具）后，审核
+prompt 自动排队回**当前会话**（保留讨论上下文的 parent）；返工意见自动发回**同一个执行会话**，
+直到通过 / 需要用户决定 / 轮次用尽。循环由 triggers 插件在宿主推进，与 handoff 只在 spawn 时
 交接一次。
 
+- 审核决策**不因旗标被跳过**：`--model`、`--workspace`、单工作区、`--model` + `--workspace`
+  全固定的每条路径都会到达审核选择（浏览器向导或问题卡片其一）；只有显式 `--review` /
+  `--review-rounds` 或未挂载 triggers 时才不问。
 - 顺序保证：创建 session → 记录 spawnedAt → 绑定并启动触发器 run → **才**发出首条执行
   prompt，执行者拿到的首条 prompt 自带 runId 与信号规则。
+- **意图与结果分开**：命令结果写「Auto review: 已请求（最多 N 轮）——绑定随新会话创建进行」；
+  绑定成功后当前会话标题栏出现「触发」状态 chip，失败则在本会话收到可见通知并降级普通交接，
+  绝不留“看似已启动、实际无人审核”的执行者。
 - CLI 直达：`/handoff --review <任务>`（`--review-rounds <n>` 设预算并隐含开启）。
-- 未挂载 dsh-triggers 或绑定失败时**降级为普通交接**，并向原会话排一条可见说明，绝不
-  留下“看似已启动、实际无人审核”的执行者。
-- sidecar meta 的 `review` 节记录预算与绑定结果（bindingId/runId）；裸 `/handoff` 重试时
-  上次的开启状态会预勾选。极少见的「绑定成功但进程随即崩溃」会在触发器面板留下一个
-  等待交付的 run，可手动取消。
+- sidecar meta 的 `review` 节记录预算，spawn 后回填绑定结果（bindingId/runId）；裸 `/handoff`
+  重试时上次的开启状态会预勾选（`confirm: false` 的无弹窗重试也沿用上次的审核裁决）。
+  极少见的「绑定成功但进程随即崩溃」会在触发器面板留下一个等待交付的 run，可手动取消。
 
 ## 选择新会话的模型与思考强度
 
@@ -74,15 +83,17 @@ sidecar 记录 `<时间戳>-handoff.meta.json`（任务、原会话、当时的�
 2. **第二步：思考强度**。选中的模型若声明了 `reasoning.efforts`，同一模态切到强度列表（每档显示名 +
    描述，标注「默认」；若所选正是当前会话的模型，则预标注该会话正在用的档位为「当前会话」）。
    `Esc`／「返回」回模型列表，「取消」结束整个 handoff。
-3. **第三步：目标工作区**（仅在注册了多个 workspace 且未给 `--workspace` 时出现）：同一模态切到
+3. **第四步：目标工作区**（仅在注册了多个 workspace 且未给 `--workspace` 时出现）：同一模态切到
    工作区列表——首项「原工作区」（带「当前」徽标，description 为原 cwd），divider 后为可搜索的
    其余注册工作区（title + path 过滤，重名 title 附路径尾段；`status()` 报目录缺失的灰显不可选）。
-   名单由 host 在命令触发时经 `workspaceRegistry.list()` 快照并随 pending 请求下发，浏览器无需新
-   remote 依赖。`Esc`／「返回」逐级回退（工作区 → 强度 → 模型），「取消」结束整个 handoff。
+   **行点击只选中**（标「已选」徽标），「继续」进入下一步。名单由 host 在命令触发时经
+   `workspaceRegistry.list()` 快照并随 pending 请求下发，浏览器无需新 remote 依赖。
+   `Esc`／「返回」逐级回退（确认 → 审核 → 工作区 → 强度 → 模型），「取消」结束整个 handoff。
 4. **问题卡片（降级路径）**：部署里没有浏览器 half（TUI/headless），或浏览器在 `pickTimeoutMs` 内
    没有应答时，改用 `ctx.userQuestions` 卡片：可点选项 + "Other" 自由输入。选项 label 用模型
    **显示名**（重名时附 `provider`），description 显示 `厂商 · model id`；该路径不下发强度，用模型默认。
-   需要选工作区时在模型卡之后再发一张工作区卡（同样支持 "Other" 输入 title/path）。
+   需要选工作区时在模型卡之后再发一张工作区卡（同样支持 "Other" 输入 title/path）；触发器挂载
+   且旗标未决定审核时，**每条卡片路径最后都会多问一张审核卡**（60s 无应答视为关闭）。
 5. **命令直达**：`/handoff --model provider/model [--workspace <title|path>] <任务>` 跳过对应选择，
    适合脚本与 `confirm: false`；`--model` 拼写只做形状校验，路由合法性由首次请求验证（强度用模型
    默认）；`--workspace` 支持含空格的 title（最长前缀匹配）或 workspace 根路径（realpath 精确匹配），

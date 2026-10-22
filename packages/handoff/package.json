@@ -24,6 +24,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test",
     "clean": "rm -rf lib",
     "prepare": "tsdown"
   },

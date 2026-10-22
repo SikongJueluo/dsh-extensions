@@ -403,19 +403,21 @@ async function askReviewCard(
 /**
  * Resolve the fresh session's model and workspace: prefer the browser picker
  * (a searchable, provider-grouped dropdown backed by the same catalog as the
- * /model popup, followed by a workspace step), and fall back to the shipped
- * question cards whenever no browser is attached or the picker goes unanswered.
+ * /model popup, a workspace step, a dedicated review step, and a final
+ * confirmation), and fall back to the shipped question cards whenever no
+ * browser is attached or the picker goes unanswered.
  *
- * `modelFixed` means the model came from `--model`; the browser then starts
- * (and the card path skips) the model step, and the returned choice is a
- * placeholder the caller overrides with the flag's route.
+ * `modelFixed` means the model came from `--model` (with `fixedRoute` naming
+ * that route for the summary); the browser then skips the model step, and the
+ * card path skips the model card. The returned choice is a placeholder the
+ * caller overrides with the flag's route.
  *
  * `previous` (retries only) forwards the last attempt's picks so the picker
  * can mark them as the defaults; the card fallback path ignores it.
  *
  * `reviewOffer` (present = dsh-triggers mounted and the flag did not decide)
- * surfaces the auto-review toggle on the picker's final step, or as one extra
- * card on the card path.
+ * must stay reachable on EVERY path: it becomes the picker's review step or
+ * one extra card — never something a fixed flag silently skips.
  */
 async function resolveChoice(
   rt: HandoffRuntime,
@@ -426,6 +428,7 @@ async function resolveChoice(
   modelFixed: boolean,
   previous?: PreviousDefaults,
   reviewOffer?: { defaultRounds: number; enabled?: boolean },
+  fixedRoute?: RouteSummary,
 ): Promise<AskOutcome> {
   const { ctx, config } = rt
   const inherited = sessionRoute(ctx, agent)
@@ -443,7 +446,14 @@ async function resolveChoice(
             origin: roster.origin,
             workspaces: roster.others,
             pickWorkspace: true,
-            ...(modelFixed ? { modelFixed: true } : {}),
+          }
+          : {}),
+        ...(modelFixed
+          ? {
+            modelFixed: true,
+            ...(fixedRoute !== undefined
+              ? { fixedModel: { provider: fixedRoute.provider, model: fixedRoute.model, ...(fixedRoute.reasoningEffort === undefined ? {} : { reasoningEffort: fixedRoute.reasoningEffort }) } }
+              : {}),
           }
           : {}),
         ...(previous === undefined ? {} : { previous }),
@@ -459,16 +469,16 @@ async function resolveChoice(
     const routes = config.modelMenu !== false ? await listModelRoutes(ctx) : []
     const model = await askChoiceCard(ctx, agent, routes, inherited, fallback)
     if (model.kind === 'cancel') return model
-    if (!needWorkspace && reviewOffer !== undefined) {
-      const review = await askReviewCard(ctx, agent, reviewOffer.defaultRounds)
+    if (!needWorkspace) {
+      if (reviewOffer === undefined) return { kind: 'choice', choice: model.choice, workspace: 'origin' }
+      const reviewNoWs = await askReviewCard(ctx, agent, reviewOffer.defaultRounds)
       return {
         kind: 'choice',
         choice: model.choice,
         workspace: 'origin',
-        ...(review.enabled ? { review: { enabled: true, rounds: review.rounds } } : {}),
+        ...(reviewNoWs.enabled ? { review: { enabled: true, rounds: reviewNoWs.rounds } } : {}),
       }
     }
-    if (!needWorkspace) return { kind: 'choice', choice: model.choice, workspace: 'origin' }
     const workspace = await askWorkspaceCard(ctx, agent, roster)
     if (workspace.kind === 'cancel') return workspace
     if (reviewOffer !== undefined) {
@@ -482,19 +492,30 @@ async function resolveChoice(
     }
     return { kind: 'choice', choice: model.choice, workspace: workspace.pick }
   }
-  if (!needWorkspace) return { kind: 'choice', choice: { kind: 'inherit' }, workspace: 'origin' }
+  // --model given: no model card. The review verdict still must be asked.
+  const baseChoice: ModelChoice = { kind: 'inherit' }
+  if (!needWorkspace) {
+    if (reviewOffer === undefined) return { kind: 'choice', choice: baseChoice, workspace: 'origin' }
+    const review = await askReviewCard(ctx, agent, reviewOffer.defaultRounds)
+    return {
+      kind: 'choice',
+      choice: baseChoice,
+      workspace: 'origin',
+      ...(review.enabled ? { review: { enabled: true, rounds: review.rounds } } : {}),
+    }
+  }
   const workspace = await askWorkspaceCard(ctx, agent, roster)
   if (workspace.kind === 'cancel') return workspace
   if (reviewOffer !== undefined) {
     const review = await askReviewCard(ctx, agent, reviewOffer.defaultRounds)
     return {
       kind: 'choice',
-      choice: { kind: 'inherit' },
+      choice: baseChoice,
       workspace: workspace.pick,
       ...(review.enabled ? { review: { enabled: true, rounds: review.rounds } } : {}),
     }
   }
-  return { kind: 'choice', choice: { kind: 'inherit' }, workspace: workspace.pick }
+  return { kind: 'choice', choice: baseChoice, workspace: workspace.pick }
 }
 
 /** Human-readable name of a resolved choice for the command result. */
@@ -682,6 +703,13 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       if (flagChoice !== undefined && flagTarget !== undefined) {
         choice = flagChoice
         target = flagTarget
+        // Everything else is decided by flags; the review verdict is the one
+        // open question, and it must not be silently skipped when the toggle
+        // is offered (dsh-triggers mounted, no --review flag).
+        if (reviewOffer !== undefined && config.confirm !== false) {
+          const review = await askReviewCard(ctx, agent, reviewOffer.defaultRounds)
+          if (review.enabled) dialogReview = { enabled: true, rounds: review.rounds }
+        }
       } else if (config.confirm !== false) {
         const outcome = await resolveChoice(
           rt,
@@ -692,6 +720,9 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
           flagChoice !== undefined,
           previous,
           reviewOffer,
+          flagChoice !== undefined && flagChoice.kind === 'model'
+            ? { provider: flagChoice.provider, model: flagChoice.model, ...(flagChoice.reasoningEffort === undefined ? {} : { reasoningEffort: flagChoice.reasoningEffort }) }
+            : undefined,
         )
         if (outcome.kind === 'cancel') {
           return outcome.reason === undefined ? ok('Handoff cancelled.') : fail(outcome.reason)
@@ -718,14 +749,17 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       const crossWorkspace = target.path !== roster.origin.path
       const choiceText = describeChoice(choice, sessionRoute(ctx, agent), defaultRoute(ctx))
 
-      // Final review verdict: flags win, the dialog verdict second, and the
-      // retry default (previous meta) rides inside reviewOffer/dialogReview.
-      const reviewEnabled = reviewFlag || dialogReview?.enabled === true
+      // Final review verdict: flags win, the dialog verdict second, and a
+      // dialog-free retry reuses the previous attempt's recorded verdict.
+      const previousReview = recovered?.meta.review
+      const reviewEnabled = reviewFlag
+        || dialogReview?.enabled === true
+        || (config.confirm === false && recovered !== undefined && previousReview !== undefined)
       const review = reviewEnabled
         ? {
           maxRounds: reviewFlag
             ? (reviewRoundsFlag ?? DEFAULT_REVIEW_ROUNDS)
-            : (dialogReview?.rounds ?? DEFAULT_REVIEW_ROUNDS),
+            : (dialogReview?.rounds ?? previousReview?.maxRounds ?? DEFAULT_REVIEW_ROUNDS),
         }
         : undefined
 
@@ -784,7 +818,7 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
             `- Brief: \`${briefPath}\`（发起于 ${new Date(createdAt).toLocaleString('zh-CN')}）`,
             `- Model: ${choiceText}`,
             ...(crossWorkspace ? [`- Target workspace: ${target.title} (\`${target.path}\`)`] : []),
-            ...(review === undefined ? [] : [`- Auto review: 开启（最多 ${review.maxRounds} 轮，交付自动交回本会话审核）`]),
+            ...(review === undefined ? [] : [`- Auto review: 已请求（最多 ${review.maxRounds} 轮）——绑定随新会话创建进行，成功后本会话标题栏出现「触发」状态；失败会在此通知并降级普通交接`]),
           ].join('\n'),
         )
       }
@@ -844,7 +878,7 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
           `- Brief target: \`${briefPath}\`${recovered === undefined ? '' : ' (retry)'}`,
           `- Model: ${choiceText}`,
           ...(crossWorkspace ? [`- Target workspace: ${target.title} (\`${target.path}\`)`] : []),
-          ...(review === undefined ? [] : [`- Auto review: 开启（最多 ${review.maxRounds} 轮，交付自动交回本会话审核）`]),
+          ...(review === undefined ? [] : [`- Auto review: 已请求（最多 ${review.maxRounds} 轮）——绑定随新会话创建进行，成功后本会话标题栏出现「触发」状态；失败会在此通知并降级普通交接`]),
           crossWorkspace
             ? `The new session appears in workspace "${target.title}" once the brief is complete (timeout ${Math.round(rt.timeoutMs / 1000)}s).`
             : `The new session appears in this workspace's sidebar (title "Handoff: …") once the brief is complete (timeout ${Math.round(rt.timeoutMs / 1000)}s).`,
