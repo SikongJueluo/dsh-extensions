@@ -248,7 +248,7 @@ describe('delivery failures', () => {
 })
 
 describe('restart recovery', () => {
-  it('parks a run whose signal never saw its turn end, and re-sends pending deliveries under the same requestId', async () => {
+  it('a signal whose turn end has no log evidence keeps waiting after restart, and pending deliveries re-send under the same requestId', async () => {
     const host = createFakeHost()
     const svc1 = host.service()
     const bound = await svc1.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT, deliverStart: true })
@@ -258,7 +258,9 @@ describe('restart recovery', () => {
     expect(startDelivery.state).toBe('sent')
 
     // Crash before the turn ends: a signal is pending, and (simulated) a
-    // queued-but-unconfirmed delivery.
+    // queued-but-unconfirmed delivery. The host log carries no turn/end for
+    // the signal's turn, so the run keeps waiting (parking on restart
+    // uncertainty alone is gone); the pending delivery still re-sends.
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 2 } })
     await svc1.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 's' })
     host.tables.deliveries.set(startDelivery.id, { ...startDelivery, state: 'pending' })
@@ -266,8 +268,8 @@ describe('restart recovery', () => {
     const svc2 = host.service()
     await host.flush()
     const run = host.tables.runs.get(bound.runId) as RunRecord
-    expect(run.status).toBe('paused-error')
-    expect(run.pendingSignal).toBeUndefined()
+    expect(run.status).toBe('active')
+    expect(run.pendingSignal).toBeDefined()
     // pending delivery re-sent with the SAME requestId (idempotent replay)
     const resent = host.prompts.filter(p => p.requestId === startDelivery.requestId)
     expect(resent).toHaveLength(2)

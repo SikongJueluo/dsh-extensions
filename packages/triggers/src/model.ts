@@ -124,6 +124,21 @@ export interface RunRecord {
   readonly pendingRework?: PendingRework
   /** Bounded missing-conclusion reminders already sent in their round. */
   readonly nudgeState?: NudgeState
+  /**
+   * Transactional outbox: queued prompts committed atomically WITH the run
+   * state. Empty/absent once every send has been confirmed. See
+   * {@link OutboxEntry}.
+   */
+  readonly outbox?: readonly OutboxEntry[]
+  /**
+   * Turn-end consumption checkpoint per side: the highest turn whose
+   * `turn/end` this run has already consumed (advanced OR evaluated and
+   * skipped — both count). Committed atomically WITH the transition it
+   * belongs to, so a restart replay can never re-consume an old turn as a
+   * new round's delivery. Absent on records written before the checkpoint
+   * existed; recovery initializes it from the log tail on first sight.
+   */
+  readonly consumedTurns?: { readonly executor?: number, readonly parent?: number }
   /** Which side a `needs_user` pause came from (resume notes go there). */
   readonly pausedBy?: 'executor' | 'parent'
   readonly startedAt: number
@@ -182,6 +197,35 @@ export interface DeliveryRecord {
   readonly error?: string
 }
 
+/**
+ * One not-yet-confirmed queued prompt carried INSIDE its run record — the
+ * transactional-outbox half of an atomic commit. A transition and the prompts
+ * it owes are persisted by a single `runs.put`: before that write neither
+ * exists, after it both do, so a crash can never leave a run advanced with no
+ * delivery owed (or vice versa). The entry keeps the FULL composed content
+ * (retry never re-renders) and the once-minted `requestId` (the host queue
+ * dedupes replays). `sent` entries leave the outbox; `failed` entries stay for
+ * the manual redeliver path. The `deliveries` table is a rebuildable
+ * projection of these entries kept for UI history and redeliver lookup.
+ */
+export interface OutboxEntry {
+  /** Same id the deliveries projection row carries. */
+  readonly id: string
+  readonly runId: string
+  readonly round: number
+  readonly to: string
+  readonly kind: DeliveryKind
+  /** Session-controller prompt requestId; minted once, reused on every retry. */
+  readonly requestId: string
+  /** The complete composed prompt; redelivery re-sends this verbatim. */
+  readonly content: string
+  /** `pending` until the send is confirmed; `failed` stays for manual retry. */
+  readonly state: 'pending' | 'failed'
+  /** Nudge semantics: a failed send must not park the run. */
+  readonly bestEffort?: true
+  readonly createdAt: number
+}
+
 // ── zod boundary schemas ─────────────────────────────────────────────────────
 
 const schemaSignalOutcome = z.enum(SIGNAL_OUTCOMES)
@@ -220,6 +264,19 @@ const schemaTemplateBodies = z.object({
   rework: z.string(),
 })
 
+const schemaOutboxEntry = z.object({
+  id: z.string().min(1),
+  runId: z.string().min(1),
+  round: z.number().int().positive(),
+  to: z.string().min(1),
+  kind: z.enum(['start', 'review', 'rework', 'notice', 'resume', 'nudge']),
+  requestId: z.string().min(1),
+  state: z.enum(['pending', 'failed']),
+  content: z.string(),
+  bestEffort: z.literal(true).optional(),
+  createdAt: z.number(),
+})
+
 const schemaRun = z.object({
   id: z.string().min(1),
   bindingId: z.string().min(1),
@@ -235,6 +292,11 @@ const schemaRun = z.object({
   pendingSignal: schemaPendingSignal.optional(),
   pendingRework: schemaPendingRework.optional(),
   nudgeState: schemaNudgeState.optional(),
+  outbox: z.array(schemaOutboxEntry).optional(),
+  consumedTurns: z.object({
+    executor: z.number().int().optional(),
+    parent: z.number().int().optional(),
+  }).optional(),
   pausedBy: z.enum(['executor', 'parent']).optional(),
   startedAt: z.number(),
   endedAt: z.number().optional(),
