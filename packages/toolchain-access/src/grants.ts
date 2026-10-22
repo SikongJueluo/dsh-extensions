@@ -518,13 +518,23 @@ export function resolveGrants(input: {
           })
         } else {
           // pnpm's actual lock dir, canonicalized with the same fallback
-          // the grant paths get, so the comparison below is like-for-like
-          // even before the dir has been created.
-          const derived = joinDir(env.xdgRuntimeDir, `pnpm-store-operation-locks-${env.uid}`)
+          // the grant paths get, so the comparison below is like-for-like.
+          // When the dir does not exist yet (fresh boot), its FUTURE
+          // canonical form is the canonical RUNTIME ROOT plus the lock dir
+          // name: falling back to the raw spelling here would misreport
+          // lock-dir-mismatch on the first confine after controlled
+          // creation under a symlinked runtime root (safe-direction false
+          // refusal, fixed here).
+          const lockName = `pnpm-store-operation-locks-${env.uid}`
+          const derived = joinDir(env.xdgRuntimeDir, lockName)
           try {
             pnpmLockCanonical = fs.realpath(derived)
           } catch {
-            pnpmLockCanonical = derived
+            try {
+              pnpmLockCanonical = joinDir(fs.realpath(env.xdgRuntimeDir), lockName)
+            } catch {
+              pnpmLockCanonical = derived
+            }
           }
         }
       } catch {

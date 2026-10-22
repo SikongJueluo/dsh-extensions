@@ -146,6 +146,53 @@ describe('default derivation', () => {
     ])
   })
 
+  it('real filesystem: symlinked runtime root, first initialization is not misrefused', async () => {
+    // XDG_RUNTIME_DIR is a symlink and pnpm's lock dir does not exist yet:
+    // the first confine must create it and produce the CANONICAL bind
+    // (realpath(runtime root) + lock name), not report lock-dir-mismatch
+    // against the pre-creation spelling. The fixture lives under the
+    // workspace (not os.tmpdir): host /tmp is a floor prefix by design.
+    const { mkdtempSync, mkdirSync, symlinkSync, rmSync, statSync } = await import('node:fs')
+    const { join, dirname } = await import('node:path')
+    const { fileURLToPath } = await import('node:url')
+    const { nodeGrantFs, resolveGrants: resolve } = await import('../src/index.js')
+    const workspace = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
+    const root = mkdtempSync(join(workspace, '.tca-runtime-'))
+    try {
+      const realRuntime = join(root, 'real-runtime')
+      mkdirSync(realRuntime, { recursive: true, mode: 0o700 })
+      symlinkSync(realRuntime, join(root, 'link-runtime'))
+      const lockName = `pnpm-store-operation-locks-${process.getuid?.() ?? 1000}`
+      const env = { home: join(root, 'home'), uid: process.getuid?.() ?? -1, xdgRuntimeDir: join(root, 'link-runtime') }
+      const first = resolve({
+        presets: ['pnpm-runtime-locks'],
+        overrides: {},
+        env,
+        workspaceRoots: [],
+        fs: nodeGrantFs(),
+        prepare: true,
+      })
+      expect(first.issues).toEqual([])
+      expect(first.binds.map((bind) => bind.source)).toEqual([join(realRuntime, lockName)])
+      // Created inside the REAL runtime root, 0700, on the first call.
+      const stats = statSync(join(realRuntime, lockName))
+      expect(stats.isDirectory()).toBe(true)
+      expect(stats.mode & 0o777).toBe(0o700)
+      // Second call (dir now exists) resolves identically.
+      const again = resolve({
+        presets: ['pnpm-runtime-locks'],
+        overrides: {},
+        env,
+        workspaceRoots: [],
+        fs: nodeGrantFs(),
+      })
+      expect(again.issues).toEqual([])
+      expect(again.binds.map((bind) => bind.source)).toEqual([join(realRuntime, lockName)])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('refuses pnpm-runtime-locks without XDG_RUNTIME_DIR (shared lock domain would split)', () => {
     const result = plan(['pnpm-runtime-locks'], {}, { env: { xdgRuntimeDir: undefined } })
     expect(result.binds).toEqual([])
