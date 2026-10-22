@@ -94,9 +94,10 @@ sandbox adapter               （super.confine() 官方行为原样保留）
 
 目录授权（本包）管「沙箱内哪些目录可写」；审批插件管「哪次命令可以越出沙
 箱」。启用 `cargo-cache` 后 Cargo 构建不再需要提权，因此 cmd-permit 的种子白
-名单已移除 `cargo`/`direnv`（详见其 README 与上述 plan 文档的迁移说明），
-auto-permit 判官 v3 也不再凭「工具+缓存理由」批准 Full access。用户在
-Settings 里显式加回的白名单不受影响。
+名单已收敛为**空**（`cargo`/`direnv` 是缓存绕行；`rtk` 复审后同样移除——按命
+令头匹配时 `rtk cargo build` 仍会命中 rtk 条目拿 Full access，详见其 README
+与上述 plan 文档的迁移说明），auto-permit 判官 v3 也不再凭「工具+缓存理由」
+批准 Full access。用户在 Settings 里显式加回的白名单不受影响。
 
 ## 开发
 

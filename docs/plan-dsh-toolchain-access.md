@@ -7,7 +7,7 @@
 - `packages/toolchain-access`(`dsh-toolchain-access`):`LocalSandboxProvider` 子类,对 `workspace-write` 沙箱追加精确 `--bind`(详见包 README 的信任语义)。
 - 预设:`uv-cache`、`cargo-cache`(registry/git/`.package-cache`)、`pnpm-store`、`pnpm-runtime-locks`(`$XDG_RUNTIME_DIR` 共享锁域)、`pnpm-engine`(默认关)。
 - confine 时受控自建缺失的**默认推导**路径(pnpm 的 `/run/user` 锁目录重启即清空,0755/0700/锁文件按各工具语义创建);显式 override 与插件加载不写宿主。
-- 迁移:cmd-permit 种子收敛为 `[rtk]`;auto-permit 判官 v3「缓存上限」(缓存-only 越界一律 DEFER,同族等价不可越过)。
+- 迁移:cmd-permit 种子收敛为**空**(cargo/direnv/rtk 均移除——按命令头匹配时 `rtk cargo build` 仍会命中 rtk 条目拿 Full access);auto-permit 判官 v3「缓存上限」(缓存-only 越界一律 DEFER,同族等价不可越过)。
 - 已实测:grant 子树可写、父/邻居仍 EROFS;uv sync、cargo fetch/build(真依赖)、pnpm run 热引擎授权后成功、对照 EROFS;cargo 并发 fetch ×2 共享 cargo-home 均成功;pnpm 锁文件落在宿主共享目录。
 
 ## 2. Nix 落点(用户执行)
@@ -61,7 +61,7 @@ allow = [ ];
 
 判官 prompt 随插件行加载,`dsh-auto-permit` 的行声明不变。版本 `dsh-auto-permit-v3` 生效即新判据。
 
-**exact-repeat 记忆已按审查收紧**:审计日志不记录批准者,历史 `allowed-once` 无法证明来自用户还是 v2 缓存规则,所以日志里的旧批准不再直接重放。重放条件 = 本进程观察到该批准来自链路后方(人工弹窗);插件自身的自动批准与重启前的历史批准一律交 v3 判官/人工重新决定。效果:**旧 session 的缓存类自动批准不会跨插件重启复用**;真正的人工批准在同进程内照旧免弹窗。
+**exact-repeat 记忆已按审查收紧**:审计日志不记录批准者,历史 `allowed-once` 无法证明来自用户还是 v2 缓存规则,所以日志里的旧批准不再直接重放。重放条件 = 本进程观察到该批准由**链路后方**给出——通常是人工弹窗,也可能是其他 answerer 对该次请求的独立回答(确定性 answerer 面对相同请求会再次认领,因此这不构成旧授权的静默扩散,但也不是人工来源的证明);插件自身的自动批准与重启前的历史批准一律交 v3 判官/人工重新决定。效果:**旧 session 的缓存类自动批准不会跨插件重启复用**;真正的人工批准在同进程内照旧免弹窗。
 
 ## 5. 已知边界(如实,不粉饰)
 
