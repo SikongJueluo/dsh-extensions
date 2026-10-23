@@ -30,6 +30,8 @@ dsh 归 nix 管。**注意:本插件不能进 `programs.dsh.plugins` 列表**—
       name: '/home/sikongjueluo/Projects/dsh-extensions/packages/toolchain-access/lib/index.js'
       config:
         presets: [uv-cache, cargo-cache, pnpm-store, pnpm-runtime-locks]
+        # Java 项目再按需加 gradle-cache / maven-cache(见包 README);
+        # gradle-jdks 与 pnpm-engine 同为"可执行内容"的单独信任决定。
         paths: {}
 ```
 

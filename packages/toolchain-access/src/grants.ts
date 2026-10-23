@@ -38,6 +38,9 @@ export const PRESET_IDS = [
   'pnpm-store',
   'pnpm-runtime-locks',
   'pnpm-engine',
+  'gradle-cache',
+  'gradle-jdks',
+  'maven-cache',
 ] as const
 
 /** One enabled preset. */
@@ -61,6 +64,8 @@ export interface GrantEnv {
   pnpmHome?: string
   /** `$UV_CACHE_DIR` when the operator exported one (absolute). */
   uvCache?: string
+  /** `$GRADLE_USER_HOME` when the operator exported one (absolute). */
+  gradleUserHome?: string
 }
 
 /** Explicit path overrides from the plugin row's `paths` config. */
@@ -75,6 +80,10 @@ export interface GrantOverrides {
   pnpmStore?: string
   /** The shared operation-lock directory (default `$XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>`). */
   pnpmRuntimeLocks?: string
+  /** GRADLE_USER_HOME anchor for gradle-cache/gradle-jdks (default `$GRADLE_USER_HOME` or `~/.gradle`). */
+  gradleUserHome?: string
+  /** Maven user home anchor for maven-cache (default `~/.m2`; Maven has no standard env var for it). */
+  mavenHome?: string
 }
 
 /** The filesystem slice `resolveGrants` needs; sync like the stock provider. */
@@ -320,6 +329,18 @@ interface NamedPath {
   prepare: PrepareKind | 'none'
 }
 
+/** First non-empty anchor: the row's paths override wins over the exported env var. */
+function pickAnchor(override: string | undefined, envValue: string | undefined): string | undefined {
+  if (override !== undefined && override !== '') return override
+  if (envValue !== undefined && envValue !== '') return envValue
+  return undefined
+}
+
+/** Whether an operator statement (override or exported env var) named the anchor. */
+function hasAnchor(override: string | undefined, envValue: string | undefined): boolean {
+  return pickAnchor(override, envValue) !== undefined
+}
+
 /** Derive every named path per preset; unresolved derivations become issues up front. */
 function derivePaths(
   presets: readonly PresetId[],
@@ -423,6 +444,50 @@ function derivePaths(
         }
         break
       }
+      case 'gradle-cache': {
+        // Subdirectories of GRADLE_USER_HOME only: caches/ (dependencies,
+        // transforms, ALL file locks — verified on-host), wrapper/ (the
+        // wrapper's downloaded distributions), daemon/ (registry + logs),
+        // native/ (file-watching state), workers/, notifications/,
+        // kotlin-dsl/ (script compilation cache + repo mirror) and .tmp/
+        // (Gradle's staging area directly under the user home — verified:
+        // a build fails creating it when the root is read-only). The ROOT
+        // itself stays read-only on purpose: gradle.properties there is
+        // often credential-bearing (signing passwords, repo tokens) and on
+        // this host is a home-manager/Nix store symlink.
+        const gradleHome = pickAnchor(overrides.gradleUserHome, env.gradleUserHome) ?? joinDir(env.home, '.gradle')
+        const explicitHome = hasAnchor(overrides.gradleUserHome, env.gradleUserHome)
+        for (const segment of ['caches', 'wrapper', 'daemon', 'native', 'workers', 'notifications', 'kotlin-dsl', '.tmp']) {
+          push(preset, joinDir(gradleHome, segment), explicitHome, gradleHome, explicitHome ? 'none' : 'cache-dir')
+        }
+        break
+      }
+      case 'gradle-jdks': {
+        // Gradle's auto-provisioned toolchain JDKs (<gradle home>/jdks):
+        // EXECUTABLE content, so it is its own preset — the same separate
+        // trust decision as pnpm-engine — and never part of gradle-cache.
+        const gradleHome = pickAnchor(overrides.gradleUserHome, env.gradleUserHome) ?? joinDir(env.home, '.gradle')
+        const explicitHome = hasAnchor(overrides.gradleUserHome, env.gradleUserHome)
+        push(preset, joinDir(gradleHome, 'jdks'), explicitHome, gradleHome, explicitHome ? 'none' : 'cache-dir')
+        break
+      }
+      case 'maven-cache': {
+        // ~/.m2/repository (local repo = dependency cache; resolver writes
+        // .lastUpdated/_remote.repositories inside it) and ~/.m2/wrapper
+        // (mvnw distributions). settings.xml at the ~/.m2 root stays
+        // read-only: it carries server credentials. Maven has no standard
+        // env var for the user home, so only the paths override can move it
+        // (settings.xml <localRepository> relocations must be configured
+        // here explicitly).
+        const mavenHome = overrides.mavenHome !== undefined && overrides.mavenHome !== ''
+          ? overrides.mavenHome
+          : joinDir(env.home, '.m2')
+        const explicitHome = overrides.mavenHome !== undefined && overrides.mavenHome !== ''
+        for (const segment of ['repository', 'wrapper']) {
+          push(preset, joinDir(mavenHome, segment), explicitHome, mavenHome, explicitHome ? 'none' : 'cache-dir')
+        }
+        break
+      }
     }
   }
   return { named, issues }
@@ -466,6 +531,7 @@ export function resolveGrants(input: {
     ...(input.env.cargoHome === undefined ? {} : { cargoHome: stripSlashes(input.env.cargoHome) }),
     ...(input.env.pnpmHome === undefined ? {} : { pnpmHome: stripSlashes(input.env.pnpmHome) }),
     ...(input.env.uvCache === undefined ? {} : { uvCache: stripSlashes(input.env.uvCache) }),
+    ...(input.env.gradleUserHome === undefined ? {} : { gradleUserHome: stripSlashes(input.env.gradleUserHome) }),
   }
   const { named, issues } = derivePaths(presets, overrides, env)
   const notes: GrantNote[] = []

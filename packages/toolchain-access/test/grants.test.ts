@@ -568,6 +568,92 @@ describe('dedupe and workspace subtraction', () => {
   })
 })
 
+describe('java toolchain presets', () => {
+  const GRADLE_DIRS = [
+    '/home/u/.gradle/caches',
+    '/home/u/.gradle/wrapper',
+    '/home/u/.gradle/daemon',
+    '/home/u/.gradle/native',
+    '/home/u/.gradle/workers',
+    '/home/u/.gradle/notifications',
+    '/home/u/.gradle/kotlin-dsl',
+    '/home/u/.gradle/.tmp',
+  ]
+  const gradleTree = (): Record<string, Entry> => ({
+    '/home/u/.gradle': dir(),
+    ...Object.fromEntries(GRADLE_DIRS.map((path) => [path, dir()])),
+  })
+
+  it('gradle-cache grants the cache/lock subdirectories, never the root', () => {
+    const entries: Record<string, Entry> = {
+      ...gradleTree(),
+      '/home/u/.gradle/gradle.properties': { file: true, mode: 0o600 },
+    }
+    const result = plan(['gradle-cache'], entries)
+    expect(result.issues).toEqual([])
+    expect(result.binds.map((bind) => bind.source)).toEqual(GRADLE_DIRS)
+    // gradle.properties (credential-bearing; here a Nix store symlink) is
+    // never in the grant list — the root stays read-only.
+    expect(result.binds.some((bind) => bind.source.includes('gradle.properties'))).toBe(false)
+  })
+
+  it('gradle-jdks is separate executable-content trust, not part of gradle-cache', () => {
+    const withBoth = plan(['gradle-cache', 'gradle-jdks'], { ...gradleTree(), '/home/u/.gradle/jdks': dir() })
+    expect(withBoth.issues).toEqual([])
+    expect(withBoth.binds.map((bind) => bind.source)).toContain('/home/u/.gradle/jdks')
+
+    const cacheOnly = plan(['gradle-cache'], { ...gradleTree(), '/home/u/.gradle/jdks': dir() })
+    expect(cacheOnly.binds.map((bind) => bind.source)).not.toContain('/home/u/.gradle/jdks')
+  })
+
+  it('GRADLE_USER_HOME exported counts as explicit: outside HOME ok, never prepared', () => {
+    const entries: Record<string, Entry> = {
+      '/data/gradle': dir(),
+      ...Object.fromEntries(GRADLE_DIRS.map((path) => [path.replace('/home/u/.gradle/', '/data/gradle/'), dir()])),
+    }
+    const viaEnv = plan(['gradle-cache'], entries, { env: { gradleUserHome: '/data/gradle' } })
+    expect(viaEnv.issues).toEqual([])
+    expect(viaEnv.binds).toHaveLength(GRADLE_DIRS.length)
+
+    // A missing subdirectory under an explicit anchor fails closed instead
+    // of being created (the operator named this tree; defaults only).
+    const missingSub = plan(
+      ['gradle-cache'],
+      { ...entries, '/data/gradle/caches': undefined as unknown as Entry },
+      { env: { gradleUserHome: '/data/gradle' }, prepare: true },
+    )
+    expect(missingSub.binds).toEqual([])
+    expect(missingSub.issues[0]?.reason).toBe('missing')
+    expect(missingSub.ensured).toEqual([])
+  })
+
+  it('maven-cache grants repository/ and wrapper/, never settings.xml at the root', () => {
+    const result = plan(['maven-cache'], {
+      '/home/u/.m2': dir(),
+      '/home/u/.m2/repository': dir(),
+      '/home/u/.m2/wrapper': dir(),
+      '/home/u/.m2/settings.xml': { file: true, mode: 0o600 },
+    })
+    expect(result.issues).toEqual([])
+    expect(result.binds.map((bind) => bind.source)).toEqual([
+      '/home/u/.m2/repository',
+      '/home/u/.m2/wrapper',
+    ])
+    expect(result.binds.some((bind) => bind.source.includes('settings.xml'))).toBe(false)
+  })
+
+  it('mavenHome override anchors both maven grants and skips preparation', () => {
+    const result = plan(
+      ['maven-cache'],
+      { '/data/m2/repository': dir(), '/data/m2/wrapper': dir() },
+      { overrides: { mavenHome: '/data/m2' }, prepare: true },
+    )
+    expect(result.issues).toEqual([])
+    expect(result.binds.map((bind) => bind.source)).toEqual(['/data/m2/repository', '/data/m2/wrapper'])
+    expect(result.ensured).toEqual([])
+  })
+})
+
 describe('controlled preparation (confine time only)', () => {
   it('creates a missing default lock dir as 0700 (reboot-wiped /run/user)', () => {
     const result = plan(['pnpm-runtime-locks'], { '/run/user/1000': { dir: true, mode: 0o700 } }, { prepare: true })

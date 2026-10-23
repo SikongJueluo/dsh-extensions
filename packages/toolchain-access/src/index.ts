@@ -142,6 +142,8 @@ export const configFields = {
     pnpmHome: Schema.string().description('Explicit pnpm home anchor for pnpm-store/pnpm-engine (default: $PNPM_HOME, else <XDG_DATA_HOME|~/.local/share>/pnpm).'),
     pnpmStore: Schema.string().description('Explicit package-store directory for pnpm-store (default: <pnpm home>/store).'),
     pnpmRuntimeLocks: Schema.string().description('Explicit spelling of pnpm\'s shared operation-lock directory (default: $XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>). pnpm derives this from XDG_RUNTIME_DIR and cannot be redirected: an override may re-spell the same directory (e.g. via symlink) but is refused if it points anywhere else, and it never bypasses the runtime-root validation.'),
+    gradleUserHome: Schema.string().description('Explicit GRADLE_USER_HOME anchor for gradle-cache/gradle-jdks (default: $GRADLE_USER_HOME or ~/.gradle). Only its cache/lock subdirectories become writable; gradle.properties and init scripts at the root stay read-only.'),
+    mavenHome: Schema.string().description('Explicit Maven user-home anchor for maven-cache (default ~/.m2, covering repository/ + wrapper/). Maven has no standard env var for it; a settings.xml <localRepository> relocation must be configured here explicitly. settings.xml stays read-only.'),
   }).default({}).description(
     'Explicit grant paths. Every entry must be an absolute path to an existing, user-owned directory (or lock file) that is not group-writable; a preset whose path is missing or refuses validation fails closed.',
   ),
@@ -169,6 +171,7 @@ export function grantEnvFrom(home: string, uid: number, env: Record<string, stri
     cargoHome: absolute(env.CARGO_HOME),
     pnpmHome: absolute(env.PNPM_HOME),
     uvCache: absolute(env.UV_CACHE_DIR),
+    gradleUserHome: absolute(env.GRADLE_USER_HOME),
   }
 }
 

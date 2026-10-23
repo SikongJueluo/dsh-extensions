@@ -29,10 +29,16 @@ sandbox adapter               （super.confine() 官方行为原样保留）
 | `pnpm-store` | pnpm home 下 `store/` | 共享包 store（本仓这类 store 在 workspace 内的项目会自动按「已覆盖」扣除） |
 | `pnpm-runtime-locks` | `$XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>` | pnpm 12 的 operation lock 域。**必须**绑定宿主原目录：绑到私有 `/tmp` 会拆散共享锁域。要求 `$XDG_RUNTIME_DIR` 满足 pnpm 自己的条件（本 uid 目录、属主可写可搜索、group/other 不可写——0775 会被 pnpm 拒绝回退 `/tmp`）；未设置或不合格时预设拒绝，且 **`paths.pnpmRuntimeLocks` 不能代为修复/迁移**（pnpm 的锁目录只由 `XDG_RUNTIME_DIR` 决定，override 只允许换拼写、不允许换位置）。`/run/user` 是 tmpfs，重启清空——confine 时受控自建 0700 锁目录 |
 | `pnpm-engine` | 整个 pnpm home（`~/.local/share/pnpm`） | 冷装其他版本 pnpm 需要写 `package-manager-store/`、`global/v11`、`_tmp`。**含可执行 engine 副本**，属单独信任决定，默认不启用；热缓存场景不需要它 |
+| `gradle-cache` | `GRADLE_USER_HOME`/`~/.gradle` 下 `caches/`、`wrapper/`、`daemon/`、`native/`、`workers/`、`notifications/`、`kotlin-dsl/`、`.tmp/` | 构建缓存与全部文件锁、wrapper 发行版、daemon 注册表/日志、file-watching 状态、kotlin-dsl 编译缓存、临时区（`.tmp` 实测必需：根只读时构建失败在创建它）。**根目录保持只读**：`gradle.properties` 常含签名密码/仓库 token，本机还是 home-manager 的 nix store 符号链接 |
+| `gradle-jdks` | `~/.gradle/jdks/` | Gradle 工具链自动下载的 JDK（tarball 中转 + 解包）。**含可执行内容**，与 pnpm-engine 同类的单独信任决定，不在 gradle-cache 内 |
+| `maven-cache` | `~/.m2` 下 `repository/`、`wrapper/` | 本地仓库（依赖缓存、`.lastUpdated`、resolver 元数据）与 mvnw 发行版。**`settings.xml` 保持只读**（服务器凭据）；Maven 无标准环境变量，自定义位置用 `paths.mavenHome`（settings.xml 的 `<localRepository>` 迁移同样须显式配置） |
 
 `paths` 可显式覆盖各锚点（`uvCache` / `cargoHome` / `pnpmHome` / `pnpmStore` /
-`pnpmRuntimeLocks`）；未覆盖时依次取宿主导出变量（`UV_CACHE_DIR`、
-`CARGO_HOME`、`PNPM_HOME`、XDG）→ 内置默认。
+`pnpmRuntimeLocks` / `gradleUserHome` / `mavenHome`）；未覆盖时依次取宿主导出
+变量（`UV_CACHE_DIR`、`CARGO_HOME`、`PNPM_HOME`、`GRADLE_USER_HOME`、XDG）→
+内置默认。Java 侧实测：gradle 8.8 冷缓存 `help` 构建授权组成功、只读对照失
+败，并发双构建共享 `daemon/<v>/registry.bin` 锁域；maven 预设按标准布局与
+`~/.m2` 实际结构实现（本机无 mvn 二进制，未做真实构建验证）。
 
 ## 信任语义（读一遍再开预设）
 
