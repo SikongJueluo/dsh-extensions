@@ -549,3 +549,91 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
     void svc2
   })
 })
+
+describe('session-scoped snapshot', () => {
+  it('filters bindings, runs, and deliveries to the participating session', async () => {
+    const host = createFakeHost()
+    const svc = host.service()
+    const first = await svc.bindReviewLoop({ task: '任务 A', executorSession: 'sess-a-exec', parentSession: 'sess-a-parent' })
+    const second = await svc.bindReviewLoop({ task: '任务 B', executorSession: 'sess-b-exec', parentSession: 'sess-b-parent' })
+
+    // Advance the first loop far enough to persist a review delivery.
+    host.emit('sess-a-exec', { type: 'turn/start', data: { turn: 1 } })
+    await svc.signal('sess-a-exec', { runId: first.runId, outcome: 'deliver', summary: '完成' })
+    host.emit('sess-a-exec', { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+    await host.flush()
+
+    const scoped = await svc.snapshot('sess-a-parent')
+    expect(scoped.bindings.map(binding => binding.id)).toEqual([first.bindingId])
+    expect(scoped.runs.map(run => run.id)).toEqual([first.runId])
+    expect(scoped.deliveries.length).toBeGreaterThan(0)
+    expect(scoped.deliveries.every(delivery => delivery.runId === first.runId)).toBe(true)
+
+    const other = await svc.snapshot('sess-b-parent')
+    expect(other.bindings.map(binding => binding.id)).toEqual([second.bindingId])
+    expect(other.runs.map(run => run.id)).toEqual([second.runId])
+    expect(other.deliveries).toEqual([])
+
+    const stranger = await svc.snapshot('sess-stranger')
+    expect(stranger.bindings).toEqual([])
+    expect(stranger.runs).toEqual([])
+    expect(stranger.deliveries).toEqual([])
+  })
+
+  it('keeps a run visible to its start-time counterpart after the binding pair changes', async () => {
+    const host = createFakeHost()
+    const svc = host.service()
+    const bound = await svc.bindReviewLoop({ task: '任务', executorSession: EXECUTOR, parentSession: PARENT })
+    const binding = [...host.tables.bindings.values()][0] as { id: string }
+    await svc.saveBinding({
+      id: binding.id,
+      executor: EXECUTOR,
+      parent: 'sess-new-parent',
+      maxRounds: 5,
+      name: '改过配对的绑定',
+    })
+
+    // The old reviewer is no longer on the binding, but the in-flight run
+    // still carries the pair it started with.
+    const oldParent = await svc.snapshot(PARENT)
+    expect(oldParent.bindings).toEqual([])
+    expect(oldParent.runs.map(run => run.id)).toEqual([bound.runId])
+
+    const newParent = await svc.snapshot('sess-new-parent')
+    expect(newParent.bindings.map(record => record.id)).toEqual([binding.id])
+    expect(newParent.runs).toEqual([])
+
+    const executor = await svc.snapshot(EXECUTOR)
+    expect(executor.bindings.map(record => record.id)).toEqual([binding.id])
+    expect(executor.runs.map(run => run.id)).toEqual([bound.runId])
+  })
+
+  it('does not let another session\'s history consume the run cap', async () => {
+    const host = createFakeHost()
+    const svc = host.service()
+    const bound = await svc.bindReviewLoop({ task: '本会话任务', executorSession: EXECUTOR, parentSession: PARENT })
+    const template = host.tables.runs.get(bound.runId) as RunRecord
+    for (let index = 0; index < 60; index++) {
+      host.tables.runs.set(`run-other-${index}`, {
+        ...template,
+        id: `run-other-${index}`,
+        bindingId: 'bnd-other',
+        executor: 'sess-other',
+        parent: 'sess-other-parent',
+        task: `其他任务 ${index}`,
+        status: 'completed',
+        startedAt: Date.now() + index,
+        endedAt: Date.now() + index,
+        history: [],
+      })
+    }
+
+    const scoped = await svc.snapshot(EXECUTOR)
+    expect(scoped.runs.map(run => run.id)).toEqual([bound.runId])
+
+    // The unscoped snapshot still prefers the unfinished run and caps the rest.
+    const global = await svc.snapshot()
+    expect(global.runs).toHaveLength(50)
+    expect(global.runs[0]!.id).toBe(bound.runId)
+  })
+})

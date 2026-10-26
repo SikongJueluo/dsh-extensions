@@ -1,7 +1,7 @@
 {
   "name": "dsh-triggers",
   "version": "0.1.0",
-  "description": "DSH trigger plugin: structured handoff signals between two bound sessions (execute → review → rework loop) with round budget, pause/resume, and a table editor UI",
+  "description": "DSH trigger plugin: structured handoff signals between two bound sessions (execute → review → rework loop) with round budget, pause/resume, and a session-scoped browser view",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",
@@ -35,8 +35,6 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-ui-sidebar",
-        "@deepseek-ai/dsh-client-ui-layout",
         "@deepseek-ai/dsh-client-ui-locale",
         "@deepseek-ai/dsh-client-ui-conversation"
       ]

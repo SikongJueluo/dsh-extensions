@@ -2,18 +2,18 @@
 
 **结构化交接触发器**：把两个普通 session 绑成一个「执行 ↔ 审核」循环。执行者收尾有两种
 方式——**自动送审 run**（handoff 交接默认）在回合**正常结束后**由宿主把该回合的最终回复
-直接送审，执行者不需要调用任何工具；**工具 run**（UI 手工绑定默认）仍调用 `trigger_signal`
+直接送审，执行者不需要调用任何工具；**工具 run**（非 handoff 绑定默认）仍调用 `trigger_signal`
 提交交付。审核者以 `rework` / `pass` / `needs_user` **工具**回签，返工意见排回**同一个执行
 session**。轮次有预算、可暂停/恢复/取消，一切推进都在宿主进程里完成——浏览器关着、没人
 盯着也不中断。
 
 产品形态是通用的「事件 + 模板 + 目标 session」：执行—审核循环是首个预设（一个规则组的
-两条方向行共享生命周期与轮次预算），模板可编辑复用。
+两条方向行共享生命周期与轮次预算）；模板由绑定引用并在启动时快照，浏览器首版只读展示。
 
 ## 循环语义
 
 ```text
-启动（handoff 交接 或 UI「启动运行」）
+启动（handoff 交接创建绑定与首个 run）
   └─ 第 N 轮：phase=awaiting-delivery（执行者工作）
        自动送审 run：最终回复 → turn/end(completed) → 直接送审（无需工具，见下节）
        工具 run：执行者调用 trigger_signal(runId, deliver, summary)
@@ -32,8 +32,8 @@ session**。轮次有预算、可暂停/恢复/取消，一切推进都在宿主
 - **裁决只认工具**。审核者的 rework / pass / needs_user 与执行者的 needs_user 只能通过
   `trigger_signal` 提交；普通回复、step 结束、中间输出都不构成结论，模型忘叫工具 ≠ 通过。
   自动送审 run 里执行者的 `deliver` 只是可选项——正常结束回合本身即交付。
-- **自动送审是受控的**。仅当：run 标记 `autoDeliver`（handoff 绑定默认开、UI 绑定默认
-  关，规则组里可切换；运行启动时快照，改绑定不影响在途运行）、该回合以 `completed`
+- **自动送审是受控的**。仅当：run 标记 `autoDeliver`（handoff 绑定默认开、非 handoff 绑定默认
+  关；运行启动时快照，改绑定不影响在途运行）、该回合以 `completed`
   结束、执行会话没有**活动 goal**（goal 续轮的回合结束可能还有下一轮，不提前送审；
   goal 落定后的下一回合再送）、最终回复非空（取该回合**最后一条** assistant 消息——终稿
   为空或仅空白时视为无可交付内容，绝不回退用更早的中间输出）。
@@ -140,31 +140,27 @@ run 记录的读-改-写，全部排在每 run 的串行链上、基于最新已
 
 ## GUI
 
-两个入口，同一套编辑器（`/dsh-triggers` 通道，全部状态读写走宿主，无第二写路径）：
+会话顶部页签 **触发器**（`conversation.view`，id `triggers`，order 30，排在 Chat / Trajectory /
+Spine Tree 之后）。只显示**当前会话参与**的循环：作为执行者或审核者任意一方出现，行上标出本
+会话的角色。没有全局侧边栏入口，标题区也不再放操作 chip。
 
-- **侧边栏「触发器」**：规则组表格、模板、运行与投递记录；主面板自动轮询刷新。
-- **会话标题操作区 chip**：本 session 参与的运行状态（如「触发 · 第 2/5 轮 · 等待审核」），
-  点开有暂停/恢复/续一轮/取消。
-
-规则组表格一行一组，列语义与内容一一对应：
-
-| 规则组 | 执行者 → 审核者 | 运行 / 预算 | 启用 | 操作 |
-| --- | --- | --- | --- | --- |
-| 循环 · 修 README | 重构任务 · 3f2a… → session-1 | 第 2/5 轮 · 进行中 | ✓ | 详情 / 删除 |
-
-- **新建规则组是表单卡片**：执行者、审核者各配独立下拉（角色显式，不会再把审核者写进执行者
-  字段），「自动送审」开关默认关闭（打开后执行者回合正常结束即交付；需要用户决定仍走
-  trigger_signal 的 needs_user），点「保存规则组」才落库；配对未完成时保存保持禁用。
-- **行展开是完整操作面**：名称/预算/双方会话/自动送审开关/三个模板编辑；「任务 + 启动运行」显式发起一次
-  运行（已有进行中运行时禁用）；下方是运行详情——任务、状态、最近历史、暂停/恢复/续轮/取消，
-  投递失败显示错误原因并可「重投」（重投成功会同时恢复运行）。
-- 会话标签优先显示**会话标题**，无标题时显示去前缀的短 ID（`session-<uuid>` 不再全部塌缩成
-  `session-`）；自动送审的规则组与运行带「自动送审」徽标，运行记录里 `nudge` 类投递显示为
-  「提醒」。
-- 模板编辑器按模板 id 挂载（切换模板不串写）、未保存的新模板没有删除按钮、另存副本会切到
-  保存后的那一条；内置模板可改正文不可删。
-
-移动端：全部点按操作、≥44px 目标、`min(px, vw)` 宽度、表格横向滚动，无 hover-only 行为。
+- 首屏只有标题和一条「N 个运行进行中」摘要（有运行在进行时才出现）。规则组一行只保留任务名、
+  本会话角色与对方会话的关系、当前轮次和状态；自动送审、绑定状态、模板等低频信息下沉到折叠
+  的只读配置里。
+- 点开行只显示当前运行的原因和必要操作。失败/待发送投递（含具体错误、可用时的「重投」）与
+  恢复入口保持直接可见，并排在普通历史之前。
+- 历史、已送达投递和只读配置收在「详情」里，默认不展开；其他运行收在「其他运行 (N)」里，
+  默认不展开，点开单个运行再显示其摘要与操作。
+- 操作保留暂停、恢复（可附带给对方的说明）、续一轮、取消；取消是次要操作并保留确认。**不做
+  手工新建或启动**，也不编辑绑定或全局模板；双方会话、自动送审、绑定状态、模板仅只读展示。
+- 当前会话没有关联触发器时只显示空状态，不提供新建按钮。
+- 宿主先按 session 过滤 bindings / runs / deliveries，再套用快照上限；run 的归属取启动时
+  快照的 executor/parent，绑定事后改配对不会让在途或历史运行串到别的会话。
+- 滚动交给会话的常驻滚动容器（与 Chat 相同），页签内不再自建固定高度滚动层；展开详情后
+  底部记录和操作随页面滚动可达。
+- 移动端：全部点按、≥44px 目标、`min(px, vw)` 宽度、无 hover-only 行为；颜色与边框使用
+  DSH 主题 token，明暗主题共用。页面在挂载期间每 10 秒刷新一次，切到后台暂停轮询，回到前台
+  立即补一次。
 
 ## 与 dsh-handoff 的接入
 
@@ -195,9 +191,9 @@ dsh plugin --profile <name> add ./packages/triggers
 - 宿主运行时 peer：`@deepseek-ai/cordis`、`dsh-llm`（defineTool 类型）、`dsh-storage-domain`
   （+ zod，宿主自带）、`dsh-tools`、`schemastery`；`dsh-agent` / `dsh-session` /
   `dsh-api-session-controller` / `dsh-client-connection` / `dsh-host-webserver` 为 type-only。
-- 浏览器 half：`client/client.js`（React.createElement，无 JSX），slot：
-  `main`、`sidebar.panellist`、`conversation.session.header.actions`；通信走 `/dsh-triggers`
-  前缀路由（connection 信封 + webServer）。
+- 浏览器 half：`client/client.js`（React.createElement，无 JSX），唯一 slot：
+  `conversation.view`（id `triggers`，order 30）；通信走 `/dsh-triggers` 前缀路由
+  （connection 信封 + webServer）。
 - 发布可选服务 `triggerBindings`（`ctx.get('triggerBindings')`）；无 handoff 的组装照常加载。
 
 ## Roadmap（未实现）
@@ -205,3 +201,4 @@ dsh plugin --profile <name> add ./packages/triggers
 - 上下文压力阈值暂停（按两边 session 实际窗口占用分别观察）。
 - 单向通知类规则（只有一条方向行的规则组）。
 - 运行详情页跳转对方 session。
+- 在会话页内编辑绑定或模板（首版只保留运行控制，配置只读）。

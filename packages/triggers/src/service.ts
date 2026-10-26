@@ -105,6 +105,14 @@ export interface SessionRow {
 const MAX_ROUNDS_LIMIT = 50
 const SNAPSHOT_RUN_LIMIT = 50
 const SNAPSHOT_DELIVERY_LIMIT = 120
+
+/**
+ * Snapshot ordering puts unfinished runs before finished ones, so a long
+ * history can never push a live run past {@link SNAPSHOT_RUN_LIMIT}.
+ */
+function runSnapshotRank(run: RunRecord): number {
+  return run.status === 'active' || run.status.startsWith('paused') ? 0 : 1
+}
 /** Ceiling for the executor reply text reused as an auto-delivery summary. */
 const AUTO_SUMMARY_LIMIT = 6000
 
@@ -1163,17 +1171,28 @@ export class TriggerService extends Service implements TriggerBindingsService {
 
   // ── channel surface ──────────────────────────────────────────────────────
 
-  /** The full snapshot the table editor renders. */
-  async snapshot(): Promise<TriggerSnapshot> {
+  /**
+   * The UI snapshot. `sessionId` restricts bindings to the pairs that name the
+   * session and runs to the participants snapshotted at their start; deliveries
+   * follow the visible runs. Filtering happens BEFORE the caps so one busy
+   * session can never push another session's rows out of the response.
+   */
+  async snapshot(sessionId?: string): Promise<TriggerSnapshot> {
     const store = await this.ready()
+    const scope = typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : undefined
     const templates = [...store.templates.entries()].map(([, value]) => value)
-    const bindings = [...store.bindings.entries()].map(([, value]) => value)
+    const bindings = [...store.bindings.entries()]
+      .map(([, value]) => value)
+      .filter(binding => scope === undefined || binding.executor === scope || binding.parent === scope)
     const runs = [...store.runs.entries()]
       .map(([, value]) => value)
-      .sort((a, b) => b.startedAt - a.startedAt)
+      .filter(run => scope === undefined || run.executor === scope || run.parent === scope)
+      .sort((a, b) => runSnapshotRank(a) - runSnapshotRank(b) || b.startedAt - a.startedAt)
       .slice(0, SNAPSHOT_RUN_LIMIT)
+    const visibleRunIds = new Set(runs.map(run => run.id))
     const deliveries = [...store.deliveries.entries()]
       .map(([, value]) => value)
+      .filter(delivery => scope === undefined || visibleRunIds.has(delivery.runId))
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, SNAPSHOT_DELIVERY_LIMIT)
     return { templates, bindings, runs, deliveries }
@@ -1425,7 +1444,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
     return store.runs.get(runId) ?? resumed.run
   }
 
-  /** Runs touching one session (the header action chip). */
+  /** Runs touching one session, newest first (kept for service callers). */
   async runsForSession(sessionId: string): Promise<RunRecord[]> {
     const store = await this.ready()
     return [...store.runs.entries()]

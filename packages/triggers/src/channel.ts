@@ -2,10 +2,10 @@
  * The browser channel: one web-server prefix route (`/dsh-triggers`) speaking
  * the connection RPC envelope (same grammar as dsh-handoff / dsh-context-audit).
  *
- * The table editor is a full-snapshot client: every mutation is a small RPC
- * (`template.save`, `run.control`, …) and `state` re-reads the domain, so the
- * UI and the model tool always drive the SAME host state — there is no second
- * write path in the browser.
+ * The browser view is a full-snapshot client: every mutation is a small RPC
+ * (`run.control`, …) and `state` re-reads the domain, so the UI and the model
+ * tool always drive the SAME host state — there is no second write path in the
+ * browser. `state` accepts a `sessionId` so the host filters before its caps.
  *
  * @module dsh-triggers/channel
  */
@@ -27,8 +27,10 @@ type ChannelResult = { ok: true, value: unknown } | { ok: false, error: { code: 
 async function handle(service: TriggerService, endpoint: string, payload: Record<string, unknown>): Promise<ChannelResult> {
   try {
     switch (endpoint) {
-      case 'state':
-        return { ok: true, value: await service.snapshot() }
+      case 'state': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : undefined
+        return { ok: true, value: await service.snapshot(sessionId) }
+      }
       case 'sessions':
         return { ok: true, value: { items: await service.sessions() } }
       case 'template.save':
