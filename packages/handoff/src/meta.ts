@@ -12,7 +12,7 @@
  */
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { coerceModelChoice, type ModelChoice } from './brief.js'
+import { coerceModelChoice, coercePresetChoice, type ModelChoice, type PresetChoice } from './brief.js'
 import type { HandoffTarget } from './workspace.js'
 
 /** The durable record of one handoff attempt. */
@@ -26,6 +26,11 @@ export interface HandoffMeta {
   readonly target: HandoffTarget
   /** The model route picked when the handoff started (a retry's default). */
   readonly choice: ModelChoice
+  /**
+   * The preset intent picked when the handoff started (a retry's default).
+   * Older records predate the field and read as "inherit".
+   */
+  readonly preset: PresetChoice
   /** Epoch ms when the command ran. */
   readonly createdAt: number
   /** Epoch ms when the fresh session was created; absent = never spawned. */
@@ -104,6 +109,11 @@ function coerceMeta(value: unknown): HandoffMeta | undefined {
   if (workspaceId !== undefined && typeof workspaceId !== 'string') return undefined
   const choice = coerceModelChoice(record.choice)
   if (choice === undefined) return undefined
+  // Pre-preset records (and records with a corrupt preset field) inherit the
+  // origin's live preset, which is exactly the old behavior.
+  const preset = record.preset === undefined
+    ? { kind: 'inherit' as const }
+    : (coercePresetChoice(record.preset) ?? { kind: 'inherit' as const })
   if (typeof record.createdAt !== 'number') return undefined
   const spawnedAt = record.spawnedAt
   if (spawnedAt !== undefined && typeof spawnedAt !== 'number') return undefined
@@ -119,6 +129,7 @@ function coerceMeta(value: unknown): HandoffMeta | undefined {
       title: targetRecord.title,
     },
     choice,
+    preset,
     createdAt: record.createdAt,
     ...(spawnedAt === undefined ? {} : { spawnedAt }),
     ...(review === undefined ? {} : { review }),

@@ -19,6 +19,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { COMMAND_NAME, DEFAULT_BRIEF_DIR, PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
 import { handoffCommandDefinition } from './command.js'
 import { registerHandoffChannel } from './channel.js'
+import { createPreferenceStore } from './preferences.js'
 import type { HandoffRuntime } from './brief.js'
 
 export { PACKAGE_NAME, PLUGIN_NAME, COMMAND_NAME } from './identity.js'
@@ -76,6 +77,12 @@ export const Config: Schema<Config> = Schema.object({
 })
 
 export function apply(ctx: Context, config: Config): void {
+  const preferences = createPreferenceStore(ctx)
+  // The store is opened lazily on first use; release a handle this plugin
+  // owns when the row unmounts.
+  ctx.effect(() => () => {
+    void preferences.close().catch(() => {})
+  })
   const rt: HandoffRuntime = {
     ctx,
     config,
@@ -86,6 +93,7 @@ export function apply(ctx: Context, config: Config): void {
     notifyFailure: config.notifyFailure !== false,
     pending: new Map(),
     channel: registerHandoffChannel(ctx),
+    preferences,
   }
   ctx.commands.register(handoffCommandDefinition(rt))
   ctx.logger(PACKAGE_NAME).info('loaded', { dir: rt.config.dir })

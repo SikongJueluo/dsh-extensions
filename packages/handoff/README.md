@@ -1,10 +1,14 @@
 # dsh-handoff
 
-**一条命令完成会话交接**：`/handoff <任务描述>` → 浏览器弹出**模型下拉**（可搜索、按厂商分组，可继承当前会话或用全局默认）→ 注册了多个 workspace 时再弹**工作区选择步**（首项「原工作区」，其余可搜索）→ 当前会话把上下文浓缩成一份自包含简报写入
-`.dsh/handoff/<时间戳>-handoff.md` → 插件检测到完成标记后，在**所选工作区**自动新建 session
-（与 Web「新建会话」按钮同一条 `ctx.agents.create` 工厂链路），并把简报作为首条 prompt 交给新
-agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文。**不带参数的 `/handoff`（或
-`/handoff --retry`）重试上一次未完成的交接**：简报已写一半的继续补完，已写完但没来得及拉起新会话的直接拉起。
+**一条命令完成会话交接**：`/handoff <任务描述>` → 浏览器弹出**单页配置卡**（模型 / 思考强度 /
+Preset / 工作区 / 自动审核；默认值预填，点字段值展开选择器，只有「开始交接」提交）→ 当前会话把
+上下文浓缩成一份自包含简报写入 `.dsh/handoff/<时间戳>-handoff.md` → 插件检测到完成标记后，在
+**所选工作区**、用**所选 preset** 自动新建 session（与 Web「新建会话」按钮同一条
+`ctx.agents.create` 工厂链路），并把简报作为首条 prompt 交给新 agent 直接开工。不再依赖 handoff
+skill，也不再手动搬运上下文。**模型与思考强度会被记住**（同一 profile 内跨 session / 工作区 /
+浏览器共享），下次普通 handoff 默认沿用；**Preset 默认继承原 session**，不记忆上次的显式选择。
+**不带参数的 `/handoff`（或 `/handoff --retry`）重试上一次未完成的交接**：简报已写一半的继续补完，
+已写完但没来得及拉起新会话的直接拉起。
 
 ## 工作流程
 
@@ -12,15 +16,16 @@ agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文
 /handoff 修复 README 的安装一节
   │
   ├─ 浏览器弹出「交接任务」单页配置卡（默认值预填好；只有「开始交接」会提交）：
-  │    模型       继承当前会话 · 当前模型                [更改]
-  │    思考强度   沿用当前设置 / 模型默认                [更改]
-  │    工作区     原工作区 · <路径>                      [更改]
+  │    模型       上次使用的模型 / 继承当前会话          [更改]
+  │    思考强度   <档位> / 模型默认强度                  [更改]   （模型不支持强度时整行隐藏）
+  │    Preset     继承当前 · <preset 名>                 [更改]
+  │    工作区     原工作区 / <工作区>                    [更改]   （只有一个可选目标时整行隐藏）
   │    ─────────────────────────────────────
-  │    自动审核   [关闭 ○] 执行完成后交回当前会话审核；开启后显示轮预算
-  │    ─────────────────────────────────────
+  │    自动审核   [开关]   最多 5 轮
   │                              [取消] [开始交接]
-  │    · 「更改」只展开该字段的选择器（模型列表 / 强度 / 工作区），选完回到同一张卡
+  │    · 「更改」只展开该字段的选择器（模型 / 强度 / Preset / 工作区），选完回到同一张卡
   │    · 旗标固定的字段照常显示并标注「命令指定」，不提供「更改」——摘要永远与实际一致
+  │    · 上次模型不可用或旧强度不再支持时，卡片写明原因并要求重新选择
   │    · Esc 收起展开的选择器；在卡片上按 Esc 取消整个 handoff
   │    （无浏览器 half 的部署回退到问题卡片；--model/--workspace 参数预固定对应字段）
   ├─ 当前 agent 排队一个 turn：按六节模板写简报 + 末尾完成标记
@@ -35,39 +40,38 @@ agent 直接开工。不再依赖 handoff skill，也不再手动搬运上下文
 ## 重试（bare /handoff）
 
 超时、dsh 重启、spawn 失败都会留下一次「未完成的交接」。每个 handoff 发起时会在简报旁边写一份
-sidecar 记录 `<时间戳>-handoff.meta.json`（任务、原会话、当时的模型/工作区选择），新会话**成功创建后**
+sidecar 记录 `<时间戳>-handoff.meta.json`（任务、原会话、当时的模型 / Preset / 工作区选择），新会话**成功创建后**
 回填 `spawnedAt`——它是「这次交接到底成没成」的唯一持久判定，也是防止重复拉起会话的闸门。
 
 不带参数的 `/handoff`（或 `/handoff --retry`，两者等价；`--retry` 与任务描述互斥）扫描简报目录，取
 **最新一份没有 `spawnedAt` 的记录**，按简报文件的现状走三个分支：
 
-1. **简报已有完成标记**（watch 丢了/进程重启了）→ 重选模型与工作区后**直接拉起新会话**，不再让
+1. **简报已有完成标记**（watch 丢了/进程重启了）→ 重新解析模型 / Preset / 工作区后**直接拉起新会话**，不再让
    agent 写任何东西；
-2. **简报缺失或没写完** → 重选模型与工作区后，给*当前*会话排一条**续写指令**：保留已有内容、只补
+2. **简报缺失或没写完** → 重新解析后，给*当前*会话排一条**续写指令**：保留已有内容、只补
    缺失部分，同一文件、超时重新计满。重试者不是原会话时，指令会注明「无法从你的历史确认的内容
    不要臆造，写进 Open questions」；文件根本没写过则退回完整简报指令；
 3. **没有可重试的记录** → 报错，并提示用 `/handoff <任务描述>` 发起新交接。
 
-重试时模型/工作区选择重新弹（原选择只在内存里，已丢），但上次的选择会作为「上次」徽标标记在对应
-行上（问题卡片降级路径不带此标记）；`confirm: false` 时直接沿用上次选择，不再弹窗。`--model` /
+重试把 sidecar 里的模型 / Preset / 工作区作为本次默认（**本次重试记录优先于长期模型偏好**；Preset
+不会被记成下次普通 handoff 的默认）；`confirm: false` 时直接沿用记录，不再弹窗。`--model` /
 `--workspace` 旗标在重试模式下照常生效，例如 `/handoff --retry --model gpt/x` 就是用指定模型重试。
-失败通知的文案也会明确指路这个重试入口。
+旧 sidecar 没有 preset 字段时按「继承原会话」处理。失败通知的文案也会明确指路这个重试入口。
 
 
 ## 自动审核（可选，默认关闭）
 
-挂载 [dsh-triggers](../triggers/) 后，配置卡的模型/工作区字段下方有**独立的自动审核信息
-区**（开关 + 轮数预算，默认 5，始终显眼；开启后注明「执行者 = 新会话，审核者 = 当前会
-话」）。勾选后本次交接变成**执行—审核循环**——执行会话每轮**正常结束回合即自动送审**
+挂载 [dsh-triggers](../triggers/) 后，配置卡底部有**一行自动审核开关**：默认关闭；开启后同一行显示
+「最多 N 轮」。轮数不再由用户点选——默认 **5**，`--review-rounds <n>` 或重试记录里的实际预算会如实
+显示。勾选后本次交接变成**执行—审核循环**——执行会话每轮**正常结束回合即自动送审**
 （自动送审 run：最终回复作为交付说明；需要用户决定时才调用 `trigger_signal` 提交
 needs_user），审核 prompt 自动排队回**当前会话**（保留讨论上下文的 parent）；返工意见自动
 发回**同一个执行会话**，直到通过 / 需要用户决定 / 轮次用尽。循环由 triggers 插件在宿主推进，
 与 handoff 只在 spawn 时交接一次。执行者侧有活动 goal 时该回合不自动送审（goal 结束后的
 下一回合再送），避免把中途进展当交付。
 
-- 审核决策**不因旗标被跳过**：`--model`、`--workspace`、单工作区、`--model` + `--workspace`
-  全固定的每条路径都会到达审核选择（浏览器向导或问题卡片其一）；只有显式 `--review` /
-  `--review-rounds` 或未挂载 triggers 时才不问。
+- 审核决策**不因普通旗标被跳过**：只固定模型或工作区时，配置卡/问题卡片仍会问审核；只有显式
+  `--review` / `--review-rounds`（裁决已固定，不再追问）或未挂载 triggers 时才不问。
 - 顺序保证：创建 session → 记录 spawnedAt → 绑定并启动触发器 run → **才**发出首条执行
   prompt，执行者拿到的首条 prompt 自带 runId 与信号规则。
 - **意图与结果分开**：命令结果写「Auto review: 已请求（最多 N 轮）——绑定随新会话创建进行」；
@@ -80,27 +84,30 @@ needs_user），审核 prompt 自动排队回**当前会话**（保留讨论上�
 
 ## 选择新会话的模型与思考强度
 
-1. **浏览器配置卡（默认路径）**：Web half 在 `shell.overlay` 注册模态卡片。模型字段默认
-   「继承当前会话」；「更改」在卡内展开选择器——搜索框、按厂商分组的模型列表（显示名 +
-   描述 + 「默认强度 X」，数据来自 `ctx.remote.session.modelCatalog()`，与 `/model` 弹窗同源），
-   首两项为「继承当前会话」「全局默认」。host 通过 `/dsh-handoff` 通道把待选请求发给浏览器，
-   浏览器轮询取件并回传选择（`oauth-providers` 同款通道模式）。
+1. **浏览器配置卡（默认路径）**：Web half 在 `shell.overlay` 注册模态卡片。模型字段显示当前生效的
+   路由，默认按「命令旗标 → 本次选择 → 本次重试记录 → 记住的上次模型 → 继承原会话」解析；
+   「更改」在卡内展开选择器——搜索框、按厂商分组的模型列表（显示名 + 描述 + 「默认强度 X」，数据来自
+   `ctx.remote.session.modelCatalog()`，与 `/model` 弹窗同源），首两项为「继承当前会话」「全局默认」。
+   host 通过 `/dsh-handoff` 通道把待选请求发给浏览器，浏览器轮询取件并回传选择
+   （`oauth-providers` 同款通道模式）。
 2. **思考强度附属于模型**。生效模型若声明了 `reasoning.efforts`，卡片显示「思考强度」一行
-   （默认「模型默认强度」或当前会话档位）；「更改」展开强度列表（每档显示名 + 描述，标注
-   「默认」；正在用的档位标「当前」），选完回到卡片。对继承/默认路线改强度会自动变成
+   （默认「模型默认强度」或当前会话档位）；模型不声明强度时整行隐藏。「更改」展开强度列表（每档显示名
+   + 描述，标注「默认」；正在用的档位标「当前」），选完回到卡片。对继承/默认路线改强度会自动变成
    「显式选该模型 + 指定强度」的等价形式。
-3. **工作区字段**（仅在注册了多个 workspace 且未给 `--workspace` 时可更改）：「更改」展开
-   工作区列表——首项「原工作区」（带「当前」徽标，description 为原 cwd），divider 后为可搜索的
-   其余注册工作区（title + path 过滤，重名 title 附路径尾段；`status()` 报目录缺失的灰显不可选）。
-   **点选即回到卡片**（选中项标「已选」徽标），名单由 host 在命令触发时经
-   `workspaceRegistry.list()` 快照并随 pending 请求下发，浏览器无需新 remote 依赖。
-   `--workspace` 指定时该字段显示目标并标注「命令指定」，不提供更改。
-4. **问题卡片（降级路径）**：部署里没有浏览器 half（TUI/headless），或浏览器在 `pickTimeoutMs` 内
-   没有应答时，改用 `ctx.userQuestions` 卡片：可点选项 + "Other" 自由输入。选项 label 用模型
-   **显示名**（重名时附 `provider`），description 显示 `厂商 · model id`；该路径不下发强度，用模型默认。
-   需要选工作区时在模型卡之后再发一张工作区卡（同样支持 "Other" 输入 title/path）；触发器挂载
-   且旗标未决定审核时，**每条卡片路径最后都会多问一张审核卡**（60s 无应答视为关闭）。
-5. **命令直达**：`/handoff --model provider/model [--workspace <title|path>] <任务>` 跳过对应选择，
+3. **工作区字段**（仅在注册了多个 workspace 且未给 `--workspace` 时出现）：「更改」展开工作区列表——
+   首项「原工作区」（description 为原 cwd），divider 后为可搜索的其余注册工作区（title + path 过滤，
+   重名 title 附路径尾段；`status()` 报目录缺失的灰显不可选）。**点选即回到卡片**，名单由 host 在命令
+   触发时经 `workspaceRegistry.list()` 快照并随 pending 请求下发，浏览器无需新 remote 依赖。
+   只有一个可选目标时整行隐藏；`--workspace` 指定时显示目标并标注「命令指定」，不提供更改。
+4. **Preset 字段**：默认「继承当前 · <原会话 preset>」；「更改」展开注册 preset 列表（`broken` 行灰显并
+   给出原因）。详见下一节。
+5. **问题卡片（降级路径）**：部署里没有浏览器 half（TUI/headless）时改用 `ctx.userQuestions` 卡片：
+   可点选项 + "Other" 自由输入。选项 label 用模型**显示名**（重名时附 `provider`），description 显示
+   `厂商 · model id`；有可用的记住路由时首项是「上次使用的模型」，失效路由只在 detail 里说明、不再提供。
+   该路径不下发强度，用模型默认。需要选工作区时在模型卡之后再发一张工作区卡（同样支持 "Other" 输入
+   title/path）；触发器挂载且旗标未决定审核时，**每条卡片路径最后都会多问一张审核卡**（60s 无应答视为
+   关闭）；原 session 的 preset 失效时先问一张预设卡。
+6. **命令直达**：`/handoff --model provider/model [--workspace <title|path>] <任务>` 跳过对应选择，
    适合脚本与 `confirm: false`；`--model` 拼写只做形状校验，路由合法性由首次请求验证（强度用模型
    默认）；`--workspace` 支持含空格的 title（最长前缀匹配）或 workspace 根路径（realpath 精确匹配），
    未命中/歧义时列出候选。两个 flag 顺序任意，`--retry` 同理（见上节）。
@@ -111,10 +118,42 @@ needs_user），审核 prompt 自动排队回**当前会话**（保留讨论上�
   （`ctx.sessionProjections.stateOf(session, 'modelSelection')`，取 `pending → lastUsed`；投影缺席时
   回退到 agent 的创建选项）。`/model` 切换过的模型与强度因此能正确带走，原 `maxTokens` 一并保留。
 - **全局默认** = 部署默认选择，**含它自带的强度**（此前只取了 provider/model，把强度丢了）。
-- **显式选模型** = 你选的强度（没选则用该模型默认值），**保留当前会话的 preset**（同一人设、不同大脑），
-  不继承原 `maxTokens`。
+- **显式选模型** = 你选的强度（没选则用该模型默认值），不继承原 `maxTokens`；preset 由独立字段决定，
+  **不会**因为选「全局默认模型」而切回默认 preset。
 
-要点：
+### 记住上次的模型与思考强度
+
+- 偏好存在插件自己的 storage domain（单元名 `handoff`；JSON 后端下是 `$DSH_HOME/storages/handoff.json`），
+  记录键按 profile 隔离（如 `web`），因此**同一 profile 的所有 session / 工作区 / 浏览器共用，重启后
+  仍在**，且不会改变 DSH 全局默认模型（`agentDefaultModel`）或新会话按钮的行为。
+- 记的是**选择意图**：继承 / 全局默认 / 显式 `provider/model[+强度]`。选「继承」或「全局默认」时保存
+  模式而不是冻结当时的路由；省略强度表示该模型自己的默认强度。
+- 只有你**明确提交配置卡（或回答问题卡）且新会话创建成功后**才写；点开选择器、取消、超时 / 无人作答、
+  `confirm:false` 的自动路径都不覆盖。写失败不阻止交接，但原会话会收到「本次选择未记住」的可见通知。
+- 优先级：**命令旗标 → 本次 UI 选择 → 本次重试记录 → 上次记忆 → 首次继承原会话**。`--model` 只影响
+  本次，不污染长期偏好。
+- 上次模型已从目录消失、或旧强度不再被该模型支持时，卡片显示原因并要求重选，**不会静默换成原会话的
+  模型**；无浏览器的路径能重选就重选，不能则带原因失败。目录暂时加载失败（provider 枚举失败/超时）
+  不当作模型已删除，仍按记忆尝试，真正的路由错误由首次请求暴露。
+- **不记**自动审核开关、工作区或 Preset：它们按每次交接/原 session 重新解析。
+
+## Preset（执行预设）
+
+- 每次普通 handoff 默认**继承原 session 实际挂载的 preset**（`agentPresets.composedPreset`），而不是
+  部署默认 preset；原 session 没有 preset 时保持无 preset（`resolve(undefined)` 的语义是部署默认，
+  不能当作「继承」）。
+- 模型与 preset 是两个独立意图：可以「原 preset + 记住的便宜模型 + 上次强度」，也可以「自选执行
+  preset + 同一模型」。
+- 卡片里的显式选择只在**本次**交接（及其重试）生效；下一次普通 handoff 仍继承当时的原 session，
+  不会记住上次的显式 preset。
+- 已删除 / `broken` 的 preset **不会静默降级成无 preset 会话**：显式选择会在开始前失败并给出原因；
+  原 session 的 preset 失效时卡片要求改选，无浏览器时问一张预设卡，`confirm: false` 则直接带原因失败。
+  旧 sidecar 没有 preset 字段时按「继承原会话」处理。sidecar 里的显式 preset 在当前组合没有可用默认注册表
+  （缺失或读取失败）时也会在写简报前可见失败；记录保持未创建，修复组合后可直接重试，不会被改成 inherit。
+- preset 会带自己的工具 / 提示 / 行为，挂载成功不等于任务能力齐全（例如限制工具的 preset 可能看不到
+  `trigger_signal`）。需要自动审核时先确认执行 preset 能正常送审。
+
+### 其他行为要点
 
 - **简报永远写原工作区** `.dsh/handoff/`：那是原 agent 在任何沙箱模式下都唯一确定可写、宿主插件又
   可读的位置（`/tmp` 在 bwrap 下是每次调用私有的 tmpfs，`~/.dsh` 不在 workspace-write 允许列表里，
@@ -169,7 +208,7 @@ needs_user），审核 prompt 自动排队回**当前会话**（保留讨论上�
 | `pollMs` | `1000` | 简报文件轮询间隔 |
 | `confirm` | `true` | 交接前让用户选模型（兼作取消入口） |
 | `modelMenu` | `true` | 问题卡片降级路径里枚举所有 provider/model |
-| `pickTimeoutMs` | `120000` | 浏览器配置卡的最长等待；超时按「继承当前会话」继续 |
+| `pickTimeoutMs` | `120000` | 浏览器配置卡的最长等待；超时按已解析的默认继续（默认不可用时带原因失败） |
 | `notifyFailure` | `true` | 失败时向原会话排一条可见通知 |
 | `maxBriefChars` | `65536` | 首条 prompt 的简报截断保护 |
 
@@ -177,18 +216,21 @@ needs_user），审核 prompt 自动排队回**当前会话**（保留讨论上�
 
 ## 依赖面
 
-- 宿主运行时 peer：`@deepseek-ai/cordis`、`@deepseek-ai/dsh-llm`（`createUserMessage`）、`@deepseek-ai/schemastery`。
+- 宿主运行时 peer：`@deepseek-ai/cordis`、`@deepseek-ai/dsh-llm`（`createUserMessage`）、
+  `@deepseek-ai/dsh-storage-domain`（模型偏好）、`@deepseek-ai/schemastery`、`zod`（偏好记录 schema）。
 - 其余宿主依赖（`dsh-agent` / `dsh-commands` / `dsh-session` / `dsh-session-title` / `dsh-user-questions` /
-  `dsh-workspace`）均为 type-only import，构建时擦除；`agentPresets` / `agentDefaultModel` 用本地最小类型
-  shim，运行时走 `ctx.get()` 可选获取。
+  `dsh-workspace`）均为 type-only import，构建时擦除；`agentPresets` / `agentDefaultModel` /
+  `storageDomain` 用本地最小类型 shim 或 `ctx.get()` 可选获取，组合里没有对应服务时照常加载。
+- 模型偏好走插件自己的 storage domain（`handoff`），不写 `agentDefaultModel`；没有 `storageDomain`
+  的组装只是不记忆，交接本身不受影响。
 - 浏览器 half：`client/client.js`（`window.__ModuleLoader__.load`，纯 JS + `React.createElement`），
   经 `dsh.client` 声明，注册 `shell.overlay` 槽；模型目录取 `ctx.remote.session.modelCatalog()`，
   工作区名单随 pending 请求经通道下发（无需新 remote 依赖），与宿主通信走 `/dsh-handoff` 前缀路由
   （`ctx.connection` 的 client-request/server-response 信封 + `ctx.webServer`），与 `oauth-providers`
   的通道同构。
-- **移动端适配**：三级步全部触摸可达——工作区/强度步有「返回」「取消」实体按钮（Esc 仅桌面增强），
-  hover 反馈与 `autoFocus` 在 `pointer: coarse` 下退避，搜索框 16px 防 iOS 聚焦缩放，宽度
-  `min(560px, 92vw)` 自适应，行高保持 ≥ 44px 点选目标。
+- **移动端适配**：单卡展开的模型 / 强度 / Preset / 工作区选择器全部触摸可达——每个选择器都有「返回配置」
+  实体按钮、卡片都有「取消」（Esc 仅桌面增强），hover 反馈与 `autoFocus` 在 `pointer: coarse` 下退避，
+  搜索框 16px 防 iOS 聚焦缩放，宽度 `min(560px, 92vw)` 自适应，行高/按钮 ≥ 44px 点选目标。
 - 不发布任何服务，无需 isolate realm，与 stock `web` profile 直接兼容；没有 `connection`/`webServer`
   的组装里宿主半插件照常加载，只是不启用下拉。
 

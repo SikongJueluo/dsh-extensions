@@ -185,15 +185,6 @@ async function originFixture(host, label) {
   }
 }
 
-/** Answer the pending browser pick (liveness poll + choose). */
-async function answerPick(host, choice) {
-  await channel(host, 'pending', {})
-  const pick = await until(async () => (await channel(host, 'pending', {})).requests[0], 3000, 'pending pick')
-  const chosen = await channel(host, 'choose', { requestId: pick.id, choice })
-  assert.equal(chosen.ok, true, `choose rejected: ${JSON.stringify(chosen)}`)
-  return pick
-}
-
 /** Write the completion-marked brief and await the spawn. */
 async function completeBrief(host, originId) {
   const briefMsg = await until(() => host.state.followups.get(originId)?.[0], 3000, 'briefing followup')
@@ -215,11 +206,10 @@ test('flag path: --review binds the loop before the first prompt and the loop cl
     assert.equal(typeof root.get('triggerBindings')?.bindReviewLoop, 'function', 'cross-plugin service visible')
 
     const { cwd, agent } = await originFixture(host, 'flag')
-    // The liveness poll must precede the command: clientAttached() decides
-    // whether waiting for a real picker is worthwhile.
+    // --review fixes the verdict and --model fixes the route, so nothing is
+    // left to ask: the scripted invocation must not open (or wait for) a card.
     await channel(host, 'pending', {})
     const handled = command.handler({ rawInput: '--review --model prov/model fix the flaky tests', agent, signal: null })
-    await answerPick(host, { kind: 'inherit' })
     const answer = await handled
     assert.equal(answer.kind, 'success', JSON.stringify(answer))
     assert.ok(answer.text.includes('Auto review: 已请求'), answer.text)
@@ -329,7 +319,6 @@ test('no triggers mounted: --review degrades to a plain handoff with a visible n
     const { agent } = await originFixture(host, 'plain')
     await channel(host, 'pending', {})
     const handled = command.handler({ rawInput: '--review --model p/m task without triggers', agent, signal: null })
-    await answerPick(host, { kind: 'inherit' })
     const answer = await handled
     assert.equal(answer.kind, 'success')
 

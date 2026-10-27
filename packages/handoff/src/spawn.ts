@@ -12,7 +12,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent, AgentHandle, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session-title'
 import type {} from '@deepseek-ai/dsh-workspace'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -22,6 +22,7 @@ import { bootstrapPrompt, type HandoffRuntime, type PendingHandoff } from './bri
 import { markSpawned, metaPathFor, writeReviewBound } from './meta.js'
 import { targetBriefDir } from './workspace.js'
 import { defaultRoute, sessionRoute, toAgentOptions } from './selection.js'
+import { mountedPreset } from './presets.js'
 
 /** Sidebar title prefix; the task tail is trimmed to keep it readable. */
 const TITLE_PREFIX = 'Handoff: '
@@ -67,32 +68,22 @@ function resolveAgentOptions(ctx: Context, agent: Agent, choice: PendingHandoff[
 }
 
 /**
- * Resolve the preset to mount, mirroring the api-session controller's
- * composeAgent: resolve (current or default) → mount inside unpublished setup.
- * A missing or failing preset service degrades to a preset-less session.
+ * Remember the model choice for later handoffs. Only a successful spawn calls
+ * this, so browsing a picker, cancelling, or timing out never overwrites the
+ * stored preference, and a `--model` override is excluded by `rememberModel`.
+ * A failed write is visible on the origin session but never blocks the
+ * handoff: the session itself already exists.
  */
-async function resolvePreset(
-  ctx: Context,
-  agent: Agent,
-  choice: PendingHandoff['choice'],
-): Promise<{ id?: string; setup?: CreateAgentOptions['setup'] }> {
-  const presets = ctx.get('agentPresets')
-  if (presets === undefined) return {}
+async function rememberModel(rt: HandoffRuntime, pending: PendingHandoff): Promise<void> {
+  if (!pending.rememberModel || rt.preferences === undefined) return
   try {
-    // An explicit model switch keeps the current session's preset (same
-    // persona, different brain); only the global-default choice mounts the
-    // deployment default preset.
-    const from = choice.kind === 'default' ? undefined : presets.composedPreset(agent.ctx)
-    const resolved = await presets.resolve(from)
-    return {
-      id: resolved.id,
-      setup: async (agentCtx: Parameters<NonNullable<CreateAgentOptions['setup']>>[0]) => {
-        await presets.mount(agentCtx, resolved.id)
-      },
+    const stored = await rt.preferences.write(pending.choice)
+    if (!stored) {
+      rt.ctx.logger(PACKAGE_NAME).info('no storage domain; handoff model preference not remembered')
     }
   } catch (error) {
-    ctx.logger(PACKAGE_NAME).warn('preset resolution failed; spawning without an explicit preset', { error: String(error) })
-    return {}
+    rt.ctx.logger(PACKAGE_NAME).warn('handoff model preference write failed', { error: String(error) })
+    notifyOrigin(rt, pending, '[handoff] 本次选择未记住（偏好写入失败）。下次交接仍使用之前记住的模型。')
   }
 }
 
@@ -247,7 +238,7 @@ export async function spawnHandoff(rt: HandoffRuntime, pending: PendingHandoff, 
 
   const sessionId = mintSessionId()
   const agentOptions = resolveAgentOptions(ctx, pending.agent, pending.choice)
-  const preset = await resolvePreset(ctx, pending.agent, pending.choice)
+  const preset = await mountedPreset(ctx, pending.agent, pending.preset)
 
   const handle: AgentHandle = await ctx.agents.create({
     sessionId,
@@ -262,6 +253,9 @@ export async function spawnHandoff(rt: HandoffRuntime, pending: PendingHandoff, 
   // title, copy) can fail, so a later bare `/handoff` cannot double-spawn
   // this brief. A missing sidecar (older briefs) is a silent no-op.
   await markSpawned(metaPathFor(pending.briefPath))
+  // Only a spawned session vouches for the choice; a `--model` override never
+  // reaches the preference because pending.rememberModel is false for it.
+  await rememberModel(rt, pending)
   await attachToWorkspace(rt, pending, sessionId)
   // The review binding must exist before the executor's first prompt: a fast
   // executor could otherwise deliver into a loop that nobody is watching.

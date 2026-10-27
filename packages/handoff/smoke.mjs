@@ -491,8 +491,8 @@ for (let i = 0; i < 40 && retryPick === null; i += 1) {
   else await new Promise(resolve => setTimeout(resolve, 10))
 }
 if (retryPick === null) throw new Error('bare /handoff never published a pick')
-if (retryPick.previous?.choice?.kind !== 'inherit' || retryPick.previous?.workspaceId !== 'ws-origin') {
-  throw new Error(`retry pick lacks the previous defaults: ${JSON.stringify(retryPick.previous)}`)
+if (retryPick.defaultChoice?.kind !== 'inherit' || retryPick.previous?.workspaceId !== 'ws-origin') {
+  throw new Error(`retry pick lacks the previous defaults: ${JSON.stringify({ defaultChoice: retryPick.defaultChoice, previous: retryPick.previous })}`)
 }
 if (!retryPick.task.includes('slow cycle')) {
   throw new Error(`retry pick does not show the recovered task: ${retryPick.task}`)

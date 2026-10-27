@@ -9,12 +9,24 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 
-/** Minimal `ctx.agentPresets` surface used by the spawn path. */
+/** One declared preset as the registry reports it (activation failures included). */
+export interface AgentPresetSummary {
+  readonly id: string
+  readonly name?: string
+  readonly description?: string
+  readonly order?: number
+  /** Why the preset cannot compose a session; absent when it can. */
+  readonly broken?: string
+}
+
+/** Minimal `ctx.agentPresets` surface used by the selection and spawn paths. */
 export interface AgentPresetsShim {
   /** Resolve the preset id composed into an agent context, if any. */
   composedPreset(agentCtx: Context): string | undefined
-  /** Resolve a preset id (undefined = the deployment default) to its stable id. */
-  resolve(id?: string): Promise<{ id: string }>
+  /** Every declared preset, including ones whose activation failed. */
+  list(): Promise<AgentPresetSummary[]>
+  /** Resolve a preset id (undefined = the deployment default) to its current revision. */
+  resolve(id?: string): Promise<AgentPresetSummary>
   /** Mount a preset's composition into an (unpublished) agent context. */
   mount(agentCtx: Context, id?: string): Promise<unknown>
 }

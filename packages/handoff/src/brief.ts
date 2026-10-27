@@ -11,6 +11,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Config } from './index.js'
 import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
 import type { HandoffChannel } from './channel.js'
+import type { PreferenceStore } from './preferences.js'
 import type { HandoffTarget } from './workspace.js'
 import { spawnHandoff } from './spawn.js'
 
@@ -38,6 +39,28 @@ export function coerceModelChoice(value: unknown): ModelChoice | undefined {
   return undefined
 }
 
+/**
+ * Which agent preset the fresh session should mount. Separate from the model
+ * choice on purpose: the two must combine freely ("inherit preset + a cheaper
+ * remembered model" is the common case). `inherit` means the origin session's
+ * live preset — or no preset at all when the origin runs none; it never means
+ * the deployment default.
+ */
+export type PresetChoice =
+  | { kind: 'inherit' }
+  | { kind: 'preset'; id: string }
+
+/** Narrow an untrusted value (browser payload, sidecar meta JSON) into a preset choice. */
+export function coercePresetChoice(value: unknown): PresetChoice | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const record = value as Record<string, unknown>
+  if (record.kind === 'inherit') return { kind: 'inherit' }
+  if (record.kind === 'preset' && typeof record.id === 'string' && record.id.length > 0) {
+    return { kind: 'preset', id: record.id }
+  }
+  return undefined
+}
+
 /** One in-flight handoff, keyed by the origin agent's session id. */
 export interface PendingHandoff {
   /** The agent (and session) that writes the brief. */
@@ -58,8 +81,21 @@ export interface PendingHandoff {
    * bootstrap prompt stays truthful when a different session picks up.
    */
   readonly originLabel?: string
-  /** Model route chosen in the dialog or via --model; preset inheritance follows it. */
+  /** Model route chosen in the dialog or via --model. */
   readonly choice: ModelChoice
+  /**
+   * Preset intent for the fresh session. Independent of {@link choice}: the
+   * default inherits the origin session's live preset, and an explicit pick
+   * rides this attempt (and its retry) only — it is not remembered as a
+   * default for later handoffs.
+   */
+  readonly preset: PresetChoice
+  /**
+   * Whether {@link choice} may become the remembered default once the fresh
+   * session exists. A `--model` flag is a one-off override and never
+   * overwrites the long-term preference.
+   */
+  readonly rememberModel: boolean
   /**
    * The auto-review opt-in: bind a dsh-triggers loop (this origin reviews,
    * the fresh session executes) before the first prompt. Absent = plain
@@ -89,6 +125,8 @@ export interface HandoffRuntime {
   readonly pending: Map<string, PendingHandoff>
   /** Browser pick channel; absent only when the composition has no connection/web server. */
   readonly channel?: HandoffChannel
+  /** Durable remembered model; absent only when the plugin was built without it. */
+  readonly preferences?: PreferenceStore
 }
 
 /** `20260928-153012` style slug for brief file names. */
