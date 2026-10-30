@@ -12,8 +12,10 @@
 # must stay quoted strings: a bare path literal would be copied into the
 # Nix store at eval time and later rebuilds would never be seen.
 #
-# Enable the presets this machine needs — this overlay deliberately mirrors
-# the bundle's empty default so no dev/deploy instance widens silently.
+# `presets` is omitted exactly like the bundle layer, so dev/deploy rows
+# resolve to the same schema default (the six ordinary cache presets); write
+# `presets: [...]` here to pin an explicit set for this overlay
+# ([] = stock sandbox).
 - id: sandbox
   name: '@deepseek-ai/dsh-sandbox-local'
   disabled: true
@@ -22,5 +24,4 @@
     - id: toolchain-sandbox
       name: '/home/sikongjueluo/Projects/dsh-extensions/packages/toolchain-access/lib/index.js'
       config:
-        presets: []
         paths: {}

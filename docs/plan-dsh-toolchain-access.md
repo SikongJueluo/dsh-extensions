@@ -1,45 +1,53 @@
 # 计划:toolchain-access 的 Nix 接入与权限迁移
 
-状态:代码与验证已完成(见 [packages/toolchain-access](../packages/toolchain-access/) 与各层提交说明);本文件是**宿主落点计划**,由用户落进 flake,本会话不改 `~/.dsh`、不装 bundle、不 reload profile。本机当前 profile **尚未启用**本插件。
+状态(2026-10-30):本文件是**宿主落点计划**,由用户落进 flake,agent 不改 `~/.dsh`、不装 bundle、不 reload profile。当前 `web` 已挂载本插件,但 Nix 显式 `presets = [];` 关闭了全部授权,见 [uv 授权调研](research-toolchain-access-uv-approvals.md)。仓库默认策略现改为普通缓存默认开启;已有显式列表(含空列表)不会被升级覆盖,需按第 2 节迁移。
 
 ## 1. 交付了什么(仓库内,已验证)
 
 - `packages/toolchain-access`(`dsh-toolchain-access`):`LocalSandboxProvider` 子类,对 `workspace-write` 沙箱追加精确 `--bind`(详见包 README 的信任语义)。
-- 预设:`uv-cache`、`cargo-cache`(registry/git/`.package-cache`)、`pnpm-store`、`pnpm-runtime-locks`(`$XDG_RUNTIME_DIR` 共享锁域)、`pnpm-engine`(默认关)。
+- 默认开启六项:`uv-cache`、`cargo-cache`、`pnpm-store`、`pnpm-runtime-locks`(`$XDG_RUNTIME_DIR` 共享锁域)、`gradle-cache`、`maven-cache`。`pnpm-engine`、`gradle-jdks` 含可执行工具链,维持显式 opt-in。默认只影响省略 `presets` 的配置;`presets: []` 全关,显式非空列表只启用列出的项。
 - confine 时受控自建缺失的**默认推导**路径(pnpm 的 `/run/user` 锁目录重启即清空,0755/0700/锁文件按各工具语义创建);显式 override 与插件加载不写宿主。
 - 迁移:cmd-permit 种子收敛为**空**(cargo/direnv/rtk 均移除——按命令头匹配时 `rtk cargo build` 仍会命中 rtk 条目拿 Full access);auto-permit 判官 v3「缓存上限」(缓存-only 越界一律 DEFER,同族等价不可越过)。
-- 已实测:grant 子树可写、父/邻居仍 EROFS;uv sync、cargo fetch/build(真依赖)、pnpm run 热引擎授权后成功、对照 EROFS;cargo 并发 fetch ×2 共享 cargo-home 均成功;pnpm 锁文件落在宿主共享目录。
+- 此前实测:grant 子树可写、父/邻居仍 EROFS;uv sync、cargo fetch/build(真依赖)、pnpm run 热引擎授权后成功、对照 EROFS;cargo 并发 fetch ×2 共享 cargo-home 均成功;pnpm 锁文件落在宿主共享目录。
+- 本次默认策略验证(2026-10-30):`node node_modules/vitest/vitest.mjs run --root packages/toolchain-access` 为 4 文件/69 测试通过;全 16 包 `tsc --noEmit`、client syntax 与插件 tsdown 构建通过。构建产物的 Config 与两份真实 YAML patch 解析 smoke 通过。新增默认 confine 测试断言 18 条精确 bind、只读无写授权、无效 runtime-dir 仍拒绝;未部署当前 Nix 空列表,不声称生产授权已生效。
 
 ## 2. Nix 落点(用户执行)
 
-dsh 归 nix 管。**注意:本插件不能进 `programs.dsh.plugins` 列表**——它要**替换** base 的 `sandbox` 行(patch 不能改行 name,只能 disable+insert),而 plugins 列表只是 append;直接 append 会与官方 sandbox provider 撞 service 注册。正确路径是 `extraPatches`,与现有 rtk-rewrite(dev.patch.yml)同款。
+dsh 归 nix 管。当前 Nix 模块已支持 `host = true` + `replaces = ["sandbox"]` 自动生成 disable+insert,不再需要旧版文档的 raw patch 绕行。插件必须替换 stock provider,不能仅 append 后让两个 provider 抢同一 service。
 
-### 方案 A(推荐):自建 patch 文件,config 归 nix 管
+### 方案 A(当前部署,推荐):沿用 Host 插件声明
 
-在 `~/.config/nixos/home/ai/dsh/` 新建 `toolchain-access.patch.yml`(仿 `subagents.patch.yml` 的存放方式):
+在 `~/.config/nixos/home/ai/dsh/plugins.nix` 现有声明中**删除 `presets = [];`**,保留:
 
-```yaml
-# 用 dsh-toolchain-access 替换 stock sandbox 行,启用本机常用缓存预设。
-# pnpm-engine 默认不开:它授权整个 pnpm home(含可执行 engine 副本)。
-- id: sandbox
-  name: '@deepseek-ai/dsh-sandbox-local'
-  disabled: true
-
-- insert:
-    - id: toolchain-sandbox
-      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/toolchain-access/lib/index.js'
-      config:
-        presets: [uv-cache, cargo-cache, pnpm-store, pnpm-runtime-locks]
-        # Java 项目再按需加 gradle-cache / maven-cache(见包 README);
-        # gradle-jdks 与 pnpm-engine 同为"可执行内容"的单独信任决定。
-        paths: {}
+```nix
+"toolchain-sandbox" = {
+  name = "/home/sikongjueluo/Projects/dsh-extensions/packages/toolchain-access/lib/index.js";
+  host = true;
+  config = {
+    paths = {};
+  };
+  replaces = ["sandbox"];
+};
 ```
 
-`plugins.nix` 的 `extraPatches` 追加一项 `${./toolchain-access.patch.yml}`（同 `subagents.patch.yml` 的 `${./...}` 写法）。改预设 → 编辑此文件 → `home-manager switch` → 重启 dsh。
+省略 `presets` 才会采用插件的六项默认。若要关闭某项,写出保留项的完整列表;例如不用 Java 缓存:
+
+```nix
+config = {
+  presets = ["uv-cache" "cargo-cache" "pnpm-store" "pnpm-runtime-locks"];
+  paths = {};
+};
+```
+
+`presets = [];` 始终表示全部关闭,升级不会把它重新解释为“采用默认”。已有其他显式列表也保持原样。`paths` 单独是位置覆盖,不是开关;列表里排除某预设时其 path 不产生授权。
+
+构建插件 → 用现有 flake/home-manager 流程部署 → 重启 `dsh-web`。Nix 声明经后置 `--patch` 生效,优先于 profile Settings;Settings 修改同一行遇到冲突会报 `overridden by a home patch or command-line overlay`,应改 Nix 而不是反复保存。组合后的 `config` 是整体替换,不是深合并。
 
 ### 方案 B:直接用仓库的 dev.patch.yml
 
-`extraPatches` 追加 `/home/sikongjueluo/Projects/dsh-extensions/packages/toolchain-access/dev.patch.yml`,预设默认空,需再改该文件(或后层按 id 覆盖 `toolchain-sandbox` 行——覆盖行必须整体重述 `presets` 与 `paths`)。适合先零预设观察、再逐步开。
+没有 Host 插件声明的部署可把 `/home/sikongjueluo/Projects/dsh-extensions/packages/toolchain-access/dev.patch.yml` 加入 `extraPatches`。该 overlay 与 bundle 都省略 `presets`,由 schema 采用相同的六项默认;无需另改仓库模板。它已禁用 stock sandbox 并插入替换行,**不可与方案 A 重复插入**。
+
+两种方案的默认信任相同:所列目录对沙箱内全部子进程可写,不是只给 uv/Cargo 等同名命令。只绑精确子树,不泛开 HOME / `~/.cache`,凭据树仍只读。缺失的显式路径、无效/未设置的 `XDG_RUNTIME_DIR`、不支持的后端仍 fail-closed,不会自动漏掉预设以求运行成功;不用该项时由操作者显式从列表中排除。
 
 ### 前置构建
 
@@ -80,5 +88,5 @@ allow = [ ];
 2. 会话内 `bash: uv cache dir` 应答 `~/.cache/uv`;`uv sync` 不再 EROFS、不需要 `sandbox_permissions`。
 3. `cargo fetch`(真依赖项目)不 EROFS;`~/.cargo/credentials.toml` 仍不可写(`test -w` 应失败)。
 4. `pnpm run`(pin 与运行版本不一致的项目)不再报 `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK`;`/run/user/1000/pnpm-store-operation-locks-1000/` 出现 `all-stores.lock`。若你自定义过 `XDG_RUNTIME_DIR`:它必须满足 pnpm 自己的条件(本 uid 属主、属主可写可搜索、group/other 不可写——0775 会被 pnpm 拒绝并回退 `/tmp`),否则预设会 fail-closed 报错而不是静默绑一个 pnpm 不用的目录;可用 `strace -e trace=file pnpm --version 2>&1 | grep lock` 确认锁文件落在该目录而非 `/tmp`。
-5. Settings → `toolchain-sandbox` 分区可见 presets/paths 表单;改 presets 保存后 provider 重挂(非 volatile)。
+5. Settings → `toolchain-sandbox` 分区可见六项默认与 presets/paths 表单。无高优先级覆盖时修改会重挂 provider(非 volatile);本机方案 A 的 Nix overlay 优先,应在 Nix 中修改并部署,Settings 冲突提示不是授权已保存。
 6. 提权抽查:模型对 `cargo build` 的 Full access 请求应弹窗(cmd-permit 不再白名单)或被 v3 判官 DEFER,而非自动放行。

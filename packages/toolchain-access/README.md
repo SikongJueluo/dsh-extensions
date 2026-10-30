@@ -22,16 +22,41 @@ sandbox adapter               （super.confine() 官方行为原样保留）
 
 ## 预设
 
-| 预设 | 授权路径（默认） | 说明 |
-|---|---|---|
-| `uv-cache` | `$XDG_CACHE_HOME`/`~/.cache` 下 `uv/` | uv 唯一的共享缓存根 |
-| `cargo-cache` | `CARGO_HOME`/`~/.cargo` 下 `registry/`、`git/`、`.package-cache`、`.package-cache-mutate`、`.global-cache` | registry/git 缓存 + Cargo 1.74+ 的**两把**全局锁（共享下载锁与 mutate 锁——只绑第一把时 mutate 锁 EROFS，cargo 会**静默降级为无锁**，与宿主侧并发 cargo 互斥失效）+ use-tracking sqlite；**不是**整个 `~/.cargo`（credentials、config 保持只读） |
-| `pnpm-store` | pnpm home 下 `store/` | 共享包 store（本仓这类 store 在 workspace 内的项目会自动按「已覆盖」扣除） |
-| `pnpm-runtime-locks` | `$XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>` | pnpm 12 的 operation lock 域。**必须**绑定宿主原目录：绑到私有 `/tmp` 会拆散共享锁域。要求 `$XDG_RUNTIME_DIR` 满足 pnpm 自己的条件（本 uid 目录、属主可写可搜索、group/other 不可写——0775 会被 pnpm 拒绝回退 `/tmp`）；未设置或不合格时预设拒绝，且 **`paths.pnpmRuntimeLocks` 不能代为修复/迁移**（pnpm 的锁目录只由 `XDG_RUNTIME_DIR` 决定，override 只允许换拼写、不允许换位置）。`/run/user` 是 tmpfs，重启清空——confine 时受控自建 0700 锁目录 |
-| `pnpm-engine` | 整个 pnpm home（`~/.local/share/pnpm`） | 冷装其他版本 pnpm 需要写 `package-manager-store/`、`global/v11`、`_tmp`。**含可执行 engine 副本**，属单独信任决定，默认不启用；热缓存场景不需要它 |
-| `gradle-cache` | `GRADLE_USER_HOME`/`~/.gradle` 下 `caches/`、`wrapper/`、`daemon/`、`native/`、`workers/`、`notifications/`、`kotlin-dsl/`、`.tmp/` | 构建缓存与全部文件锁、wrapper 发行版、daemon 注册表/日志、file-watching 状态、kotlin-dsl 编译缓存、临时区（`.tmp` 实测必需：根只读时构建失败在创建它）。**根目录保持只读**：`gradle.properties` 常含签名密码/仓库 token，本机还是 home-manager 的 nix store 符号链接 |
-| `gradle-jdks` | `~/.gradle/jdks/` | Gradle 工具链自动下载的 JDK（tarball 中转 + 解包）。**含可执行内容**，与 pnpm-engine 同类的单独信任决定，不在 gradle-cache 内 |
-| `maven-cache` | `~/.m2` 下 `repository/`、`wrapper/` | 本地仓库（依赖缓存、`.lastUpdated`、resolver 元数据）与 mvnw 发行版。**`settings.xml` 保持只读**（服务器凭据）；Maven 无标准环境变量，自定义位置用 `paths.mavenHome`（settings.xml 的 `<localRepository>` 迁移同样须显式配置） |
+| 预设 | 默认 | 授权路径（默认） | 说明 |
+|---|---|---|---|
+| `uv-cache` | 开 | `$XDG_CACHE_HOME`/`~/.cache` 下 `uv/` | uv 唯一的共享缓存根 |
+| `cargo-cache` | 开 | `CARGO_HOME`/`~/.cargo` 下 `registry/`、`git/`、`.package-cache`、`.package-cache-mutate`、`.global-cache` | registry/git 缓存 + Cargo 1.74+ 的**两把**全局锁（共享下载锁与 mutate 锁——只绑第一把时 mutate 锁 EROFS，cargo 会**静默降级为无锁**，与宿主侧并发 cargo 互斥失效）+ use-tracking sqlite；**不是**整个 `~/.cargo`（credentials、config 保持只读） |
+| `pnpm-store` | 开 | pnpm home 下 `store/` | 共享包 store（本仓这类 store 在 workspace 内的项目会自动按「已覆盖」扣除） |
+| `pnpm-runtime-locks` | 开 | `$XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>` | pnpm 12 的 operation lock 域。**必须**绑定宿主原目录：绑到私有 `/tmp` 会拆散共享锁域。要求 `$XDG_RUNTIME_DIR` 满足 pnpm 自己的条件（本 uid 目录、属主可写可搜索、group/other 不可写——0775 会被 pnpm 拒绝回退 `/tmp`）；未设置或不合格时预设拒绝，且 **`paths.pnpmRuntimeLocks` 不能代为修复/迁移**（pnpm 的锁目录只由 `XDG_RUNTIME_DIR` 决定，override 只允许换拼写、不允许换位置）。`/run/user` 是 tmpfs，重启清空——confine 时受控自建 0700 锁目录 |
+| `pnpm-engine` | opt-in | 整个 pnpm home（`~/.local/share/pnpm`） | 冷装其他版本 pnpm 需要写 `package-manager-store/`、`global/v11`、`_tmp`。**含可执行 engine 副本**，属单独信任决定，永不默认；热缓存场景不需要它 |
+| `gradle-cache` | 开 | `GRADLE_USER_HOME`/`~/.gradle` 下 `caches/`、`wrapper/`、`daemon/`、`native/`、`workers/`、`notifications/`、`kotlin-dsl/`、`.tmp/` | 构建缓存与全部文件锁、wrapper 发行版、daemon 注册表/日志、file-watching 状态、kotlin-dsl 编译缓存、临时区（`.tmp` 实测必需：根只读时构建失败在创建它）。**根目录保持只读**：`gradle.properties` 常含签名密码/仓库 token，本机还是 home-manager 的 nix store 符号链接 |
+| `gradle-jdks` | opt-in | `~/.gradle/jdks/` | Gradle 工具链自动下载的 JDK（tarball 中转 + 解包）。**含可执行内容**，与 pnpm-engine 同类的单独信任决定，永不默认，不在 gradle-cache 内 |
+| `maven-cache` | 开 | `~/.m2` 下 `repository/`、`wrapper/` | 本地仓库（依赖缓存、`.lastUpdated`、resolver 元数据）与 mvnw 发行版。**`settings.xml` 保持只读**（服务器凭据）；Maven 无标准环境变量，自定义位置用 `paths.mavenHome`（settings.xml 的 `<localRepository>` 迁移同样须显式配置） |
+
+### `presets` 的默认语义（三种写法）
+
+行配置对 `presets` 键的处理：
+
+- **省略**（不写这个键）：默认开启上表标「开」的六项常规缓存（`uv-cache`、
+  `cargo-cache`、`pnpm-store`、`pnpm-runtime-locks`、`gradle-cache`、
+  `maven-cache`）。本包的 bundle/dev patch 都按此省略，由插件 schema 默认生效。
+- **`presets: []`**：全部关闭，行为与官方 stock sandbox 逐字节一致。
+- **显式列表**：**精确替换**默认（不与默认叠加）；`pnpm-engine`（整个 pnpm
+  home）与 `gradle-jdks`（自动下载的 JDK）是**整套工具链安装**，维持单独
+  opt-in，永不默认。
+
+默认授权的含义：这六组**确切子树**对沙箱内**所有进程**可写（缓存本身也可含
+可执行内容，如构建脚本、wrapper 发行版）——不是打开 `~/.cache`、`~/.gradle`
+或任何父目录整体；父目录与邻居仍只读，`gradle.properties`、`settings.xml`、
+credentials 仍只读。
+
+默认**不做可用性筛选**：任一启用的预设（含默认六项）无法兑现时，整个
+confined 命令 fail-closed，不会静默漏掉预设换取运行成功——典型如
+`pnpm-runtime-locks` 在 `$XDG_RUNTIME_DIR` 缺失或不合格时拒绝；非 Linux 平台
+或非 stock bwrap 布局（形状不同的 `runnerCommand`、Landlock/Seatbelt rung）下
+默认预设同样直接拒绝（`GrantArgvError`）。这类环境要退回官方行为，显式写
+`presets: []`；要收敛授权面，显式写出保留项的完整列表。后续层按 id 覆盖本行
+时 config 整体替换，`presets`/`paths` 都需按需重述。
 
 `paths` 可显式覆盖各锚点（`uvCache` / `cargoHome` / `pnpmHome` / `pnpmStore` /
 `pnpmRuntimeLocks` / `gradleUserHome` / `mavenHome`）；未覆盖时依次取宿主导出
@@ -40,11 +65,11 @@ sandbox adapter               （super.confine() 官方行为原样保留）
 败，并发双构建共享 `daemon/<v>/registry.bin` 锁域；maven 预设按标准布局与
 `~/.m2` 实际结构实现（本机无 mvn 二进制，未做真实构建验证）。
 
-## 信任语义（读一遍再开预设）
+## 信任语义（使用默认授权前请读）
 
 - **启用预设 = 该目录对沙箱内全部子进程可写**，不只是同名工具。不解析 shell
   猜命令、不按进程名授权。
-- 授权来源只有两个：行配置（操作者显式选择）与宿主环境锚点（操作者会话导出
+- 授权来源只有两个：行配置（含省略时采用的默认预设）与宿主环境锚点（操作者会话导出
   的 HOME/XDG/`CARGO_HOME` 等）。**agent 的 command/justification、仓库文件、
   项目 `.envrc`（auto-env 叠加的会话环境）都不是授权来源**——项目把
   `UV_CACHE_DIR` 指向别处不会获得授权，只会继续 EROFS，直到操作者显式配置。
@@ -58,7 +83,8 @@ sandbox adapter               （super.confine() 官方行为原样保留）
   （操作者声明），但永远不能越过底线。
 - 缺失目录**不会**放宽父目录来迁就；也不会用 `--bind-try` 静默漏挂。要么在
   宿主准备好目录（见下），要么关预设。
-- `read-only` 模式不加任何写授权；无预设时行为与官方逐字节一致。
+- `read-only` 模式不加任何写授权；显式 `presets: []` 时行为与官方逐字节一致
+  （省略 `presets` 则为六项默认，见上）。
 
 ## 宿主准备（缺失目录怎么办）
 
@@ -108,11 +134,14 @@ sandbox adapter               （super.confine() 官方行为原样保留）
 ## 开发
 
 ```sh
-pnpm -C packages/toolchain-access test    # grants / bwrap / provider 三组
+pnpm -C packages/toolchain-access test    # grants / bwrap / provider / patch-config
 pnpm build && pnpm check
 ```
 
 - dev overlay：`dsh --profile web --patch $PWD/packages/toolchain-access/dev.patch.yml --no-open --port <端口>`
-  （改 preset 需改 dev.patch.yml 里的 config 后重启 dsh）。
+  （dev.patch.yml 省略 `presets`，走六项默认；要显式定制就在其 config 里写
+  `presets: [...]`，`[]` = 全关，改后重启 dsh）。
 - 装进 profile：`dsh plugin --profile <profile> add ./packages/toolchain-access`，
-  然后在 Settings 的 `toolchain-sandbox` 分区启用预设。
+  未配置 `presets` 时六项缓存即默认开启；Settings 的 `toolchain-sandbox` 分区可
+  缩减或关闭授权。本机 Nix overlay 优先于 Settings，需按上述接入计划删除旧的
+  `presets = [];` 后部署并重启。

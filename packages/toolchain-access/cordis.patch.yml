@@ -11,11 +11,13 @@
 # swapped the sandbox row for something else, this patch skips itself
 # instead of disabling an unknown provider.
 #
-# `presets` defaults to empty — the bundle never widens a sandbox silently.
-# Enable the presets this machine actually needs (see README for the
-# per-preset trust notes; pnpm-engine in particular is a separate decision).
+# `presets` is omitted on purpose: the plugin schema's default then enables
+# the six ordinary cache presets (uv-cache, cargo-cache, pnpm-store,
+# pnpm-runtime-locks, gradle-cache, maven-cache). Set `presets: []` to fall
+# back to the stock sandbox, or an explicit list to replace the default;
+# pnpm-engine and gradle-jdks (whole toolchain installs) stay opt-in.
 # A later layer can override this row by id; config is replaced wholesale,
-# so restate `presets` and `paths` when overriding.
+# so restate `paths` (and `presets`, if you want one) when overriding.
 - id: sandbox
   name: '@deepseek-ai/dsh-sandbox-local'
   disabled: true
@@ -24,5 +26,4 @@
     - id: toolchain-sandbox
       name: dsh-toolchain-access
       config:
-        presets: []
         paths: {}

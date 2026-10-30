@@ -24,7 +24,7 @@
  *
  * - Enabling a preset makes that directory writable for EVERY process in
  *   the confined sandbox, not just the tool it is named after.
- * - Grants come from the plugin row (the operator's explicit choice) and
+ * - Grants come from the plugin row (including its schema defaults) and
  *   ambient host anchors (HOME/XDG/CARGO_HOME/PNPM_HOME/UV_CACHE_DIR as
  *   exported by the operator's session). Agent claims, repository files and
  *   session env overlays are never grant sources: a project that points
@@ -108,11 +108,21 @@ export interface PathsConfig {
 
 /** Row configuration: the stock sandbox-local knobs plus the grant fields. */
 export interface Config extends LocalSandboxConfig {
-  /** Enabled directory-grant presets; empty means stock behavior everywhere. */
+  /** Enabled presets; omitted resolves to DEFAULT_PRESETS, an explicit list (including []) replaces it exactly. */
   presets: readonly PresetId[]
   /** Explicit path overrides; unset anchors fall back to ambient host env then defaults. */
   paths: Readonly<PathsConfig>
 }
+
+/** Presets enabled when a row omits `presets`: the ordinary cache presets — the whole-toolchain-install presets (pnpm-engine, gradle-jdks) stay opt-in. */
+export const DEFAULT_PRESETS = [
+  'uv-cache',
+  'cargo-cache',
+  'pnpm-store',
+  'pnpm-runtime-locks',
+  'gradle-cache',
+  'maven-cache',
+] as const satisfies readonly PresetId[]
 
 /**
  * The schema mirrors `LocalSandboxProvider.Config` verbatim (this row
@@ -133,8 +143,8 @@ export const configFields = {
   probeTimeoutMs: Schema.natural().default(5000).description(
     'Positive timeout in ms for each functional runner probe (stock sandbox-local field restated).',
   ),
-  presets: Schema.array(Schema.union([...PRESET_IDS])).default([]).description(
-    'Enabled writable-directory presets: uv-cache ($XDG_CACHE_HOME/uv), cargo-cache (registry, git and the .package-cache lock under CARGO_HOME), pnpm-store (<pnpm home>/store), pnpm-runtime-locks ($XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>), pnpm-engine (the whole pnpm home incl. executable engine copies — separate trust decision, keep off unless you need cold engine installs). Grants apply to every process in the sandbox under workspace-write; missing or invalid paths fail the confined command with a reason.',
+  presets: Schema.array(Schema.union([...PRESET_IDS])).default([...DEFAULT_PRESETS]).description(
+    'Enabled writable-directory presets; the per-preset grant paths are in the package README. Omitted: the six ordinary cache presets default on (uv-cache, cargo-cache, pnpm-store, pnpm-runtime-locks, gradle-cache, maven-cache). presets: [] turns every preset off (stock sandbox); a non-empty list replaces the default exactly. pnpm-engine and gradle-jdks are whole toolchain installs and stay opt-in only, never default. Each enabled preset makes its exact directories writable for EVERY process in the sandbox under workspace-write, never a parent tree; a preset that cannot be honored (missing/invalid path, missing/invalid XDG_RUNTIME_DIR, non-stock backend) fails the confined command with a reason instead of being silently skipped.',
   ),
   paths: Schema.object({
     uvCache: Schema.string().description('Explicit uv cache directory (default: paths from UV_CACHE_DIR, else <XDG_CACHE_HOME|~/.cache>/uv).'),
