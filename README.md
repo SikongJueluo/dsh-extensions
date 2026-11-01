@@ -19,6 +19,7 @@ Out-of-tree [DeepSeek Harness](https://www.deepseek.com/harness/en/) 插件 bund
 | [`dsh-rtk-rewrite`](packages/rtk-rewrite/) | rtk 命令改写执行器：模型跑 `git status`、实际执行 `rtk git status`，用确定性压缩输出降低上下文压力 |
 | [`dsh-search-integrator`](packages/search-integrator/) | 多源检索 + 整合模型一次成文：`web_research` 吃整个问题，去重排序后返回带引文校验的综合答案与覆盖说明 |
 | [`dsh-toolchain-access`](packages/toolchain-access/) | 沙箱窄目录授权：默认开启 uv/Cargo/pnpm/Gradle/Maven 缓存与共享锁目录，workspace-write 下精确 bind（钉版 bwrap 布局、fail-closed）；可显式缩减或全关，整套工具链安装另行 opt-in；接入见 [plan-dsh-toolchain-access.md](docs/plan-dsh-toolchain-access.md) |
+| [`dsh-recursive-skills`](packages/recursive-skills/) | 分类目录里嵌套的 `SKILL.md` 自动进入原生技能目录：追加 provider、按需加载、增删与 frontmatter 变化热刷新；原生直接技能仍优先；接入见 [plan-dsh-recursive-skills.md](docs/plan-dsh-recursive-skills.md) |
 
 ## 安装
 

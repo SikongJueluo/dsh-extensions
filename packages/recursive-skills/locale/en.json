@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Recursive Skills",
+    "description": "Discovers SKILL.md bundles nested in category directories under the shared agents skill root and merges them into the native skill catalog."
+  }
+}
