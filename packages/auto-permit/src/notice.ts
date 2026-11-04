@@ -34,6 +34,7 @@ export type NoticeOutcome =
   | 'allowed-by-cmd-permit'
   | 'deferred'
   | 'high-risk'
+  | 'container-guard'
 
 const SUMMARY_PREFIX: Record<NoticeOutcome, string> = {
   allowed: 'auto-permit ✓ allowed',
@@ -41,6 +42,7 @@ const SUMMARY_PREFIX: Record<NoticeOutcome, string> = {
   'allowed-by-cmd-permit': 'cmd-permit ✓ allowlisted',
   deferred: 'auto-permit ✎ deferred to you',
   'high-risk': 'auto-permit ⚠ irreversible shape — needs you',
+  'container-guard': 'auto-permit ⚠ container boundary — needs you',
 }
 
 const BODY_PREFIX: Record<NoticeOutcome, string> = {
@@ -49,11 +51,13 @@ const BODY_PREFIX: Record<NoticeOutcome, string> = {
   'allowed-by-cmd-permit': '[cmd-permit via auto-permit] allowed this escalation: allowlist hit',
   deferred: '[auto-permit] deferred this escalation to the user',
   'high-risk': '[auto-permit] routed this escalation to the user: irreversible shape',
+  'container-guard': '[auto-permit] routed this container escalation to the user',
 }
 
 /** The reason line's label per outcome (the judge is not the only decider). */
 const REASON_PREFIX: Partial<Record<NoticeOutcome, string>> = {
   'allowed-by-cmd-permit': 'rule',
+  'container-guard': 'boundary',
 }
 
 /**

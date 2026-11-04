@@ -7,7 +7,15 @@
  * escalate privileges are a human decision even when the prompt names them,
  * and even when an identical command was allowed before. The shapes are
  * deliberately conservative (false positives just cost a dialog).
+ *
+ * The table is shared: cmd-permit's `cmdPermit.isHighRisk()` uses it as its
+ * built-ins, so these shapes also cannot be claimed by a user allowlist.
+ * Container-specific boundaries (compose, remote targets, privilege, host
+ * namespaces, engine sockets, sensitive mounts, existing-resource lifecycle,
+ * prune, push, host configuration) live in ./container.ts and are folded in
+ * here so both paths enforce them.
  */
+import { containerRisk } from './container.js'
 
 /** One anchored shape: matches the whole command string case-insensitively. */
 const SHAPES: RegExp[] = [
@@ -36,4 +44,5 @@ const SHAPES: RegExp[] = [
  */
 export function isHighRisk(command: string): boolean {
   return SHAPES.some((shape) => shape.test(command))
+    || containerRisk(command) !== undefined
 }

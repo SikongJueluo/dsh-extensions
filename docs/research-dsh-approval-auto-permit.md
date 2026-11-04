@@ -461,3 +461,49 @@ reason}`、`approval/decided` 的 `{id, outcome}`——记忆机制本身无 bug
   （allowed/allowed-by-memory 绿色 success，deferred/high-risk 警告色，
   锚 `[data-composer-card]`，用官方 primitives.Toast）；新 attach 的页面
   拿游标不回放历史。
+
+## 9. 容器构建/临时验证支持（v4，2026-11-05）
+
+背景：sandbox 内的 Podman 反复触发提权。先评估过 toolchain-access 方向，
+结论是**目录授权不够**：bwrap 只追加可写 bind，而完整 Podman 还需要
+UID/GID namespace、no_new_privs、overlay/FUSE、cgroup 与生命周期管理。
+用户选择不做嵌套容器 runner，改由 auto-permit 判官判断提权是否常规。
+
+实现（`dsh-auto-permit-v4`）：
+
+- **判据 4**：用户明确要求构建/测试/临时验证本项目时，直接的本地、当前
+  用户身份、rootless 的 podman/docker 调用可在边界内 ALLOW；容器运行时
+  自身存储（HOME 下的镜像/容器存储、namespace、overlay）不算 v3 的
+  "工具链缓存写"，不触发缓存上限。compose、wrapper 脚本、Makefile、
+  远端目标一律 DEFER（解析后的效果不在命令字符串里）。
+- **程序硬规则**（`src/container.ts`，并入共享 `isHighRisk`，cmd-permit
+  白名单同样绕不过）：compose/manifest、`--remote/--url/--connection/-H`
+  与 `CONTAINER_HOST` 等远端目标、`--privileged`/`--cap-add`/`--device`/
+  `--security-opt` 放宽/`--ssh`、host 网络/PID/IPC/UTS/userns/cgroupns、
+  引擎 socket、HOME/根/凭据/配置/`/dev`/`/proc`/`/sys`/env-file/secret
+  暴露、既有容器启停/exec/rm/cp/commit、volume/全局 prune/reset、push、
+  system/machine/generate/connection/hooks-dir。顶级别名与分组写法统一
+  归一化（`podman stop` / `podman container stop`、`podman push` /
+  `podman image push` / `podman manifest push`、`podman container prune` /
+  `podman volume prune` 等）。挂载源识别 pflag 的等价拼写：`-v源:目标`、
+  `-v=源`、`-itv源:目标`、`--volume=源`、`--mount src=源`，并对可静态确定
+  的源路径归一化尾斜杠/重复斜杠/`.` 段（`..` 段因 symlink 语义直接交人）。
+  命中 → `container boundary` 通知行 + 人工弹窗，不过模型。
+- **精确记忆绕过**：容器引擎调用与 `.sh/.bash` 脚本即便来源合格也不重放
+  （效果来自可变文件/引擎状态）；该判断在 exact-repeat 短路之前生效。
+  同族等价规则也明确不适用于容器调用。
+- **完整命令**：硬规则与白名单使用日志恢复的完整命令，不做截断；判官侧
+  8000 字符预算，超预算直接 defer，绝不用前缀判完整命令。
+- **执行目录**（2026-11-05 按审查修正）：不可变 `session_workspace`
+  （header.cwd）与 `effective_cwd`（工作目录投影：审批时读
+  `ctx.workingDirectory.get(session)`，日志 `working-directory/change`
+  回退，header 最后回退）分开；`resolved_working_directory` 按宿主
+  `resolveWorkdir` 规则解析（省略 workdir = effective cwd、相对路径拼接、
+  绝对路径原样）。判据 4 以 resolved 目录判断 `$PWD` 与相对路径是否落在
+  workspace 内，目录不可用/不一致 → DEFER。目录字符串不是安全证明；
+  文本扫描不宣称是 shell/Podman 解析器。
+
+未做（有意）：读取 Containerfile/compose.yaml 作为证据、可信的容器/卷
+归属投影、真实容器运行验证。没有归属证据时，既有容器的启停/清理一律
+交人工；不为"名字像本任务"发明授权规则。真实 Podman 行为与判官模型在
+真实模型上的表现仍未验证，首轮验证为 fixture/mock 判官。

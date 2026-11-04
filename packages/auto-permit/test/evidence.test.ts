@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { Session } from '@deepseek-ai/dsh-session'
-import { collectEvidence, MAX_COMMAND_CHARS } from '../src/evidence.js'
+import { collectEvidence, MAX_COMMAND_CHARS, MAX_PATH_CHARS } from '../src/evidence.js'
 
 interface Fixture {
   type: string
@@ -18,8 +18,11 @@ interface Fixture {
 }
 
 /** Minimal session surface `collectEvidence` reads. */
-function sessionOf(events: Fixture[]): Session {
-  return { snapshotEvents: () => [...events] } as unknown as Session
+function sessionOf(events: Fixture[], header?: { cwd?: string }): Session {
+  return {
+    snapshotEvents: () => [...events],
+    ...(header === undefined ? {} : { header }),
+  } as unknown as Session
 }
 
 /** Top-level `tool/call`: arguments are a JSON string. */
@@ -62,6 +65,11 @@ function userPrompt(seq: number, text: string): Fixture {
     seq,
     data: { source: { kind: 'user' }, content: [{ type: 'text', text }] },
   }
+}
+
+/** A committed working-directory change, as dsh-working-directory appends it. */
+function changeCwd(seq: number, cwd: string): Fixture {
+  return { type: 'working-directory/change', seq, data: { cwd } }
 }
 
 const UV_ARGS = {
@@ -326,6 +334,96 @@ describe('exact-repeat memory across both paths', () => {
   })
 })
 
+describe('execution context: workdir, effective cwd, and session workspace', () => {
+  it('recovers the call workdir from direct and PTC records identically', () => {
+    const args = {
+      command: 'podman build -t app .',
+      workdir: '/home/u/Projects/app',
+      sandbox_permissions: 'danger-full-access',
+    }
+    const direct = collectEvidence(sessionOf([directCall(1, 'c1', 'bash', args)]), 'c1')
+    const ptc = collectEvidence(sessionOf([ptcStart(1, 'root:ptc:1', args)]), 'root:ptc:1')
+    expect(direct.call?.workdir).toBe('/home/u/Projects/app')
+    expect(ptc.call).toEqual(direct.call)
+  })
+
+  it('taints an id whose workdir disagrees between records', () => {
+    const evidence = collectEvidence(sessionOf([
+      ptcStart(1, 'root:ptc:1', { command: 'podman build .', workdir: '/home/u/app' }),
+      ptcStart(2, 'root:ptc:1', { command: 'podman build .', workdir: '/etc' }),
+    ]), 'root:ptc:1')
+    expect(evidence.call).toBeUndefined()
+  })
+
+  it('keeps the immutable workspace and the recorded effective cwd distinct', () => {
+    const evidence = collectEvidence(sessionOf([
+      changeCwd(1, '/home/u/other-project'),
+      ptcStart(2, 'root:ptc:1', { command: 'podman build .' }),
+    ], { cwd: '/home/u/project' }), 'root:ptc:1')
+    expect(evidence.workspace).toBe('/home/u/project')
+    expect(evidence.effectiveCwd).toBe('/home/u/other-project')
+  })
+
+  it('resolves an omitted workdir to the effective cwd, not the header', () => {
+    const evidence = collectEvidence(sessionOf([
+      changeCwd(1, '/home/u/other-project'),
+      ptcStart(2, 'root:ptc:1', { command: 'podman run --rm alpine true' }),
+    ], { cwd: '/home/u/project' }), 'root:ptc:1')
+    expect(evidence.resolvedWorkdir).toBe('/home/u/other-project')
+  })
+
+  it('resolves a relative workdir against the effective cwd like the host', () => {
+    const evidence = collectEvidence(sessionOf([
+      changeCwd(1, '/home/u/other-project'),
+      ptcStart(2, 'root:ptc:1', { command: 'podman build .', workdir: 'src' }),
+    ], { cwd: '/home/u/project' }), 'root:ptc:1')
+    expect(evidence.resolvedWorkdir).toBe('/home/u/other-project/src')
+  })
+
+  it('uses an absolute workdir as-is', () => {
+    const evidence = collectEvidence(sessionOf([
+      changeCwd(1, '/home/u/other-project'),
+      ptcStart(2, 'root:ptc:1', { command: 'podman build .', workdir: '/tmp/build' }),
+    ], { cwd: '/home/u/project' }), 'root:ptc:1')
+    expect(evidence.resolvedWorkdir).toBe('/tmp/build')
+  })
+
+  it('prefers the host service value over the log and the header', () => {
+    const evidence = collectEvidence(sessionOf([
+      changeCwd(1, '/stale/from-log'),
+      ptcStart(2, 'root:ptc:1', { command: 'podman build .' }),
+    ], { cwd: '/home/u/project' }), 'root:ptc:1', '/live/from-service')
+    expect(evidence.effectiveCwd).toBe('/live/from-service')
+    expect(evidence.resolvedWorkdir).toBe('/live/from-service')
+  })
+
+  it('falls back to the header when no change and no service value exist', () => {
+    const evidence = collectEvidence(
+      sessionOf([ptcStart(1, 'root:ptc:1', { command: 'podman build .' })], { cwd: '/home/u/Projects/app' }),
+      'root:ptc:1',
+    )
+    expect(evidence.workspace).toBe('/home/u/Projects/app')
+    expect(evidence.effectiveCwd).toBe('/home/u/Projects/app')
+    expect(evidence.resolvedWorkdir).toBe('/home/u/Projects/app')
+  })
+
+  it('reports no workspace and no resolved directory when nothing records one', () => {
+    const evidence = collectEvidence(sessionOf([ptcStart(1, 'root:ptc:1', { command: 'podman build .' })]), 'root:ptc:1')
+    expect(evidence.workspace).toBeUndefined()
+    expect(evidence.effectiveCwd).toBeUndefined()
+    expect(evidence.resolvedWorkdir).toBeUndefined()
+  })
+
+  it('treats an over-long workdir as unresolved and clips it for display', () => {
+    const workdir = '/' + 'x'.repeat(MAX_PATH_CHARS * 2)
+    const evidence = collectEvidence(sessionOf([
+      ptcStart(1, 'root:ptc:1', { command: 'podman build .', workdir }),
+    ], { cwd: '/home/u/app' }), 'root:ptc:1')
+    expect(evidence.call?.workdir?.endsWith('…[truncated]')).toBe(true)
+    expect(evidence.resolvedWorkdir).toBeUndefined()
+  })
+})
+
 describe('unchanged policy around the fold', () => {
   it('gathers prompts only from human user messages', () => {
     const evidence = collectEvidence(sessionOf([
@@ -348,10 +446,10 @@ describe('unchanged policy around the fold', () => {
     expect(evidence.call?.command).toBe('uv sync')
   })
 
-  it('still clips over-long commands', () => {
+  it('never clips the complete command: hard rules and the allowlist must see all of it', () => {
     const long = 'uv sync ' + 'x'.repeat(MAX_COMMAND_CHARS)
     const evidence = collectEvidence(sessionOf([ptcStart(1, 'root:ptc:1', { command: long })]), 'root:ptc:1')
-    expect(evidence.call?.command.length).toBeLessThanOrEqual(MAX_COMMAND_CHARS + '…[truncated]'.length)
-    expect(evidence.call?.command.endsWith('…[truncated]')).toBe(true)
+    expect(evidence.call?.command).toBe(long)
+    expect(evidence.call?.command.endsWith('…[truncated]')).toBe(false)
   })
 })

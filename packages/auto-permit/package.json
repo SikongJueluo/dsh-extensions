@@ -1,7 +1,7 @@
 {
   "name": "dsh-auto-permit",
   "version": "0.2.0",
-  "description": "DSH auto-permit plugin: an AI answerer on the approval waterfall that auto-allows repeated/nearly-repeated bash sandbox escalations a small judge model can ground in the session's user prompts and prior approvals; judge route declared in the plugin row config, editable in Settings when the row is Web-writable",
+  "description": "DSH auto-permit plugin: an AI answerer on the approval waterfall that auto-allows repeated/nearly-repeated bash sandbox escalations and evidence-complete local container build/verification escalations a small judge model can ground in the session's user prompts, call context, and prior approvals, while container boundaries (compose, remote targets, privilege, host namespaces, sensitive mounts, existing-resource lifecycle, prune, push) always go to the human; judge route declared in the plugin row config, editable in Settings when the row is Web-writable",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",

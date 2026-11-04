@@ -24,7 +24,10 @@ answerer**——配置内命令族的 sandbox 提权不再弹窗，也不消耗 
 
 1. **高危形状**：内置表（`rm -rf ~`、`git clean -xfd`、`git reset --hard`、
    `git push --force`、`sudo`、`curl|sh` …）∪ 本行 `denyShape` 正则命中 →
-   `next()` 交人工，永不过插件。
+   `next()` 交人工，永不过插件。内置表还包括 [auto-permit](../auto-permit/)
+   的容器边界形状（compose、远端目标、privileged/设备、host namespace、
+   引擎 socket、敏感挂载、既有容器生命周期、volume/全局 prune、push、宿主
+   引擎配置），所以即使 `allow: ["podman"]` 也覆盖不了这些。
 2. **白名单覆盖**：命令按 `&&`/`||`/`;`/`|`/换行切段，**每段**都被
    `allow`（命令名，自动剥 `VAR=` 前缀 / wrapper / 路径 basename）或
    `allowPattern`（正则，如 `^gh pr\b`）覆盖，且请求的 mode ≤ `maxMode` →

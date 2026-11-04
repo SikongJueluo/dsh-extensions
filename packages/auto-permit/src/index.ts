@@ -6,15 +6,22 @@
  * (registered with `prepend`) and decides whether the request matches what
  * the user already asked for — or already approved — in this session:
  *
- * 1. exact-repeat memory: the same command escalated to the same mode was
- *    already allowed in this session → allowed at once, no model call;
- * 2. high-risk irreversibility shapes (rm -rf ~, git clean -xfd, reset
- *    --hard, push --force, sudo, curl|sh…) → straight to the human dialog;
- * 3. otherwise one bounded one-shot judge call (a small model configured in
+ * 1. high-risk irreversibility shapes (rm -rf ~, git clean -xfd, reset
+ *    --hard, push --force, sudo, curl|sh…) and container boundaries
+ *    (compose, remote targets, privilege, host namespaces, engine sockets,
+ *    sensitive mounts, lifecycle of existing resources, prune, push, host
+ *    configuration) → straight to the human dialog;
+ * 2. cmd-permit's explicit allowlist, when that plugin is mounted → its
+ *    claim wins over both memory and the judge;
+ * 3. exact-repeat memory: the same command escalated to the same mode was
+ *    already allowed in this session → allowed at once, no model call; never
+ *    for container-engine or script commands, whose effects come from mutable
+ *    files (those are judged again every time);
+ * 4. otherwise one bounded one-shot judge call (a small model configured in
  *    the plugin row config) over the session's user prompts, the pending
- *    call's full arguments, and the already-approved commands: ALLOW claims
- *    the request, everything else — ambiguity, timeout, parse failure —
- *    falls through to the human answerer.
+ *    call's full arguments, the call/session working directories, and the
+ *    already-approved commands: ALLOW claims the request, everything else —
+ *    ambiguity, timeout, parse failure — falls through to the human answerer.
  *
  * Every decision is appended to the session's log as a `form: 'notice'`
  * message, so the stock Web chat shows it as a collapsed context row
@@ -34,6 +41,7 @@ import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-app
 import type { Session } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { collectEvidence } from './evidence.js'
+import { containerRisk, isMutableFileDependent } from './container.js'
 import { isHighRisk } from './rules.js'
 import { judge } from './judge.js'
 import { buildNoticeMessage } from './notice.js'
@@ -44,6 +52,7 @@ import type { Config as RowConfig } from './settings.js'
 export { Config } from './settings.js'
 export type { AutoPermitSettings } from './settings.js'
 export { collectEvidence } from './evidence.js'
+export { containerRisk, isMutableFileDependent, CONTAINER_RISKS } from './container.js'
 export { isHighRisk } from './rules.js'
 export { judge, buildJudgeMessage, PROMPT_VERSION, SYSTEM_PROMPT } from './judge.js'
 export { buildNoticeMessage } from './notice.js'
@@ -117,6 +126,15 @@ interface CmdPermitLike {
 }
 
 /**
+ * The optional dsh-working-directory service: the host's committed current
+ * directory for a session (updated by `working-directory/change`, and the
+ * directory a relative or omitted bash `workdir` resolves against).
+ */
+interface WorkingDirectoryLike {
+  get(session: Session): string
+}
+
+/**
  * Record the decision's notice through the order-safe channel.
  *
  * @param agent - the agent the approval was raised for.
@@ -179,7 +197,11 @@ export function apply(ctx: Context, config: RowConfig): void {
           if (req.callId !== undefined) selfAllowed.add(keyOf(session.id, req.callId))
         }
 
-        const evidence = collectEvidence(session, req.callId)
+        const evidence = collectEvidence(
+          session,
+          req.callId,
+          (ctx.get('workingDirectory') as WorkingDirectoryLike | undefined)?.get(session),
+        )
         if (evidence.call === undefined) return rest()
 
         const command = evidence.call.command.slice(0, 160)
@@ -187,15 +209,19 @@ export function apply(ctx: Context, config: RowConfig): void {
         // Shared high-risk oracle: when dsh-cmd-permit is mounted, its table
         // (these built-ins plus its row's denyShape regexes) is authoritative,
         // so the judge and the allowlist defer on exactly the same shapes.
+        // The union is deliberate: this plugin's own boundary must hold even
+        // when the peer's table is older than this build.
         const cmdPermit = ctx.get('cmdPermit') as CmdPermitLike | undefined
-        const highRisk = cmdPermit?.isHighRisk(evidence.call.command)
-          ?? isHighRisk(evidence.call.command)
+        const container = containerRisk(evidence.call.command)
+        const highRisk = isHighRisk(evidence.call.command)
+          || (cmdPermit?.isHighRisk(evidence.call.command) ?? false)
         if (highRisk) {
           ctx.logger.info(
-            'auto-permit: high-risk shape, deferring to human: %s',
+            'auto-permit: high-risk shape (%s), deferring to human: %s',
+            container ?? 'irreversible',
             command,
           )
-          notify(agent, 'high-risk', command)
+          notify(agent, container === undefined ? 'high-risk' : 'container-guard', command, container)
           return rest()
         }
 
@@ -226,12 +252,21 @@ export function apply(ctx: Context, config: RowConfig): void {
         // dialog). Our own earlier auto-allowances are deliberately NOT
         // replayable — a pre-v3 cache-rule allowance must not become a
         // standing grant, and post-v3 allowances stand on their own merits
-        // each time.
+        // each time. Container-engine and script commands are excluded even
+        // when the source qualifies: their effect is a mutable file or
+        // engine state, so the identical string must be judged again.
         const replayable = evidence.exactRepeatSources.some(
           (priorCallId) => chainApproved.has(keyOf(session.id, priorCallId))
             && !selfAllowed.has(keyOf(session.id, priorCallId)),
         )
-        if (replayable) {
+        const mutableRepeat = replayable && isMutableFileDependent(evidence.call.command)
+        if (mutableRepeat) {
+          ctx.logger.info(
+            'auto-permit: repeat re-judged (mutable-file dependent): %s',
+            command,
+          )
+        }
+        if (replayable && !mutableRepeat) {
           ctx.logger.info(
             'auto-permit: exact repeat of a chain-approved command, allowing: %s',
             command,
