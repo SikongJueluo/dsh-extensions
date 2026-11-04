@@ -41,6 +41,7 @@ export const PRESET_IDS = [
   'gradle-cache',
   'gradle-jdks',
   'maven-cache',
+  'semgrep-state',
 ] as const
 
 /** One enabled preset. */
@@ -58,6 +59,8 @@ export interface GrantEnv {
   xdgDataHome?: string
   /** `$XDG_RUNTIME_DIR` when the operator exported one (absolute). */
   xdgRuntimeDir?: string
+  /** `$XDG_CONFIG_HOME` when the operator exported one (absolute). */
+  xdgConfigHome?: string
   /** `$CARGO_HOME` when the operator exported one (absolute). */
   cargoHome?: string
   /** `$PNPM_HOME` when the operator exported one (absolute). */
@@ -66,6 +69,10 @@ export interface GrantEnv {
   uvCache?: string
   /** `$GRADLE_USER_HOME` when the operator exported one (absolute). */
   gradleUserHome?: string
+  /** `$SEMGREP_LOG_FILE` when the operator exported one (absolute). */
+  semgrepLogFile?: string
+  /** `$SEMGREP_VERSION_CACHE_PATH` when the operator exported one (absolute). */
+  semgrepVersionCache?: string
 }
 
 /** Explicit path overrides from the plugin row's `paths` config. */
@@ -84,6 +91,10 @@ export interface GrantOverrides {
   gradleUserHome?: string
   /** Maven user home anchor for maven-cache (default `~/.m2`; Maven has no standard env var for it). */
   mavenHome?: string
+  /** Host directory mounted over semgrep's data dir in the sandbox (default `<cache base>/semgrep-state`). */
+  semgrepState?: string
+  /** The semgrep version-check cache file (default `<cache base>/semgrep_version`). */
+  semgrepVersionCache?: string
 }
 
 /** The filesystem slice `resolveGrants` needs; sync like the stock provider. */
@@ -102,7 +113,7 @@ export interface GrantFs {
 }
 
 /** How a preset's default path may be prepared when missing. */
-export type PrepareKind = 'cache-dir' | 'lock-dir' | 'lock-file'
+export type PrepareKind = 'cache-dir' | 'lock-dir' | 'lock-file' | 'state-file' | 'mount-dir'
 
 /** The stat subset the checks consume. */
 export interface GrantStat {
@@ -114,7 +125,12 @@ export interface GrantStat {
   mode: number
 }
 
-/** One writable bind the sandbox adapter adds (source and destination are the same spelling). */
+/**
+ * One mount the sandbox adapter adds. For ordinary grants `destination`
+ * equals `source`; a private-state shadow (semgrep) mounts a writable host
+ * cache directory at a different sandbox path — the destination is only a
+ * mount point and is never granted on the host.
+ */
 export interface GrantBind {
   readonly source: string
   readonly destination: string
@@ -128,6 +144,7 @@ export interface GrantIssue {
   readonly reason:
     | 'missing'
     | 'not-dir-or-file'
+    | 'not-a-directory'
     | 'not-owner'
     | 'not-owner-writable'
     | 'group-or-world-writable'
@@ -241,14 +258,26 @@ function exactFloors(env: GrantEnv, canonicalHome: string): readonly string[] {
 export type PathRefusal = 'floor-path' | 'credential-segment'
 
 /**
+ * The system-floor half of the refusal rules. Kept separate because a
+ * private-state shadow's DESTINATION is a mount point, not a grant: mounting
+ * over a credential tree (`$XDG_CONFIG_HOME/.config` included) is exactly
+ * what makes semgrep's state private, so only the system floors apply there.
+ */
+export function pathFloorRefusal(path: string, env: GrantEnv, canonicalHome: string): PathRefusal | undefined {
+  if (FLOOR_PREFIXES.some((floor) => pathCovers(floor, path))) return 'floor-path'
+  if (exactFloors(env, canonicalHome).includes(path)) return 'floor-path'
+  return undefined
+}
+
+/**
  * The ONE home of the floor/credential judgment, used by both the final
  * grant validation and the controlled-preparation pre-flight — one
  * implementation so the two rule sets can never drift apart. `path` is
  * canonical (post-realpath); `canonicalHome` is the realpath'd HOME.
  */
 export function pathRefusal(path: string, env: GrantEnv, canonicalHome: string): PathRefusal | undefined {
-  if (FLOOR_PREFIXES.some((floor) => pathCovers(floor, path))) return 'floor-path'
-  if (exactFloors(env, canonicalHome).includes(path)) return 'floor-path'
+  const floor = pathFloorRefusal(path, env, canonicalHome)
+  if (floor !== undefined) return floor
   if (path.split(sep).some((segment) => CREDENTIAL_SEGMENTS.has(segment))) return 'credential-segment'
   return undefined
 }
@@ -263,15 +292,15 @@ function canonicalHomeOf(env: GrantEnv, fs: GrantFs): string {
 }
 
 /**
- * Pre-flight for controlled preparation: would creating `entry.path` land
- * inside a system floor or a credential tree? Resolves the nearest EXISTING
- * ancestor (the base being a symlink then points at the real target) and
- * applies the SAME refusal rules as the final validation to the resolved
- * ancestor plus the still-missing segments. Returns true when creation
- * must NOT happen.
+ * Pre-flight for controlled preparation: would creating `path` land inside a
+ * system floor (or, for grant sources, a credential tree)? Resolves the
+ * nearest EXISTING ancestor (the base being a symlink then points at the real
+ * target) and applies the SAME refusal rules as the final validation to the
+ * resolved ancestor plus the still-missing segments. Returns true when
+ * creation must NOT happen.
  */
-function preflightRejects(entry: NamedPath, env: GrantEnv, fs: GrantFs): boolean {
-  let ancestor = entry.path
+function preflightRejects(path: string, env: GrantEnv, fs: GrantFs, mode: 'grant' | 'mount-point' = 'grant'): boolean {
+  let ancestor = path
   const missing: string[] = []
   let resolved: string | undefined
   while (resolved === undefined) {
@@ -287,7 +316,10 @@ function preflightRejects(entry: NamedPath, env: GrantEnv, fs: GrantFs): boolean
   const effective = missing.length === 0
     ? resolved!
     : `${resolved === '/' ? '' : resolved}${sep}${missing.join(sep)}`
-  return pathRefusal(effective, env, canonicalHomeOf(env, fs)) !== undefined
+  const refusal = mode === 'mount-point'
+    ? pathFloorRefusal(effective, env, canonicalHomeOf(env, fs))
+    : pathRefusal(effective, env, canonicalHomeOf(env, fs))
+  return refusal !== undefined
 }
 
 /** `child === parent` or `child` sits below `parent` (both canonical, absolute). */
@@ -311,6 +343,7 @@ export function defaultBaseTrees(env: GrantEnv): readonly string[] {
     joinDir(env.home, '.local' + sep + 'share'),
     env.xdgCacheHome ?? '',
     env.xdgDataHome ?? '',
+    env.xdgConfigHome ?? '',
     env.xdgRuntimeDir ?? '',
     env.home,
   ]
@@ -327,6 +360,46 @@ interface NamedPath {
   base: string
   /** Controlled preparation allowed for a missing implicit default (never for explicit paths). */
   prepare: PrepareKind | 'none'
+  /**
+   * Set only for a private-state shadow: the sandbox path the writable
+   * `path` is mounted over. The destination is a mount point, not a grant —
+   * it is never made writable on the host.
+   */
+  destination?: string
+  /** Controlled preparation for a missing shadow destination (empty mount directory). */
+  prepareDestination?: PrepareKind
+}
+
+/**
+ * Semgrep's own storage layout, mirrored from pysemgrep (`env.py`) and
+ * osemgrep (`Semgrep_envvars.ml`):
+ * - data folder: `$XDG_CONFIG_HOME/.semgrep` when `XDG_CONFIG_HOME` is an
+ *   EXISTING directory, else `~/.semgrep` (note: semgrep joins `.semgrep`
+ *   directly under XDG_CONFIG_HOME, unlike the usual XDG layout);
+ * - cache base for the version-check file: `$XDG_CACHE_HOME` when it is an
+ *   existing directory, else `~/.cache`.
+ */
+function semgrepDataDir(env: GrantEnv, fs: GrantFs): string {
+  const base = env.xdgConfigHome !== undefined && isExistingDirectory(fs, env.xdgConfigHome)
+    ? env.xdgConfigHome
+    : env.home
+  return joinDir(base, '.semgrep')
+}
+
+/** The base semgrep writes its version-check file into (its own is_dir() test). */
+function semgrepCacheBase(env: GrantEnv, fs: GrantFs): string {
+  return env.xdgCacheHome !== undefined && isExistingDirectory(fs, env.xdgCacheHome)
+    ? env.xdgCacheHome
+    : joinDir(env.home, '.cache')
+}
+
+/** True when `path` is an existing directory (semgrep uses `Path.is_dir()`). */
+function isExistingDirectory(fs: GrantFs, path: string): boolean {
+  try {
+    return fs.stat(path).isDirectory
+  } catch {
+    return false
+  }
 }
 
 /** First non-empty anchor: the row's paths override wins over the exported env var. */
@@ -346,6 +419,7 @@ function derivePaths(
   presets: readonly PresetId[],
   overrides: Readonly<GrantOverrides>,
   env: GrantEnv,
+  fs: GrantFs,
 ): { named: NamedPath[]; issues: GrantIssue[] } {
   const named: NamedPath[] = []
   const issues: GrantIssue[] = []
@@ -488,9 +562,120 @@ function derivePaths(
         }
         break
       }
+      case 'semgrep-state': {
+        // Semgrep's data folder must be writable as a DIRECTORY, not just
+        // file-by-file: pysemgrep's Settings.save() runs on every invocation
+        // and rewrites settings.yml atomically (mkstemp INSIDE the folder,
+        // then rename). A read-only folder dies with EROFS before the scan
+        // starts — the Python catch covers PermissionError only, and EROFS is
+        // a plain OSError (verified on-host with 1.182.1). The folder also
+        // holds settings.yml, which may carry the Semgrep API token, so it is
+        // never granted: a private state directory is bind-mounted OVER it in
+        // the sandbox. The sandbox writes only that copy; the host folder
+        // (and any login stored there) stays invisible and untouched.
+        //
+        // The version-check cache is a separate ordinary file outside the
+        // data folder (~/.cache/semgrep_version), written by the CLI after
+        // the version fetch; its absence likewise fails the run.
+        const cacheBase = semgrepCacheBase(env, fs)
+        const stateOverride = overrides.semgrepState
+        const stateExplicit = stateOverride !== undefined && stateOverride !== ''
+        const state = stateExplicit ? stateOverride : joinDir(cacheBase, 'semgrep-state')
+        const dataDir = semgrepDataDir(env, fs)
+        named.push({
+          preset,
+          path: state,
+          explicit: stateExplicit,
+          base: cacheBase,
+          prepare: stateExplicit ? 'none' : 'cache-dir',
+          destination: dataDir,
+          prepareDestination: 'mount-dir',
+        })
+        // SEMGREP_LOG_FILE moves the log out of the shadowed folder: honor
+        // the operator's exact file as a plain grant (logs carry no
+        // credentials). A log inside the data folder is covered by the
+        // shadow and needs no separate bind.
+        if (env.semgrepLogFile !== undefined && env.semgrepLogFile !== ''
+          && !pathCovers(dataDir, env.semgrepLogFile)) {
+          push(preset, env.semgrepLogFile, true, '', 'none')
+        }
+        // Version cache: row override > $SEMGREP_VERSION_CACHE_PATH > default.
+        // A path inside the shadowed folder is covered by the shadow mount.
+        const version = pickAnchor(overrides.semgrepVersionCache, env.semgrepVersionCache)
+        if (version !== undefined) {
+          if (!pathCovers(dataDir, version)) push(preset, version, true, '', 'none')
+        } else {
+          push(preset, joinDir(cacheBase, 'semgrep_version'), false, cacheBase, 'state-file')
+        }
+        break
+      }
     }
   }
   return { named, issues }
+}
+
+/**
+ * Resolve (and, at confine time, create) a private-state shadow's mount
+ * point. The destination is never granted: only its counterpart source is
+ * writable on the host. The checks are therefore the FLOOR half only —
+ * mounting over a credential tree is the very thing that keeps the host's
+ * credential-bearing `settings.yml` out of the sandbox — plus a directory
+ * type check, because bwrap mounts a directory source onto a directory
+ * destination and cannot create a missing destination under its read-only
+ * root.
+ */
+function resolveShadowDestination(input: {
+  preset: PresetId
+  destination: string
+  prepareDestination: PrepareKind | undefined
+  env: GrantEnv
+  fs: GrantFs
+  prepare: boolean | undefined
+  canonicalHome: string
+}): { destination: string } | { issue: GrantIssue } {
+  const { preset, destination, prepareDestination, env, fs, prepare, canonicalHome } = input
+  const issue = (reason: GrantIssue['reason'], message: string): { issue: GrantIssue } =>
+    ({ issue: { preset, path: destination, reason, message } })
+
+  if (!isAbsolute(destination)) {
+    return issue('outside-default-bases', `${preset}: private-state mount point must be absolute: ${destination}`)
+  }
+  let canonical: string
+  try {
+    canonical = fs.realpath(destination)
+  } catch {
+    const rejected = preflightRejects(destination, env, fs, 'mount-point')
+    const kind = prepareDestination
+    const guarded = prepare === true && kind !== undefined && fs.ensure !== undefined && rejected === false
+    if (!guarded || kind === undefined) {
+      return issue(rejected ? 'floor-path' : 'missing', rejected
+        ? `${preset}: private-state mount point ${destination} resolves into a system tree — refusing to create or mount it`
+        : `${preset}: private-state mount point ${destination} does not exist on the host — bwrap cannot create it under its read-only root, so the private state directory has nowhere to mount; prepare it (see the package README) or disable the preset`)
+    }
+    try {
+      fs.ensure?.(destination, kind)
+    } catch {
+      // A concurrent confine may have created it first (EEXIST is success).
+    }
+    try {
+      canonical = fs.realpath(destination)
+    } catch {
+      return issue('missing', `${preset}: private-state mount point ${destination} still missing after controlled preparation`)
+    }
+  }
+  let stat: GrantStat
+  try {
+    stat = fs.stat(canonical)
+  } catch {
+    return issue('missing', `${preset}: private-state mount point ${destination} disappeared between resolution and stat`)
+  }
+  if (!stat.isDirectory) {
+    return issue('not-a-directory', `${preset}: private-state mount point ${destination} is not a directory — refusals keep bwrap from mounting a directory source over a file`)
+  }
+  if (pathFloorRefusal(canonical, env, canonicalHome) !== undefined) {
+    return issue('floor-path', `${preset}: private-state mount point ${destination} resolves to ${canonical}, a system or session root — refusing to mount there`)
+  }
+  return { destination: canonical }
 }
 
 /**
@@ -528,12 +713,15 @@ export function resolveGrants(input: {
     ...(input.env.xdgCacheHome === undefined ? {} : { xdgCacheHome: stripSlashes(input.env.xdgCacheHome) }),
     ...(input.env.xdgDataHome === undefined ? {} : { xdgDataHome: stripSlashes(input.env.xdgDataHome) }),
     ...(input.env.xdgRuntimeDir === undefined ? {} : { xdgRuntimeDir: stripSlashes(input.env.xdgRuntimeDir) }),
+    ...(input.env.xdgConfigHome === undefined ? {} : { xdgConfigHome: stripSlashes(input.env.xdgConfigHome) }),
     ...(input.env.cargoHome === undefined ? {} : { cargoHome: stripSlashes(input.env.cargoHome) }),
     ...(input.env.pnpmHome === undefined ? {} : { pnpmHome: stripSlashes(input.env.pnpmHome) }),
     ...(input.env.uvCache === undefined ? {} : { uvCache: stripSlashes(input.env.uvCache) }),
     ...(input.env.gradleUserHome === undefined ? {} : { gradleUserHome: stripSlashes(input.env.gradleUserHome) }),
+    ...(input.env.semgrepLogFile === undefined ? {} : { semgrepLogFile: stripSlashes(input.env.semgrepLogFile) }),
+    ...(input.env.semgrepVersionCache === undefined ? {} : { semgrepVersionCache: stripSlashes(input.env.semgrepVersionCache) }),
   }
-  const { named, issues } = derivePaths(presets, overrides, env)
+  const { named, issues } = derivePaths(presets, overrides, env, fs)
   const notes: GrantNote[] = []
   // The realpath'd HOME: every whole-home floor comparison happens in this
   // canonical space so `HOME=/link -> /real` cannot grant `/real` wholesale.
@@ -618,7 +806,12 @@ export function resolveGrants(input: {
   interface Resolved extends NamedPath {
     canonical: string
   }
+  interface ShadowResolved extends Resolved {
+    destination: string
+    destinationCanonical: string
+  }
   const resolved: Resolved[] = []
+  const shadows: ShadowResolved[] = []
 
   for (const entry of named) {
     if (runtimeDirBroken && entry.preset === 'pnpm-runtime-locks') {
@@ -651,7 +844,7 @@ export function resolveGrants(input: {
       // ancestor and run the floor/credential checks against it plus the
       // remaining segments, so a symlinked base (say ~/.cache -> /var/x)
       // is rejected without ever writing into the never-grantable target.
-      const preflight = preflightRejects(entry, env, fs)
+      const preflight = preflightRejects(entry.path, env, fs)
       const kind = entry.prepare === 'none' ? undefined : entry.prepare
       const guarded = prepare === true && !entry.explicit && kind !== undefined && fs.ensure !== undefined
         && preflight === false
@@ -750,6 +943,17 @@ export function resolveGrants(input: {
       })
       continue
     }
+    // A shadow source is mounted OVER its destination, so bwrap requires a
+    // directory here even though plain grants may also be single files.
+    if (entry.destination !== undefined && !stat.isDirectory) {
+      issues.push({
+        preset: entry.preset,
+        path: entry.path,
+        reason: 'not-a-directory',
+        message: `${entry.preset}: private-state source ${entry.path} is not a directory — it is mounted over ${entry.destination}, and bwrap cannot mount a file onto a directory`,
+      })
+      continue
+    }
     if (stat.uid !== env.uid) {
       issues.push({
         preset: entry.preset,
@@ -823,6 +1027,28 @@ export function resolveGrants(input: {
         continue
       }
     }
+    // Private-state shadows: the validated source is mounted at a DIFFERENT
+    // sandbox path. The destination is a mount point, so only the system
+    // floors apply to it (a credential tree such as
+    // `$XDG_CONFIG_HOME/.semgrep` is exactly what a private state directory
+    // has to be mounted over) and a missing one may be created empty.
+    if (entry.destination !== undefined) {
+      const destination = resolveShadowDestination({
+        preset: entry.preset,
+        destination: entry.destination,
+        prepareDestination: entry.prepareDestination,
+        env,
+        fs,
+        prepare,
+        canonicalHome,
+      })
+      if ('issue' in destination) {
+        issues.push(destination.issue)
+        continue
+      }
+      shadows.push({ ...entry, canonical, destination: entry.destination, destinationCanonical: destination.destination })
+      continue
+    }
     resolved.push({ ...entry, canonical })
   }
 
@@ -855,9 +1081,34 @@ export function resolveGrants(input: {
     .filter((entry) => keptCanonical.has(entry.canonical))
     .map((entry) => ({ source: entry.canonical, destination: entry.canonical, preset: entry.preset }))
 
+  // Private-state shadows are about the sandbox VIEW, not new host write
+  // capability: the same host directory may already be writable through
+  // another grant, yet the mount is still required to make the destination
+  // writable (and to keep the host's own folder — and any credentials in it
+  // — out of view). They are therefore never deduped against normal binds
+  // nor subtracted by source. They ARE dropped when the sandbox already
+  // writes the destination itself: a workspace root covering the mount
+  // point, or a plain grant that made the destination writable.
+  const shadowBinds: GrantBind[] = []
+  const shadowDestinations = new Set<string>()
+  for (const entry of shadows) {
+    if (workspace.some((root) => pathCovers(root, entry.destinationCanonical))) {
+      notes.push({ preset: entry.preset, path: entry.path, covered: 'workspace' })
+      continue
+    }
+    if (shadowDestinations.has(entry.destinationCanonical)
+      || binds.some((bind) => pathCovers(bind.destination, entry.destinationCanonical))) {
+      notes.push({ preset: entry.preset, path: entry.path, covered: 'another-grant' })
+      continue
+    }
+    shadowDestinations.add(entry.destinationCanonical)
+    shadowBinds.push({ source: entry.canonical, destination: entry.destinationCanonical, preset: entry.preset })
+  }
+  const allBinds = [...binds, ...shadowBinds]
+
   // All-or-nothing: with any issue the caller fails the confined command,
   // so a plan carrying binds alongside issues would only invite partial
   // consumption. An honest plan is either fully grantable or empty.
   if (issues.length > 0) return { binds: [], issues, notes }
-  return { binds, issues, notes }
+  return { binds: allBinds, issues, notes }
 }

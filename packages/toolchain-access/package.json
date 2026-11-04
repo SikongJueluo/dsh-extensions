@@ -1,7 +1,7 @@
 {
   "name": "dsh-toolchain-access",
   "version": "0.2.0",
-  "description": "DSH toolchain-access plugin: LocalSandboxProvider subclass that grants exact writable binds (uv / Cargo / pnpm caches, shared lock dirs) inside the stock bwrap sandbox — pinned-layout verified, fail-closed, never a full-access escalation",
+  "description": "DSH toolchain-access plugin: LocalSandboxProvider subclass that grants exact writable binds (uv / Cargo / pnpm / Gradle / Maven caches, shared lock dirs, a private Semgrep state dir) inside the stock bwrap sandbox — pinned-layout verified, fail-closed, never a full-access escalation",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",

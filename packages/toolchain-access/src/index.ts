@@ -8,7 +8,9 @@
  * per command. This plugin replaces the sandbox row with a
  * `LocalSandboxProvider` subclass that, for `workspace-write` policies,
  * appends exact `--bind <granted path> <itself>` mounts after the stock
- * bwrap profile:
+ * bwrap profile (one exception: the semgrep private-state shadow mounts a
+ * writable cache directory at the sandbox path of semgrep's data folder —
+ * same `--bind` shape, different destination):
  *
  * ```text
  * trusted row config + built-in presets
@@ -35,6 +37,11 @@
  *   missing directory, and any configured-but-unhonorable grant fails the
  *   confined call with a precise reason instead of silently degrading to
  *   the old EROFS loop.
+ * - One preset mounts at a DIFFERENT path: `semgrep-state` binds a private
+ *   writable state directory over semgrep's data folder. The host folder
+ *   (whose settings.yml may carry an API token) is never granted and is not
+ *   even visible inside the sandbox; the destination is a mount point, not
+ *   a write grant.
  * - `read-only` policies are returned untouched — this layer adds write
  *   capability and therefore adds nothing there.
  * - Only the pinned stock Linux bwrap layout is edited. A configured
@@ -51,6 +58,7 @@
  */
 import { chmodSync, closeSync, mkdirSync, openSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { dirname } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
@@ -104,6 +112,10 @@ export interface PathsConfig {
   pnpmHome?: string
   pnpmStore?: string
   pnpmRuntimeLocks?: string
+  gradleUserHome?: string
+  mavenHome?: string
+  semgrepState?: string
+  semgrepVersionCache?: string
 }
 
 /** Row configuration: the stock sandbox-local knobs plus the grant fields. */
@@ -114,7 +126,7 @@ export interface Config extends LocalSandboxConfig {
   paths: Readonly<PathsConfig>
 }
 
-/** Presets enabled when a row omits `presets`: the ordinary cache presets — the whole-toolchain-install presets (pnpm-engine, gradle-jdks) stay opt-in. */
+/** Presets enabled when a row omits `presets`: the ordinary cache/state presets — the whole-toolchain-install presets (pnpm-engine, gradle-jdks) stay opt-in. */
 export const DEFAULT_PRESETS = [
   'uv-cache',
   'cargo-cache',
@@ -122,6 +134,7 @@ export const DEFAULT_PRESETS = [
   'pnpm-runtime-locks',
   'gradle-cache',
   'maven-cache',
+  'semgrep-state',
 ] as const satisfies readonly PresetId[]
 
 /**
@@ -144,7 +157,7 @@ export const configFields = {
     'Positive timeout in ms for each functional runner probe (stock sandbox-local field restated).',
   ),
   presets: Schema.array(Schema.union([...PRESET_IDS])).default([...DEFAULT_PRESETS]).description(
-    'Enabled writable-directory presets; the per-preset grant paths are in the package README. Omitted: the six ordinary cache presets default on (uv-cache, cargo-cache, pnpm-store, pnpm-runtime-locks, gradle-cache, maven-cache). presets: [] turns every preset off (stock sandbox); a non-empty list replaces the default exactly. pnpm-engine and gradle-jdks are whole toolchain installs and stay opt-in only, never default. Each enabled preset makes its exact directories writable for EVERY process in the sandbox under workspace-write, never a parent tree; a preset that cannot be honored (missing/invalid path, missing/invalid XDG_RUNTIME_DIR, non-stock backend) fails the confined command with a reason instead of being silently skipped.',
+    'Enabled writable-directory presets; the per-preset grant paths are in the package README. Omitted: the seven ordinary cache/state presets default on (uv-cache, cargo-cache, pnpm-store, pnpm-runtime-locks, gradle-cache, maven-cache, semgrep-state). presets: [] turns every preset off (stock sandbox); a non-empty list replaces the default exactly. pnpm-engine and gradle-jdks are whole toolchain installs and stay opt-in only, never default. Each enabled preset makes its exact directories writable for EVERY process in the sandbox under workspace-write, never a parent tree; semgrep-state instead mounts a private writable state directory over semgrep\'s data folder, so its credential-bearing settings.yml never becomes writable. A preset that cannot be honored (missing/invalid path, missing/invalid XDG_RUNTIME_DIR, non-stock backend) fails the confined command with a reason instead of being silently skipped.',
   ),
   paths: Schema.object({
     uvCache: Schema.string().description('Explicit uv cache directory (default: paths from UV_CACHE_DIR, else <XDG_CACHE_HOME|~/.cache>/uv).'),
@@ -154,6 +167,8 @@ export const configFields = {
     pnpmRuntimeLocks: Schema.string().description('Explicit spelling of pnpm\'s shared operation-lock directory (default: $XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>). pnpm derives this from XDG_RUNTIME_DIR and cannot be redirected: an override may re-spell the same directory (e.g. via symlink) but is refused if it points anywhere else, and it never bypasses the runtime-root validation.'),
     gradleUserHome: Schema.string().description('Explicit GRADLE_USER_HOME anchor for gradle-cache/gradle-jdks (default: $GRADLE_USER_HOME or ~/.gradle). Only its cache/lock subdirectories become writable; gradle.properties and init scripts at the root stay read-only.'),
     mavenHome: Schema.string().description('Explicit Maven user-home anchor for maven-cache (default ~/.m2, covering repository/ + wrapper/). Maven has no standard env var for it; a settings.xml <localRepository> relocation must be configured here explicitly. settings.xml stays read-only.'),
+    semgrepState: Schema.string().description('Explicit host directory mounted over semgrep\'s data folder (default: <XDG_CACHE_HOME|~/.cache>/semgrep-state). It holds the sandbox-private settings.yml/semgrep.log; the host data folder (default ~/.semgrep) is never made writable.'),
+    semgrepVersionCache: Schema.string().description('Explicit semgrep version-check cache file (default: <XDG_CACHE_HOME|~/.cache>/semgrep_version; $SEMGREP_VERSION_CACHE_PATH is honored when set).'),
   }).default({}).description(
     'Explicit grant paths. Every entry must be an absolute path to an existing, user-owned directory (or lock file) that is not group-writable; a preset whose path is missing or refuses validation fails closed.',
   ),
@@ -178,10 +193,13 @@ export function grantEnvFrom(home: string, uid: number, env: Record<string, stri
     xdgCacheHome: absolute(env.XDG_CACHE_HOME),
     xdgDataHome: absolute(env.XDG_DATA_HOME),
     xdgRuntimeDir: absolute(env.XDG_RUNTIME_DIR),
+    xdgConfigHome: absolute(env.XDG_CONFIG_HOME),
     cargoHome: absolute(env.CARGO_HOME),
     pnpmHome: absolute(env.PNPM_HOME),
     uvCache: absolute(env.UV_CACHE_DIR),
     gradleUserHome: absolute(env.GRADLE_USER_HOME),
+    semgrepLogFile: absolute(env.SEMGREP_LOG_FILE),
+    semgrepVersionCache: absolute(env.SEMGREP_VERSION_CACHE_PATH),
   }
 }
 
@@ -203,6 +221,15 @@ export function nodeGrantFs(): GrantFs {
     // on first run — impossible to do from inside the sandbox).
     ensure: (path, kind) => {
       if (kind === 'lock-file') {
+        const fd = openSync(path, 'wx', 0o644)
+        closeSync(fd)
+        return
+      }
+      if (kind === 'state-file') {
+        // The owning tool creates its parent folder on a host-side first run;
+        // an empty file is exactly what its first write leaves behind (and
+        // semgrep's version-cache reader treats an empty file as "no cache").
+        mkdirSync(dirname(path), { recursive: true, mode: 0o755 })
         const fd = openSync(path, 'wx', 0o644)
         closeSync(fd)
         return

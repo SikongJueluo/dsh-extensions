@@ -65,6 +65,20 @@ describe('insertGrantBinds', () => {
     expect(result.slice(-8)).toEqual(['--bind', '/a', '/a', '--bind', '/b', '/b', '--', 'true'])
   })
 
+  it('a private-state shadow mounts its source at a different destination', () => {
+    // semgrep-state: the writable host dir is ~/.cache/semgrep-state, while
+    // the sandbox path it must appear at is ~/.semgrep. Same --bind shape.
+    const command = ['semgrep', 'scan']
+    const result = insertGrantBinds(stockConfined(POLICY, command), command, POLICY, [
+      { source: '/home/u/.cache/semgrep-state', destination: '/home/u/.semgrep' },
+    ])
+    expect(result).toEqual([
+      'bwrap', ...HEAD, ...WS_TAIL,
+      '--bind', '/home/u/.cache/semgrep-state', '/home/u/.semgrep',
+      '--', 'semgrep', 'scan',
+    ])
+  })
+
   it('a command argument containing "--" cannot move the splice point', () => {
     const command = ['printf', '--', '--ro-bind', '/etc', '/etc']
     const confined = stockConfined(POLICY, command)

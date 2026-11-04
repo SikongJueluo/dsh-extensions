@@ -13,9 +13,9 @@
 # Nix store at eval time and later rebuilds would never be seen.
 #
 # `presets` is omitted exactly like the bundle layer, so dev/deploy rows
-# resolve to the same schema default (the six ordinary cache presets); write
-# `presets: [...]` here to pin an explicit set for this overlay
-# ([] = stock sandbox).
+# resolve to the same schema default (the seven ordinary cache/state
+# presets, semgrep-state included); write `presets: [...]` here to pin an
+# explicit set for this overlay ([] = stock sandbox).
 - id: sandbox
   name: '@deepseek-ai/dsh-sandbox-local'
   disabled: true

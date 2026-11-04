@@ -1,7 +1,7 @@
 /**
  * The bundle and dev patch layers must not restate the preset list: with
  * `presets` omitted, the row config resolves through the plugin schema and
- * the six default caches switch on — a hardcoded `presets: []` here would
+ * the seven default presets switch on — a hardcoded `presets: []` here would
  * silently disable that default for every deployment.
  *
  * @module dsh-toolchain-access/patch-config.test

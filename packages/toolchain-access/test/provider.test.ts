@@ -63,7 +63,7 @@ const ENTRIES = {
   '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
 } as const
 
-/** Every path the six default presets derive (HOME/XDG defaults, no overrides). */
+/** Every path the seven default presets derive (HOME/XDG defaults, no overrides). */
 const DEFAULT_ENTRIES: Record<string, FakeEntry> = {
   ...ENTRIES,
   '/home/u/.cargo/.package-cache-mutate': { file: true, mode: 0o644 },
@@ -77,28 +77,37 @@ const DEFAULT_ENTRIES: Record<string, FakeEntry> = {
   ),
   '/home/u/.m2/repository': { dir: true },
   '/home/u/.m2/wrapper': { dir: true },
+  // semgrep-state: the writable private state dir, the version-check cache
+  // file, and the sandbox mount point that shadows the host's ~/.semgrep.
+  '/home/u/.cache/semgrep-state': { dir: true },
+  '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
+  '/home/u/.semgrep': { dir: true },
 }
 
-/** The binds the six defaults produce, in derivation (preset) order. */
-const DEFAULT_BINDS = [
-  '/home/u/.cache/uv',
-  '/home/u/.cargo/registry',
-  '/home/u/.cargo/git',
-  '/home/u/.cargo/.package-cache',
-  '/home/u/.cargo/.package-cache-mutate',
-  '/home/u/.cargo/.global-cache',
-  '/home/u/.local/share/pnpm/store',
-  '/run/user/1000/pnpm-store-operation-locks-1000',
-  '/home/u/.gradle/caches',
-  '/home/u/.gradle/wrapper',
-  '/home/u/.gradle/daemon',
-  '/home/u/.gradle/native',
-  '/home/u/.gradle/workers',
-  '/home/u/.gradle/notifications',
-  '/home/u/.gradle/kotlin-dsl',
-  '/home/u/.gradle/.tmp',
-  '/home/u/.m2/repository',
-  '/home/u/.m2/wrapper',
+/** The binds the seven defaults produce, in derivation (preset) order. */
+const DEFAULT_BINDS: Array<[source: string, destination: string]> = [
+  ['/home/u/.cache/uv', '/home/u/.cache/uv'],
+  ['/home/u/.cargo/registry', '/home/u/.cargo/registry'],
+  ['/home/u/.cargo/git', '/home/u/.cargo/git'],
+  ['/home/u/.cargo/.package-cache', '/home/u/.cargo/.package-cache'],
+  ['/home/u/.cargo/.package-cache-mutate', '/home/u/.cargo/.package-cache-mutate'],
+  ['/home/u/.cargo/.global-cache', '/home/u/.cargo/.global-cache'],
+  ['/home/u/.local/share/pnpm/store', '/home/u/.local/share/pnpm/store'],
+  ['/run/user/1000/pnpm-store-operation-locks-1000', '/run/user/1000/pnpm-store-operation-locks-1000'],
+  ['/home/u/.gradle/caches', '/home/u/.gradle/caches'],
+  ['/home/u/.gradle/wrapper', '/home/u/.gradle/wrapper'],
+  ['/home/u/.gradle/daemon', '/home/u/.gradle/daemon'],
+  ['/home/u/.gradle/native', '/home/u/.gradle/native'],
+  ['/home/u/.gradle/workers', '/home/u/.gradle/workers'],
+  ['/home/u/.gradle/notifications', '/home/u/.gradle/notifications'],
+  ['/home/u/.gradle/kotlin-dsl', '/home/u/.gradle/kotlin-dsl'],
+  ['/home/u/.gradle/.tmp', '/home/u/.gradle/.tmp'],
+  ['/home/u/.m2/repository', '/home/u/.m2/repository'],
+  ['/home/u/.m2/wrapper', '/home/u/.m2/wrapper'],
+  ['/home/u/.cache/semgrep_version', '/home/u/.cache/semgrep_version'],
+  // The shadow mount: the host's ~/.semgrep is never writable; the private
+  // state directory is what semgrep sees there.
+  ['/home/u/.cache/semgrep-state', '/home/u/.semgrep'],
 ]
 
 /** Build a provider with bwrap forced, pinned env, and the fake fs. */
@@ -232,7 +241,7 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
 })
 
 describe('config default presets', () => {
-  it('omitting presets enables the six ordinary cache presets, never the whole-toolchain presets', () => {
+  it('omitting presets enables the seven ordinary cache/state presets, never the whole-toolchain presets', () => {
     expect(DEFAULT_PRESETS).toEqual([
       'uv-cache',
       'cargo-cache',
@@ -240,6 +249,7 @@ describe('config default presets', () => {
       'pnpm-runtime-locks',
       'gradle-cache',
       'maven-cache',
+      'semgrep-state',
     ])
     expect(Config({}).presets).toEqual(DEFAULT_PRESETS)
     expect(Config().presets).toEqual(DEFAULT_PRESETS)
@@ -253,7 +263,7 @@ describe('config default presets', () => {
     expect(Config({ presets: ['pnpm-engine', 'gradle-jdks'] }).presets).toEqual(['pnpm-engine', 'gradle-jdks'])
   })
 
-  it('the schema default reaches confine: binds for exactly the six caches', async () => {
+  it('the schema default reaches confine: binds for exactly the seven presets', async () => {
     const provider = mountedProvider(Config({}), DEFAULT_ENTRIES)
     const result = await provider.confine(COMMAND, WS_POLICY)
     expect(result.enforcement).toBe('full')
@@ -266,7 +276,7 @@ describe('config default presets', () => {
       '--die-with-parent',
       '--tmpfs', '/tmp',
       '--bind', '/ws/proj', '/ws/proj',
-      ...DEFAULT_BINDS.flatMap((path) => ['--bind', path, path]),
+      ...DEFAULT_BINDS.flatMap(([source, destination]) => ['--bind', source, destination]),
       '--', 'cargo', 'build',
     ])
   })
@@ -299,14 +309,19 @@ describe('grantEnvFrom', () => {
   it('keeps only absolute exported anchors', () => {
     expect(grantEnvFrom('/home/u', 1000, {
       XDG_RUNTIME_DIR: '/run/user/1000',
+      XDG_CONFIG_HOME: '/home/u/.config',
       CARGO_HOME: 'relative/path',
       PNPM_HOME: '',
       UV_CACHE_DIR: '/data/uv',
+      SEMGREP_LOG_FILE: '/data/logs/semgrep.log',
+      SEMGREP_VERSION_CACHE_PATH: 'relative/cache',
     })).toEqual({
       home: '/home/u',
       uid: 1000,
       xdgRuntimeDir: '/run/user/1000',
+      xdgConfigHome: '/home/u/.config',
       uvCache: '/data/uv',
+      semgrepLogFile: '/data/logs/semgrep.log',
     })
   })
 })

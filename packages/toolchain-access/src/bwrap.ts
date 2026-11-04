@@ -82,8 +82,10 @@ function describe(item: string): string {
  * @param confined - the argv `super.confine()` produced.
  * @param original - the exact argv that was passed to confine.
  * @param policy - the policy the wrap was built for.
- * @param binds - the validated grant binds (source and destination are the
- *   same spelling, validated by the grants module).
+ * @param binds - the validated grant binds. Ordinary grants mount a path onto
+ *   itself; a private-state shadow (semgrep) mounts a writable cache
+ *   directory at a different sandbox destination — both are the same
+ *   `--bind source destination` shape.
  * @returns the confined argv with `--bind source destination` pairs appended
  *   after the stock profile, before `--`.
  * @throws GrantArgvError on any deviation from the pinned layout.

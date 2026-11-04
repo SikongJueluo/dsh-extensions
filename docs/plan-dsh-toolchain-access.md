@@ -5,11 +5,12 @@
 ## 1. 交付了什么(仓库内,已验证)
 
 - `packages/toolchain-access`(`dsh-toolchain-access`):`LocalSandboxProvider` 子类,对 `workspace-write` 沙箱追加精确 `--bind`(详见包 README 的信任语义)。
-- 默认开启六项:`uv-cache`、`cargo-cache`、`pnpm-store`、`pnpm-runtime-locks`(`$XDG_RUNTIME_DIR` 共享锁域)、`gradle-cache`、`maven-cache`。`pnpm-engine`、`gradle-jdks` 含可执行工具链,维持显式 opt-in。默认只影响省略 `presets` 的配置;`presets: []` 全关,显式非空列表只启用列出的项。
-- confine 时受控自建缺失的**默认推导**路径(pnpm 的 `/run/user` 锁目录重启即清空,0755/0700/锁文件按各工具语义创建);显式 override 与插件加载不写宿主。
+- 默认开启七项:`uv-cache`、`cargo-cache`、`pnpm-store`、`pnpm-runtime-locks`(`$XDG_RUNTIME_DIR` 共享锁域)、`gradle-cache`、`maven-cache`、`semgrep-state`。`pnpm-engine`、`gradle-jdks` 含可执行工具链,维持显式 opt-in。默认只影响省略 `presets` 的配置;`presets: []` 全关,显式非空列表只启用列出的项。
+- `semgrep-state` 是唯一的影子挂载:宿主可写源是 `<cache>/semgrep-state`(default `<XDG_CACHE_HOME|~/.cache>/semgrep-state`),它被 bind 到沙箱内 semgrep 的数据目录(`~/.semgrep`,或 `XDG_CONFIG_HOME` 为已存在目录时的 `$XDG_CONFIG_HOME/.semgrep`);另授 `<cache>/semgrep_version` 文件。原因:semgrep 每次启动都 `mkstemp` 在数据目录内原子重写 `settings.yml`,只读目录会 EROFS;而该目录的 settings.yml 可能含 API token,所以**宿主目录本身不授权**。宿主 `semgrep login` 状态因此在沙箱内不可见,`semgrep ci` 用 `SEMGREP_APP_TOKEN`。
+- confine 时受控自建缺失的**默认推导**路径(pnpm 的 `/run/user` 锁目录重启即清空,0755/0700/锁文件按各工具语义创建;semgrep 的私有 state 目录 0755、版本缓存空文件 0644、以及 bwrap 无法自建的 `~/.semgrep` 空挂载点);显式 override 与插件加载不写宿主。
 - 迁移:cmd-permit 种子收敛为**空**(cargo/direnv/rtk 均移除——按命令头匹配时 `rtk cargo build` 仍会命中 rtk 条目拿 Full access);auto-permit 判官 v3「缓存上限」(缓存-only 越界一律 DEFER,同族等价不可越过)。
 - 此前实测:grant 子树可写、父/邻居仍 EROFS;uv sync、cargo fetch/build(真依赖)、pnpm run 热引擎授权后成功、对照 EROFS;cargo 并发 fetch ×2 共享 cargo-home 均成功;pnpm 锁文件落在宿主共享目录。
-- 本次默认策略验证(2026-10-30):`node node_modules/vitest/vitest.mjs run --root packages/toolchain-access` 为 4 文件/69 测试通过;全 16 包 `tsc --noEmit`、client syntax 与插件 tsdown 构建通过。构建产物的 Config 与两份真实 YAML patch 解析 smoke 通过。新增默认 confine 测试断言 18 条精确 bind、只读无写授权、无效 runtime-dir 仍拒绝;未部署当前 Nix 空列表,不声称生产授权已生效。
+- 本次默认策略验证(2026-11-04):`node node_modules/vitest/vitest.mjs run --root packages/toolchain-access` 为 4 文件/83 测试通过;全 16 包 `tsc --noEmit`、client syntax 与插件 tsdown 构建通过(`pnpm check` 退出 0)。构建产物的 Config 与两份真实 YAML patch 解析 smoke 通过。默认 confine 测试断言 20 条精确 bind(含影子挂载 destination≠source)、只读无写授权、无效 runtime-dir 仍拒绝。Semgrep 1.182.1 端到端:嵌套 bwrap 按构建产物 plan 的 bind 布局运行 `semgrep scan`(本地规则)成功、退出 0、找到 1 条 finding;宿主 `~/.semgrep/settings.yml` 在沙箱内不可见,settings/log 落在影子目录;不授版本缓存时按预期在扫描结束前 EROFS 崩溃。未部署当前 Nix 空列表,不声称生产授权已生效。
 
 ## 2. Nix 落点(用户执行)
 
@@ -30,11 +31,11 @@ dsh 归 nix 管。当前 Nix 模块已支持 `host = true` + `replaces = ["sandb
 };
 ```
 
-省略 `presets` 才会采用插件的六项默认。若要关闭某项,写出保留项的完整列表;例如不用 Java 缓存:
+省略 `presets` 才会采用插件的七项默认。若要关闭某项,写出保留项的完整列表;例如不用 Java 缓存:
 
 ```nix
 config = {
-  presets = ["uv-cache" "cargo-cache" "pnpm-store" "pnpm-runtime-locks"];
+  presets = ["uv-cache" "cargo-cache" "pnpm-store" "pnpm-runtime-locks" "semgrep-state"];
   paths = {};
 };
 ```
@@ -45,9 +46,9 @@ config = {
 
 ### 方案 B:直接用仓库的 dev.patch.yml
 
-没有 Host 插件声明的部署可把 `/home/sikongjueluo/Projects/dsh-extensions/packages/toolchain-access/dev.patch.yml` 加入 `extraPatches`。该 overlay 与 bundle 都省略 `presets`,由 schema 采用相同的六项默认;无需另改仓库模板。它已禁用 stock sandbox 并插入替换行,**不可与方案 A 重复插入**。
+没有 Host 插件声明的部署可把 `/home/sikongjueluo/Projects/dsh-extensions/packages/toolchain-access/dev.patch.yml` 加入 `extraPatches`。该 overlay 与 bundle 都省略 `presets`,由 schema 采用相同的七项默认;无需另改仓库模板。它已禁用 stock sandbox 并插入替换行,**不可与方案 A 重复插入**。
 
-两种方案的默认信任相同:所列目录对沙箱内全部子进程可写,不是只给 uv/Cargo 等同名命令。只绑精确子树,不泛开 HOME / `~/.cache`,凭据树仍只读。缺失的显式路径、无效/未设置的 `XDG_RUNTIME_DIR`、不支持的后端仍 fail-closed,不会自动漏掉预设以求运行成功;不用该项时由操作者显式从列表中排除。
+两种方案的默认信任相同:所列目录对沙箱内全部子进程可写,不是只给 uv/Cargo 等同名命令。只绑精确子树,不泛开 HOME / `~/.cache`,凭据树仍只读。`semgrep-state` 的宿主可写面仅 `<cache>/semgrep-state` 与 `<cache>/semgrep_version`;`~/.semgrep` 只是影子挂载点,宿主 settings.yml 不进入沙箱。缺失的显式路径、无效/未设置的 `XDG_RUNTIME_DIR`、不支持的后端仍 fail-closed,不会自动漏掉预设以求运行成功;不用该项时由操作者显式从列表中排除。
 
 ### 前置构建
 
@@ -76,6 +77,7 @@ allow = [ ];
 ## 5. 已知边界(如实,不粉饰)
 
 - **冷 pnpm engine 安装未端到端验证**(需联网下载另一版本);`pnpm-engine` 预设按 pnpm 源码路径设计,如遇失败以实际报错调整。
+- **Semgrep 登录态不跨沙箱**:`semgrep-state` 用影子目录遮住宿主 `~/.semgrep`,宿主 `semgrep login` 的 settings.yml 在沙箱内不可见;`semgrep ci` 需 `SEMGREP_APP_TOKEN`。`SEMGREP_SETTINGS_FILE` 指到别处时本预设不覆盖(该路径照常 EROFS);`semgrep install-semgrep-pro` 写安装树(uv tool/site-packages/nix store),不在授权范围,需在沙箱外安装。
 - 本插件只增强**本地进程沙箱**的目录写;write/edit 工具、remote-exec 不在其授权范围。
 - 嵌套沙箱(在别人的沙箱里再跑 dsh)时追加 bind 可能继承只读标志——fail-visible(工具继续 EROFS),不会静默放宽。
 - 校验(realpath/stat)与 bwrap 稍后重解析之间的符号链接替换是 argv 级沙箱固有的残余竞态,与官方 workspace bind 同级,未消除。
@@ -88,5 +90,6 @@ allow = [ ];
 2. 会话内 `bash: uv cache dir` 应答 `~/.cache/uv`;`uv sync` 不再 EROFS、不需要 `sandbox_permissions`。
 3. `cargo fetch`(真依赖项目)不 EROFS;`~/.cargo/credentials.toml` 仍不可写(`test -w` 应失败)。
 4. `pnpm run`(pin 与运行版本不一致的项目)不再报 `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK`;`/run/user/1000/pnpm-store-operation-locks-1000/` 出现 `all-stores.lock`。若你自定义过 `XDG_RUNTIME_DIR`:它必须满足 pnpm 自己的条件(本 uid 属主、属主可写可搜索、group/other 不可写——0775 会被 pnpm 拒绝并回退 `/tmp`),否则预设会 fail-closed 报错而不是静默绑一个 pnpm 不用的目录;可用 `strace -e trace=file pnpm --version 2>&1 | grep lock` 确认锁文件落在该目录而非 `/tmp`。
-5. Settings → `toolchain-sandbox` 分区可见六项默认与 presets/paths 表单。无高优先级覆盖时修改会重挂 provider(非 volatile);本机方案 A 的 Nix overlay 优先,应在 Nix 中修改并部署,Settings 冲突提示不是授权已保存。
+5. Settings → `toolchain-sandbox` 分区可见七项默认与 presets/paths 表单。无高优先级覆盖时修改会重挂 provider(非 volatile);本机方案 A 的 Nix overlay 优先,应在 Nix 中修改并部署,Settings 冲突提示不是授权已保存。
 6. 提权抽查:模型对 `cargo build` 的 Full access 请求应弹窗(cmd-permit 不再白名单)或被 v3 判官 DEFER,而非自动放行。
+7. Semgrep 抽查:会话内 `semgrep scan --config=auto .` 不再 EROFS;`test -w ~/.semgrep` 成功;首次运行前 `~/.semgrep/settings.yml` 不存在(宿主原文件被影子遮住),运行后 `~/.cache/semgrep-state/` 出现 settings.yml/semgrep.log;`~/.cache/semgrep_version` 时间戳更新。宿主 `~/.semgrep` 本身不被沙箱写;登录态不共享,`semgrep ci` 用 `SEMGREP_APP_TOKEN`。

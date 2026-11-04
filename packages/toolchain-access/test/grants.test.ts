@@ -74,7 +74,9 @@ function plan(
   const fs: GrantFs = fakeFs(table)
   fs.ensure = (path, kind) => {
     ensured.push({ path, kind })
-    table[path] = kind === 'lock-file' ? { file: true, mode: 0o644 } : { dir: true, mode: kind === 'lock-dir' ? 0o700 : 0o755 }
+    table[path] = kind === 'lock-file' || kind === 'state-file'
+      ? { file: true, mode: 0o644 }
+      : { dir: true, mode: kind === 'lock-dir' ? 0o700 : 0o755 }
   }
   const result = resolveGrants({
     presets,
@@ -651,6 +653,197 @@ describe('java toolchain presets', () => {
     expect(result.issues).toEqual([])
     expect(result.binds.map((bind) => bind.source)).toEqual(['/data/m2/repository', '/data/m2/wrapper'])
     expect(result.ensured).toEqual([])
+  })
+})
+
+describe('semgrep state preset', () => {
+  const SEMGREP_ENTRIES: Record<string, Entry> = {
+    '/home/u/.cache/semgrep-state': dir(),
+    '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
+    '/home/u/.semgrep': dir(),
+  }
+
+  it('mounts a private state dir over ~/.semgrep and grants the version cache file', () => {
+    const result = plan(['semgrep-state'], SEMGREP_ENTRIES)
+    expect(result.issues).toEqual([])
+    expect(result.binds).toEqual([
+      {
+        source: '/home/u/.cache/semgrep_version',
+        destination: '/home/u/.cache/semgrep_version',
+        preset: 'semgrep-state',
+      },
+      {
+        source: '/home/u/.cache/semgrep-state',
+        destination: '/home/u/.semgrep',
+        preset: 'semgrep-state',
+      },
+    ])
+    // The host data folder is only ever a mount POINT, never a writable source.
+    expect(result.binds.some((bind) => bind.source === '/home/u/.semgrep')).toBe(false)
+  })
+
+  it('controlled preparation creates the state dir, the mount point and the cache file', () => {
+    const result = plan(['semgrep-state'], {}, { prepare: true })
+    expect(result.issues).toEqual([])
+    expect(result.ensured).toEqual([
+      { path: '/home/u/.cache/semgrep-state', kind: 'cache-dir' },
+      { path: '/home/u/.semgrep', kind: 'mount-dir' },
+      { path: '/home/u/.cache/semgrep_version', kind: 'state-file' },
+    ])
+    expect(result.binds.map((bind) => bind.destination)).toEqual([
+      '/home/u/.cache/semgrep_version',
+      '/home/u/.semgrep',
+    ])
+  })
+
+  it('a missing mount point without prepare fails closed', () => {
+    const result = plan(['semgrep-state'], {
+      '/home/u/.cache/semgrep-state': dir(),
+      '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
+    })
+    expect(result.binds).toEqual([])
+    expect(result.issues[0]?.reason).toBe('missing')
+    expect(result.issues[0]?.message).toContain('/home/u/.semgrep')
+  })
+
+  it('a mount point that is not a directory is refused', () => {
+    const result = plan(['semgrep-state'], {
+      ...SEMGREP_ENTRIES,
+      '/home/u/.semgrep': { file: true, mode: 0o600 },
+    })
+    expect(result.binds).toEqual([])
+    expect(result.issues[0]?.reason).toBe('not-a-directory')
+  })
+
+  it('a shadow source that is not a directory is refused', () => {
+    const result = plan(['semgrep-state'], {
+      ...SEMGREP_ENTRIES,
+      '/home/u/.cache/semgrep-state': { file: true, mode: 0o644 },
+    })
+    expect(result.binds).toEqual([])
+    expect(result.issues[0]?.reason).toBe('not-a-directory')
+    expect(result.issues[0]?.message).toContain('private-state source')
+  })
+
+  it('follows XDG_CONFIG_HOME only when it is an existing directory (semgrep rule)', () => {
+    const withXdg = plan(['semgrep-state'], {
+      '/home/u/.config': dir(),
+      '/home/u/.config/.semgrep': dir(),
+      '/home/u/.cache/semgrep-state': dir(),
+      '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
+    }, { env: { xdgConfigHome: '/home/u/.config' } })
+    expect(withXdg.issues).toEqual([])
+    // semgrep joins `.semgrep` directly under XDG_CONFIG_HOME.
+    expect(withXdg.binds.at(-1)?.destination).toBe('/home/u/.config/.semgrep')
+
+    // A configured-but-missing XDG_CONFIG_HOME falls back to ~/.semgrep.
+    const missingXdg = plan(['semgrep-state'], SEMGREP_ENTRIES, { env: { xdgConfigHome: '/home/u/.config' } })
+    expect(missingXdg.issues).toEqual([])
+    expect(missingXdg.binds.at(-1)?.destination).toBe('/home/u/.semgrep')
+  })
+
+  it('the mount point may cross a credential tree, a grant source may not', () => {
+    // `~/.config/.semgrep` is fine as a mount point: the shadow REPLACES it,
+    // so the host's credential-bearing settings.yml stays out of the sandbox.
+    const shadow = plan(['semgrep-state'], {
+      '/home/u/.config': dir(),
+      '/home/u/.config/.semgrep': dir(),
+      '/home/u/.cache/semgrep-state': dir(),
+      '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
+    }, { env: { xdgConfigHome: '/home/u/.config' } })
+    expect(shadow.issues).toEqual([])
+    expect(shadow.binds.at(-1)?.source).toBe('/home/u/.cache/semgrep-state')
+
+    // The writable source itself is still a grant and obeys every rule.
+    const source = plan(['semgrep-state'], {
+      ...SEMGREP_ENTRIES,
+      '/home/u/.config/semgrep-state': dir(),
+    }, { overrides: { semgrepState: '/home/u/.config/semgrep-state' } })
+    expect(source.binds).toEqual([])
+    expect(source.issues[0]?.reason).toBe('credential-segment')
+  })
+
+  it('the mount point is refused inside a system floor (XDG_CONFIG_HOME=/etc)', () => {
+    const result = plan(['semgrep-state'], {
+      '/etc': dir(),
+      '/home/u/.cache/semgrep-state': dir(),
+      '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
+    }, { env: { xdgConfigHome: '/etc' }, prepare: true })
+    expect(result.binds).toEqual([])
+    expect(result.issues[0]?.reason).toBe('floor-path')
+    expect(result.ensured).toEqual([])
+  })
+
+  it('a workspace root covering the mount point drops the shadow (already writable)', () => {
+    const result = plan(['semgrep-state'], SEMGREP_ENTRIES, { workspaceRoots: ['/home/u'] })
+    expect(result.binds).toEqual([])
+    expect(result.notes.every((note) => note.covered === 'workspace')).toBe(true)
+  })
+
+  it('keeps the shadow even when another grant already covers its source', () => {
+    // The mount is about the sandbox VIEW: uv-cache may already make the
+    // shadow source writable, yet semgrep still needs the private state dir
+    // mounted at ~/.semgrep.
+    const result = plan(['uv-cache', 'semgrep-state'], {
+      '/data/cache': dir(),
+      '/data/cache/semgrep-state': dir(),
+      '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
+      '/home/u/.semgrep': dir(),
+    }, {
+      overrides: { uvCache: '/data/cache', semgrepState: '/data/cache/semgrep-state' },
+    })
+    expect(result.issues).toEqual([])
+    expect(result.binds.find((bind) => bind.destination === '/home/u/.semgrep')).toMatchObject({
+      source: '/data/cache/semgrep-state',
+      preset: 'semgrep-state',
+    })
+    // The covered state source is not restated as a second plain grant.
+    expect(result.binds.filter((bind) => bind.source === '/data/cache/semgrep-state')).toHaveLength(1)
+  })
+
+  it('honors SEMGREP_LOG_FILE / SEMGREP_VERSION_CACHE_PATH as explicit files', () => {
+    const result = plan(['semgrep-state'], {
+      '/home/u/.cache/semgrep-state': dir(),
+      '/data/state/semgrep.log': { file: true, mode: 0o644 },
+      '/data/cache/semgrep_version': { file: true, mode: 0o644 },
+      '/home/u/.semgrep': dir(),
+    }, {
+      env: {
+        semgrepLogFile: '/data/state/semgrep.log',
+        semgrepVersionCache: '/data/cache/semgrep_version',
+      },
+    })
+    expect(result.issues).toEqual([])
+    expect(result.binds.map((bind) => bind.source)).toEqual([
+      '/data/state/semgrep.log',
+      '/data/cache/semgrep_version',
+      '/home/u/.cache/semgrep-state',
+    ])
+  })
+
+  it('a log inside the shadowed folder needs no extra bind', () => {
+    const result = plan(['semgrep-state'], SEMGREP_ENTRIES, {
+      env: { semgrepLogFile: '/home/u/.semgrep/semgrep.log' },
+    })
+    expect(result.issues).toEqual([])
+    expect(result.binds.map((bind) => bind.source)).toEqual([
+      '/home/u/.cache/semgrep_version',
+      '/home/u/.cache/semgrep-state',
+    ])
+  })
+
+  it('the version-cache default follows semgrep\'s XDG_CACHE_HOME is-a-directory test', () => {
+    const result = plan(['semgrep-state'], {
+      '/data/xdg-cache': dir(),
+      '/data/xdg-cache/semgrep-state': dir(),
+      '/data/xdg-cache/semgrep_version': { file: true, mode: 0o644 },
+      '/home/u/.semgrep': dir(),
+    }, { env: { xdgCacheHome: '/data/xdg-cache' } })
+    expect(result.issues).toEqual([])
+    expect(result.binds.map((bind) => bind.source)).toEqual([
+      '/data/xdg-cache/semgrep_version',
+      '/data/xdg-cache/semgrep-state',
+    ])
   })
 })
 
