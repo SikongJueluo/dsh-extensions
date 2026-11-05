@@ -1,15 +1,22 @@
 /**
  * The pinned bwrap argv contract of `@deepseek-ai/dsh-sandbox-local`
- * 0.2.0-rc.2, and the one edit this package ever makes to it.
+ * 0.2.2-rc.1, and the one edit this package ever makes to it.
  *
  * `LocalSandboxProvider.confine()` returns, for the stock Linux bwrap rung,
  * exactly:
  *
  * ```text
  * bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent
- *       [--tmpfs /tmp --bind <canonical workspaceRoot> <same>]   # workspace-write only
+ *       [--tmpfs /tmp (--bind <root> <root>)...]   # workspace-write only
  *       -- <caller argv verbatim>
  * ```
+ *
+ * Under `workspace-write` the bound roots are `workspaceWritableRoots(policy)`
+ * — the canonical workspace root followed by every `additionalWritableRoots`
+ * entry, in policy order, deduplicated — so the per-root bind is repeated once
+ * per root. The expected profile is derived through that same SDK helper
+ * rather than restated here: a policy that grants more roots must not look
+ * like a layout drift.
  *
  * Grant binds must land AFTER `--ro-bind / /` (later mounts stack on top —
  * verified on-host: an appended `--bind` makes exactly that subtree writable
@@ -25,7 +32,7 @@
  *
  * @module dsh-toolchain-access/bwrap
  */
-import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
+import { workspaceWritableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 
 /** The stock bwrap profile head, identical for both confined modes. */
@@ -44,8 +51,8 @@ const STOCK_PROFILE_HEAD: readonly string[] = Object.freeze([
 export function expectedStockProfileArgs(policy: SandboxPolicy): string[] {
   const args = [...STOCK_PROFILE_HEAD]
   if (policy.mode === 'workspace-write') {
-    const root = canonicalPath(policy.workspaceRoot)
-    args.push('--tmpfs', '/tmp', '--bind', root, root)
+    args.push('--tmpfs', '/tmp')
+    for (const root of workspaceWritableRoots(policy)) args.push('--bind', root, root)
   }
   return args
 }

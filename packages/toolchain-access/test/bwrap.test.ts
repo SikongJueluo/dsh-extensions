@@ -5,7 +5,10 @@
  *
  * @module dsh-toolchain-access/bwrap.test
  */
-import { describe, expect, it } from 'vitest'
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, describe, expect, it } from 'vitest'
 import { GrantArgvError, expectedStockProfileArgs, insertGrantBinds } from '../src/bwrap.js'
 import type { GrantBindSpec } from '../src/bwrap.js'
 
@@ -42,6 +45,58 @@ describe('expectedStockProfileArgs', () => {
 
   it('read-only is the head alone', () => {
     expect(expectedStockProfileArgs(READ_ONLY)).toEqual(HEAD)
+  })
+})
+
+/** Real directories: the SDK's own root derivation validates extras on the host fs. */
+const scratch = mkdtempSync(join(tmpdir(), 'toolchain-bwrap-'))
+const extraRoot = join(scratch, 'extra')
+const secondRoot = join(scratch, 'second')
+const workspaceRoot = join(scratch, 'ws')
+mkdirSync(extraRoot)
+mkdirSync(secondRoot)
+mkdirSync(workspaceRoot)
+const linkedRoot = join(scratch, 'linked')
+symlinkSync(extraRoot, linkedRoot)
+afterAll(() => rmSync(scratch, { recursive: true, force: true }))
+
+describe('expectedStockProfileArgs with policy extra roots', () => {
+  it('binds the workspace, then every additional root in policy order', () => {
+    const policy = { ...POLICY, additionalWritableRoots: [extraRoot, secondRoot] } as const
+    expect(expectedStockProfileArgs(policy)).toEqual([
+      ...HEAD, '--tmpfs', '/tmp',
+      '--bind', '/ws/proj', '/ws/proj',
+      '--bind', extraRoot, extraRoot,
+      '--bind', secondRoot, secondRoot,
+    ])
+  })
+
+  it('deduplicates a root the workspace already names', () => {
+    const policy = {
+      mode: 'workspace-write' as const,
+      workspaceRoot,
+      additionalWritableRoots: [workspaceRoot, extraRoot],
+    }
+    expect(expectedStockProfileArgs(policy)).toEqual([
+      ...HEAD, '--tmpfs', '/tmp',
+      '--bind', workspaceRoot, workspaceRoot,
+      '--bind', extraRoot, extraRoot,
+    ])
+  })
+
+  it('read-only ignores extra roots entirely', () => {
+    const policy = { ...READ_ONLY, additionalWritableRoots: [extraRoot] } as const
+    expect(expectedStockProfileArgs(policy)).toEqual(HEAD)
+  })
+
+  it('a missing extra root is refused by the SDK derivation, not silently dropped', () => {
+    const policy = { ...POLICY, additionalWritableRoots: [join(scratch, 'gone')] } as const
+    expect(() => expectedStockProfileArgs(policy)).toThrow(/Invalid additional writable directory/)
+  })
+
+  it('a symlinked extra root is refused (the physical path must be named)', () => {
+    const policy = { ...POLICY, additionalWritableRoots: [linkedRoot] } as const
+    expect(() => expectedStockProfileArgs(policy)).toThrow(/symlinked grants are not supported/)
   })
 })
 

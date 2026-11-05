@@ -3,9 +3,10 @@
  * caches inside the DSH file sandbox.
  *
  * The stock `workspace-write` sandbox mounts the host read-only and the
- * workspace writable, so every tool with a shared HOME cache (uv, Cargo,
- * pnpm) dies on EROFS and the old workaround was a full-access escalation
- * per command. This plugin replaces the sandbox row with a
+ * workspace (plus any `additionalWritableRoots` the policy carries) writable,
+ * so every tool with a shared HOME cache (uv, Cargo, pnpm) dies on EROFS and
+ * the old workaround was a full-access escalation per command. This plugin
+ * replaces the sandbox row with a
  * `LocalSandboxProvider` subclass that, for `workspace-write` policies,
  * appends exact `--bind <granted path> <itself>` mounts after the stock
  * bwrap profile (one exception: the semgrep private-state shadow mounts a
@@ -44,9 +45,11 @@
  *   a write grant.
  * - `read-only` policies are returned untouched — this layer adds write
  *   capability and therefore adds nothing there.
- * - Only the pinned stock Linux bwrap layout is edited. A configured
- *   `runnerCommand` wrapper, the Landlock/Seatbelt/ACL rungs, or a changed
- *   profile in a future dsh release fails closed with `GrantArgvError`
+ * - Only the pinned stock Linux bwrap layout is edited. The expected profile
+ *   is derived through the SDK's own `workspaceWritableRoots`, so a policy
+ *   carrying extra writable roots is still the stock layout; a configured
+ *   `runnerCommand` wrapper, the Landlock/Seatbelt/ACL rungs, or any other
+ *   profile change in a future dsh release fails closed with `GrantArgvError`
  *   rather than guessing where binds belong in an unfamiliar argv.
  *
  * Like every sandbox-provider service, methods here avoid `#private`
@@ -65,7 +68,7 @@ import { HarnessError } from '@deepseek-ai/dsh-llm'
 import LocalSandboxProvider from '@deepseek-ai/dsh-sandbox-local'
 import type { Config as LocalSandboxConfig } from '@deepseek-ai/dsh-sandbox-local'
 import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
-import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
+import { workspaceWritableRoots } from '@deepseek-ai/dsh-sandbox'
 import { GrantArgvError, insertGrantBinds } from './bwrap.js'
 import { PRESET_IDS, resolveGrants } from './grants.js'
 import type { GrantEnv, GrantFs, GrantIssue, GrantOverrides, GrantPlan, PresetId } from './grants.js'
@@ -337,11 +340,13 @@ export class ToolchainAccessSandboxProvider extends LocalSandboxProvider {
     const base = await super.confine(argv, policy, signal)
     if (this.grantPresets.length === 0) return base
     if (policy.mode !== 'workspace-write') return base
-    // Canonicalize the root the same way super.confine did before building
-    // its --bind, so the subtraction below compares like-for-like paths.
+    // Canonicalize exactly the roots super.confine() just bound (the stock
+    // `workspaceWritableRoots`: workspace plus any policy extra roots), so
+    // the subtraction below compares like-for-like paths and a grant already
+    // covered by a policy root becomes a note instead of a duplicate bind.
     // prepare=true: a missing implicit default (e.g. pnpm's lock dir after
     // a reboot wiped /run/user) is created now, exactly once per confine.
-    const plan = this.plan([canonicalPath(policy.workspaceRoot)], true)
+    const plan = this.plan(workspaceWritableRoots(policy), true)
     if (plan.issues.length > 0) throw new ToolchainGrantError(plan.issues)
     if (plan.binds.length === 0) return base
     return {

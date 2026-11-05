@@ -3,6 +3,9 @@
  * Cover schema-default grants, explicit overrides, passthrough and fail-closed behavior.
  * @module dsh-toolchain-access/provider.test
  */
+import { realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   Config,
@@ -128,6 +131,8 @@ function mountedProvider(config: Config, entries: Record<string, FakeEntry> = EN
 const COMMAND = ['cargo', 'build']
 const WS_POLICY = { mode: 'workspace-write' as const, workspaceRoot: '/ws/proj' }
 const RO_POLICY = { mode: 'read-only' as const, workspaceRoot: '/ws/proj' }
+/** A real, symlink-free directory outside the system floors (this package's own). */
+const EXTRA_ROOT = realpathSync.native(process.cwd())
 
 describe('ToolchainAccessSandboxProvider.confine', () => {
   it('appends grant binds to the stock workspace-write wrap and preserves official metadata', async () => {
@@ -177,6 +182,66 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
       '--bind', '/ws/proj', '/ws/proj',
       '--', 'cargo', 'build',
     ])
+  })
+
+  it('carries policy extra roots in the stock profile and splices grants after them', async () => {
+    // An existing, symlink-free directory: `workspaceWritableRoots` accepts a
+    // real extra root without this test writing anything into it.
+    const root = EXTRA_ROOT
+    {
+      const provider = makeProvider(['uv-cache'])
+      const result = await provider.confine(COMMAND, { ...WS_POLICY, additionalWritableRoots: [root] })
+      expect(result.argv).toEqual([
+        'bwrap',
+        '--ro-bind', '/', '/',
+        '--dev', '/dev',
+        '--unshare-pid',
+        '--proc', '/proc',
+        '--die-with-parent',
+        '--tmpfs', '/tmp',
+        '--bind', '/ws/proj', '/ws/proj',
+        '--bind', root, root,
+        '--bind', '/home/u/.cache/uv', '/home/u/.cache/uv',
+        '--', 'cargo', 'build',
+      ])
+    }
+  })
+
+  it('subtracts a grant the policy extra root already made writable', async () => {
+    // Grants cannot live under /tmp (a system floor), so the policy's extra
+    // root is a real directory here; the grant beneath it is hypothetical in
+    // the fake fs, which is enough for the subtraction.
+    const root = EXTRA_ROOT
+    const uv = join(root, '.cache', 'uv')
+    {
+      const provider = mountedProvider(
+        Config({ presets: ['uv-cache'], paths: { uvCache: uv } }),
+        { ...DEFAULT_ENTRIES, [uv]: { dir: true } },
+      )
+      const result = await provider.confine(COMMAND, { ...WS_POLICY, additionalWritableRoots: [root] })
+      // The policy root is already the stock wrap's bind; a grant beneath it
+      // adds no capability, so it must not become a second mount.
+      expect(result.argv).toEqual([
+        'bwrap',
+        '--ro-bind', '/', '/',
+        '--dev', '/dev',
+        '--unshare-pid',
+        '--proc', '/proc',
+        '--die-with-parent',
+        '--tmpfs', '/tmp',
+        '--bind', '/ws/proj', '/ws/proj',
+        '--bind', root, root,
+        '--', 'cargo', 'build',
+      ])
+    }
+  })
+
+  it('refuses a missing policy extra root instead of splicing around it', async () => {
+    const provider = makeProvider(['uv-cache'])
+    await expect(provider.confine(COMMAND, {
+      ...WS_POLICY,
+      additionalWritableRoots: [join(tmpdir(), 'toolchain-extra-does-not-exist')],
+    })).rejects.toThrow(/Invalid additional writable directory/)
   })
 
   it('drops grants already covered by the workspace bind', async () => {
