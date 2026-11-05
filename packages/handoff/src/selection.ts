@@ -4,18 +4,17 @@
  * `agent.options` only records what the agent was created with; a `/model`
  * switch — provider, model, and the reasoning effort — lands in the session's
  * durable `modelSelection` projection instead. Inheriting from `agent.options`
- * therefore handed the fresh session a stale or missing effort. This module
- * reads the projection the same way the /model popup does: the pending
- * selection first, the last used one second, and only then the creation
- * options.
+ * therefore handed the fresh session a stale or missing effort. The Agent owns
+ * that fold: `agent.model.current()` reads the pending selection first, the
+ * last used one second, and falls back to the creation options — the same
+ * order the /model popup shows, without this plugin reading another service's
+ * projection or casting its untyped state.
  *
  * @module dsh-handoff/selection
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
-// Type-only: pull the `Context.sessionProjections` / `Context.sessionController`
-// augmentations and the `modelSelection` projection key in.
-import type {} from '@deepseek-ai/dsh-session-projection'
+// Type-only: pull the `Context.sessionController` augmentation in.
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { PACKAGE_NAME } from './identity.js'
 import type { ModelChoice } from './brief.js'
@@ -27,7 +26,7 @@ export interface RouteSummary {
   readonly reasoningEffort?: string
 }
 
-/** Narrow the projection's selection shape into our owned route summary. */
+/** Narrow a selection into our owned route summary. */
 function toRoute(selection: { provider: string; model: string; reasoningEffort?: string }): RouteSummary {
   return {
     provider: selection.provider,
@@ -36,26 +35,14 @@ function toRoute(selection: { provider: string; model: string; reasoningEffort?:
   }
 }
 
-/** The origin agent's creation options, when they name a complete route. */
-function optionRoute(agent: Agent): RouteSummary | undefined {
-  const { provider, model, reasoningEffort } = agent.options
-  if (provider === undefined || model === undefined) return undefined
-  return { provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }
-}
-
 /**
- * The route the origin session is actually on: its durable selection
- * (pending first, then last used), falling back to the agent's creation
- * options. Returns `undefined` only when neither source names a route.
+ * The route the origin session is actually on: the Agent's durable selection
+ * (pending first, then last used), falling back to its creation options.
+ * Returns `undefined` only when neither source names a route.
  */
-export function sessionRoute(ctx: Context, agent: Agent): RouteSummary | undefined {
-  const projections = ctx.get('sessionProjections')
-  if (projections !== undefined) {
-    const state = projections.stateOf(agent.session, 'modelSelection')
-    const selection = state?.pending ?? state?.lastUsed ?? undefined
-    if (selection !== undefined && selection !== null) return toRoute(selection)
-  }
-  return optionRoute(agent)
+export function sessionRoute(agent: Agent): RouteSummary | undefined {
+  const selection = agent.model.current()
+  return selection === undefined ? undefined : toRoute(selection)
 }
 
 /** The deployment's global default route, effort included. */

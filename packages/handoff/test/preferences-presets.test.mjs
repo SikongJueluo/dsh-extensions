@@ -226,7 +226,19 @@ async function answerPick(host, choice) {
   return pick
 }
 
-async function originFixture(host, label, livePreset = 'preset-a') {
+/**
+ * An origin agent whose `model` accessor folds like the host's: the durable
+ * selection when one exists, otherwise the creation options. `selection` stands
+ * in for a recorded `/model` choice.
+ */
+function originModel(selection) {
+  return {
+    current: () => selection ?? { provider: 'origin-provider', model: 'origin-model' },
+    select() {},
+  }
+}
+
+async function originFixture(host, label, livePreset = 'preset-a', selection) {
   const cwd = new URL(`./.smoke-prefs/${label}`, import.meta.url).pathname
   await rm(cwd, { recursive: true, force: true })
   await mkdir(cwd, { recursive: true })
@@ -237,6 +249,7 @@ async function originFixture(host, label, livePreset = 'preset-a') {
     agent: {
       id,
       options: { provider: 'origin-provider', model: 'origin-model' },
+      model: originModel(selection),
       session: { header: { cwd } },
       ctx: { livePreset },
       followup: message => host.state.followups.get(id).push(message),
@@ -467,6 +480,30 @@ test('a stale remembered route is reported and cannot be spawned silently', asyn
     assert.deepEqual(created.agentOptions, { provider: 'origin-provider', model: 'origin-model' })
   }
   await rm(new URL('./.smoke-prefs', import.meta.url), { recursive: true, force: true })
+})
+
+test('an inherited route follows the origin durable selection, not its creation options', async () => {
+  const presets = makePresets()
+  const { host } = await boot({ domains: new Map(), presets })
+  try {
+    const origin = await originFixture(host, 'durable-selection', 'preset-a', {
+      provider: 'switched-provider',
+      model: 'switched-model',
+      reasoningEffort: 'high',
+    })
+    await channel(host, 'pending', {})
+    const pending = handoff(host, origin.agent, 'switched model task')
+    await answerPick(host, { kind: 'inherit', preset: { kind: 'inherit' } })
+    assert.equal((await pending).kind, 'success')
+    const { created } = await completeBrief(host, 'origin-durable-selection')
+    assert.deepEqual(created.agentOptions, {
+      provider: 'switched-provider',
+      model: 'switched-model',
+      reasoningEffort: 'high',
+    })
+  } finally {
+    await rm(new URL('./.smoke-prefs', import.meta.url), { recursive: true, force: true })
+  }
 })
 
 test('preset and model stay independent: default model keeps the origin preset; an explicit preset mounts', async () => {

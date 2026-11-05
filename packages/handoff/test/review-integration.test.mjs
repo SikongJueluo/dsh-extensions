@@ -94,7 +94,14 @@ function makeHost({ queueFails = false } = {}) {
   }
   const connection = { requestRejection: () => undefined }
   const webServer = { register(route) { state.routes.push(route); return () => {} } }
-  return { state, tools, sessionController, storageDomain, commands, agents, connection, webServer }
+  // The host's session-log reader (dsh-triggers injects it). This fake keeps
+  // no durable history, so every session reads as a genuinely empty log.
+  const sessionQuery = {
+    async readSession(sessionId) {
+      return { session: { id: sessionId }, inheritedEventCount: 0, events: [] }
+    },
+  }
+  return { state, tools, sessionController, sessionQuery, storageDomain, commands, agents, connection, webServer }
 }
 
 async function boot({ withTriggers = true, queueFails = false, config } = {}) {
@@ -102,6 +109,7 @@ async function boot({ withTriggers = true, queueFails = false, config } = {}) {
   const root = new Context()
   root.provide('tools', host.tools)
   root.provide('sessionController', host.sessionController)
+  root.provide('sessionQuery', host.sessionQuery)
   root.provide('storageDomain', host.storageDomain)
   root.provide('commands', host.commands)
   root.provide('agents', host.agents)
@@ -119,6 +127,7 @@ async function bootWithServices(config, extra) {
   const root = new Context()
   root.provide('tools', host.tools)
   root.provide('sessionController', host.sessionController)
+  root.provide('sessionQuery', host.sessionQuery)
   root.provide('storageDomain', host.storageDomain)
   root.provide('commands', host.commands)
   root.provide('agents', host.agents)
@@ -179,6 +188,9 @@ async function originFixture(host, label) {
     agent: {
       id,
       options: { provider: 'origin-provider', model: 'origin-model' },
+      // The host Agent folds the durable /model selection over its creation
+      // options; this fixture has no recorded selection.
+      model: { current: () => ({ provider: 'origin-provider', model: 'origin-model' }), select() {} },
       session: { header: { cwd } },
       followup: m => host.state.followups.get(id).push(m),
     },

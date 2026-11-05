@@ -559,7 +559,7 @@ async function resolveChoice(input: ResolveChoiceInput): Promise<AskOutcome> {
   const { rt, agent, task, roster, needWorkspace, modelFixed, defaults, presets, catalog, previous, reviewWire, fixedRoute, fixedWorkspace } = input
   const reviewAsk = reviewWire !== undefined && reviewWire.fixed !== true
   const { ctx, config } = rt
-  const inherited = sessionRoute(ctx, agent)
+  const inherited = sessionRoute(agent)
   const fallback = defaultRoute(ctx)
   const channel = rt.channel
 
@@ -1033,7 +1033,7 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       }
 
       const crossWorkspace = target.path !== roster.origin.path
-      const choiceText = describeChoice(choice, sessionRoute(ctx, agent), defaultRoute(ctx))
+      const choiceText = describeChoice(choice, sessionRoute(agent), defaultRoute(ctx))
       const presetText = presets === undefined ? undefined : describePreset(presets, preset)
       // A --model override is a one-off, and a default that no human confirmed
       // (timeout, missing answerer, confirm:false) must not become the

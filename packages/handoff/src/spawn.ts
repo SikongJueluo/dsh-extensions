@@ -38,7 +38,7 @@ function inheritAgentOptions(ctx: Context, agent: Agent): AgentOptions | undefin
   // The session's durable selection — provider, model, and reasoning effort —
   // is the route it is actually on; `agent.options` is only the creation
   // fallback for a session that has not recorded a selection yet.
-  const route = sessionRoute(ctx, agent)
+  const route = sessionRoute(agent)
   const options = toAgentOptions(route)
   if (options === undefined) return undefined
   // The origin's own output cap is a per-agent setting rather than part of a
