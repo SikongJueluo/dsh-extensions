@@ -73,7 +73,7 @@ dsh 本体与 `$DSH_HOME`（`~/.dsh` 下 profiles、patch 层、bin 等运行时
 
 ## 版本钉版
 
-`@deepseek-ai/*` 的 devDependencies 钉本机 dsh 内置的精确版本（dsh 0.2.0-rc.2：cordis 4.0.4 / schemastery 3.18.4 / dsh-* 0.2.0-rc.2），使类型检查与宿主运行时一致。schemastery 3.18.4 起类型把 volatile 模式编进 schema 泛型，**不要给 `Config` 写 `Schema<Config>` 注解**——声明 `interface Config`（volatile 字段用 `Volatile<T>`，见 dsh-llm-pi-ai 或本仓 auto-permit/settings.ts 的写法），让 `const Config = Schema.object({...})` 自行推断，loader 才能对上 `static Config`/`Config` 导出的形状。`peerDependencies` 保持宽松，交给安装方解析。升级 dsh 后同步核对这些钉版；API 演进（如 `CallId` → `ToolCallId`、0.2 删掉 `ctx.settings.installSection`）正是靠钉版类型检查暴露的。
+`@deepseek-ai/*` 的 devDependencies 钉本机 dsh 内置的精确版本（dsh 0.2.2-rc.1：cordis 4.1.0 / schemastery 3.19.0 / dsh-* 0.2.2-rc.1），使类型检查与宿主运行时一致。schemastery 3.18.4 起类型把 volatile 模式编进 schema 泛型，**不要给 `Config` 写 `Schema<Config>` 注解**——声明 `interface Config`（volatile 字段用 `Volatile<T>`，见 dsh-llm-pi-ai 或本仓 auto-permit/settings.ts 的写法），让 `const Config = Schema.object({...})` 自行推断，loader 才能对上 `static Config`/`Config` 导出的形状。`peerDependencies` 保持宽松，交给安装方解析。升级 dsh 后同步核对这些钉版；API 演进（如 `CallId` → `ToolCallId`、0.2 删掉 `ctx.settings.installSection`、0.2.2 的 `subagents.startActivation` / `sessionQuery.readSession` / `agent.model.current()` / `workspaceWritableRoots`）正是靠钉版类型检查暴露的——契约变更与验证记录见 [docs/dsh-0.2.2-sdk-migration.md](docs/dsh-0.2.2-sdk-migration.md)。
 
 ## 参考
 

@@ -128,8 +128,11 @@ settings.yml 在沙箱内不可见；不授 state 目录时启动即崩（settin
 
 ## 后端限制
 
-- 只编辑 **Linux / stock bwrap** 布局（钉版 `dsh-sandbox-local` 0.2.0-rc.2 的
-  profile 形状，见 [src/bwrap.ts](src/bwrap.ts)）。需要授权的调用在以下情形
+- 只编辑 **Linux / stock bwrap** 布局（钉版 `dsh-sandbox-local` 0.2.2-rc.1 的
+  profile 形状，见 [src/bwrap.ts](src/bwrap.ts)）。该形状里的 `--bind` 列表由
+  `workspaceWritableRoots()`（canonical workspace + policy 的
+  `additionalWritableRoots`）推导，所以策略多给的 root 属于 stock 布局而非漂移；
+  授权路径若已被这些 root 覆盖，只记 note、不重复挂载。需要授权的调用在以下情形
   **明确失败**（`GrantArgvError`），不猜 unfamiliar 布局、不静默去掉授权：非
   Linux 平台（在 super.confine 之前拒绝，不产生其他后端如 windows-acl 的副作
   用）、链路选中 Landlock/Seatbelt/ACL、配置了**形状非 stock** 的
