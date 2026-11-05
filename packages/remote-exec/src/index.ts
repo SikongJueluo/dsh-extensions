@@ -81,7 +81,7 @@ export type { DisplayView } from './display.js'
 /** The one tool this plugin registers. */
 export const TOOL_NAME = 'remote_exec'
 
-/** A target as written in the plugin config; `defaultCwd`/`workdir` are resolved at mount. */
+/** A target as written in the plugin config; `defaultCwd` is validated at mount. */
 export interface ConfiguredTarget {
   readonly sshHost: string
   readonly sshPort?: number
@@ -89,9 +89,7 @@ export interface ConfiguredTarget {
   readonly container: string
   readonly containerUser?: string
   /** Default container directory for calls that omit `cwd` (absolute path). */
-  readonly defaultCwd?: string
-  /** Legacy alias for `defaultCwd`; both may not disagree. */
-  readonly workdir?: string
+  readonly defaultCwd: string
   readonly shell: string
   readonly envInit: 'direnv' | 'none'
   readonly autoStart: boolean
@@ -160,8 +158,9 @@ export const Config = Schema.object({
       sshOptions: Schema.array(Schema.string()).description('Operator-trusted extra ssh options, pre-split (e.g. [-o, ProxyJump=bastion]). Model input never reaches these; BatchMode=yes is forced and cannot be weakened.'),
       container: Schema.string().required().description('Container name on the remote host. Only docker inspect/start/exec ever touch it; it is never created or rebuilt.'),
       containerUser: Schema.string().description('docker exec -u spec, double-quoted in the script so $(…) stays live. Default: $(id -u):$(id -g) — the remote login user.'),
-      defaultCwd: Schema.string().description('Default absolute container directory for calls that omit cwd. Adding a project under this directory needs no config change.'),
-      workdir: Schema.string().description('Legacy alias for defaultCwd. Keep only one; if both are set they must match.'),
+      defaultCwd: Schema.string()
+        .required()
+        .description('Absolute container directory for calls that omit cwd. Adding a project under this directory needs no config change.'),
       shell: Schema.string()
         .default(DEFAULT_CONTAINER_SHELL)
         .description(`Container shell, inserted into a double-quoted assignment (may embed $(id -un)); invoked as <shell> -l -c <wrapper>. Default: ${DEFAULT_CONTAINER_SHELL}`),
@@ -536,7 +535,7 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Resolve config targets: one default cwd, legacy `workdir` accepted, fail loud on conflict. */
+/** Resolve config targets: one required default cwd per target, validated at mount. */
 export function resolveTargets(targets: Record<string, ConfiguredTarget>): Map<string, RemoteTarget> {
   const resolved = new Map<string, RemoteTarget>()
   for (const [name, target] of Object.entries(targets)) {
@@ -546,21 +545,14 @@ export function resolveTargets(targets: Record<string, ConfiguredTarget>): Map<s
 }
 
 function resolveTarget(name: string, target: ConfiguredTarget): RemoteTarget {
-  if (target.defaultCwd !== undefined && target.workdir !== undefined && target.defaultCwd !== target.workdir) {
-    throw new Error(`remote target "${name}" sets both defaultCwd and workdir with different values; use one`)
-  }
-  const defaultCwd = target.defaultCwd ?? target.workdir
-  if (defaultCwd === undefined) {
-    throw new Error(`remote target "${name}" needs defaultCwd (or the legacy workdir)`)
-  }
-  assertAbsoluteCwd(`remote target "${name}"`, defaultCwd)
+  assertAbsoluteCwd(`remote target "${name}"`, target.defaultCwd)
   return {
     sshHost: target.sshHost,
     ...(target.sshPort === undefined ? {} : { sshPort: target.sshPort }),
     ...(target.sshOptions === undefined ? {} : { sshOptions: target.sshOptions }),
     container: target.container,
     ...(target.containerUser === undefined ? {} : { containerUser: target.containerUser }),
-    defaultCwd,
+    defaultCwd: target.defaultCwd,
     shell: target.shell,
     envInit: target.envInit,
     autoStart: target.autoStart,
@@ -569,7 +561,7 @@ function resolveTarget(name: string, target: ConfiguredTarget): RemoteTarget {
 }
 
 function assertAbsoluteCwd(label: string, cwd: string): void {
-  if (!cwd.startsWith('/')) {
+  if (typeof cwd !== 'string' || !cwd.startsWith('/')) {
     throw new Error(`${label} cwd must be an absolute container path: ${JSON.stringify(cwd)}`)
   }
   if (cwd.includes('\0')) {

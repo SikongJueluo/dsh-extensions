@@ -28,4 +28,3 @@
   #       container: research-cuda
   #       defaultCwd: /workspace/projects
   #       description: experiment box (devenv + fish)
-  #       # workdir: /workspace/projects   # legacy alias for defaultCwd

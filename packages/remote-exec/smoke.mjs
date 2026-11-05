@@ -1,7 +1,7 @@
 /* Runtime smoke test for dsh-remote-exec.
  *
  * Part 1 — plugin surface: config defaults, target-dict defaults.
- * Part 2 — target resolution: defaultCwd / legacy workdir migration.
+ * Part 2 — target resolution: required defaultCwd, invalid paths rejected.
  * Part 3 — exec.ts protocol: shQuote, buildRemoteScript (cwd/command argv,
  *          nonce control lines, env-log separation, autoStart on/off,
  *          prep markers/exits), buildSshArgv ordering, control parsing,
@@ -76,38 +76,30 @@ check('default stdout/stderr raw budgets', defaults.stdoutMaxBytes === 1048576 &
 check('default display budget', defaults.displayMaxBytes === 16384)
 check('default targets is an empty dict', Array.isArray(Object.keys(defaults.targets)) && Object.keys(defaults.targets).length === 0)
 
-const withTarget = Config({ targets: { box: { sshHost: 'gpu', container: 'nav', workdir: '/w' } } })
+const withTarget = Config({ targets: { box: { sshHost: 'gpu', container: 'nav', defaultCwd: '/w' } } })
 const box = withTarget.targets.box
 check(
   'target defaults filled by the dict schema',
   box.shell === DEFAULT_CONTAINER_SHELL && box.autoStart === true && box.envInit === 'direnv' && box.containerUser === undefined,
 )
-check('target required fields survive', box.sshHost === 'gpu' && box.container === 'nav' && box.workdir === '/w')
-check('target defaultCwd is optional in the schema', box.defaultCwd === undefined)
+check('target required fields survive', box.sshHost === 'gpu' && box.container === 'nav' && box.defaultCwd === '/w')
+throws('target without defaultCwd rejected by the schema', () => Config({ targets: { box: { sshHost: 'gpu', container: 'nav' } } }))
+throws('legacy workdir cannot replace defaultCwd', () => Config({ targets: { box: { sshHost: 'gpu', container: 'nav', workdir: '/w' } } }))
 
-// ── Part 2: target resolution / migration ────────────────────────────────
+// ── Part 2: target resolution: required defaultCwd ───────────────────────
 {
-  const cfg = Config({
-    targets: {
-      legacy: { sshHost: 'h', container: 'c', workdir: '/legacy' },
-      modern: { sshHost: 'h', container: 'c', defaultCwd: '/modern' },
-      same: { sshHost: 'h', container: 'c', defaultCwd: '/same', workdir: '/same' },
-    },
-  })
+  const cfg = Config({ targets: { modern: { sshHost: 'h', container: 'c', defaultCwd: '/modern' } } })
   const resolved = resolveTargets(cfg.targets)
-  check('legacy workdir becomes defaultCwd', resolved.get('legacy').defaultCwd === '/legacy')
-  check('legacy target no longer carries workdir', !('workdir' in resolved.get('legacy')))
   check('modern defaultCwd survives', resolved.get('modern').defaultCwd === '/modern')
-  check('matching defaultCwd/workdir accepted', resolved.get('same').defaultCwd === '/same')
+  check('resolved target no longer carries workdir', !('workdir' in resolved.get('modern')))
   check(
     'resolved target keeps shell/envInit/autoStart',
     resolved.get('modern').shell === DEFAULT_CONTAINER_SHELL && resolved.get('modern').envInit === 'direnv' && resolved.get('modern').autoStart === true,
   )
 }
-throws('conflicting defaultCwd/workdir rejected', () =>
-  resolveTargets(Config({ targets: { bad: { sshHost: 'h', container: 'c', defaultCwd: '/a', workdir: '/b' } } }).targets),
+throws('missing defaultCwd rejected by resolution', () =>
+  resolveTargets({ bad: { sshHost: 'h', container: 'c', shell: DEFAULT_CONTAINER_SHELL, envInit: 'direnv', autoStart: true } }),
 )
-throws('missing defaultCwd rejected', () => resolveTargets(Config({ targets: { bad: { sshHost: 'h', container: 'c' } } }).targets))
 throws('relative defaultCwd rejected', () => resolveTargets(Config({ targets: { bad: { sshHost: 'h', container: 'c', defaultCwd: 'rel' } } }).targets))
 throws('NUL defaultCwd rejected', () => resolveTargets(Config({ targets: { bad: { sshHost: 'h', container: 'c', defaultCwd: '/w\u0000x' } } }).targets))
 

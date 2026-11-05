@@ -67,8 +67,8 @@ docker exec -i -u "$(id -u):$(id -g)" -w / <container> /bin/sh -c '<outer>' \
 - 目录不存在/不可访问 → `cwd-error`，**不会自动创建，也不会回退到别的目录**。
 - 结果里的 `cwd` 是本次请求的目录（省略时是 target 默认值），不是 realpath 解析结果。
 - target 仍是 operator 授权的固定主机 + 固定容器；cwd 只决定命令在容器里的起点。
-- 旧配置的 `workdir` 作为 `defaultCwd` 的兼容别名保留；两者同时出现且不一致时插件
-  挂载失败，不会静默选一个。
+- `defaultCwd` 是 target 的必填字段；第一版的 `workdir` 别名已移除，旧配置必须改写为
+  `defaultCwd`（值不变），否则插件挂载失败，不会静默回退。
 
 ## 输出协议
 
@@ -141,7 +141,6 @@ docker exec -i -u "$(id -u):$(id -g)" -w / <container> /bin/sh -c '<outer>' \
         container: research-cuda      # 只 inspect/start/exec，绝不创建/重建
         defaultCwd: /workspace/projects
         description: 实验机（devenv + fish）
-        # workdir: /workspace/projects   # 旧字段，等价于 defaultCwd
         # sshPort: 22                    # 缺省交给 ssh config
         # sshOptions: [-o, ProxyJump=bastion]   # operator 信任的额外参数
         # containerUser: '1000:1000'     # 缺省远端 $(id -u):$(id -g)
@@ -149,6 +148,10 @@ docker exec -i -u "$(id -u):$(id -g)" -w / <container> /bin/sh -c '<outer>' \
         # envInit: direnv                # direnv | none
         # autoStart: true                # 只 docker start 已有容器
 ```
+
+迁移：第一版的 `workdir` 已移除，改为同值的 `defaultCwd`；NixOS 里对应
+`targets.<name>.workdir = …;` → `targets.<name>.defaultCwd = …;`。仍只写 `workdir` 的
+target 缺必填字段，插件在挂载/配置校验期直接失败。
 
 调用示例：
 
