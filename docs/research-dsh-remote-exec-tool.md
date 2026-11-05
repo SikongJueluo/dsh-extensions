@@ -1,5 +1,9 @@
 # 调研：DSH 远端容器执行工具（remote-exec）
 
+> 注：阶段一（2026-11）已实现 per-call cwd、环境日志与命令输出分离、有界展示 +
+> spillStore 原文取回。本文保留 0.2.0-rc.2 的调研原文；协议与配置细节以
+> `packages/remote-exec/README.md` 为准。
+
 > 结论先行：**可以实现，且不需要动 DSH 上游或放宽沙箱**。四个所需能力在 0.2.0-rc.2
 > 里都有官方挂点：`ctx.tools.register`（给模型一个 `remote_exec` 工具）、
 > `ctx.subprocess.spawn`（宿主侧 spawn `ssh`，天然不在模型 bash 沙箱内，能读真实

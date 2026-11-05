@@ -7,7 +7,10 @@
 # (host-side ssh — the model bash sandbox is never involved, so the real
 # ~/.ssh, agent forwarding and jump chains all apply). Approval is fetched
 # opportunistically (ctx.get('approval')); a missing approval service fails
-# closed unless approvalMode is explicitly 'never'.
+# closed unless approvalMode is explicitly 'never'. The session spill store
+# (ctx.get('spillStore')) is optional: when present, truncated raw output is
+# saved there and its locator is returned; when absent, the tool still returns
+# a bounded view and reports that the full output is unavailable.
 #
 # The row config owns the target whitelist — operator-managed (bundle layer
 # here, or a later patch/nixos overlay layer can replace it by id). Zero
@@ -18,9 +21,11 @@
   #   approvalMode: session        # session | every | never
   #   defaultTimeoutMs: 600000
   #   maxTimeoutMs: 3600000
+  #   displayMaxBytes: 16384       # per-stream model-facing display budget
   #   targets:
-  #     mini-nav-gpu:
+  #     lab-cuda:
   #       sshHost: gpu-workstation
-  #       container: mini-nav
-  #       workdir: /workspace/Mini-Nav
-  #       description: Mini-Nav experiment box
+  #       container: research-cuda
+  #       defaultCwd: /workspace/projects
+  #       description: experiment box (devenv + fish)
+  #       # workdir: /workspace/projects   # legacy alias for defaultCwd

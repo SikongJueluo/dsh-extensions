@@ -1,7 +1,7 @@
 {
   "name": "dsh-remote-exec",
   "version": "0.1.0",
-  "description": "DSH remote-exec plugin: one remote_exec tool that runs fish commands inside a fixed Docker container on a whitelisted SSH host — host-side ssh (real ~/.ssh), per-target session approval, no host-shell fallback",
+  "description": "DSH remote-exec plugin: one remote_exec tool that runs fish commands inside a fixed Docker container on a whitelisted SSH host — per-call container cwd, separated environment-init logs, bounded output with spill retrieval, per-target session approval, no host-shell fallback",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",
