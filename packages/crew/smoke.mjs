@@ -140,16 +140,23 @@ try {
 check('an aborted delegation never degrades to the fallback', abortError instanceof Error && cancelled.calls.length === 1)
 
 // ── delegation path against stub services ────────────────────────────────────
-/** Minimal Cordis-shaped context covering exactly what crew's apply() touches. */
-function makeApplyCtx({ plan, failFor = [] } = {}) {
+/**
+ * Minimal Cordis-shaped context covering exactly what crew's apply() touches.
+ * `activate(spec, childId)` replaces the default already-completed activation so
+ * a test can model a child that only stops when disposed.
+ */
+function makeApplyCtx({ plan, failFor = [], activate } = {}) {
   const registered = new Map()
   const warnings = []
   const starts = []
+  const activations = []
+  const disposals = []
   const provider = {
     name: 'spawn',
     capabilities: { agentOptions: true },
     prepareContinuable: () => {},
   }
+  const record = { disposals }
   const ctx = {
     logger: { info() {}, warn: (message, ...args) => warnings.push([message, ...args].join(' ')) },
     get: (serviceName) => (serviceName === 'planUsage' && plan !== undefined ? { get: async () => plan } : undefined),
@@ -172,25 +179,46 @@ function makeApplyCtx({ plan, failFor = [] } = {}) {
     subagents: {
       getProvider: (providerName) => (providerName === 'spawn' ? provider : undefined),
       resolveMaxDepth: () => undefined,
-      startContinuable: async (request) => {
-        // The provider receives the start envelope; the child's own request
-        // (prompt + parent + agentOptions) sits inside it.
-        starts.push(request.request)
-        return { childId: `child-${starts.length}` }
-      },
-      start: async (_providerName, request) => {
-        starts.push(request)
+      startActivation: async (spec) => {
+        // The child's own request (prompt + parent + agentOptions) sits inside
+        // the activation spec; `delivery` decides who receives the result.
+        starts.push(spec.request)
+        activations.push(spec)
+        const childId = `child-${starts.length}`
+        if (activate !== undefined) return activate(spec, childId, record)
         return {
-          id: 'run-1',
+          childId,
+          messageId: 'message-1',
           result: Promise.resolve({ stopReason: 'completed', output: [{ type: 'text', text: 'child answer' }] }),
-          dispose: () => {},
+          dispose: async () => { disposals.push(childId) },
         }
       },
     },
     systemPrompt: { getSectionOrder: () => 0, section: () => () => {} },
   }
-  return { ctx, registered, warnings, starts }
+  return { ctx, registered, warnings, starts, activations, disposals }
 }
+
+/** A promise plus its resolvers, for tests that need to hold an outcome open. */
+function deferred() {
+  let resolve
+  const promise = new Promise((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve }
+}
+
+/** Spin the microtask/timer queue until `condition` holds (bounded). */
+async function until(condition, what) {
+  for (let i = 0; i < 200; i += 1) {
+    if (condition()) return
+    await new Promise((settle) => setTimeout(settle, 2))
+  }
+  throw new Error(`smoke: timed out waiting for ${what}`)
+}
+
+/** Settle a promise into `{ ok, value|error }` without letting rejections escape. */
+const settled = (promise) => promise.then((value) => ({ ok: true, value }), (error) => ({ ok: false, error }))
 
 const exec = { agent: { id: 'parent' }, signal: new AbortController().signal }
 const delegationArgs = { description: 'two word label', prompt: 'do the thing' }
@@ -201,6 +229,8 @@ const delegationArgs = { description: 'two word label', prompt: 'do the thing' }
   check('all four tools register', ['subagent_quick', 'subagent', 'subagent_smart', 'create_agent'].every((toolName) => wired.registered.has(toolName)))
   const value = await wired.registered.get('subagent_quick').execute(delegationArgs, exec)
   check('healthy quick delegates on opencode-go', value.kind === 'continuable' && wired.starts[0].agentOptions.provider === 'opencode-go')
+  check('a background child delivers its result to the parent', wired.activations[0].delivery === 'parent')
+  check('a background child stays resident (not disposed by the tool)', wired.disposals.length === 0)
   check('healthy quick records no notice', value.notice === undefined)
   check('the child inherits the pinned effort', wired.starts[0].agentOptions.reasoningEffort === 'max')
 }
@@ -227,10 +257,126 @@ const delegationArgs = { description: 'two word label', prompt: 'do the thing' }
   const wired = makeApplyCtx({ failFor: ['opencode-go'] })
   apply(wired.ctx, config)
   const value = await wired.registered.get('subagent_quick').execute({ ...delegationArgs, run_in_background: false }, exec)
-  check('a foreground fallback settles the child run', value.kind === 'foreground' && value.runId === 'run-1')
+  check('a foreground fallback settles the child run', value.kind === 'foreground' && value.runId === 'child-1')
+  check('a foreground child returns its result to the caller only', wired.activations[0].delivery === 'caller')
+  check('a foreground child is disposed by the tool call', wired.disposals.length === 1)
   check('the foreground child ran on the fallback', wired.starts[0].agentOptions.provider === 'deepseek-official')
   const rendered = wired.registered.get('subagent_quick').output.render(delegationArgs, value)
   check('the foreground render keeps the child text and appends the notice', rendered[0].text.includes('child answer') && rendered[0].text.includes('[crew]'))
+}
+
+// ── foreground cancellation after acceptance ─────────────────────────────────
+// 0.2.2's start signal owns publication only; after acceptance the caller must
+// dispose() to stop the child. These cases pin that lifecycle.
+
+/** A foreground child whose result only settles once dispose() stops it. */
+function pendingActivation({ log } = {}) {
+  return (spec, childId, record) => {
+    const outcome = deferred()
+    return {
+      childId,
+      messageId: 'message-1',
+      result: outcome.promise,
+      dispose: async () => {
+        record.disposals.push(childId)
+        log?.push('dispose')
+        // Teardown is observable: the result settles only after the stop lands.
+        await new Promise((settle) => setTimeout(settle, 5))
+        outcome.resolve({ stopReason: 'aborted', output: [] })
+        log?.push('stopped')
+      },
+    }
+  }
+}
+
+{
+  // Accept-then-cancel: the tool call must dispose, wait for teardown, and only
+  // then report the aborted run.
+  const controller = new AbortController()
+  const log = []
+  const wired = makeApplyCtx({ activate: pendingActivation({ log }) })
+  apply(wired.ctx, config)
+  const pending = wired.registered.get('subagent_quick').execute(
+    { ...delegationArgs, run_in_background: false },
+    { agent: { id: 'parent' }, signal: controller.signal },
+  )
+  await until(() => wired.activations.length === 1, 'activation acceptance')
+  controller.abort()
+  log.push('abort')
+  const outcome = await settled(pending)
+  check('an accepted foreground child is disposed when the tool call is aborted', wired.disposals.length === 1)
+  check('the abort disposes rather than waiting for the child to finish', outcome.ok === false && /cancelled/.test(String(outcome.error)))
+  check('the tool call ends only after teardown settled', log.join(',') === 'abort,dispose,stopped')
+  check('an aborted foreground child is not reported as output', outcome.ok === false)
+}
+
+{
+  // Already-cancelled race: the signal aborted while the activation published.
+  const controller = new AbortController()
+  const wired = makeApplyCtx({
+    activate: (spec, childId, record) => {
+      controller.abort()
+      const outcome = deferred()
+      return {
+        childId,
+        messageId: 'message-1',
+        result: outcome.promise,
+        dispose: async () => {
+          record.disposals.push(childId)
+          outcome.resolve({ stopReason: 'aborted', output: [] })
+        },
+      }
+    },
+  })
+  apply(wired.ctx, config)
+  const outcome = await settled(wired.registered.get('subagent_quick').execute(
+    { ...delegationArgs, run_in_background: false },
+    { agent: { id: 'parent' }, signal: controller.signal },
+  ))
+  check('an abort that landed during publication still disposes the child', wired.disposals.length === 1)
+  check('the publication-race cancellation reports a failed call', outcome.ok === false)
+}
+
+{
+  // Cancel/complete race: the child finished just before the abort landed.
+  const controller = new AbortController()
+  const wired = makeApplyCtx({
+    activate: (spec, childId, record) => {
+      const outcome = deferred()
+      setTimeout(() => outcome.resolve({ stopReason: 'completed', output: [{ type: 'text', text: 'race winner' }] }), 2)
+      return {
+        childId,
+        messageId: 'message-1',
+        result: outcome.promise,
+        dispose: async () => { record.disposals.push(childId) },
+      }
+    },
+  })
+  apply(wired.ctx, config)
+  const pending = wired.registered.get('subagent_quick').execute(
+    { ...delegationArgs, run_in_background: false },
+    { agent: { id: 'parent' }, signal: controller.signal },
+  )
+  await until(() => wired.activations.length === 1, 'activation acceptance')
+  controller.abort()
+  const outcome = await settled(pending)
+  check('a completed foreground child wins the cancel/complete race', outcome.ok === true && outcome.value.runId === 'child-1')
+  check('the racing completion still releases exactly once', wired.disposals.length === 1)
+}
+
+{
+  // Background children are untouched by their own tool call's later abort.
+  const controller = new AbortController()
+  const wired = makeApplyCtx({ activate: pendingActivation() })
+  apply(wired.ctx, config)
+  const value = await wired.registered.get('subagent_quick').execute(
+    delegationArgs,
+    { agent: { id: 'parent' }, signal: controller.signal },
+  )
+  controller.abort()
+  await new Promise((settle) => setTimeout(settle, 20))
+  check('a background delegation returns without waiting for the child', value.kind === 'continuable')
+  check('a later abort never disposes a background child from this tool call', wired.disposals.length === 0)
 }
 
 console.log(failures === 0 ? '\nall crew smoke checks passed' : `\n${failures} crew smoke check(s) failed`)

@@ -28,7 +28,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 import { ReasoningEffortId, type ContentBlock, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
-import type { SubagentProvider, SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
+import type { SubagentActivation, SubagentProvider, SubagentResult } from '@deepseek-ai/dsh-subagent'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 
@@ -179,26 +179,52 @@ interface ForegroundResult {
   output: JsonValue[]
 }
 
-/** Collect and release one foreground run without letting disposal replace an independent result failure. */
-async function settleForegroundRun(run: SubagentRun): Promise<ForegroundResult> {
-  const [execution] = await Promise.allSettled([run.result.then((result) => {
-    const error = stopReasonError(result)
-    if (error !== undefined) throw new Error(withDiagnosticAndPartialText(error, result))
-    return {
-      kind: 'foreground' as const,
-      runId: run.id as string,
-      // ContentBlocks travel the session log as lossless JSON; the output
-      // schema types them as the broader JsonValue[].
-      output: [...result.output] as unknown as JsonValue[],
+/** Outcome of releasing one activation, captured instead of thrown so a result failure survives. */
+type DisposalOutcome = { ok: true } | { ok: false, error: unknown }
+
+/**
+ * Collect and release one foreground activation.
+ *
+ * The activation's start signal owns publication only: once the child is
+ * accepted, the caller owns cancellation, so an abort must `dispose()` the
+ * activation — that is what stops the running child and lets its result settle.
+ * Both teardown and the result are awaited before this returns, so the tool
+ * call never reports an outcome the child is still running against.
+ */
+async function settleForegroundRun(activation: SubagentActivation, signal: AbortSignal): Promise<ForegroundResult> {
+  let release: Promise<DisposalOutcome> | undefined
+  /** Start (or reuse) the one release this activation ever needs; dispose is idempotent. */
+  const dispose = (): Promise<DisposalOutcome> => release ??= Promise.resolve()
+    .then(() => activation.dispose())
+    .then(() => ({ ok: true as const }), (error: unknown) => ({ ok: false as const, error }))
+  const cancel = (): void => { void dispose() }
+  // Covers an abort that landed while `startActivation` was still publishing.
+  if (signal.aborted) cancel()
+  else signal.addEventListener('abort', cancel, { once: true })
+  try {
+    const [execution] = await Promise.allSettled([activation.result.then((result) => {
+      const error = stopReasonError(result)
+      if (error !== undefined) throw new Error(withDiagnosticAndPartialText(error, result))
+      return {
+        kind: 'foreground' as const,
+        runId: activation.childId as string,
+        // ContentBlocks travel the session log as lossless JSON; the output
+        // schema types them as the broader JsonValue[].
+        output: [...result.output] as unknown as JsonValue[],
+      }
+    })])
+    // A normal completion releases here; an aborted activation already released
+    // in the listener, and the result settled because of it.
+    const disposal = await dispose()
+    if (execution.status === 'rejected') {
+      if (!disposal.ok) throw new AggregateError([execution.reason, disposal.error], `subagent run failed: ${String(execution.reason)}; dispose failed: ${String(disposal.error)}`)
+      throw execution.reason
     }
-  })])
-  const [disposal] = await Promise.allSettled([Promise.resolve().then(() => run.dispose())])
-  if (execution.status === 'rejected') {
-    if (disposal.status === 'rejected') throw new AggregateError([execution.reason, disposal.reason], `subagent run failed: ${String(execution.reason)}; dispose failed: ${String(disposal.reason)}`)
-    throw execution.reason
+    if (!disposal.ok) throw disposal.error
+    return execution.value
+  } finally {
+    signal.removeEventListener('abort', cancel)
   }
-  if (disposal.status === 'rejected') throw disposal.reason
-  return execution.value
 }
 
 // ── Route selection ──────────────────────────────────────────────────────────
@@ -373,20 +399,22 @@ async function startTierChild(ctx: Context, config: Config, subagentProvider: Su
     ...(maxDepth !== undefined ? { maxDepth } : {}),
   }
   const notice = selection.notice
-  if (!spec.runInForeground) {
-    const start = await ctx.subagents.startContinuable({
-      provider: config.provider,
-      label: spec.label,
-      request,
-      signal: exec.signal,
-    })
-    return { background: true, childId: start.childId as string, ...(notice !== undefined ? { notice } : {}) }
-  }
-  return { background: false, value: await settleForegroundRun(await ctx.subagents.start(config.provider, {
-    ...request,
+  // One activation API for both modes: only the result recipient (and therefore
+  // whether the model is notified) differs. Background children stay resident
+  // and are released through the host's control plane — this tool call's end,
+  // including a later abort of its signal, never touches them. A foreground
+  // child is settled and disposed by this call itself.
+  const activation = await ctx.subagents.startActivation({
+    provider: config.provider,
     label: spec.label,
+    request,
     signal: exec.signal,
-  })), ...(notice !== undefined ? { notice } : {}) }
+    delivery: spec.runInForeground ? 'caller' : 'parent',
+  })
+  if (!spec.runInForeground) {
+    return { background: true, childId: activation.childId as string, ...(notice !== undefined ? { notice } : {}) }
+  }
+  return { background: false, value: await settleForegroundRun(activation, exec.signal), ...(notice !== undefined ? { notice } : {}) }
 }
 
 /** Install the crew delegation composition. */
