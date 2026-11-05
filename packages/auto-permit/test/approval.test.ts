@@ -7,7 +7,10 @@
  *
  * @module dsh-auto-permit/approval.test
  */
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Context, Volatile, VolatileSnapshot } from '@deepseek-ai/cordis'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { apply } from '../src/index.js'
@@ -16,9 +19,16 @@ import { MAX_COMMAND_CHARS } from '../src/evidence.js'
 
 const vol = <T>(value: T): Volatile<T> => ({ get: () => value as VolatileSnapshot<T> })
 
+/** A real directory: mutable-file commands need a readable inspector. */
+const WORKSPACE = mkdtempSync(join(tmpdir(), 'dsh-auto-permit-approval-'))
+
+afterAll(() => {
+  rmSync(WORKSPACE, { recursive: true, force: true })
+})
+
 interface Fixture {
   events: { type: string; data: unknown }[]
-  injected: { source?: { kind?: string; summary?: string } }[]
+  injected: { source?: { kind?: string; summary?: string }; content?: { type: string; text?: string }[] }[]
   appended: unknown[]
   llmCalls: { messages: { content: { type: string; text?: string }[] }[] }[]
   answer(callId: string, toolName?: string, chainOutcome?: ApprovalOutcome): Promise<{ outcome: ApprovalOutcome; fellThrough: boolean }>
@@ -137,6 +147,40 @@ describe('auto-permit answerer over PTC evidence', () => {
     expect(fixture.appended).toEqual([])
   })
 
+  it('sends a disposable podman probe to the judge instead of the rm hard rule', async () => {
+    const fixture = makeFixture(undefined, {
+      verdicts: ['VERDICT: defer\nREASON: needs the script'],
+      workspace: WORKSPACE,
+      workingDirectory: WORKSPACE,
+    })
+    const command = 'podman run --rm --network none -v "$PWD/out:/app:ro" '
+      + 'localhost/realsense-official:2.59.1 ldd /app/bin/camera'
+    directBash(fixture, 'probe', { command, sandbox_permissions: 'danger-full-access' })
+    const { outcome, fellThrough } = await fixture.answer('probe')
+    expect(fellThrough).toBe(true)
+    expect(outcome).toBe('rejected')
+    expect(fixture.llmCalls).toHaveLength(1)
+    const notices = fixture.injected.map((message) => message.source?.summary ?? '')
+    expect(notices.some((summary) => summary.includes('irreversible'))).toBe(false)
+    expect(notices.some((summary) => summary.includes('deferred'))).toBe(true)
+  })
+
+  it('renders the judge category and evidence references in the deferred notice', async () => {
+    const fixture = makeFixture(undefined, {
+      verdicts: ['VERDICT: defer\nREASON: script calls an unread helper\nEVIDENCE: scripts/build.sh:10-20'],
+      workspace: WORKSPACE,
+      workingDirectory: WORKSPACE,
+    })
+    directBash(fixture, 'evidence-note', {
+      command: 'bash scripts/build.sh',
+      sandbox_permissions: 'danger-full-access',
+    })
+    await fixture.answer('evidence-note')
+    const body = fixture.injected[0]?.content?.map((block) => block.text ?? '').join('\n') ?? ''
+    expect(body).toContain('judge (policy): script calls an unread helper')
+    expect(body).toContain('evidence: scripts/build.sh:10-20')
+  })
+
   it('defers a high-risk PTC sub-call to the human with a high-risk notice', async () => {
     const fixture = makeFixture()
     ptcBash(fixture, 'root:ptc:1', { command: 'sudo rm -rf /tmp/x', sandbox_permissions: 'danger-full-access' })
@@ -250,22 +294,22 @@ describe('auto-permit answerer over PTC evidence', () => {
 
   it('hands the call workdir, effective cwd, and immutable workspace to the judge', async () => {
     const fixture = makeFixture(undefined, {
-      workspace: '/home/u/Projects/app',
-      workingDirectory: '/home/u/Projects/app',
+      workspace: WORKSPACE,
+      workingDirectory: WORKSPACE,
     })
     ptcBash(fixture, 'root:ptc:1', {
       command: 'podman build -t local/app:test .',
-      workdir: '/home/u/Projects/app',
+      workdir: WORKSPACE,
       sandbox_permissions: 'danger-full-access',
     })
     await fixture.answer('root:ptc:1')
     const text = fixture.llmCalls[0]?.messages[0]?.content
       ?.map((block) => block.text ?? '')
       .join('\n') ?? ''
-    expect(text).toContain('call_workdir: "/home/u/Projects/app"')
-    expect(text).toContain('effective_cwd (recorded current working directory): "/home/u/Projects/app"')
-    expect(text).toContain('resolved_working_directory (host resolution): "/home/u/Projects/app"')
-    expect(text).toContain('session_workspace (immutable original project): "/home/u/Projects/app"')
+    expect(text).toContain(`call_workdir: "${WORKSPACE}"`)
+    expect(text).toContain(`effective_cwd (recorded current working directory): "${WORKSPACE}"`)
+    expect(text).toContain(`resolved_working_directory (host resolution): "${WORKSPACE}"`)
+    expect(text).toContain(`session_workspace (immutable original project): "${WORKSPACE}"`)
   })
 
   it('falls back without a notice on malformed PTC evidence', async () => {
@@ -300,7 +344,7 @@ describe('container boundary', () => {
   }
 
   it('never replays a chain-approved container command: the identical string is re-judged', async () => {
-    const fixture = makeFixture()
+    const fixture = makeFixture(undefined, { workspace: WORKSPACE, workingDirectory: WORKSPACE })
     await chainApprove(fixture, 'root:ptc:1', 'podman build -t local/app:test .')
     ptcBash(fixture, 'root:ptc:2', {
       command: 'podman build -t local/app:test .',
@@ -313,7 +357,7 @@ describe('container boundary', () => {
   })
 
   it('never replays a chain-approved script invocation: the script file can change', async () => {
-    const fixture = makeFixture()
+    const fixture = makeFixture(undefined, { workspace: WORKSPACE, workingDirectory: WORKSPACE })
     await chainApprove(fixture, 'root:ptc:1', './scripts/test-container.sh --fast')
     ptcBash(fixture, 'root:ptc:2', {
       command: './scripts/test-container.sh --fast',
@@ -437,7 +481,7 @@ describe('container boundary', () => {
 
   it('resolves an omitted workdir against the host effective cwd, not the header', async () => {
     const fixture = makeFixture(undefined, {
-      workspace: '/home/u/project',
+      workspace: WORKSPACE,
       workingDirectory: '/home/u/other-project',
     })
     directBash(fixture, 'cwd-1', {
@@ -450,12 +494,12 @@ describe('container boundary', () => {
       .join('\n') ?? ''
     expect(text).toContain('effective_cwd (recorded current working directory): "/home/u/other-project"')
     expect(text).toContain('resolved_working_directory (host resolution): "/home/u/other-project"')
-    expect(text).toContain('session_workspace (immutable original project): "/home/u/project"')
+    expect(text).toContain(`session_workspace (immutable original project): "${WORKSPACE}"`)
   })
 
   it('joins a PTC relative workdir to the effective cwd like the host', async () => {
     const fixture = makeFixture(undefined, {
-      workspace: '/home/u/project',
+      workspace: WORKSPACE,
       workingDirectory: '/home/u/other-project',
     })
     ptcBash(fixture, 'root:ptc:1', {
@@ -471,7 +515,7 @@ describe('container boundary', () => {
   })
 
   it('falls back to the logged working-directory change when the service is absent', async () => {
-    const fixture = makeFixture(undefined, { workspace: '/home/u/project' })
+    const fixture = makeFixture(undefined, { workspace: WORKSPACE })
     fixture.events.push({ type: 'working-directory/change', data: { cwd: '/home/u/other-project' } })
     directBash(fixture, 'cwd-2', {
       command: 'podman build .',

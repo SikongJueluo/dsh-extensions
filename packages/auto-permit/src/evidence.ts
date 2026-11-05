@@ -301,6 +301,75 @@ function clip(text: string, max: number): string {
   return text.length > max ? text.slice(0, max) + '…[truncated]' : text
 }
 
+interface TaskSection {
+  /** Offset of the heading in the prompt. */
+  start: number
+  /** Heading plus its body, bounded by the caller. */
+  text: string
+}
+
+/**
+ * Find the last explicit `## Task` / `## 任务` section. A long handoff often
+ * carries its operative request in the tail; extracting the section keeps it
+ * from being lost when the middle of the prompt is omitted.
+ */
+function findTaskSection(text: string): TaskSection | undefined {
+  const pattern = /^(#{1,3})[ \t]+(?:Task|任务)\b.*$/gim
+  let match: RegExpExecArray | null = null
+  let last: RegExpExecArray | null = null
+  while ((match = pattern.exec(text)) !== null) last = match
+  if (last === null) return undefined
+  const level = (last[1] ?? '#').length
+  const bodyStart = last.index + last[0].length
+  const nextHeading = new RegExp(`\\n#{1,${level}}[ \\t]+`, 'g')
+  nextHeading.lastIndex = bodyStart
+  const next = nextHeading.exec(text)
+  const end = next === null ? text.length : next.index + 1
+  return { start: last.index, text: text.slice(last.index, end) }
+}
+
+/**
+ * Bound one human prompt while keeping both ends and an explicit Task section.
+ *
+ * A plain prefix loses the formal task in long handoffs (the observed case:
+ * `## Task` at character 12,841 of 13,184). Head + tail keeps the latest
+ * authorization, and a Task section in the omitted middle is carried
+ * explicitly, with every omission marked.
+ *
+ * @param text - the human prompt.
+ * @param budget - maximum characters to return.
+ * @returns the bounded prompt, with omission markers.
+ */
+export function foldPrompt(text: string, budget: number): string {
+  if (text.length <= budget) return text
+  if (budget < 200) return text.slice(0, Math.max(0, budget))
+  const marker = (count: number): string => `\n…[${Math.max(0, count)} characters omitted]…\n`
+  const reserve = 160
+  const tasks = budget >= 800 ? findTaskSection(text) : undefined
+  const baseHead = Math.floor((budget - reserve) * 0.55)
+  if (tasks !== undefined) {
+    const inTail = tasks.start >= text.length - Math.floor(budget * 0.4)
+    const inHead = tasks.start < baseHead
+    if (!inTail && !inHead) {
+      const taskText = tasks.text.slice(0, Math.min(tasks.text.length, Math.floor(budget * 0.4)))
+      const rest = Math.max(200, budget - reserve - taskText.length - 24)
+      const headBudget = Math.floor(rest * 0.5)
+      const tailBudget = rest - headBudget
+      const head = text.slice(0, headBudget)
+      const tail = text.slice(text.length - tailBudget)
+      const omitted = text.length - head.length - tail.length - taskText.length
+      return `${head}${marker(omitted)}## Task (extracted)\n${taskText}${
+        tailBudget > 0 ? `\n…[end of prompt]…\n${tail}` : ''
+      }`
+    }
+  }
+  const headBudget = baseHead
+  const tailBudget = budget - reserve - headBudget
+  const head = text.slice(0, headBudget)
+  const tail = text.slice(text.length - tailBudget)
+  return `${head}${marker(text.length - head.length - tail.length)}${tail}`
+}
+
 /**
  * Fold one session's log into the judge evidence for a pending call.
  *
@@ -376,7 +445,7 @@ export function collectEvidence(
     const text = prompts[i]
     if (text === undefined) break
     if (text.length > budget) {
-      promptWindow.unshift(text.slice(0, Math.max(budget, 0)) + '…[truncated]')
+      promptWindow.unshift(foldPrompt(text, budget))
       break
     }
     budget -= text.length

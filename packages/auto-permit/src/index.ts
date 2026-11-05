@@ -17,11 +17,13 @@
  *    already allowed in this session → allowed at once, no model call; never
  *    for container-engine or script commands, whose effects come from mutable
  *    files (those are judged again every time);
- * 4. otherwise one bounded one-shot judge call (a small model configured in
+ * 4. otherwise a bounded read-only judge agent (a small model configured in
  *    the plugin row config) over the session's user prompts, the pending
- *    call's full arguments, the call/session working directories, and the
- *    already-approved commands: ALLOW claims the request, everything else —
- *    ambiguity, timeout, parse failure — falls through to the human answerer.
+ *    call's full arguments, the call/session working directories, the
+ *    already-approved commands, and — when needed — project files it reads
+ *    through its three read-only tools: ALLOW claims the request, everything
+ *    else (ambiguity, a weak or changed evidence trail, timeout, budget,
+ *    provider failure) falls through to the human answerer.
  *
  * Every decision is appended to the session's log as a `form: 'notice'`
  * message, so the stock Web chat shows it as a collapsed context row
@@ -45,7 +47,7 @@ import { containerRisk, isMutableFileDependent } from './container.js'
 import { isHighRisk } from './rules.js'
 import { judge } from './judge.js'
 import { buildNoticeMessage } from './notice.js'
-import type { NoticeOutcome } from './notice.js'
+import type { NoticeDetail, NoticeOutcome } from './notice.js'
 import { registerSettings, routeConfigured } from './settings.js'
 import type { Config as RowConfig } from './settings.js'
 
@@ -54,7 +56,8 @@ export type { AutoPermitSettings } from './settings.js'
 export { collectEvidence } from './evidence.js'
 export { containerRisk, isMutableFileDependent, CONTAINER_RISKS } from './container.js'
 export { isHighRisk } from './rules.js'
-export { judge, buildJudgeMessage, PROMPT_VERSION, SYSTEM_PROMPT } from './judge.js'
+export { judge, buildJudgeMessage, JUDGE_LIMITS, PROMPT_VERSION, SYSTEM_PROMPT } from './judge.js'
+export type { JudgeCategory, JudgeResult, Verdict } from './judge.js'
 export { buildNoticeMessage } from './notice.js'
 
 export const inject = ['llm']
@@ -141,14 +144,16 @@ interface WorkingDirectoryLike {
  * @param outcome - how the request settled.
  * @param command - the command being escalated (already excerpted).
  * @param reason - the judge's reason line, when the model call produced one.
+ * @param detail - judge category and evidence references, when available.
  */
 function notify(
   agent: NoticeAgent,
   outcome: NoticeOutcome,
   command: string,
   reason?: string,
+  detail?: NoticeDetail,
 ): void {
-  deliverNotice(agent, buildNoticeMessage(outcome, command, reason))
+  deliverNotice(agent, buildNoticeMessage(outcome, command, reason, detail))
 }
 
 /**
@@ -285,19 +290,27 @@ export function apply(ctx: Context, config: RowConfig): void {
         )
         if (result.verdict === 'allow') {
           ctx.logger.info(
-            'auto-permit: judge allowed: %s',
+            'auto-permit: judge allowed after %d step(s), evidence [%s]: %s',
+            result.steps ?? 1,
+            (result.evidence ?? []).join(', ') || 'none',
             command,
           )
-          notify(agent, 'allowed', command, result.reason)
+          notify(agent, 'allowed', command, result.reason, { evidence: result.evidence })
           rememberSelf()
           return 'allowed-once'
         }
         ctx.logger.info(
-          'auto-permit: judge deferred to human: %s (%s)',
-          command,
+          'auto-permit: judge deferred to human [%s] after %d step(s), evidence [%s] (%s): %s',
+          result.category ?? 'policy',
+          result.steps ?? 1,
+          (result.evidence ?? []).join(', ') || 'none',
           result.reason ?? 'no reason recorded',
+          command,
         )
-        notify(agent, 'deferred', command, result.reason)
+        notify(agent, 'deferred', command, result.reason, {
+          category: result.category,
+          evidence: result.evidence,
+        })
         return rest()
       } catch (error) {
         // Any surprise (log read failure, agent shape drift, …) goes to the

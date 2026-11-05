@@ -8,8 +8,9 @@ DSH 的 AI 自动审批判官：在 `approval/request` waterfall 上插队一个
 当一次 bash 审批请求到达时（通常是命令被 sandbox 拒绝后模型带
 `sandbox_permissions` 重试），按顺序处理：
 
-1. **不可逆形状与容器边界**：内置形状（`rm -rf ~`、`git clean -xfd`、
-   `git reset --hard`、`git push --force`、`sudo`、`curl|sh` …）∪ 容器边界
+1. **不可逆形状与容器边界**：内置形状（强制删除指向绝对路径/`~`/`$HOME`/
+   `..`、`git clean -xfd`、`git reset --hard`、`git push --force`、`sudo`、
+   `curl|sh` …；`podman run --rm` 与镜像 tag 里的 `-f` 不再被当成 `rm -f`）∪ 容器边界
    （compose/manifest、远端目标、privileged/设备/capability 放宽、host
    网络/PID 等、引擎 socket、HOME/根/凭据/配置挂载（含 `-v源:目标` 附值、
    `-itv` 分组短选项、尾斜杠/重复斜杠归一化）、既有容器生命周期
@@ -24,12 +25,16 @@ DSH 的 AI 自动审批判官：在 `approval/request` waterfall 上插队一个
    放行过 → 直接放行，不调用模型。容器引擎调用与 `.sh/.bash` 脚本**不
    适用**：效果来自可变文件/引擎状态，命令字符串相同不代表效果相同，
    必须每次重审。
-4. **判官判决**：一次性小模型调用，证据 = 会话内全部用户 prompt（截最近
-   16 条）+ 待批命令全文（含 description / justification、调用 workdir，
-   分别标记为 agent 声称或调用上下文）+ 宿主记录的 effective cwd 与按宿主
-   规则解析的 working directory + 不可变会话 workspace + 本会话已批准命令
-   列表。`VERDICT: allow` → 放行；其余一切（defer / 超时 / 解析失败 /
-   命令超出判官证据预算）→ 回落到人工弹窗。
+4. **判官调查与判决**：每次审批启动一个短生命周期、干净上下文的只读判官
+   回合，证据 = 会话内全部用户 prompt（截最近 16 条）+ 待批命令全文（含
+   description / justification、调用 workdir，分别标记为 agent 声称或调用
+   上下文）+ 宿主记录的 effective cwd 与按宿主规则解析的 working directory
+   + 不可变会话 workspace + 本会话已批准命令列表。判官只有三个工具：
+   `read_file`、`list_dir`、`search_files`——读文件、列目录、按字面搜索；
+   没有 shell、写文件、网络、Podman 或再委派。简单命令可直接判；脚本 /
+   Makefile / wrapper 的实际效果决定请求时，判官先按需读取项目证据再判。
+   `VERDICT: allow` → 放行；其余一切（defer、超时、预算耗尽、模型/解析
+   失败、证据不可读或放行前被修改）→ 回落到人工弹窗，并带稳定分类。
 
 证据来源：待批命令从会话日志恢复，两种形态等价——直接调用读顶层
 `tool/call`（`callId` + JSON 字符串参数），`run_code`（PTC）子调用读宿主
@@ -43,6 +48,46 @@ DSH 的 AI 自动审批判官：在 `approval/request` waterfall 上插队一个
 不能因为截断前缀而消失。判官侧另有 8000 字符的证据预算；完整命令超过预算
 时**直接 defer 交人工**（`the complete command exceeds the judge evidence
 budget`），绝不用截断前缀让模型判完整命令。
+
+**长人类输入保留首尾与正式 Task**：单条 prompt 超过剩余预算时，不再只取
+前缀。新格式保留开头与结尾（最新授权通常在尾部），并单独抽取
+`## Task` / `## 任务` 小节（位于被省略中段时），所有省略都带字数标记。
+这修复了实测中 13,184 字符 handoff 把位于 12,841 的正式 Task 截掉的问题。
+
+### 判官调查的边界（v5）
+
+- **能力只由程序提供**：判官工具的实现（`src/inspect.ts`）只做 `readFile`/
+  `readdir`/字面搜索。所有路径先 `realpath` 再检查是否仍在 session
+  workspace 内；symlink 越界、`..` 越界、HOME/其他项目、`.git`、`.ssh`、
+  `.env*`、私钥类文件一律拒绝。项目文件内容只作为证据回传，永远不会变成
+  判官的系统指令或用户消息。
+- **预算**：每次审批最多 6 个模型 step、12 次工具调用、32 KiB 证据输出
+  （单次读 12 KiB、单文件 256 KiB、搜索扫描 4 MiB / 400 文件 / 60 条匹配）、
+  总时限 45 秒。总输出是**硬上限**：会越界的整次结果被拒绝，不截断后放行。
+  任何工具错误、截断、搜索上限、超大/非文本文件或预算耗尽都会把本回合永久
+  标记为不可 ALLOW；后续成功读取不会“补全”并清除该事实，最终裁决由程序
+  强制回人工。策略排除项（`.git`、`.env`、`node_modules` 等）**不计入**
+  `list_dir` 截断；只有真正超过可见条目上限、或 `search_files` 匹配行被
+  裁剪、或有文件被跳过时才算不完整。
+- **版本复核**：判官读过的每个逻辑路径记录 realpath 目标 + 内容 sha256 +
+  `mtime+size`。同一路径第二次读取若目标或哈希变化，立即 invalidated 并拒绝
+  后续 ALLOW；准备 ALLOW 前还会重新 realpath、stat、重读哈希，因此 symlink
+  在读后被改指、文件跨两次读取被改都会触发 `evidence-changed`。这是有限
+  防护，不是冻结程序或环境，也不消除最终检查之后的 TOCTOU。
+- **生命周期**：45 秒截止在创建 inspector 之前开始；模型流、所有工具 I/O、
+  最终复核都与请求 signal 竞速，取消/超时后即使模型已输出 `VERDICT: allow`
+  也不会放行。
+- **失败分类**：`policy`（判官明确 DEFER）、`budget`、`timeout`、`canceled`、
+  `provider-error`、`invalid-response`、`empty-response`、
+  `evidence-unavailable`、`evidence-changed`、`internal-error`。分类与判官
+  引用的文件:行号进入 notice 与 `ctx.logger`，便于事后复现。
+- **不可递归**：判官没有可以触发审批的工具；它也不能调用自身或子 Agent。
+  父审批取消/超时会 abort 整个回合；插件只把裁决回填到父请求，不自行执行
+  待批命令。
+- **数据外发**：判官按需读取的项目文件片段会发送给配置的判官模型。默认范围
+  是 session workspace，`.env*`、私钥后缀、`.git`/`.ssh` 等已拒绝，但不能
+  保证覆盖所有秘密；不要把判官指向不可信的 provider。判官模型需支持原生
+  tool calls，不支持时调用失败 → 人工弹窗。
 
 **执行目录分三件事**，不能混用：
 
@@ -76,8 +121,8 @@ workspace 内；两者任一不可靠即 DEFER。workdir/目录字符串不是�
 - `auto-permit ✓ allowed: <命令>`——判官放行；
 - `auto-permit ✓ allowed (seen this session): <命令>`——精确记忆命中，
   零模型调用；
-- `auto-permit ✎ deferred to you: <命令>`——判官不确定，回人工弹窗
-  （展开可见判官理由）；
+- `auto-permit ✎ deferred to you: <命令>`——判官不确定/超时/预算耗尽/模型
+  失败，回人工弹窗（展开可见分类、理由与证据文件:行号）；
 - `auto-permit ⚠ irreversible shape — needs you: <命令>`——高风险形状
   直接转人工；
 - `auto-permit ⚠ container boundary — needs you: <命令>`——容器边界形状
@@ -112,17 +157,18 @@ tool 结果落盘、下一个 step 边界被领取时才写成 surface 的 `user
 回归检查（无需 API key、不发网络请求）：
 
 ```sh
-pnpm -C packages/auto-permit test             # vitest：证据 fold + 审批链集成
+pnpm -C packages/auto-permit test             # vitest：证据 fold + 只读调查 + 审批链集成
 node packages/auto-permit/test/notice-order.mjs
 ```
 
 它用真实 `Session` 重放失败会话的事件顺序，断言 `assistant(tool_calls)` 后面
 紧跟配对的 `tool` 消息；surface-append 路径失败，`agent.inject()` 路径通过。
 
-## 判官判据（v4）
+## 判官判据（v5）
 
-v4（2026-11-05）在 v3 之上新增**容器判据**，并把容器里最危险的形状做成程序
-硬规则（见「行为」第 1 条）：
+v5（2026-11-06）在 v4 容器判据上增加**只读项目调查**：wrapper / 脚本 /
+Makefile 不再是绝对排除项，只有其实际效果能从被检查证据中确认并满足边界
+才可 ALLOW。其余判据延续 v4：
 
 1. **显式意图**（v3 不变）：用户明确意图点名/唯一识别每个操作的目标与效果、
    覆盖其完整范围、效果可恢复 → 可 ALLOW。
@@ -137,12 +183,16 @@ v4（2026-11-05）在 v3 之上新增**容器判据**，并把容器里最危险
    而不是按命令放宽沙箱。容器运行时自身的开销（HOME 下的镜像/容器存储、
    namespace、overlay）**不算**这条缓存写，按判据 4 判断；v3 的缓存上限本身
    不变。
-4. **容器构建/临时验证**（v4 新增）：用户明确要求构建、测试或临时验证**本
-   项目**（或同样具体的容器任务），命令是直接的本地、当前用户身份的
-   podman/docker 调用，且每个效果都落在边界内 → 可 ALLOW。边界：
+4. **容器构建/临时验证**（v4 新增，v5 扩展 wrapper）：用户明确要求构建、
+   测试或临时验证**本项目**（或同样具体的容器任务），命令是本地、当前用户
+   身份的 podman/docker 调用（直接调用，或经判官检查确认每个 engine 操作
+   的项目脚本/Makefile），且每个效果都落在边界内 → 可 ALLOW。边界：
     - 效果限于引擎状态查询、拉取构建所需镜像、从项目上下文构建镜像、为项目
-      构建/测试创建并运行一次性（`--rm`）容器；对既有容器的单独启停/exec/
-      rm 一律交人工；
+      构建/测试创建并运行一次性（`--rm`）容器，以及同一构建在 workspace 内的
+      记账（build 目录 mkdir、stat/检查产物、echo/控制流、只读宿主查询）；
+      构建镜像自身拉取基础镜像和依赖的网络属于镜像构建，不是 host namespace；
+      显式 `--network host`/`--pid host` 等仍交人工；对既有容器的单独启停/
+      exec/rm 一律交人工；
     - 宿主机路径只能在会话 workspace 内（`$PWD`/`${PWD}`/`$(pwd)` 按宿主
       规则解析：resolved working directory = 省略 workdir 取 effective
       cwd、相对 workdir 拼到 effective cwd；effective cwd 由
@@ -156,8 +206,9 @@ v4（2026-11-05）在 v3 之上新增**容器判据**，并把容器里最危险
       不删除本任务未创建的资源。
 
    以下一律交人工（程序硬规则或判官 DEFER）：compose（解析后的挂载/卷/
-   网络不在命令字符串里）、wrapper 脚本与 Makefile/辅助程序、远端或无法
-   确认的引擎目标、既有容器的 exec/stop/rm 等生命周期（首版没有可信的
+   网络不在命令字符串里）、运行时生成或 source 的脚本、宿主侧下载后执行的
+   代码、效果无法从被检查文件确认的 wrapper / Makefile / 辅助程序、远端或
+   无法确认的引擎目标、既有容器的 exec/stop/rm 等生命周期（首版没有可信的
    资源归属证据）、volume/全局 prune/reset、镜像 push、宿主引擎配置。
    `rootless`、`--rm`、名字带 test、`localhost/` tag 只是佐证，不是安全
    保证。
@@ -165,7 +216,7 @@ v4（2026-11-05）在 v3 之上新增**容器判据**，并把容器里最危险
 历史背景：v3（2026-10-21，随 [dsh-toolchain-access](../toolchain-access/)
 迁移）收敛 v2 的「缓存副作用可 ALLOW」判据；v2（2026-10-02）当时目录授权
 尚不存在，按命令提权是唯一出口，如今缓存需求由 toolchain-access 的
-`cargo-cache` 等预设承担。判官 prompt 版本 `dsh-auto-permit-v4`；
+`cargo-cache` 等预设承担。判官 prompt 版本 `dsh-auto-permit-v5`；
 `approval/request` 链序与失败回落不变。
 
 容器硬规则是**文本启发式**（token 扫描，不是 shell/Podman 解析器）：可能
@@ -189,7 +240,7 @@ shell 脚本另外再加一道：即使来源合格也不重放（可变文件/�
   避免主模型审自己。可选 **reasoningEffort** 思考强度。
 - 写错模型 id 是安全的：判官调用失败 → defer → 回人工弹窗（fail-open）。
 
-容器判据（v4）随插件启用生效，**没有单独的开关**：安装插件并配置判官路由
+容器判据与只读调查（v5）随插件启用生效，**没有单独的开关**：安装插件并配置判官路由
 本身就是对这套自动审批的信任声明；关掉 **enabled** 后本插件不再处理任何
 审批（全部回人工，硬边界形状本来也只回人工）。
 

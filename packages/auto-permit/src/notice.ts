@@ -60,22 +60,41 @@ const REASON_PREFIX: Partial<Record<NoticeOutcome, string>> = {
   'container-guard': 'boundary',
 }
 
+/** Extra judge facts attached to a notice for auditability. */
+export interface NoticeDetail {
+  /** Stable defer category (`timeout`, `provider-error`, `policy`, …). */
+  category?: string
+  /** Workspace-relative files/lines the judge relied on. */
+  evidence?: readonly string[]
+}
+
 /**
  * Build one notice message for a settled approval request.
  *
  * @param outcome - how the request settled.
  * @param command - the command being escalated (already excerpted).
  * @param reason - the judge's reason line, when the model call produced one.
+ * @param detail - judge category and evidence references, when available.
  * @returns the frozen user-role notice message.
  */
 export function buildNoticeMessage(
   outcome: NoticeOutcome,
   command: string,
   reason?: string,
+  detail?: NoticeDetail,
 ): UserMessage {
   const summary = boundContextSummary(`${SUMMARY_PREFIX[outcome]}: ${command}`)
   const lines = [`${BODY_PREFIX[outcome]}: ${command}`]
-  if (reason !== undefined && reason !== '') lines.push(`${REASON_PREFIX[outcome] ?? 'judge'}: ${reason}`)
+  if (reason !== undefined && reason !== '') {
+    const label = REASON_PREFIX[outcome] ?? 'judge'
+    const category = detail?.category === undefined ? '' : ` (${detail.category})`
+    lines.push(`${label}${category}: ${reason}`)
+  } else if (detail?.category !== undefined && detail.category !== 'policy') {
+    lines.push(`judge (${detail.category}): no reason recorded`)
+  }
+  if (detail?.evidence !== undefined && detail.evidence.length > 0) {
+    lines.push(`evidence: ${detail.evidence.slice(0, 8).join(', ')}`)
+  }
   return createUserMessage({
     content: [{ type: 'text', text: lines.join('\n') }],
     source: { kind: 'auto-permit', form: 'notice', summary },

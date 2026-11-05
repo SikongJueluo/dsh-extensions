@@ -237,7 +237,9 @@ packages/auto-permit/
   src/settings.ts   auto-permit namespace（enabled/provider/model/reasoningEffort）
   src/evidence.ts   session log fold：tool/call 反查、user/message、审批历史、精确记忆
   src/rules.ts      不可逆硬规则（命中交人工，不过模型）
-  src/judge.ts      判官提示词（pi bash-shadow-v4 迁移版）+ ctx.llm 一次性调用
+  src/container.ts  容器边界扫描 + 可变文件依赖判断（与 cmd-permit 共享）
+  src/inspect.ts    判官只读证据工具（read_file/list_dir/search_files）与预算
+  src/judge.ts      判官提示词（pi bash-shadow-v4 迁移版）+ 有界只读调查循环
   client/client.js  设置分区 UI：开关 + 模型选择（含思考强度二级）
 ```
 
@@ -247,12 +249,20 @@ packages/auto-permit/
 approval/request (req, next):
   1. 未启用 / 未配置判官路由 → next()
   2. 非 bash / 无 callId / 取不到入参 / 无 session → next()
-  3. 高风险形状命中（rm -rf ~ / git clean -xfd / reset --hard / push --force
-     / sudo / curl|sh…）→ next()                     （不过模型，交人工）
-  4. 精确记忆命中（同命令 + 同提权目标已 allowed）→ 'allowed-once'（零模型调用）
-  5. 判官单次调用（15s 预算，VERDICT 文本协议）：
-     allow → 'allowed-once'；defer / 超时 / 解析失败 / 异常 → next()
+  3. 高风险形状命中（rm 删除边界 / git clean -xfd / reset --hard / push --force
+     / sudo / curl|sh…）∪ 容器边界 → next()          （不过模型，交人工）
+  4. cmd-permit 显式白名单命中 → 'allowed-once'（零模型调用）
+  5. 精确记忆命中（同命令 + 同提权目标已 allowed 且来源合格）→ 'allowed-once'
+  6. 只读判官回合（最多 6 step / 12 次工具调用 / 32 KiB 证据 / 45s）：
+     简单命令直接判；脚本等按需 read_file/list_dir/search_files 取证；
+     ALLOW → 'allowed-once'
+     policy defer / budget / timeout / canceled / provider-error /
+     invalid-response / empty-response / evidence-unavailable /
+     evidence-changed / internal-error → next()
 ```
+
+判官输出仍是 `VERDICT: allow|defer`、`REASON:`、可选 `EVIDENCE:` 文本协议
+（DSH `GenerateOptions` 没有 toolChoice，但模型工具调用本身是原生的）。
 
 安全不变量：判官**永不返回 `'rejected'`**（AI 误报不得伪装成用户拒绝）；
 一切失败 fail-open 向人工弹窗；非 bash 一律放行原链路。
@@ -464,6 +474,9 @@ reason}`、`approval/decided` 的 `{id, outcome}`——记忆机制本身无 bug
 
 ## 9. 容器构建/临时验证支持（v4，2026-11-05）
 
+> v5 已把“wrapper 一律 DEFER”改为“有效操作可从被检查证据确认才可 ALLOW”，
+> 见第 10 节；本节保留 v4 的历史边界。
+
 背景：sandbox 内的 Podman 反复触发提权。先评估过 toolchain-access 方向，
 结论是**目录授权不够**：bwrap 只追加可写 bind，而完整 Podman 还需要
 UID/GID namespace、no_new_privs、overlay/FUSE、cgroup 与生命周期管理。
@@ -507,3 +520,46 @@ UID/GID namespace、no_new_privs、overlay/FUSE、cgroup 与生命周期管理�
 归属投影、真实容器运行验证。没有归属证据时，既有容器的启停/清理一律
 交人工；不为"名字像本任务"发明授权规则。真实 Podman 行为与判官模型在
 真实模型上的表现仍未验证，首轮验证为 fixture/mock 判官。
+
+## 10. 只读 Agent 判官（v5，2026-11-06）
+
+背景：v4 对 wrapper / 脚本一律 DEFER，因为判官只能看到待批命令字符串。
+实际 RealSense 会话中主模型早已读过 `scripts/realsense_dev.sh`，但
+`collectEvidence()` 不采集其他工具结果，判官看不到，于是 10 次脚本化构建
+全部回人工。调查见 [research-auto-permit-podman-runtime-routing.md](research-auto-permit-podman-runtime-routing.md)。
+
+v5 没有把"脚本内容"预先塞进一次请求，而是把判官升级成**每次审批一个短生命周期、
+干净上下文的只读调查回合**：
+
+- 工具面只有 `read_file`、`list_dir`、`search_files`，由 `src/inspect.ts`
+  在本进程实现。没有宿主 Agent 工厂、没有 bash/写文件/网络/插件管理/再委派，
+  因此不存在"judge 的工具反过来触发审批"的递归，也不需要给子会话配置
+  preset 或生命周期。能力边界由代码而非 system prompt 保证。
+- 读取范围默认 = session workspace。路径先 `realpath` 再检查是否仍在 root 内；
+  symlink 越界、`..`、HOME/其他项目、`.git`、`.ssh`、`.env*`、私钥后缀
+  全部拒绝。项目文本只以 tool 消息回传，系统提示明确它是待审数据，不是指令。
+- 预算固定：6 个模型 step、12 次工具调用、32 KiB 证据输出、45 秒；总输出
+  是硬上限，会越界的整次结果直接拒绝，不截断放行。任何工具错误、截断、
+  搜索/列表上限、被裁剪的匹配行、超大或非文本文件、预算耗尽都会把该回合
+  永久标记为不可 ALLOW——最终裁决由程序检查，不依赖模型服从工具错误。
+  `.git`/`.env`/`node_modules` 等策略排除不计入列表截断，避免正常项目根
+  目录发现被误判为超预算。45 秒截止从 inspector
+  创建前开始，模型流、工具 I/O、最终复核都与请求 signal 竞速；父审批取消后
+  即使模型已经输出 allow 也不放行。
+- 版本绑定：每个逻辑路径记录 realpath 目标、内容 sha256、mtime/size；同一
+  路径第二次读取目标/哈希变化即 invalidated，ALLOW 前再 realpath/stat/重读
+  哈希，因此 symlink 读后改指或跨两次读取修改文件都会 `evidence-changed`。
+- 工具轮保留 `BlockAssembler.replayState`（provider 的 thinking signature 等
+  原生回放元数据随 assistant 消息回传），不手工重造或丢弃。
+- 失败有稳定分类（policy/budget/timeout/canceled/provider-error/
+  invalid-response/empty-response/evidence-unavailable/evidence-changed/
+  internal-error），分类、理由与证据引用进入 notice 和日志。
+- 旧的 `rm` 硬规则改为从命令位置的 `rm` token 解析 flags/目标；`--rm`、
+  镜像 tag 与普通参数不再拼出删除形状（真实危险 `rm -f /abs`、`~`、
+  `$HOME` 仍交人工）。
+- 长人类输入改为保留首尾并抽取 `## Task`/`## 任务` 小节，避免 13k 字符
+  handoff 的正式 Task 落在 12k 前缀之外。
+
+仍未做：compose 解析、持久卷/容器归属投影、USB 设备任务放行、宿主 Agent
+factory 集成、真实模型行为校准。真实模型测试会发送项目文件片段并产生费用，
+尚未执行；当前验证为 fixture/mock + 真实日志命令的离线分类。

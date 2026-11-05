@@ -185,3 +185,28 @@ print("approval requests:",len(asks),"auto-permit notices:",len(notices))
 ```
 
 历史条目不可变；未来代码修复只影响离线分类与新的审批，不会把这些旧通知改成 allowed。
+
+## 后续状态（2026-11-06，实施层）
+
+上文“最小改进顺序”的第 1–4 项已随后续实现落地，历史诊断保留不改：
+
+- **误报与观测**：`rules.ts` 改为从命令位置的 `rm` token 解析 flags/目标，`--rm`、
+  镜像 tag、普通参数不再拼出删除形状；真实 `rm -f /abs`、`~`、`$HOME` 仍交人工。
+  判官 defer 新增稳定分类（policy/budget/timeout/canceled/provider-error/
+  invalid-response/empty-response/evidence-unavailable/evidence-changed/
+  internal-error），并记录耗时相关 step 数与证据引用。
+- **受限证据与只读 Agent**：`src/inspect.ts` 提供 `read_file`/`list_dir`/
+  `search_files`，路径经 realpath 限定在 workspace，秘密/VCS/依赖目录拒绝；
+  `src/judge.ts` 是每审批一个有界只读调查回合（6 step / 12 调用 / 32 KiB /
+  45 s）。项目文本只作为 tool 消息，不作为指令。
+- **wrapper 政策**：`(3)` 从“必须直接调用 engine”改为“直接调用，或经检查确认
+  每个 engine 操作的项目脚本/Makefile”；未知操作、运行时生成脚本、宿主侧
+  下载后执行仍 DEFER。构建自身的网络与项目内 build 记账允许；显式 host
+  namespace/privileged/device/敏感挂载/既有资源生命周期不变。
+- **长意图**：prompt 折叠保留首尾并抽取 `## Task`/`## 任务` 小节，修复本文件
+  记录的 13,184 字符 handoff 任务尾段丢失。
+
+验证为 fixture/mock + 真实日志命令的离线分类；真实判官模型与真实 Podman
+自动化仍未验证，USB 设备任务与任意容器清理仍不自动放行。实现说明见
+[dsh-approval-auto-permit 第 10 节](research-dsh-approval-auto-permit.md) 与
+[auto-permit README](../packages/auto-permit/README.md)。

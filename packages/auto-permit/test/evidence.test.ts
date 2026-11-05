@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { Session } from '@deepseek-ai/dsh-session'
-import { collectEvidence, MAX_COMMAND_CHARS, MAX_PATH_CHARS } from '../src/evidence.js'
+import { collectEvidence, foldPrompt, MAX_COMMAND_CHARS, MAX_PATH_CHARS } from '../src/evidence.js'
 
 interface Fixture {
   type: string
@@ -451,5 +451,43 @@ describe('unchanged policy around the fold', () => {
     const evidence = collectEvidence(sessionOf([ptcStart(1, 'root:ptc:1', { command: long })]), 'root:ptc:1')
     expect(evidence.call?.command).toBe(long)
     expect(evidence.call?.command.endsWith('…[truncated]')).toBe(false)
+  })
+})
+
+describe('long human prompts', () => {
+  it('keeps both ends and the formal Task in a handoff longer than the budget', () => {
+    const head = `HEAD-INTENT ${'a'.repeat(12790)}`
+    const task = '## Task\nImplement the container build with the read-only judge.\n'
+    const tail = `${'t'.repeat(200)} TAIL-AUTHORIZATION`
+    const folded = foldPrompt(head + task + tail, 12000)
+    expect(folded.length).toBeLessThanOrEqual(12000)
+    expect(folded).toContain('HEAD-INTENT')
+    expect(folded).toContain('## Task')
+    expect(folded).toContain('read-only judge')
+    expect(folded).toContain('TAIL-AUTHORIZATION')
+    expect(folded).toContain('characters omitted')
+  })
+
+  it('extracts a Task section that would otherwise sit in the omitted middle', () => {
+    const text = `${'a'.repeat(7000)}\n## Task\nMIDDLE-TASK-DETAIL ${'m'.repeat(500)}\n${'z'.repeat(6000)}`
+    const folded = foldPrompt(text, 12000)
+    expect(folded).toContain('## Task (extracted)')
+    expect(folded).toContain('MIDDLE-TASK-DETAIL')
+    expect(folded.length).toBeLessThanOrEqual(12000)
+  })
+
+  it('feeds the bounded prompt through collectEvidence without losing the Task', () => {
+    const task = '## Task\nRun the RealSense wire test with podman.\n'
+    const text = `${'a'.repeat(12800)}${task}${'z'.repeat(300)}`
+    const evidence = collectEvidence(sessionOf([
+      userPrompt(1, text),
+      userPrompt(2, 'newest authorization: only build, do not install'),
+      ptcStart(3, 'root:ptc:1', UV_ARGS),
+    ]), 'root:ptc:1')
+    const joined = evidence.prompts.join('\n')
+    expect(joined).toContain('Run the RealSense wire test')
+    expect(joined).toContain('newest authorization')
+    expect(joined.length).toBeLessThanOrEqual(12000)
+    expect(evidence.prompts[evidence.prompts.length - 1]).toContain('newest authorization')
   })
 })
