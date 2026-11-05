@@ -7,9 +7,10 @@
  * controller's queue (with a persisted, idempotent requestId). Rounds are
  * budgeted; pass / needs_user / budget-edge rework are the stop semantics.
  *
- * Consumed host services: `tools` + `sessionController` + `storageDomain`
- * (hard inject); `connection` + `webServer` (soft, for the browser channel).
- * Publishes the optional `triggerBindings` service for dsh-handoff.
+ * Consumed host services: `tools` + `sessionController` + `sessionQuery` +
+ * `storageDomain` (hard inject); `connection` + `webServer` (soft, for the
+ * browser channel). Publishes the optional `triggerBindings` service for
+ * dsh-handoff.
  *
  * @module dsh-triggers
  */
@@ -28,8 +29,9 @@ export { TriggerService, type BindReviewLoopRequest, type TriggerBindingsService
 export { registerSignalTool } from './tool.js'
 
 export const name = PLUGIN_NAME
-// The loop is dead without the tool registry, the queue, or durable storage.
-export const inject = ['tools', 'sessionController', 'storageDomain']
+// The loop is dead without the tool registry, the queue, session history, or
+// durable storage.
+export const inject = ['tools', 'sessionController', 'sessionQuery', 'storageDomain']
 
 /** Plugin-row configuration. */
 export interface Config {

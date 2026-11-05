@@ -135,7 +135,14 @@ async function boot(root: string, options: { queueFails?: boolean } = {}) {
       return { accepted: true as const }
     },
     list: async () => ({ items: [] }),
-    inspect: async (sessionId: string) => ({ events: [...(logs.get(sessionId) ?? [])] }),
+  })
+  // The host's session-log reader; recovery replays these durable rows.
+  ctx.provide('sessionQuery', {
+    readSession: async (sessionId: string) => ({
+      session: { id: sessionId },
+      inheritedEventCount: 0,
+      events: [...(logs.get(sessionId) ?? [])].map((event, seq) => ({ ...event, seq, time: Date.now() })),
+    }),
   })
   await ctx.plugin(Storage as never, {} as never)
   await ctx.plugin(fileBackendPlugin as never, { root } as never)

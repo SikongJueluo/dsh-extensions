@@ -21,7 +21,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { TriggerService } from '../src/service.js'
 import type { OutboxEntry, RunRecord } from '../src/model.js'
 
-/** Durable event rows exactly as `sessionController.inspect` returns them. */
+/** Durable event rows exactly as `sessionQuery.readSession` returns them. */
 interface LogEvent {
   readonly type: string
   readonly seq: number
@@ -43,8 +43,9 @@ class Crash extends Error {
 
 /**
  * Minimal host surface. Differences from the plain service-test fake, both
- * deliberate: `inspect` serves a per-session durable log, and `prompt`
- * dedupes requestIds the way the session controller's queue actually does.
+ * deliberate: `sessionQuery.readSession` serves a per-session durable log, and
+ * `prompt` dedupes requestIds the way the session controller's queue actually
+ * does.
  */
 function createFakeHost() {
   const tables = {
@@ -62,11 +63,13 @@ function createFakeHost() {
   /**
    * Host-realism switches: `slowPuts` delays run-record publication by a
    * tick (the domain layer publishes after durability, so a concurrent get
-   * sees the old value); `inspectGate` freezes the inspect snapshot before
+   * sees the old value); `readGate` freezes the log snapshot before
    * awaiting (events landing during the read must come from the boot buffer).
    */
   const slowPuts = { runs: false }
-  let inspectGate: Promise<void> | undefined
+  let readGate: Promise<void> | undefined
+  /** Fault injection: a non-`undefined` value makes every log read reject with it. */
+  let readFailure: unknown
   /** Fault injection: called around the interesting durable effects. */
   const hooks: {
     beforeRunsPut?: () => void
@@ -127,12 +130,19 @@ function createFakeHost() {
         return { accepted: true as const }
       },
       list: async () => ({ items: [] }),
-      inspect: async (sessionId: string) => {
+    },
+    sessionQuery: {
+      readSession: async (sessionId: string) => {
+        if (readFailure !== undefined) throw readFailure
         // Host realism: the snapshot freezes at read start; events appended
         // while the read is in flight arrive only through the live feed.
         const frozen = [...(logs.get(sessionId) ?? [])]
-        if (inspectGate !== undefined) await inspectGate
-        return { events: frozen }
+        if (readGate !== undefined) await readGate
+        return {
+          session: { id: sessionId },
+          inheritedEventCount: 0,
+          events: frozen,
+        }
       },
     },
     tools: { register: () => () => {} },
@@ -160,10 +170,13 @@ function createFakeHost() {
   }
   const run = (runId: string): RunRecord | undefined => tables.runs.get(runId) as RunRecord | undefined
   const outboxOf = (runId: string): readonly OutboxEntry[] => run(runId)?.outbox ?? []
-  const setInspectGate = (gate: Promise<void> | undefined): void => {
-    inspectGate = gate
+  const setReadGate = (gate: Promise<void> | undefined): void => {
+    readGate = gate
   }
-  return { tables, logs, prompts, queue, hooks, slowPuts, admitted, log, emit, flush, service, run, outboxOf, setInspectGate }
+  const failReads = (failure: unknown): void => {
+    readFailure = failure
+  }
+  return { tables, logs, prompts, queue, hooks, slowPuts, admitted, log, emit, flush, service, run, outboxOf, setReadGate, failReads }
 }
 
 const EXECUTOR = 'sess-exec'
@@ -536,14 +549,14 @@ describe('review round 2: replay must not re-consume round 1 (checkpoint commit)
   })
 })
 
-describe('boot handoff: live events during a frozen inspect read', () => {
+describe('boot handoff: live events during a frozen session-log read', () => {
   it('events buffered while init waits for the log read survive into the live caches', async () => {
     const host = createFakeHost()
     let release: () => void = () => {}
     const gate = new Promise<void>(resolve => {
       release = resolve
     })
-    host.setInspectGate(gate)
+    host.setReadGate(gate)
     const svc = host.service()
     // While init is blocked reading the (frozen, pre-goal) log, the session
     // starts a goal and a turn — live feed only.
@@ -572,7 +585,7 @@ describe('boot handoff: live events during a frozen inspect read', () => {
     const gate = new Promise<void>(resolve => {
       release = resolve
     })
-    host.setInspectGate(gate)
+    host.setReadGate(gate)
     const svc2 = host.service()
     await new Promise(resolve => setTimeout(resolve, 10))
     // A turn opens while init is still blocked reading the log.
@@ -581,6 +594,28 @@ describe('boot handoff: live events during a frozen inspect read', () => {
     await host.flush()
     const accepted = await svc2.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 's' })
     expect(accepted).toMatchObject({ ok: true })
+  })
+})
+
+describe('log reads: a genuinely absent session is empty history, anything else is an error', () => {
+  it('an unpublished session replays as empty history and recovery proceeds', async () => {
+    const host = createFakeHost()
+    const svc = host.service()
+    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
+    host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 1 } })
+    await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 's' })
+    // The host answers with its typed "no such session" code for both sides.
+    host.failReads(Object.assign(new Error('session "sess-exec" not found'), { code: 'SESSION_QUERY_SESSION_NOT_FOUND' }))
+    const restarted = host.service()
+    await expect(restarted.runsForSession(EXECUTOR)).resolves.toHaveLength(1)
+  })
+
+  it('an unreadable session log fails the bind instead of seeding an empty baseline', async () => {
+    const host = createFakeHost()
+    host.failReads(new Error('persistence offline'))
+    const svc = host.service()
+    await expect(svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT }))
+      .rejects.toThrow(/persistence offline/)
   })
 })
 
@@ -899,7 +934,7 @@ describe('round 3: a cold goal in the log must gate boot-time turn ends', () => 
     const gate = new Promise<void>(resolve => {
       release = resolve
     })
-    host.setInspectGate(gate)
+    host.setReadGate(gate)
     // Restart: init blocks reading the (frozen) executor log.
     const svc2 = host.service()
     await new Promise(resolve => setTimeout(resolve, 10))
@@ -960,7 +995,7 @@ describe('round 4: seeding must not mistake a transient live fold for a seeded o
     const gate = new Promise<void>(resolve => {
       release = resolve
     })
-    host.setInspectGate(gate)
+    host.setReadGate(gate)
     // The bind reaches seedFold and blocks inside the (frozen) log read.
     const binding = svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
     await new Promise(resolve => setTimeout(resolve, 10))
@@ -1021,7 +1056,7 @@ describe('round 5: seeding is shared and buffer timing is point-in-time', () => 
     const gate = new Promise<void>(resolve => {
       release = resolve
     })
-    host.setInspectGate(gate)
+    host.setReadGate(gate)
     const bindA = svc.bindReviewLoop({ task: 'A', executorSession: EXECUTOR, parentSession: PARENT })
     await new Promise(resolve => setTimeout(resolve, 10))
     const bindB = svc.bindReviewLoop({ task: 'B', executorSession: EXECUTOR, parentSession: 'sess-parent-2' })
@@ -1058,7 +1093,7 @@ describe('round 5: seeding is shared and buffer timing is point-in-time', () => 
     const gate = new Promise<void>(resolve => {
       release = resolve
     })
-    host.setInspectGate(gate)
+    host.setReadGate(gate)
     const svc2 = host.service()
     await host.flush()
     // Resume: the run chain seeds the executor BEFORE reviving the run — and

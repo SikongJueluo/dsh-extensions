@@ -70,6 +70,11 @@ function createFakeHost() {
       },
       list: async () => ({ items: [] }),
     },
+    // The host's log reader: no persisted history in this fake, so every
+    // session reads as a genuinely empty log.
+    sessionQuery: {
+      readSession: async (sessionId: string) => ({ session: { id: sessionId }, inheritedEventCount: 0, events: [] }),
+    },
     tools: { register: () => () => {} },
   }
 

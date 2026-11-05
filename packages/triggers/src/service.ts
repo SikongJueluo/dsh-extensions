@@ -28,9 +28,11 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPromptRequest, SessionRequestId } from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
+// Type-only: pull the `Context.sessionQuery` augmentation in.
+import type {} from '@deepseek-ai/dsh-session-query'
 import { PACKAGE_NAME, SERVICE_NAME } from './identity.js'
 import {
   DEFAULT_MAX_ROUNDS,
@@ -115,6 +117,16 @@ function runSnapshotRank(run: RunRecord): number {
 }
 /** Ceiling for the executor reply text reused as an auto-delivery summary. */
 const AUTO_SUMMARY_LIMIT = 6000
+
+/**
+ * Whether a session-log read failed because the host has no such session.
+ * Matched by code, not `instanceof`: this plugin resolves its own copy of the
+ * query package, so the host's error class is a different identity here.
+ */
+function isSessionNotFound(failure: unknown): boolean {
+  return typeof failure === 'object' && failure !== null
+    && (failure as { code?: unknown }).code === 'SESSION_QUERY_SESSION_NOT_FOUND'
+}
 
 /** The full UI snapshot the channel serves. */
 export interface TriggerSnapshot {
@@ -319,6 +331,23 @@ export class TriggerService extends Service implements TriggerBindingsService {
   }
 
   /**
+   * One session's complete durable log, live-preferred over a cold persistence
+   * read by the host's query service. A session the host never persisted is
+   * genuinely empty history and reads as `[]`; every other failure propagates,
+   * because an unreadable log must not masquerade as an empty one — replay
+   * would seed (and permanently pin) a baseline that never existed.
+   */
+  private async readSessionLog(sessionId: string): Promise<readonly SessionEvent[]> {
+    try {
+      return (await this.ctx.sessionQuery.readSession(sessionId as SessionId)).events
+    } catch (failure) {
+      if (!isSessionNotFound(failure)) throw failure
+      this.ctx.logger(PACKAGE_NAME).info('session has no durable log yet', { sessionId })
+      return []
+    }
+  }
+
+  /**
    * Re-derive missed turn ends from the durable logs of every session an
    * active run listens on. Facts from BOTH sessions merge into one timeline
    * ordered by event time — the two sides' logs interleave causally (a
@@ -348,21 +377,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
     const timeline: Fact[] = []
     const lastClosedBySession = new Map<string, TurnEndFact[]>()
     for (const sessionId of sessions) {
-      let events: readonly { type: string, time?: unknown, data: unknown }[]
-      try {
-        const inspection = await this.ctx.sessionController.inspect(
-          sessionId as never,
-          new AbortController().signal,
-        )
-        events = inspection.events as readonly { type: string, time?: unknown, data: unknown }[]
-      } catch (failure) {
-        // Unknown/gone sessions simply have nothing to replay.
-        this.ctx.logger(PACKAGE_NAME).info('session log unavailable for replay', {
-          sessionId,
-          error: String(failure),
-        })
-        events = []
-      }
+      const events = await this.readSessionLog(sessionId)
       const { facts, final } = scanTurnEnds(events)
       lastClosedBySession.set(sessionId, facts)
       for (const fact of facts) timeline.push({ ...fact, sessionId })
@@ -1105,23 +1120,18 @@ export class TriggerService extends Service implements TriggerBindingsService {
     }
     const buffer: { type: string, data: unknown }[] = []
     let settle!: () => void
-    const promise = new Promise<void>(resolve => {
+    let fail!: (failure: unknown) => void
+    const promise = new Promise<void>((resolve, reject) => {
       settle = resolve
+      fail = reject
     })
+    // Joiners await this broadcast; this caller reports through its own await,
+    // so an unobserved rejection must not escape as an unhandled rejection.
+    void promise.catch(() => {})
     this.seedingPromises.set(sessionId, promise)
     this.seedingBuffers.set(sessionId, buffer)
     try {
-      let events: readonly { type: string, data: unknown }[]
-      try {
-        const inspection = await this.ctx.sessionController.inspect(
-          sessionId as never,
-          new AbortController().signal,
-        )
-        events = inspection.events as readonly { type: string, data: unknown }[]
-      } catch {
-        // Unknown session: an empty fold is the honest baseline.
-        events = []
-      }
+      const events = await this.readSessionLog(sessionId)
       // The durable baseline lands AS SCANNED — buffered events are NOT
       // pre-folded into it. Pre-folding would let an early buffered turn
       // end see a later buffered goal state; instead each buffered event is
@@ -1129,10 +1139,15 @@ export class TriggerService extends Service implements TriggerBindingsService {
       // point-in-time context off this baseline.
       this.folds.set(sessionId, scanTurnEnds(events).final)
       this.seededSessions.add(sessionId)
+      settle()
+    } catch (failure) {
+      // No baseline, no seeding: joiners must see the failure instead of
+      // waking up as if the fold had landed.
+      fail(failure)
+      throw failure
     } finally {
       this.seedingPromises.delete(sessionId)
       this.seedingBuffers.delete(sessionId)
-      settle()
     }
     // Unbuffered now: dispatch each buffered event exactly once, in order.
     // Turn ends snapshot their point-in-time goal/reply against the baseline

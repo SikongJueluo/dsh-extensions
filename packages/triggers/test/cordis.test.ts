@@ -61,6 +61,10 @@ function createHost({ queueFails = false } = {}) {
       },
       list: async () => ({ items: [] }),
     },
+    // The host's log reader: this composition keeps no durable history.
+    sessionQuery: {
+      readSession: async (sessionId: string) => ({ session: { id: sessionId }, inheritedEventCount: 0, events: [] }),
+    },
     storageDomain: {
       open: async (spec: typeof TRIGGER_DOMAIN) => {
         const store = { spec, tables: new Map<string, Map<string, unknown>>() }
@@ -89,6 +93,7 @@ async function boot(options: { queueFails?: boolean } = {}) {
   const root = new Context()
   root.provide('tools', host.ctx.tools as never)
   root.provide('sessionController', host.ctx.sessionController as never)
+  root.provide('sessionQuery', host.ctx.sessionQuery as never)
   root.provide('storageDomain', host.ctx.storageDomain as never)
   await root.plugin(triggersPlugin, {} as never)
   return { root, host }
