@@ -155,6 +155,11 @@ check(
 )
 check('wrapper checks the export-file read before eval', script.includes('set -l __re_exported (cat $__re_export)'))
 check('script reads the status as the container user', script.includes('docker exec -u "$user"') && script.includes('cat "$status"'))
+check(
+  'script cleans status, env log, direnv export and read-error files',
+  script.includes('rm -f "$status" "$envlog" "${status}.export" "$status_err_file"'),
+)
+check('script does not misname the direnv export in cleanup', !script.includes('"$envlog.export"'))
 check('prep errors use the marker + distinct exit', script.includes('control prep-error') && script.includes(`exit ${PREP_EXIT_CODE}`))
 check('autoStart branch starts and polls', script.includes('docker start') && script.includes('-ge 30'))
 

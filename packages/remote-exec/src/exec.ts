@@ -282,7 +282,7 @@ case "$status_text" in
     fi
     ;;
 esac
-docker exec -u "$user" ${container} rm -f "$status" "$envlog" "$envlog.export" "$status_err_file" >/dev/null 2>&1 || true
+docker exec -u "$user" ${container} rm -f "$status" "$envlog" "\${status}.export" "$status_err_file" >/dev/null 2>&1 || true
 exit "$rc"
 `
 }

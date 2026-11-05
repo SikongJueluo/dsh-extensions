@@ -55,8 +55,10 @@ docker exec -i -u "$(id -u):$(id -g)" -w / <container> /bin/sh -c '<outer>' \
 - 命令必须是 **fish 语法**（`env VAR=1 cmd`，不是 `VAR=1 cmd`）——login fish 提供
   nix PATH，`.envrc` 存在时按 remote.py 先 direnv 导出（`envInit: none` 可关）。
 - 超时/取消只杀**本地** ssh：远端命令可能还在跑，结果报 `timeout-unknown` /
-  `cancelled-unknown`，模型被明确告知不要盲目重跑。长任务请在远端 tmux 里提交
-  （`tmux new -d …`），本工具不做保活。
+  `cancelled-unknown`，模型被明确告知不要盲目重跑。每次调用的 `timeoutMs` 会被夹在
+  1000ms 与 `maxTimeoutMs` 之间；预算耗尽后的实际耗时还包含本地 ssh 的 TERM→KILL
+  grace（进程提前退出就不等满）。长任务请在远端 tmux 里提交（`tmux new -d …`），
+  本工具不做保活。
 
 ## cwd
 
