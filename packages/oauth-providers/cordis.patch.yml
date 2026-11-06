@@ -1,19 +1,12 @@
 # dsh-oauth-providers bundle layer.
 #
-# Two rows:
+# The `oauth-providers` plugin: one LLM route per OAuth-authenticated provider
+# module (today: the ChatGPT subscription on route `chatgpt`). The harness
+# authorization seam is already provided by dsh-base; inserting it here again
+# would duplicate the row id.
 #
-# 1. The harness authorization seam. The stock `web` profile does not mount
-#    it, and this package's sign-in flows register on it (`ctx.authorization`).
-#    The row id matches the name a future base composition would use, so an
-#    official layer simply overrides this one instead of colliding. Mounting
-#    it is safe everywhere: the seam offers no flows of its own.
-# 2. The `oauth-providers` plugin: one LLM route per OAuth-authenticated
-#    provider module (today: the ChatGPT subscription on route `chatgpt`).
-#
-# Users can override either row later (by id) in a later patch layer — a
-# patch replaces the row's whole `config`.
+# Users can override the row later by id in a later patch layer — a patch
+# replaces the row's whole `config`.
 - insert:
-    - id: authorization
-      name: '@deepseek-ai/dsh-authorization'
     - id: oauth-providers
       name: dsh-oauth-providers

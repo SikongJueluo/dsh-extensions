@@ -9,6 +9,7 @@ Out-of-tree [DeepSeek Harness](https://www.deepseek.com/harness/en/) 插件 bund
 | [`dsh-auto-permit`](packages/auto-permit/) | 审批瀑布上的 AI 判官：小模型在弹窗之前决定是否放行 bash 提权（高危/容器硬边界 → 白名单 → 精确记忆 → 判官调用；含本地容器构建/临时验证） |
 | [`dsh-cmd-permit`](packages/cmd-permit/) | 同一瀑布上的确定性白名单：配置内的命令族提权不弹窗也不耗判官调用（种子为空——缓存类绕行改走 toolchain-access 目录授权，rtk 代理任意命令也不再默认 Full access）；`denyShape` 高危表以 `ctx.cmdPermit` 共享给上面那位 |
 | [`dsh-execution-guard`](packages/execution-guard/) | 参数预检（审批与副作用**之前**、同批整体校验）+ 重复 `INVALID_ARGS` 纠偏提示（原生 repeat-reminder 只认完全相同的参数，抓不到"值在变、形状没变"） |
+| [`dsh-jj-workspace`](packages/jj-workspace/) | 原 `create_worktree` 工具与新会话工作树入口在 jj 仓库创建 workspace + 同名任务 bookmark，Git 仓库继续走原实现；项目内 `.agents/workspaces` 池，工具/UI 统一任务状态显示在会话 header，只读观测 bookmark move/delete，不自动推进/清理/恢复 |
 | [`dsh-task-anchor`](packages/task-anchor/) | `checkpoint_task` 恢复锚点：记 jj 工作层 / goal 身份 / 阶段 / 归属文件 / 验证摘要，恢复时比对并报告一致或漂移（只报告，不 rebase、不 resume goal） |
 | [`dsh-auto-env`](packages/auto-env/) | 按 session 工作区自动加载 direnv / devenv 环境 |
 | [`dsh-auto-continue`](packages/auto-continue/) | 套餐限额后睡到重置点自动重试，支持跨进程重启续跑 |

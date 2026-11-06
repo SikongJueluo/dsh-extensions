@@ -1,0 +1,38 @@
+# dsh-jj-workspace bundle layer.
+#
+# The stock `worktrees` provider is mounted twice: once for the tool scope and
+# once inside the Forge panel's isolated group. Both rows are disabled (a patch
+# cannot rename a row, so the stock rows go dark and this bundle's provider is
+# appended) and replaced by one provider that dispatches by the nearest VCS
+# root: a jj repository gets a jj workspace with a same-name task bookmark, a
+# Git-only repository is handed to the stock Git runtime constructed on a
+# private service realm. The tool row is replaced only to state the
+# VCS-neutral model contract; the browser half adds the new-session option for
+# non-colocated jj workspaces, which the stock Forge option cannot see.
+#
+# A later layer may override `jj-worktree`/`jj-forge-worktree` by id; config is
+# replaced wholesale, so restate every field the row needs (workspaceDirectory,
+# jjCommand, and the stock Git/directory/limit fields).
+- id: worktree
+  name: '@deepseek-ai/dsh-experimental-worktree'
+  disabled: true
+- id: tool-worktree
+  name: '@deepseek-ai/dsh-experimental-tool-worktree'
+  disabled: true
+- id: forge-worktree
+  name: '@deepseek-ai/dsh-experimental-worktree'
+  disabled: true
+
+- insert:
+    - id: jj-worktree
+      name: dsh-jj-workspace
+    - id: jj-tool-worktree
+      name: dsh-jj-workspace/tool
+
+- id: optional-forge-panel
+  insert:
+    - id: jj-forge-worktree
+      name: dsh-jj-workspace
+      config:
+        # One status route per process; the root provider owns it.
+        statusChannel: false

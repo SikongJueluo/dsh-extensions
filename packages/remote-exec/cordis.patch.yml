@@ -15,8 +15,9 @@
 # The row config owns the target whitelist — operator-managed (bundle layer
 # here, or a later patch/nixos overlay layer can replace it by id). Zero
 # targets is valid: the tool then errors on use until targets are added.
-- id: remote-exec
-  name: dsh-remote-exec
+- insert:
+    - id: remote-exec
+      name: dsh-remote-exec
   # config:
   #   approvalMode: session        # session | every | never
   #   defaultTimeoutMs: 600000

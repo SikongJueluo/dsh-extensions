@@ -1,0 +1,29 @@
+# Development overlay for the locally built plugin entry, by absolute path.
+# Rebuild first (`pnpm build`) so lib/ is current, then restart dsh:
+#   dsh --profile web --patch ./packages/jj-workspace/dev.patch.yml --no-open --port <port>
+# (the `web` subcommand takes no parent flags; `--profile web` does).
+#
+# Paths must stay quoted strings so a later build is seen on restart.
+- id: worktree
+  name: '@deepseek-ai/dsh-experimental-worktree'
+  disabled: true
+- id: tool-worktree
+  name: '@deepseek-ai/dsh-experimental-tool-worktree'
+  disabled: true
+- id: forge-worktree
+  name: '@deepseek-ai/dsh-experimental-worktree'
+  disabled: true
+
+- insert:
+    - id: jj-worktree
+      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/jj-workspace/lib/index.js'
+    - id: jj-tool-worktree
+      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/jj-workspace/lib/tool.js'
+
+- id: optional-forge-panel
+  insert:
+    - id: jj-forge-worktree
+      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/jj-workspace/lib/index.js'
+      config:
+        # One status route per process; the root provider owns it.
+        statusChannel: false
