@@ -407,44 +407,36 @@ window.__ModuleLoader__.load({
       }, "dsh-jj-workspace: locale");
       var t = ctx.locale.bind(LOCALE_NS);
 
-      ctx.slots.inject("conversation.hero.options", function () {
-        return ctx.slots.register({
-          name: "conversation.hero.options",
-          id: "forge-panel.worktree",
-          priority: -1,
-          order: 0,
-          locale: LOCALE_NS,
-          inject: function (sessionId) {
-            return {
-              t: t,
-              status: function (id, signal) {
-                return call(id, "status", signal);
-              },
-              follow: function (signal) {
-                if (!ctx.remote.forgePanel) throw new Error("the Forge panel is not mounted");
-                return ctx.remote.forgePanel.follow(sessionId, signal);
-              },
-              branches: function () {
-                if (!ctx.remote.forgePanel) {
-                  return Promise.resolve({ ok: false, error: { message: "the Forge panel is not mounted" } });
+      ctx.inject(["remote.forgePanel"], function (scope) {
+        scope.slots.inject("conversation.hero.options", function () {
+          return scope.slots.register({
+            name: "conversation.hero.options",
+            id: "forge-panel.worktree",
+            priority: -1,
+            order: 0,
+            locale: LOCALE_NS,
+            inject: function (sessionId) {
+              return {
+                t: t,
+                status: function (id, signal) {
+                  return call(id, "status", signal);
+                },
+                follow: function (signal) {
+                  return scope.remote.forgePanel.follow(sessionId, signal);
+                },
+                branches: function () {
+                  return scope.remote.forgePanel.branches(sessionId);
+                },
+                request: function (from) {
+                  return scope.remote.forgePanel.requestWorktree(sessionId, from);
+                },
+                cancel: function () {
+                  return scope.remote.forgePanel.cancelWorktree(sessionId);
                 }
-                return ctx.remote.forgePanel.branches(sessionId);
-              },
-              request: function (from) {
-                if (!ctx.remote.forgePanel) {
-                  return Promise.resolve({ ok: false, error: { message: "the Forge panel is not mounted" } });
-                }
-                return ctx.remote.forgePanel.requestWorktree(sessionId, from);
-              },
-              cancel: function () {
-                if (!ctx.remote.forgePanel) {
-                  return Promise.resolve({ ok: false, error: { message: "the Forge panel is not mounted" } });
-                }
-                return ctx.remote.forgePanel.cancelWorktree(sessionId);
-              }
-            };
-          }
-        }, Toggle);
+              };
+            }
+          }, Toggle);
+        });
       });
 
       ctx.slots.inject("conversation.session.header.utilities", function () {

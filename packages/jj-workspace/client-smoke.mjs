@@ -43,6 +43,11 @@ const ctx = {
     const dispose = fn()
     return typeof dispose === 'function' ? dispose : () => {}
   },
+  // The worktree control is scoped to the Forge Remote namespace. This fake
+  // context represents a page where that namespace is already mounted.
+  inject(_deps, callback) {
+    return callback(ctx)
+  },
   locale: {
     register() {},
     bind() {

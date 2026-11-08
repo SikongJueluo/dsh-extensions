@@ -85,16 +85,16 @@ bundle 层必须排在 `@deepseek-ai/dsh-experimental-forge-bundle` **之后**�
 
 ```fish
 pnpm --filter dsh-jj-workspace typecheck
-pnpm --filter dsh-jj-workspace test      # 32 个 vitest：真实 jj 临时仓库 + 真实 React 渲染
+pnpm --filter dsh-jj-workspace test      # 35 个 vitest：真实 jj 临时仓库 + 真实 React 渲染 + 真实 Cordis 依赖契约
 pnpm --filter dsh-jj-workspace smoke     # 真实 Cordis Context + 本地进程 stub：jj/Git 两臂、记录、任务状态、blocker、restart
 pnpm check                                # 全仓 typecheck + build + client syntax
 ```
 
-测试用临时 `HOME`/`XDG_CONFIG_HOME`/`JJ_CONFIG` 与测试身份，不读用户 alias/hooks；jj 集成测试覆盖默认 `@` 快照、colocated 且 Git HEAD attached 时仍从 `@`、显式 bookmark base、嵌套目录、重名/路径冲突、非 colocated 无 `.git`。React 测试覆盖 colocated jj 默认 `null`、显式 bookmark、Git 当前分支、read-only/creation/editable 门控与撤回、权限切换重取、目录切换期间不复用旧语义、status 失败重试、header task pill。
+测试用临时 `HOME`/`XDG_CONFIG_HOME`/`JJ_CONFIG` 与测试身份，不读用户 alias/hooks；jj 集成测试覆盖默认 `@` 快照、colocated 且 Git HEAD attached 时仍从 `@`、显式 bookmark base、嵌套目录、重名/路径冲突、非 colocated 无 `.git`。React 测试覆盖 colocated jj 默认 `null`、显式 bookmark、Git 当前分支、read-only/creation/editable 门控与撤回、权限切换重取、目录切换期间不复用旧语义、status 失败重试、header task pill。`test/client-deps.test.mjs` 在真实 Cordis Context 上挂载实际的 client module：Forge Remote namespace（`remote.forgePanel`）未挂载时不注册替换控件，挂载后能订阅面板、发出 status 并渲染控件，namespace 卸载时控件撤回；普通对象 mock 不能替代这道依赖检查。
 
 ## 已知边界
 
-- **浏览器半依赖 Forge 客户端包**（`@deepseek-ai/dsh-experimental-client-ui-forge`）：它通过 Forge 的 Remote 复用请求/等待/进度生命周期，不自行复制一套。没有 Forge 时只有宿主工具可用，client 入口会因注入依赖缺失而不激活。
+- **浏览器半依赖 Forge 客户端包**（`@deepseek-ai/dsh-experimental-client-ui-forge`）：它通过 Forge 的 Remote 复用请求/等待/进度生命周期，不自行复制一套。替换控件按 `remote.forgePanel` 这个 Cordis namespace 服务设作用域：namespace 未挂载时不注册、不 shadow stock 入口，挂载后才接管；Session header 的 task pill 不依赖 Forge。没有 Forge 客户端包时，client 入口仍会因包加载依赖不满足而不激活。
 - **覆盖是 slot cell 级的**：卸载本插件后 stock 控件恢复；本包对 Git 的控件是兼容实现（当前分支默认、显式分支选择、blocked 撤回），不是源码复用。
 - **Forge 侧栏的 Git 本地 diff/缺失恢复没有为 jj 适配**。colocated workspace 里 Git 能读的部分照常显示；非 colocated workspace 没有 Git 面板。恢复按钮对 jj 记录明确报「不支持」，不会调 Git restore。这是刻意的第一版范围。
 - **任务状态是只读观测**：pill 每 10 秒重读一次；workspace 缺失以实际目录/`.jj`/登记 root 三者不一致判定，bookmark 只认本地 present 行；显示 bookmark move/delete/conflict 与 workspace 缺失，不自动追踪 rename、不自动恢复、不移动 bookmark。多个任务时显示最新一条记录；无任务时 pill 不出现。

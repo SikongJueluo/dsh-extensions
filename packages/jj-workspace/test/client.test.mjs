@@ -41,6 +41,11 @@ function mount() {
       fn()
       return () => {}
     },
+    // The worktree control is scoped to the Forge Remote namespace; this fake
+    // context stands in for a page where that namespace is already mounted.
+    inject(_deps, callback) {
+      return callback(ctx)
+    },
     locale: {
       register() {},
       bind() {
