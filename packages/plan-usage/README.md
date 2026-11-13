@@ -1,10 +1,10 @@
 # dsh-plan-usage
 
-**Coding 套餐配额查询**：把 GLM / OpenAI（Codex）/ MiniMax / OpenCode Go 四家的限额窗口发布成 `planUsage` 宿主服务，并在设置页增加「Coding 套餐用量」分区（进度条 + 重置倒计时）。独立可用——不装 dsh-auto-continue 也能随时手动看剩多少限额。
+**Coding 套餐配额查询**：把 GLM / OpenAI（Codex）/ MiniMax / OpenCode Go / Command Code 五家的限额窗口发布成 `planUsage` 宿主服务，并在设置页增加「Coding 套餐用量」分区（进度条 + 重置倒计时）。独立可用——不装 dsh-auto-continue 也能随时手动看剩多少限额。
 
-**只显示实际注册的路由**：服务与 `ctx.llm.listProviders()` 求交（随 `llm/adapters-updated` 刷新）——GLM 的别名家族（zai-coding-cn / glm / zai / …）收敛为你实际配置的那一条，一家订阅一张卡。
+**只显示实际注册且能解析到 key 的路由**：服务与 `ctx.llm.listProviders()` 求交（随 `llm/adapters-updated` 刷新），设置页再过滤掉配额源解析不到 key 的路线——没有 key 就不出空卡；不想看某家时删掉它的 key 即可，不必同时删 provider。GLM 的别名家族（zai-coding-cn / glm / zai / …）收敛为你实际配置的那一条，一家订阅一张卡。
 
-## 数据源（四源聚合）
+## 数据源（五源聚合）
 
 | 源 | 路由 | 端点 | 认证 | 实测依据 |
 |---|---|---|---|---|
@@ -12,6 +12,7 @@
 | OpenAI Codex | `chatgpt` | `https://chatgpt.com/backend-api/wham/usage` | **ChatGPT OAuth**（经 `oauthProviders` 服务，自动刷新轮换） | headroom（MIT） |
 | MiniMax | `minimax`, `minimax-cn` | `{host}/v1/token_plan/remains` | API key（`MINIMAX_API_KEY` / `MINIMAX_CN_API_KEY`） | ai-usagebar（MIT） |
 | OpenCode Go | `opencode-go` | `https://opencode.ai/zen/go/v1/usage` | API key（`OPENCODE_API_KEY`；403 = 无 Go 订阅） | 官方未公开端点，实测 2026-10-13 |
+| Command Code | `command-code` | `https://api.commandcode.ai/alpha/billing/credits`（+ `whoami` / `subscriptions`） | API key（`CMD_API_KEY` / `COMMAND_CODE_API_KEY`） | CLI 1.53.0 alpha 路由；hermes / opencodex / CodexBar 交叉验证 |
 
 各家 wire 语义在源内归一为 `fiveHour`（滚动短窗）+ `weekly`（+ `monthly` 月度窗 / GLM 的 `monthlyMcp`），统一为「已消耗 %」与 **epoch 毫秒** 重置时间：
 
@@ -19,6 +20,7 @@
 - OpenAI：`rate_limit.primary_window` / `secondary_window`（`used_percent`、`reset_at` **秒**→毫秒、`limit_window_seconds`→windowMinutes）；`plan_type`→level。
 - MiniMax：永远 HTTP 200（错误在 `base_resp.status_code`）；百分比是**剩余**（反转）；时间戳毫秒；`general` 桶即文本/coding；**2049 自动翻区**（key 属于另一区域时切换 minimax.io ↔ minimaxi.com 并记住）。
 - OpenCode Go：`usage.rolling/weekly/monthly` 三窗，仅 `status` / `percent` / `resetsAt`（ISO-8601→毫秒），无金额；`percent` 为**已消耗**整数；`rate-limited` 一律按 100% 计；端点未公开且变更过一次，防御性解码。
+- Command Code：`windowLimits.fiveHour/weekly`（`used/cap`、`resetAt` 毫秒或 ISO、`exceeded`）；月度窗用 `monthlyCreditsGranted - monthlyCredits` 算已用，`remaining` 以 USD 显示；grant 缺失时仍显示余额但不出百分比；`limited:false` 表示按量付费、不出滚动窗。
 
 共享同一端点+key 的路由合并为一次上游调用；服务层再按路由做 TTL 缓存 + 并发去重（等待中的恢复 agent 与设置页共用）。
 
@@ -35,9 +37,11 @@ interface PlanUsageService {
 }
 ```
 
-`get` 永不抛错：无源、无凭证、上游失败都返回 `undefined`。`QuotaSnapshot` 含 `fiveHour` / `weekly` / `monthly`（月度窗，OpenCode）/ `monthlyMcp`（各带 `percent` / `used` / `total` / `resetAt` / `windowMinutes`）与 `level`。
+`get` 永不抛错：无源、无凭证、上游失败都返回 `undefined`。`QuotaSnapshot` 含 `fiveHour` / `weekly` / `monthly`（月度窗，OpenCode 与 Command Code）/ `monthlyMcp`（各带 `percent` / `used` / `total` / `remaining` / `unit` / `resetAt` / `windowMinutes`）与 `level`。
 
 **OpenAI 依赖说明**：`chatgpt` 路由的 token 经 `oauthProviders` 服务（[dsh-oauth-providers](../oauth-providers/) v0.4+ 提供）获取，未装该插件或未登录时此源优雅降级为 `undefined`。
+
+**Command Code 依赖说明**：卡片只在 `command-code` 路由实际注册时出现，通常由 [dsh-more-providers](../more-providers/) 在 `CMD_API_KEY` 存在时注册；source 本身只读环境变量，不依赖该插件的服务。
 
 ## 配置（cordis 行）
 
@@ -50,11 +54,17 @@ interface PlanUsageService {
       zai-coding-cn:
         monitorBaseUrl: https://open.bigmodel.cn
         apiKeyEnv: ZAI_CODING_CN_API_KEY
+    commandCode:             # 可选：对齐 dsh-more-providers 的 env / staging origin
+      apiKeyEnv: CMD_API_KEY
+      baseURL: https://api.commandcode.ai
 ```
+
+`commandCode.apiKeyEnv` 用于 provider 侧改了 `apiKeyEnv` 的场景；默认仍会尝试
+`CMD_API_KEY` 与 `COMMAND_CODE_API_KEY`。
 
 ## 设置页
 
-浏览器半（`client/client.js`）在设置页增加「Coding 套餐用量」分区：每路由一张卡——滚动窗（API 上报窗口大小时按实际显示，如 "5h 窗口"）、周窗、月度窗（OpenCode Go；GLM 的月度 MCP 预算另有一条）的消耗进度条、重置倒计时（秒级跳动）、手动刷新，可见时每分钟自动刷新。经本包自有通道 `POST /dsh-plan-usage/quota` 读取（与连接 RPC 同信封、同鉴权）。
+浏览器半（`client/client.js`）在设置页增加「Coding 套餐用量」分区：每个可监控路由一张卡——滚动窗（API 上报窗口大小时按实际显示，如 "5h 窗口"）、周窗、月度窗（OpenCode Go / Command Code；GLM 的月度 MCP 预算另有一条）的消耗进度条、重置倒计时（秒级跳动）、手动刷新，可见时每分钟自动刷新。Command Code 的月度窗额外显示 `$x.xx left` 形式的剩余额度。经本包自有通道 `POST /dsh-plan-usage/quota` 读取（与连接 RPC 同信封、同鉴权）。
 
 ## 开发
 
@@ -63,10 +73,12 @@ pnpm -C packages/plan-usage build
 dsh --profile web --patch ./packages/plan-usage/dev.patch.yml --no-open --port 3180
 ```
 
-验证：`pnpm -C packages/plan-usage smoke`（四源实测向量 + 区域翻转 + 真实 Cordis 上下文的服务注册与路由过滤）。
+验证：`pnpm -C packages/plan-usage smoke`（五源实测向量 + 区域翻转 + 真实 Cordis 上下文的服务注册与路由过滤）。
 
 ## 已知限制
 
-- 四个配额 API 均为未公开端点；上游字段变更时解析器返回 `undefined`（消费方自行兜底），不会误展示。
+- 五个配额 API 均为未公开端点；上游字段变更时解析器返回 `undefined`（消费方自行兜底），不会误展示。
+- Command Code 的 `/alpha/*` 路由是 CLI 内部接口，且 `$1` Go plan 不允许外部工具；Go key 会优雅降级为无卡片数据。
+- 无 key 的路由不再显示空卡；`PlanUsageService.providers()` 仍按契约返回 live 路由全集，过滤发生在本包设置页的 channel。
 - OpenAI 源依赖 dsh-oauth-providers 的 `oauthProviders` 服务（软依赖）。
-- 仅 GLM 系支持 `providers` 配置覆盖；OpenAI/MiniMax/OpenCode 端点固定。
+- 仅 GLM 系支持 `providers` 配置覆盖；OpenAI/MiniMax/OpenCode/Command Code 端点固定。

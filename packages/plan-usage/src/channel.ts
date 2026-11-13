@@ -24,26 +24,21 @@ const MAX_CHANNEL_BODY_BYTES = 16 * 1024
 /** What the browser sees for one monitored provider. */
 export interface ProviderQuotaView {
   provider: string
-  /** Whether a monitor (endpoint + key) is resolvable for the route. */
-  monitored: boolean
   snapshot?: import('./types.js').QuotaSnapshot
   /** Why the quota is unavailable, when known. */
   error?: string
 }
 
-/** Serve one `quota` request. */
+/** Serve one `quota` request; routes without a resolvable key are omitted. */
 async function quotaView(service: PlanUsageService, refresh: boolean): Promise<{ providers: ProviderQuotaView[] }> {
+  const monitored = service.providers().filter((provider) => service.monitored(provider))
   const views = await Promise.all(
-    service.providers().map(async (provider): Promise<ProviderQuotaView> => {
-      if (!service.monitored(provider)) {
-        return { provider, monitored: false }
-      }
+    monitored.map(async (provider): Promise<ProviderQuotaView> => {
       const snapshot = await service.get(provider, { force: refresh })
-      if (snapshot !== undefined) return { provider, monitored: true, snapshot }
+      if (snapshot !== undefined) return { provider, snapshot }
       const sourceId = service.sourceId(provider)
       return {
         provider,
-        monitored: true,
         error: sourceId === 'openai-codex'
           ? 'no signed-in ChatGPT token, or the usage fetch failed (see host logs)'
           : 'quota fetch failed (see host logs)',

@@ -23,6 +23,8 @@ import type {} from '@deepseek-ai/dsh-llm'
 import type {} from './shims.js'
 import { SERVICE_NAME } from './identity.js'
 import type { QuotaSnapshot } from './types.js'
+import { CommandCodeSource } from './sources/commandcode.js'
+import type { CommandCodeMonitorSettings } from './sources/commandcode.js'
 import { MiniMaxSource } from './sources/minimax.js'
 import { OpenAiUsageSource } from './sources/openai.js'
 import { OpenCodeGoSource } from './sources/opencode.js'
@@ -35,6 +37,8 @@ export interface PlanUsageConfig {
   quotaCacheMs: number
   /** Per-provider monitor overrides/additions keyed by provider route (GLM family). */
   providers: Record<string, ProviderMonitorSettings>
+  /** Command Code monitor overrides (env var / API origin). */
+  commandCode?: CommandCodeMonitorSettings
 }
 
 /** Read options accepted by {@link PlanUsageService.get}. */
@@ -104,6 +108,11 @@ export class PlanUsageService extends Service {
         logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) },
       }),
       new MiniMaxSource({ logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) } }),
+      new CommandCodeSource({
+        apiKeyEnv: config.commandCode?.apiKeyEnv,
+        baseURL: config.commandCode?.baseURL,
+        logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) },
+      }),
       new OpenCodeGoSource({ logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) } }),
     ]
     this.refreshLiveRoutes()

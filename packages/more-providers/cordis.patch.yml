@@ -1,0 +1,13 @@
+# dsh-more-providers bundle layer: env-driven extra LLM providers.
+#
+# Command Code is the first module: when CMD_API_KEY (or
+# COMMAND_CODE_API_KEY) is present, the plugin fetches the live
+# /provider/v1/models catalog and registers one `command-code` route whose
+# models span the anthropic-messages, openai-responses and openai-completions
+# protocols. With no key the row loads and stays dormant, so installing the
+# bundle does not change the model picker.
+#
+# A later layer may override this row by id; config is replaced wholesale.
+- insert:
+    - id: more-providers
+      name: dsh-more-providers

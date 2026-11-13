@@ -15,6 +15,10 @@
 - 用户已有的接入点：`~/.config/nixos/home/ai/dsh/providers.nix` 的 `programs.dsh.piAiProviders`（静态 allowlist，
   `apiKeyEnv` 按请求解析）；`secrets.nix` 里已经有 `CMD_API_KEY`。所以“env 驱动”与现有部署方式同构。
 
+> **落地状态（2026-11-14）**：provider 侧已实现为 `packages/more-providers`（bundle 名
+> `dsh-more-providers`），plan-usage 侧已加入 `src/sources/commandcode.ts`；`pnpm check` 与两个
+> `smoke` 均通过。下文的包名/路径已按最终实现更新。
+
 ---
 
 ## 1. 参考实现到底做了什么
@@ -125,21 +129,21 @@ DSH 内置的 `@deepseek-ai/dsh-llm-pi-ai` 已经支持“手写 gateway”：
 
 ---
 
-## 3. 推荐方案：`packages/commandcode-provider`
+## 3. 推荐方案：`packages/more-providers`
 
 ### 3.1 形态
 
-Host-only bundle，一个插件行 `commandcode-provider`，无浏览器半：
+Host-only bundle，一个插件行 `more-providers`，无浏览器半：
 
 ```yaml
 # cordis.patch.yml
 - insert:
-    - id: commandcode-provider
-      name: dsh-commandcode-provider
+    - id: more-providers
+      name: dsh-more-providers
 ```
 
 `inject: ['llm']`；`apply` 是 `async`（先拉目录再注册）。安装方式与现有包一致：
-`plugins.nix` 里加一行 `"${extensions}/commandcode-provider"`，或 `dsh plugin add`。
+`plugins.nix` 里加一行 `"${extensions}/more-providers"`，或 `dsh plugin add`。
 刻意**不**注册 `registerConfigurableProviders`——这个插件没有“设置页编辑”的需求，route 的有无完全由
 `CMD_API_KEY` 决定；模型选择器仍然会看到它，只是 Models 设置页不会多一张可编辑卡片。
 
@@ -355,6 +359,7 @@ export class CommandCodeSource {
 接入点：
 
 - `service.ts` 构造器：`new CommandCodeSource({ logger: ... })` 加进 `sources`。
+- 设置页只展示 `monitored()` 为真的路由；没有 key 的 source 不出空卡（删 key 即可隐藏）。
 - `index.ts`：导出 `CommandCodeSource` / `parseCommandCodeCredits`，供 smoke 用。
 - `README.md`：表格加一行；「四源聚合」→「五源聚合」。
 - `smoke.mjs`：加解析向量（200 正常、`data` 信封、`windowLimits` 嵌套、`limited:false`、401、坏 JSON、无 key），
@@ -390,7 +395,7 @@ export interface QuotaWindow {
 
 | 工作项 | 估计 | 说明 |
 |---|---|---|
-| `packages/commandcode-provider` 骨架（package/tsconfig/tsdown/patch/dev.patch） | 0.5h | 抄 `plan-usage` 的 host-only 形态 |
+| `packages/more-providers` 骨架（package/tsconfig/tsdown/patch/dev.patch） | 0.5h | 抄 `plan-usage` 的 host-only 形态 |
 | `catalog.ts`（拉取 + 映射） | 2h | 规则按 §3.3，纯函数可测 |
 | `index.ts`（env/key、profile、adapter 注册） | 2h | 关键在 profile 字段与错误路径 |
 | `smoke.mjs`（映射向量 + 假 fetch 的 401/坏 JSON + `listModels`） | 2h | 探针已验证可行 |
@@ -420,7 +425,7 @@ export interface QuotaWindow {
 1. **先做 plan-usage source**（不依赖 provider 插件；`smoke` 用假 fetch 就能验；
    真 key 下 `CommandCodeSource.get()` 可独立跑）。
 2. **再做 provider 插件**：先 `catalog.ts` + 映射单测，再 `PiAiAdapter` 注册，最后真 key 联调。
-3. **nix 接线**：`plugins.nix` 加 `"${extensions}/commandcode-provider"`；
+3. **nix 接线**：`plugins.nix` 加 `"${extensions}/more-providers"`；
    `secrets.nix` 已有 `CMD_API_KEY`，无需改；`systemctl --user restart dsh-web`。
 4. **验证**：
    - 模型选择器出现 `Command Code`，模型数 98（或当前目录数）；

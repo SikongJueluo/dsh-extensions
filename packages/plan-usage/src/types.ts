@@ -12,6 +12,10 @@ export interface QuotaWindow {
   used?: number
   /** Window total, when the source reports it. */
   total?: number
+  /** Amount still available in this window, when the source reports it. */
+  remaining?: number
+  /** Display unit for used/total/remaining; absent means a plain count. */
+  unit?: 'usd'
   /** Epoch ms of the next window reset, when reported. */
   resetAt?: number
   /** Window length in minutes, when the source reports it (300 = the 5h rolling window). */

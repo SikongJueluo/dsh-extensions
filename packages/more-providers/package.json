@@ -1,0 +1,49 @@
+{
+  "name": "dsh-more-providers",
+  "version": "0.1.0",
+  "description": "Env-driven extra LLM providers for DSH: Command Code subscription (CMD_API_KEY) today, with its live model catalog mapped across anthropic-messages, openai-responses and openai-completions",
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "dev.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json",
+    "smoke": "node smoke.mjs",
+    "clean": "rm -rf lib",
+    "prepare": "tsdown"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-llm": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm-pi-ai": "^0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "^3.19.0",
+    "@earendil-works/pi-ai": "^1.3.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "3.19.0",
+    "@earendil-works/pi-ai": "1.5.0"
+  }
+}

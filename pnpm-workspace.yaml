@@ -1,6 +1,10 @@
 packages:
   - packages/*
 allowBuilds:
+  # Transitive deps of @earendil-works/pi-ai (local typecheck/smoke only);
+  # neither install script is needed at runtime.
+  '@google/genai': false
   esbuild: true
   koffi: true
+  protobufjs: false
 nodeLinker: hoisted

@@ -9,6 +9,7 @@ import { parseQuotaBody, resolveMonitor, monitoredProviders, QuotaMonitor } from
 import { parseCodexUsage, OpenAiUsageSource } from './lib/index.js'
 import { parseMiniMaxRemains, consumedFromRemaining, MiniMaxSource } from './lib/index.js'
 import { parseOpenCodeGoUsage, OpenCodeGoSource } from './lib/index.js'
+import { CommandCodeSource, parseCommandCodeCredits } from './lib/index.js'
 
 let failures = 0
 function check(label, condition) {
@@ -25,6 +26,7 @@ const config = Config({})
 console.log('plugin:', name, '| inject:', inject)
 check('quotaCacheMs default 60s', config.quotaCacheMs === 60_000)
 check('providers default empty', Object.keys(config.providers).length === 0)
+check('command-code monitor defaults empty', Object.keys(config.commandCode).length === 0)
 
 // ── GLM monitor resolution ───────────────────────────────────────────────────
 check('zai-coding-cn builtin monitor', resolveMonitor('zai-coding-cn')?.monitorBaseUrl === 'https://open.bigmodel.cn')
@@ -227,6 +229,95 @@ const opencodeBadJson = new OpenCodeGoSource({
 })
 check('opencode: invalid JSON resolves undefined', (await opencodeBadJson.get('opencode-go')) === undefined)
 
+// ── Command Code credits parsing (alpha billing routes, 2026-11) ────────────
+const commandCodeCredits = {
+  credits: { monthlyCredits: 57.6, monthlyCreditsGranted: 70 },
+  windowLimits: {
+    fiveHour: { cap: 100, used: 40, resetAt: '2026-11-14T20:00:00.000Z', exceeded: false },
+    weekly: { cap: 500, used: 25, resetAt: 1795000000000, exceeded: false },
+    limited: true,
+  },
+}
+const commandCodeSubscription = {
+  data: { planId: 'individual-goat', currentPeriodEnd: '2026-12-01T00:00:00.000Z' },
+}
+const cc = parseCommandCodeCredits(commandCodeCredits, commandCodeSubscription)
+check('command-code: fiveHour used/cap', cc.fiveHour?.percent === 40 && cc.fiveHour?.used === 40 && cc.fiveHour?.total === 100)
+check('command-code: ISO reset becomes epoch ms', cc.fiveHour?.resetAt === Date.parse('2026-11-14T20:00:00.000Z'))
+check('command-code: weekly stays epoch ms', cc.weekly?.percent === 5 && cc.weekly?.resetAt === 1795000000000)
+check('command-code: monthly credits use the reported grant', cc.monthly?.percent === 17.7 && cc.monthly?.used === 12.4 && cc.monthly?.total === 70 && cc.monthly?.remaining === 57.6 && cc.monthly?.unit === 'usd')
+check('command-code: period end resets the monthly window', cc.monthly?.resetAt === Date.parse('2026-12-01T00:00:00.000Z'))
+check('command-code: plan id becomes level', cc.level === 'GOAT')
+check('command-code: limited:false hides rolling windows', (() => {
+  const parsed = parseCommandCodeCredits({ credits: { monthlyCredits: 50, monthlyCreditsGranted: 70 }, windowLimits: { limited: false } })
+  return !('error' in parsed) && parsed.fiveHour === undefined && parsed.weekly === undefined && parsed.monthly?.remaining === 50
+})())
+check('command-code: windowLimits nested inside credits', (() => {
+  const parsed = parseCommandCodeCredits({ data: { credits: { monthlyCredits: 60, monthlyCreditsGranted: 70, windowLimits: { fiveHour: { cap: 10, used: 10 } } } } })
+  return !('error' in parsed) && parsed.fiveHour?.percent === 100
+})())
+check('command-code: exceeded forces 100 even when used lags', parseCommandCodeCredits({ windowLimits: { fiveHour: { cap: 100, used: 1, exceeded: true } } }).fiveHour?.percent === 100)
+check('command-code: used above cap clamps to 100', parseCommandCodeCredits({ windowLimits: { weekly: { cap: 10, used: 50 } } }).weekly?.percent === 100)
+check('command-code: unknown grant keeps the balance', (() => {
+  const parsed = parseCommandCodeCredits({ credits: { monthlyCredits: 12.34 } })
+  return !('error' in parsed) && parsed.monthly?.remaining === 12.34 && parsed.monthly?.percent === undefined && parsed.monthly?.total === undefined && parsed.monthly?.unit === 'usd'
+})())
+check('command-code: plan table sizes an unstated grant', (() => {
+  const parsed = parseCommandCodeCredits({ credits: { monthlyCredits: 8, planId: 'individual-go' } })
+  return !('error' in parsed) && parsed.monthly?.total === 10 && parsed.monthly?.percent === 20 && parsed.level === 'Go'
+})())
+check('command-code: no usable window degrades to an error', 'error' in parseCommandCodeCredits({ credits: {} }))
+check('command-code: non-object body degrades to an error', 'error' in parseCommandCodeCredits('nope'))
+
+// Command Code source: no env key → not ready; keyed → whoami + credits + subscriptions; failures → undefined.
+const commandCodeCalls = []
+const commandCodeFetch = async (url, init) => {
+  const target = String(url)
+  commandCodeCalls.push({ url: target, auth: init?.headers?.authorization })
+  if (target.includes('/alpha/whoami')) {
+    return new Response(JSON.stringify({ org: { id: 'org-1' } }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  if (target.includes('/alpha/billing/subscriptions')) {
+    return new Response(JSON.stringify(commandCodeSubscription), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  return new Response(JSON.stringify(commandCodeCredits), { status: 200, headers: { 'content-type': 'application/json' } })
+}
+const commandCodeUnkeyed = new CommandCodeSource({ env: {}, fetchImpl: commandCodeFetch, logger: { warn() {} } })
+check('command-code: no env key → not ready, undefined, no fetch', commandCodeUnkeyed.ready('command-code') === false && (await commandCodeUnkeyed.get('command-code')) === undefined && commandCodeCalls.length === 0)
+const commandCodeSource = new CommandCodeSource({ env: { CMD_API_KEY: 'cc-key' }, fetchImpl: commandCodeFetch, logger: { warn() {} } })
+check('command-code: env key → ready, unknown route never', commandCodeSource.ready('command-code') === true && commandCodeSource.ready('commandcode') === false)
+const commandCodeSnapshot = await commandCodeSource.get('command-code')
+check('command-code: snapshot carries all three windows', commandCodeSnapshot?.provider === 'command-code' && commandCodeSnapshot?.source === 'command-code:credits' && commandCodeSnapshot?.fiveHour?.percent === 40 && commandCodeSnapshot?.weekly?.percent === 5 && commandCodeSnapshot?.monthly?.remaining === 57.6 && commandCodeSnapshot?.level === 'GOAT')
+check('command-code: whoami org scopes the billing calls', commandCodeCalls[1]?.url === 'https://api.commandcode.ai/alpha/billing/credits?orgId=org-1' && commandCodeCalls[2]?.url === 'https://api.commandcode.ai/alpha/billing/subscriptions?orgId=org-1')
+check('command-code: bearer key on every call', commandCodeCalls.every((call) => call.auth === 'Bearer cc-key'))
+const customCalls = []
+const customSource = new CommandCodeSource({
+  env: { CC_KEY: 'custom-key' },
+  apiKeyEnv: 'CC_KEY',
+  fetchImpl: async (url, init) => {
+    customCalls.push(init?.headers?.authorization)
+    return commandCodeFetch(url, init)
+  },
+  logger: { warn() {} },
+})
+check('command-code: custom apiKeyEnv is ready', customSource.ready('command-code') === true)
+await customSource.get('command-code')
+check('command-code: custom apiKeyEnv is tried first', customCalls[0] === 'Bearer custom-key')
+const commandCodeUnauthorized = new CommandCodeSource({
+  env: { CMD_API_KEY: 'cc-key' },
+  fetchImpl: async () => new Response('unauthorized', { status: 401 }),
+  logger: { warn() {} },
+})
+check('command-code: 401 resolves undefined', (await commandCodeUnauthorized.get('command-code')) === undefined)
+const commandCodeCreditsDown = new CommandCodeSource({
+  env: { CMD_API_KEY: 'cc-key' },
+  fetchImpl: async (url) => String(url).includes('/alpha/whoami')
+    ? new Response(JSON.stringify({ org: { id: 'o' } }), { status: 200, headers: { 'content-type': 'application/json' } })
+    : new Response('down', { status: 503 }),
+  logger: { warn() {} },
+})
+check('command-code: credits failure resolves undefined', (await commandCodeCreditsDown.get('command-code')) === undefined)
+
 // ── GLM QuotaMonitor with a stub fetch (shared-monitor dedupe) ───────────────
 let fetchCalls = 0
 const stubFetch = async (url, init) => {
@@ -256,7 +347,7 @@ check('apply registers the planUsage service', service instanceof PlanUsageServi
 
 // Without an llm service every known source route is listed.
 const unfiltered = service.providers()
-check('no llm service → all source routes listed', unfiltered.includes('zai-coding-cn') && unfiltered.includes('chatgpt') && unfiltered.includes('minimax-cn') && unfiltered.includes('opencode-go'))
+check('no llm service → all source routes listed', unfiltered.includes('zai-coding-cn') && unfiltered.includes('chatgpt') && unfiltered.includes('minimax-cn') && unfiltered.includes('opencode-go') && unfiltered.includes('command-code'))
 
 // A stub llm service narrows the list to routes actually registered.
 class StubLlm extends Service {

@@ -34,9 +34,9 @@ window.__ModuleLoader__.load({
       noReset: "no reset reported",
       consumed: "{percent}% used",
       usedOfTotal: "{used} / {total} used",
+      remainingUsd: "{amount} left",
       fetchedAt: "updated {when}",
       fetchFailed: "Quota unavailable (see host logs).",
-      notMonitored: "No API key resolved for this provider's quota monitor.",
       level: "plan: {level}"
     };
 
@@ -56,9 +56,9 @@ window.__ModuleLoader__.load({
       noReset: "未上报重置时间",
       consumed: "已用 {percent}%",
       usedOfTotal: "已用 {used} / {total}",
+      remainingUsd: "剩余 {amount}",
       fetchedAt: "更新于 {when}",
       fetchFailed: "用量暂不可用（详见宿主日志）。",
-      notMonitored: "未解析到该服务商配额监控的 API Key。",
       level: "套餐：{level}"
     };
 
@@ -106,6 +106,11 @@ window.__ModuleLoader__.load({
       return String(Math.round(n));
     }
 
+    function fmtUsd(n) {
+      if (typeof n !== "number" || !isFinite(n)) return "—";
+      return "$" + n.toFixed(2);
+    }
+
     var rpcSeq = 0;
     function callQuota(refresh) {
       rpcSeq += 1;
@@ -143,6 +148,14 @@ window.__ModuleLoader__.load({
       return "var(--dsw-alias-brand-primary)";
     }
 
+    function resetText(t, w, nowTick) {
+      if (typeof w.resetAt !== "number") return t("noReset");
+      var remaining = w.resetAt - nowTick;
+      return remaining > 0
+        ? t("resetsIn", { duration: fmtDuration(remaining) })
+        : t("resetOverdue");
+    }
+
     function WindowBar(props) {
       var t = props.t;
       var label = props.label;
@@ -152,21 +165,22 @@ window.__ModuleLoader__.load({
 
       var meta;
       if (percent === null) {
-        meta = t("noReset");
-      } else {
-        var used = typeof w.used === "number" && typeof w.total === "number" && w.total > 0
-          ? t("usedOfTotal", { used: fmtCount(w.used), total: fmtCount(w.total) })
-          : t("consumed", { percent: percent });
-        var reset;
-        if (typeof w.resetAt === "number") {
-          var remaining = w.resetAt - nowTick;
-          reset = remaining > 0
-            ? t("resetsIn", { duration: fmtDuration(remaining) })
-            : t("resetOverdue");
-        } else {
-          reset = t("noReset");
+        var bits = [];
+        if (w.unit === "usd" && typeof w.remaining === "number") {
+          bits.push(t("remainingUsd", { amount: fmtUsd(w.remaining) }));
         }
-        meta = used + " · " + reset;
+        if (bits.length > 0 || typeof w.resetAt === "number") bits.push(resetText(t, w, nowTick));
+        meta = bits.length > 0 ? bits.join(" · ") : t("noReset");
+      } else {
+        var used;
+        if (w.unit === "usd" && typeof w.remaining === "number") {
+          used = t("consumed", { percent: percent }) + " · " + t("remainingUsd", { amount: fmtUsd(w.remaining) });
+        } else if (typeof w.used === "number" && typeof w.total === "number" && w.total > 0) {
+          used = t("usedOfTotal", { used: fmtCount(w.used), total: fmtCount(w.total) });
+        } else {
+          used = t("consumed", { percent: percent });
+        }
+        meta = used + " · " + resetText(t, w, nowTick);
       }
 
       return React.createElement("div", { style: { marginBottom: 12 } },
@@ -204,20 +218,18 @@ window.__ModuleLoader__.load({
             ? React.createElement("span", { style: { marginLeft: "auto", fontSize: 12, lineHeight: "18px", color: "var(--dsw-alias-label-tertiary)" } }, t("fetchedAt", { when: relTime(t, snapshot.fetchedAt) }))
             : null
         ),
-        !view.monitored
-          ? React.createElement("div", { style: { fontSize: 13, lineHeight: "20px", color: "var(--dsw-alias-label-secondary)" } }, t("notMonitored"))
-          : snapshot
-            ? [
-              React.createElement(WindowBar, { key: "5h", t: t, label: windowLabel(t, t("fiveHour"), snapshot.fiveHour), window: snapshot.fiveHour, nowTick: nowTick }),
-              React.createElement(WindowBar, { key: "weekly", t: t, label: windowLabel(t, t("weekly"), snapshot.weekly), window: snapshot.weekly, nowTick: nowTick }),
-              snapshot.monthly
-                ? React.createElement(WindowBar, { key: "monthly", t: t, label: t("monthly"), window: snapshot.monthly, nowTick: nowTick })
-                : null,
-              snapshot.monthlyMcp
-                ? React.createElement(WindowBar, { key: "mcp", t: t, label: t("monthlyMcp"), window: snapshot.monthlyMcp, nowTick: nowTick })
-                : null
-            ]
-            : React.createElement("div", { style: { fontSize: 13, lineHeight: "20px", color: "var(--dsw-alias-state-warn-label)" } }, view.error ? view.error : t("fetchFailed"))
+        snapshot
+          ? [
+            React.createElement(WindowBar, { key: "5h", t: t, label: windowLabel(t, t("fiveHour"), snapshot.fiveHour), window: snapshot.fiveHour, nowTick: nowTick }),
+            React.createElement(WindowBar, { key: "weekly", t: t, label: windowLabel(t, t("weekly"), snapshot.weekly), window: snapshot.weekly, nowTick: nowTick }),
+            snapshot.monthly
+              ? React.createElement(WindowBar, { key: "monthly", t: t, label: t("monthly"), window: snapshot.monthly, nowTick: nowTick })
+              : null,
+            snapshot.monthlyMcp
+              ? React.createElement(WindowBar, { key: "mcp", t: t, label: t("monthlyMcp"), window: snapshot.monthlyMcp, nowTick: nowTick })
+              : null
+          ]
+          : React.createElement("div", { style: { fontSize: 13, lineHeight: "20px", color: "var(--dsw-alias-state-warn-label)" } }, view.error ? view.error : t("fetchFailed"))
       );
     }
 

@@ -21,6 +21,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
 import type { ProviderMonitorSettings } from './sources/glm.js'
+import type { CommandCodeMonitorSettings } from './sources/commandcode.js'
 import { PlanUsageService } from './service.js'
 import { registerChannel } from './channel.js'
 
@@ -29,7 +30,9 @@ export { QuotaMonitor, parseQuotaBody, resolveMonitor, monitoredProviders } from
 export { OpenAiUsageSource, parseCodexUsage } from './sources/openai.js'
 export { MiniMaxSource, parseMiniMaxRemains, consumedFromRemaining } from './sources/minimax.js'
 export { OpenCodeGoSource, parseOpenCodeGoUsage } from './sources/opencode.js'
+export { CommandCodeSource, parseCommandCodeCredits, COMMAND_CODE_API_BASE } from './sources/commandcode.js'
 export type { OpenCodeGoWindows, OpenCodeGoError } from './sources/opencode.js'
+export type { CommandCodeWindows, CommandCodeError, CommandCodeMonitorSettings } from './sources/commandcode.js'
 export type { ProviderMonitorSettings, MonitorConfig } from './sources/glm.js'
 export type { QuotaSnapshot, QuotaWindow } from './types.js'
 export { PlanUsageService } from './service.js'
@@ -41,6 +44,8 @@ export interface Config {
   quotaCacheMs: number
   /** Per-provider monitor overrides/additions (monitorBaseUrl / apiKeyEnv). */
   providers: Record<string, ProviderMonitorSettings>
+  /** Command Code monitor overrides (env var / API origin). */
+  commandCode?: CommandCodeMonitorSettings
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -54,6 +59,13 @@ export const Config: Schema<Config> = Schema.object({
       .description('Env var holding the API key for the quota endpoint (default: the route\'s built-ins).'),
   })).default({})
     .description('Per-provider quota monitors; keys are provider route ids (built-ins cover the GLM coding-plan routes).'),
+  commandCode: Schema.object({
+    apiKeyEnv: Schema.string()
+      .description('Env var holding the Command Code API key; CMD_API_KEY / COMMAND_CODE_API_KEY are still tried after it.'),
+    baseURL: Schema.string()
+      .description('Command Code API origin override (default: https://api.commandcode.ai).'),
+  }).default({})
+    .description('Command Code quota monitor overrides.'),
 })
 
 export const name = PLUGIN_NAME
