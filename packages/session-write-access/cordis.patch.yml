@@ -1,0 +1,27 @@
+# dsh-session-write-access bundle layer.
+#
+# The stock `sandbox-policy` row is disabled and this package's replacement is
+# appended under the same `sandboxPolicy` service name. The replacement keeps
+# the stock mode fold, deployment roots, and runtime-context contribution, and
+# adds the session family's persistent extra writable directories. Filesystem
+# tools and confined shell both read this service, so one grant reaches both.
+#
+# The `name` on the disable entry is a guard: if a later deployment already
+# swapped the policy row, this patch skips itself instead of disabling an
+# unknown service.
+#
+# Config is replaced wholesale by a later layer, so a deployment override must
+# restate `mode`, `workspaceRoot`, and `additionalWritableRoots` (plus any
+# protected paths it changes). `mode` and `workspaceRoot` mirror the stock base
+# layer so ordinary deployment env/flags keep working.
+- id: sandbox-policy
+  name: '@deepseek-ai/dsh-sandbox-policy'
+  disabled: true
+
+- insert:
+    - id: session-write-access
+      name: dsh-session-write-access
+      config:
+        mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
+        workspaceRoot: !!js process.cwd()
+        additionalWritableRoots: []

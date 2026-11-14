@@ -1,6 +1,6 @@
 # 计划：持久化的 Session 多项目写入授权
 
-状态（2026-11-14）：**需求已确认，待实现与集成验证**。本文是后续实现和验收的依据，不表示插件已可用。本次只新增文档，不修改 DSH、profile、Nix 配置或运行权限。拟交付 `packages/session-write-access`（`dsh-session-write-access`），名称暂定，尚未创建或发布。
+状态（2026-11-14）：**需求已确认，首版实现已落地，真实部署集成与下方验收清单仍待用户环境验证**。实现见 [`packages/session-write-access`](../packages/session-write-access/)（包 README 记录已跑与未跑的验证）。本文仍是行为与验收依据；实现不修改 DSH、profile 或 Nix 配置。
 
 ## 1. 已确认的行为
 

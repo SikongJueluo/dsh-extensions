@@ -1,0 +1,76 @@
+{
+  "name": "dsh-session-write-access",
+  "version": "0.1.0",
+  "description": "DSH session-write-access plugin: persistent, user-approved extra writable directories shared by a session and its local subagents, enforced through the shared sandboxPolicy that filesystem tools and confined shell already read",
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": "./client/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client",
+    "cordis.patch.yml",
+    "dev.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "clean": "rm -rf lib",
+    "prepare": "tsdown"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-agent": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-session-controller": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-sandbox": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-sandbox-policy": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-session": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-query": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-storage-domain": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "^3.19.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-agent": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-host-webserver": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-sandbox": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-sandbox-policy": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-query": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-storage-domain": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "3.19.0",
+    "vitest": "^3.2.4",
+    "zod": "4.4.3"
+  }
+}
