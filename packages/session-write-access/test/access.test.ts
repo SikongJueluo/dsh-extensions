@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   AccessError,
   AccessStore,
+  covers,
   type AccessTable,
   type AccessTables,
   type SessionFacts,
@@ -68,6 +69,15 @@ function makeStore(overrides: { protectedRoots?: string[]; workspace?: string } 
   return { root, workspace, protectedRoot, sessions, store, tables: tableSet }
 }
 
+describe('AccessStore path containment', () => {
+  it('treats the root as covering every absolute path', () => {
+    expect(covers('/', '/home/u')).toBe(true)
+    expect(covers('/', '/')).toBe(true)
+    expect(covers('/a', '/a/b')).toBe(true)
+    expect(covers('/a', '/ab')).toBe(false)
+  })
+})
+
 describe('AccessStore attribution', () => {
   it('creates one root group with its frozen workspace and no grants', async () => {
     const { workspace, store } = makeStore()
@@ -102,6 +112,35 @@ describe('AccessStore attribution', () => {
   it('refuses an unattributed session', () => {
     const { store } = makeStore()
     expect(() => store.status('missing')).toThrow(AccessError)
+  })
+
+  it('refuses the filesystem root as a workspace or grant', async () => {
+    const { store } = makeStore()
+    await expect(store.ensureRootSession({ sessionId: 'root', cwd: '/' })).rejects.toThrow(/overlaps/)
+    // A group created from a normal workspace still cannot grant '/'.
+    const workspace = mkdtempSync(join(tmpdir(), 'dsh-swa-root-'))
+    const other = new AccessStore(tables(), {
+      protectedRoots: ['/home/example/.dsh'],
+      workspaceFallback: workspace,
+      lookup: async () => undefined,
+    })
+    await other.ensureRootSession({ sessionId: 'root', cwd: workspace })
+    await expect(other.addGrant('root', '/')).rejects.toThrow(/overlaps/)
+    expect(other.status('root').grants).toEqual([])
+  })
+
+  it('audits a stored root workspace as overlapping protected data', async () => {
+    const { store, tables: tableSet } = makeStore()
+    await tableSet.groups.put('root-group', {
+      version: 1,
+      groupId: 'root-group',
+      workspaceRoot: '/',
+      grants: [],
+      revision: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    expect(() => store.auditProtectedState()).toThrow(/overlaps protected/)
   })
 
   it('refuses a workspace that overlaps protected data', async () => {
@@ -277,6 +316,96 @@ describe('AccessStore fork', () => {
     const fork = await store.beginFork('root')
     await store.reconcileForks()
     expect(store.forks().find(record => record.forkId === fork.forkId)?.stage).toBe('failed')
+  })
+})
+
+describe('AccessStore fork commit recovery', () => {
+  it('reconciles a failed final marker without losing inherited grants', async () => {
+    const { root, workspace, store, tables: tableSet } = makeStore()
+    const shared = join(root, 'shared')
+    mkdirSync(shared)
+    await store.ensureRootSession({ sessionId: 'root', cwd: workspace })
+    await store.addGrant('root', shared)
+    const fork = await store.beginFork('root')
+    const put = tableSet.forks.put.bind(tableSet.forks)
+    tableSet.forks.put = async (key, value) => {
+      if (value.stage === 'committed') throw new Error('marker write failed')
+      return put(key, value)
+    }
+    await expect(store.commitFork(fork.forkId, 'forked')).rejects.toThrow('marker write failed')
+    expect(store.status('forked').grants.map(grant => grant.path)).toEqual([shared])
+    expect(store.forks().find(record => record.forkId === fork.forkId)?.stage).toBe('committing')
+    tableSet.forks.put = put
+    await store.reconcileForks()
+    const record = store.forks().find(candidate => candidate.forkId === fork.forkId)
+    expect(record?.stage).toBe('committed')
+    expect(record?.targetSessionId).toBe('forked')
+  })
+
+  it('rebuilds a missing group after a failed group write', async () => {
+    const { root, workspace, store, tables: tableSet } = makeStore()
+    const shared = join(root, 'shared')
+    mkdirSync(shared)
+    await store.ensureRootSession({ sessionId: 'root', cwd: workspace })
+    await store.addGrant('root', shared)
+    const fork = await store.beginFork('root')
+    const put = tableSet.groups.put.bind(tableSet.groups)
+    tableSet.groups.put = async (key, value) => {
+      if (key === 'forked') throw new Error('group write failed')
+      return put(key, value)
+    }
+    await expect(store.commitFork(fork.forkId, 'forked')).rejects.toThrow('group write failed')
+    expect(store.member('forked')).toBeUndefined()
+    tableSet.groups.put = put
+    await store.reconcileForks()
+    expect(store.status('forked').grants.map(grant => grant.path)).toEqual([shared])
+  })
+
+  it('rebuilds a missing member after a failed member write, including after reopen', async () => {
+    const { root, workspace, store, tables: tableSet } = makeStore()
+    const shared = join(root, 'shared')
+    mkdirSync(shared)
+    await store.ensureRootSession({ sessionId: 'root', cwd: workspace })
+    await store.addGrant('root', shared)
+    const fork = await store.beginFork('root')
+    const put = tableSet.members.put.bind(tableSet.members)
+    tableSet.members.put = async (key, value) => {
+      if (key === 'forked') throw new Error('member write failed')
+      return put(key, value)
+    }
+    await expect(store.commitFork(fork.forkId, 'forked')).rejects.toThrow('member write failed')
+    expect(store.member('forked')).toBeUndefined()
+    tableSet.members.put = put
+    // Simulate a restart: a fresh store over the same durable tables.
+    const reopened = new AccessStore(tableSet, {
+      protectedRoots: [join(root, 'protected')],
+      workspaceFallback: workspace,
+      lookup: async () => undefined,
+    })
+    await reopened.reconcileForks()
+    expect(reopened.status('forked').grants.map(grant => grant.path)).toEqual([shared])
+  })
+
+  it('completes an empty group left by a partial commit on retry', async () => {
+    const { root, workspace, store, tables: tableSet } = makeStore()
+    const shared = join(root, 'shared')
+    mkdirSync(shared)
+    await store.ensureRootSession({ sessionId: 'root', cwd: workspace })
+    await store.addGrant('root', shared)
+    await tableSet.groups.put('forked', {
+      version: 1,
+      groupId: 'forked',
+      workspaceRoot: workspace,
+      grants: [],
+      revision: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await store.ensureRootSession(
+      { sessionId: 'forked', cwd: workspace },
+      { workspaceRoot: workspace, grants: [shared], forkSourceSessionId: 'root' },
+    )
+    expect(store.status('forked').grants.map(grant => grant.path)).toEqual([shared])
   })
 })
 

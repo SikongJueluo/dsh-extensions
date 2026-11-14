@@ -8,7 +8,7 @@
  */
 import { realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isAbsolute, join, resolve, sep } from 'node:path'
+import { isAbsolute, join, parse, resolve, sep } from 'node:path'
 
 /** A directory grant that cannot be enforced as a physical absolute directory. */
 export class InvalidWriteRootError extends Error {
@@ -98,6 +98,22 @@ export function physicalDirectory(path: string): string {
 }
 
 /**
+ * Whether `parent` is the same directory as `child` or contains it. The
+ * filesystem root is special: joining it with a separator yields `//`, which
+ * no absolute path starts with, so it must be recognized before prefixing.
+ * @param parent - a physical absolute directory.
+ * @param child - another physical absolute directory.
+ * @returns true when `child` is `parent` or sits under it.
+ */
+export function pathContains(parent: string, child: string): boolean {
+  if (parent === child) return true
+  const root = parse(parent).root
+  if (parent === root) return isAbsolute(child)
+  const normalized = parent.endsWith(sep) ? parent.slice(0, -1) : parent
+  return child.startsWith(normalized + sep)
+}
+
+/**
  * Whether two physical paths name the same directory or one contains the
  * other. Used to refuse a grant that could rewrite the authorization store
  * and to explain that a revoked child directory is still covered by a parent
@@ -107,7 +123,7 @@ export function physicalDirectory(path: string): string {
  * @returns true when either path contains the other.
  */
 export function overlaps(root: string, other: string): boolean {
-  return root === other || root.startsWith(other + sep) || other.startsWith(root + sep)
+  return pathContains(root, other) || pathContains(other, root)
 }
 
 /**

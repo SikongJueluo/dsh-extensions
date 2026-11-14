@@ -28,6 +28,13 @@ export interface Config {
   protectHomeData?: boolean
   /** Protect this package's own installed directory; default true. */
   protectPluginCode?: boolean
+  /**
+   * Management-route identity policy. `owner-cookie` accepts DSH's owner
+   * cookie and only warns about the same-UID limitation; `isolated` refuses to
+   * load while the cookie secret is readable by this process (the deployment
+   * must run the Host as a different OS user).
+   */
+  managementIdentity?: 'owner-cookie' | 'isolated'
 }
 
 /** The schema projected into the settings UI; no `Schema<Config>` annotation by repo rule. */
@@ -44,6 +51,8 @@ export const Config = Schema.object({
     .description('Refuse any workspace or grant overlapping the DSH home (profile, bundles, storage).'),
   protectPluginCode: Schema.boolean().default(true)
     .description('Refuse any workspace or grant overlapping this plugin package.'),
+  managementIdentity: Schema.union(['owner-cookie', 'isolated']).default('owner-cookie')
+    .description('Management-route identity policy: owner-cookie warns; isolated refuses to load unless the cookie secret is unreadable by this process.'),
 })
 
 /** The package root this module is installed in (lib/.. when built). */

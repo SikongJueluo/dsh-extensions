@@ -1,6 +1,6 @@
 # 计划：持久化的 Session 多项目写入授权
 
-状态（2026-11-14）：**需求已确认，首版实现已落地，真实部署集成与下方验收清单仍待用户环境验证**。实现见 [`packages/session-write-access`](../packages/session-write-access/)（包 README 记录已跑与未跑的验证）。本文仍是行为与验收依据；实现不修改 DSH、profile 或 Nix 配置。
+状态（2026-11-14）：**需求已确认，首版实现已落地，真实部署集成与下方验收清单仍待用户环境验证**；其中“Agent 不能经 HTTP 自授权”一项在默认同 UID 沙箱下**未满足**，需要宿主 seam 或独立 OS 用户（见包 README 的管理入口身份边界）。实现见 [`packages/session-write-access`](../packages/session-write-access/)（包 README 记录已跑与未跑的验证）。本文仍是行为与验收依据；实现不修改 DSH、profile 或 Nix 配置。
 
 ## 1. 已确认的行为
 
@@ -140,7 +140,7 @@ bundle 禁用 stock `sandbox-policy` 行（附包名断言），插入 `SandboxP
 ```
 
 - 工具只开放查看、申请和查询结果；增加、批准、撤销等权限决策由用户专用命令或经授权的 Host 入口调用同一内部实现。
-- Host 入口验证有权管理目标 session 的真实调用者；不把模型传入的 `actor=user` 或任意 session id 当授权。自定义路由不能绕开 connection / Remote access。
+- Host 入口验证有权管理目标 session 的真实调用者；不把模型传入的 `actor=user` 或任意 session id 当授权。自定义路由不能绕开 connection / Remote access。**已核实的限制**：connection 的 owner-cookie 准入仍允许同 UID 的 Agent shell 读取 credentials 后伪造凭据；在宿主提供独立人类在场授权或把 Agent 放到不同 OS 用户之前，此条只能算“路由准入”，不能算用户专用安全边界。
 - Agent 无须无限等待用户；可以继续其他工作。同组同目录的 pending 请求合并，拒绝后不自动重复提交。用户仍可手动授权或在明确新请求中重新考虑。
 - 当前普通拒绝提示未必会指向新工具。通过短的工具发现说明和 runtime context 明确申请入口；对文件工具拒绝结果能否追加提示需验证扩展点，不猜结构化 denied-path 字段。
 - 不尝试从任意 bash 文本或 stderr 自动推断授权根。Agent 提交具体目录；即使推荐了项目根，也必须让用户看到并确认准确范围。
@@ -214,7 +214,7 @@ bundle 禁用 stock `sandbox-policy` 行（附包名断言），插入 `SandboxP
 ### 用户交互与防自授权
 
 - [ ] 手动添加与批准申请走同一校验和持久发布路径；允许/拒绝只有真实授权用户能执行。
-- [ ] Agent 只能查看/申请/查询，不能通过工具、任意 session id、HTTP 或伪造 actor 自行授权；非授权客户端也不能代批。
+- [ ] Agent 只能查看/申请/查询，不能通过工具、任意 session id、HTTP 或伪造 actor 自行授权；非授权客户端也不能代批。**当前未满足**：默认同 UID 沙箱可读 cookie secret，需宿主支持。
 - [ ] 待确认申请跨重启保留，主会话空闲时仍可展示本地 child 申请；同目录申请去重，拒绝不自动循环弹出。
 - [ ] auto-permit 自动放行一次命令不会增加目录授权；已授权 B 的正常 bash 不再因 B 越界触发它。
 - [ ] 符号链接、目录被替换、相似路径前缀和重叠根均按约束处理；默认 workspace、部署级 roots 或新 grant 覆盖声明的存储/profile/策略代码保护路径时明确拒绝；声明与实际部署位置一致。
@@ -238,5 +238,6 @@ bundle 禁用 stock `sandbox-policy` 行（附包名断言），插入 `SandboxP
 3. 本地子会话冷恢复的归属准备是否早于策略读取；不能以 `parentSession` 单字段猜来源。
 4. 插件 Fork 的来源关联、首步闸门与崩溃恢复是否能使用当前公开契约可靠完成。
 5. 用户专用 Host 入口、Remote access 和 Client slot 的实际接线；普通工具拒绝后的申请发现体验。
+6. 管理路由的用户身份隔离：同 UID 沙箱可读 credentials 并伪造 owner 凭据；需要独立 OS 用户或宿主人类在场授权 seam。实现提供 `managementIdentity: isolated` 作为部署闸门（cookie secret 可读时拒绝加载），默认 `owner-cookie` 仅警告。
 
 上述未验证前，只能称为可行设计与实施计划，不称为已完成的权限能力。

@@ -26,6 +26,7 @@ import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { AccessError, AccessStore } from './access.js'
 import type { AccessStatus, DecisionResult, RemoveResult, RequestResult, SessionFacts } from './access.js'
 import { registerWriteAccessChannel } from './channel.js'
+import { assertManagementIdentity, ownerCookieBoundaryWarning } from './security.js'
 import { Config as ConfigSchema, assertDeploymentRootsSafe, resolveProtectedRoots } from './config.js'
 import type { Config } from './config.js'
 import { ACCESS_DOMAIN, SESSION_WRITE_ACCESS_DOMAIN } from './domain.js'
@@ -73,6 +74,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     super(ctx, config)
     this.protectedRoots = resolveProtectedRoots(config)
     assertDeploymentRootsSafe(config, this.protectedRoots)
+    assertManagementIdentity(config.managementIdentity)
   }
 
   protected async [Service.init](): Promise<void> {
@@ -103,16 +105,27 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
       await this.attributeSession(agent.session.id, agent.session.header)
     })
     this.ctx.on('agent/pre-step', async ({ agent }, next) => {
-      if (this.blocked.has(agent.session.id)) return { kind: 'reject' as const }
-      // A held Fork target may be committed by the time its first step is
-      // requested; only refuse while it still has no group.
-      if (this.held.has(agent.session.id) && this.access?.member(agent.session.id) === undefined) {
-        return { kind: 'reject' as const }
+      const sessionId = agent.session.id
+      if (this.blocked.has(sessionId)) return { kind: 'reject' as const }
+      // Attribution is awaited HERE, before the step can run. A live child
+      // whose parent header is slow therefore cannot execute with its own cwd
+      // as the workspace while the sync resolver is still missing its member.
+      if (this.access?.member(sessionId) === undefined) {
+        try {
+          await this.ensureSession(sessionId)
+        } catch (error) {
+          this.blocked.set(sessionId, error instanceof Error ? error.message : String(error))
+          return { kind: 'reject' as const }
+        }
       }
+      // A held Fork target or a failed attribution still has no group.
+      if (this.access?.member(sessionId) === undefined) return { kind: 'reject' as const }
       return next()
     })
     await super[Service.init]()
     registerWriteAccessChannel(this.ctx, this)
+    const boundaryWarning = ownerCookieBoundaryWarning()
+    if (boundaryWarning !== undefined) this.ctx.logger('session-write-access').warn(boundaryWarning)
     this.ctx.inject(['systemPrompt'], (scope) => {
       scope.systemPrompt.context({
         name: 'sandbox:write-access',
@@ -235,22 +248,47 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
       // after creation reports the id in its details. Use it only for the safe
       // default group and for an honest error message, never for inheritance.
       const reported = childId ?? detailSessionId(error, sessionId)
-      if (fork !== undefined) {
-        if (reported !== undefined) {
+      if (fork !== undefined && reported !== undefined) {
+        // Finish a partially applied commit before judging it: the durable
+        // `committing` record names the target and carries the snapshot.
+        try {
+          await access.reconcileForks()
+        } catch {
+          // The check below reports the actual committed state.
+        }
+        let applied = this.forkGrantsApplied(reported, fork)
+        if (!applied) {
           try {
-            await access.ensureRootSession({ sessionId: reported, ...this.held.get(reported) ?? {} })
+            await access.ensureRootSession(
+              { sessionId: reported, ...this.held.get(reported) ?? {} },
+              {
+                workspaceRoot: fork.workspaceRoot,
+                grants: fork.grants,
+                forkSourceSessionId: sessionId,
+              },
+            )
           } catch {
-            this.blocked.set(reported, 'Fork authorization initialization failed')
+            // Leave the session unattributed; pre-step retries attribution.
           }
+          applied = this.forkGrantsApplied(reported, fork)
+        }
+        if (applied) {
+          // The directories are durably applied; the marker is bookkeeping.
+          try {
+            await access.reconcileForks()
+          } catch {
+            // Reconcile retries at next load; permissions are already real.
+          }
+          return { sessionId: reported }
         }
         await access.failFork(fork.forkId)
-      }
-      if (reported !== undefined) {
         throw new Error(
-          `Fork created session ${reported}, but its write-access group could not be initialized: `
-          + `${error instanceof Error ? error.message : String(error)}. It is usable with the default workspace only.`,
+          `Fork created session ${reported}, but its inherited directories could not be confirmed: `
+          + `${error instanceof Error ? error.message : String(error)}. The session is refused at its first step `
+          + 'until attribution succeeds; do not assume it inherited the captured grants.',
         )
       }
+      if (fork !== undefined) await access.failFork(fork.forkId)
       throw error
     } finally {
       await this.releaseHeld(childId)
@@ -281,6 +319,15 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     return this.access
   }
 
+  /** Whether the target has a group carrying every directory captured by the Fork. */
+  private forkGrantsApplied(targetSessionId: string, fork: ForkRecord): boolean {
+    const member = this.access?.member(targetSessionId)
+    if (member === undefined) return false
+    const group = this.access?.group(member.groupId)
+    if (group === undefined) return false
+    return fork.grants.every(path => group.grants.some(grant => grant.path === path))
+  }
+
   /**
    * Attribute a live session on demand. Used by the tools and the browser
    * route so a session whose creation raced plugin initialization can still
@@ -303,14 +350,26 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
   /**
    * Resolve one capability call: the stock mode and workspace, plus the
    * family's recorded workspace and grants. A child never gains a writable
-   * root from its own cwd; an unattributed session gets the stock policy.
+   * root from its own cwd: an unattributed child refuses to resolve, while an
+   * unattributed root keeps the stock policy for its own workspace.
    */
   override resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy {
     const base = super.resolve(request)
     const session = request.session
     if (session === undefined || this.access === undefined) return base
     const member = this.access.member(session.id)
-    if (member === undefined) return base
+    if (member === undefined) {
+      // A child without a committed member would otherwise resolve to its own
+      // cwd. Fail closed instead of treating a not-yet-attributed child as a
+      // top-level session; pre-step awaits attribution before tools can run.
+      if (session.header.origin === 'subagent') {
+        throw new Error(
+          `session-write-access: subagent ${JSON.stringify(session.id)} has no committed write-access group yet; `
+          + 'refusing to resolve its cwd as a writable root',
+        )
+      }
+      return base
+    }
     const group = this.access.group(member.groupId)
     if (group === undefined) {
       throw new Error(`session-write-access: group ${JSON.stringify(member.groupId)} is missing; refusing to resolve a partial policy`)

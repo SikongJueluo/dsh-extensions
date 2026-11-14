@@ -14,9 +14,8 @@
  * @module dsh-session-write-access/access
  */
 import { randomUUID } from 'node:crypto'
-import { sep } from 'node:path'
 import type { GroupRecord, GrantRecord, MemberRecord, RequestRecord, ForkRecord } from './domain.js'
-import { admitWriteRoot, canonicalDirectory, findProtectedOverlap } from './paths.js'
+import { admitWriteRoot, canonicalDirectory, findProtectedOverlap, pathContains } from './paths.js'
 
 /** Minimal table surface this store needs; the real `KvTable` satisfies it. */
 export interface AccessTable<V> {
@@ -119,7 +118,7 @@ interface RootFacts {
 
 /** Whether `parent` is the same directory as `child` or contains it. */
 export function covers(parent: string, child: string): boolean {
-  return parent === child || child.startsWith(parent + sep)
+  return pathContains(parent, child)
 }
 
 /**
@@ -273,21 +272,44 @@ export class AccessStore {
       const current = this.tables.members.get(facts.sessionId)
       if (current !== undefined) return current
       const now = this.now()
-      const group: GroupRecord = {
-        version: 1,
-        groupId: facts.sessionId,
-        workspaceRoot,
-        grants: inheritedGrants.map(path => ({
-          version: 1 as const,
-          path,
-          source: 'fork' as const,
-          addedAt: now,
-        })),
-        revision: 1,
-        createdAt: now,
-        updatedAt: now,
+      const existingGroup = this.tables.groups.get(facts.sessionId)
+      let group: GroupRecord
+      if (existingGroup === undefined) {
+        group = {
+          version: 1,
+          groupId: facts.sessionId,
+          workspaceRoot,
+          grants: inheritedGrants.map(path => ({
+            version: 1 as const,
+            path,
+            source: 'fork' as const,
+            addedAt: now,
+          })),
+          revision: 1,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await this.tables.groups.put(group.groupId, group)
+      } else if (inheritedGrants.length > 0 && existingGroup.grants.length === 0) {
+        // A partial Fork wrote an empty group before it failed. The target is a
+        // freshly created session that has not run a step, so completing its
+        // inherited group is recovery, not widening a used session.
+        group = {
+          ...existingGroup,
+          workspaceRoot,
+          grants: inheritedGrants.map(path => ({
+            version: 1 as const,
+            path,
+            source: 'fork' as const,
+            addedAt: now,
+          })),
+          revision: existingGroup.revision + 1,
+          updatedAt: now,
+        }
+        await this.tables.groups.put(group.groupId, group)
+      } else {
+        group = existingGroup
       }
-      await this.tables.groups.put(group.groupId, group)
       const member: MemberRecord = {
         version: 1,
         sessionId: facts.sessionId,
@@ -538,7 +560,7 @@ export class AccessStore {
   }
 
   /**
-   * Record a Fork intent with its click-time grant snapshot.
+   * Record a Fork intent with its click-time workspace and grant snapshot.
    * @param sourceSessionId - the session being forked.
    */
   async beginFork(sourceSessionId: string): Promise<ForkRecord> {
@@ -551,6 +573,7 @@ export class AccessStore {
         forkId: this.newId(),
         sourceSessionId,
         sourceGroupId: group.groupId,
+        workspaceRoot: group.workspaceRoot,
         grants: group.grants.map(grant => grant.path),
         stage: 'pending',
         createdAt: now,
@@ -562,88 +585,134 @@ export class AccessStore {
   }
 
   /**
-   * Publish the new group for a Fork after the host returned its session id.
-   * Idempotent: a retry after a crash reuses the already-written membership.
-   * @param forkId - the pending Fork record.
-   * @param targetSessionId - the newly created session.
+   * Create the target group and membership, or reuse an existing one. Caller
+   * already holds the write chain. The caller wrote a `committing` record
+   * naming the target first, so every record this writes is recoverable.
    */
-  async commitFork(forkId: string, targetSessionId: string): Promise<GroupRecord> {
-    return this.enqueue(async () => {
-      const fork = this.tables.forks.get(forkId)
-      if (fork === undefined) throw new AccessError('FORK_MISSING', `fork ${JSON.stringify(forkId)} is missing`)
-      const existingMember = this.tables.members.get(targetSessionId)
-      if (existingMember !== undefined) {
-        const existing = this.group(existingMember.groupId)
-        if (existing === undefined) throw new AccessError('GROUP_MISSING', 'fork group vanished')
-        await this.tables.forks.put(fork.forkId, {
-          ...fork,
-          targetSessionId,
-          stage: 'committed',
-          updatedAt: this.now(),
-        })
-        return existing
-      }
-      const source = this.group(fork.sourceGroupId)
-      if (source === undefined) throw new AccessError('GROUP_MISSING', `fork source group ${JSON.stringify(fork.sourceGroupId)} vanished`)
-      const now = this.now()
-      const group: GroupRecord = {
+  private async materializeFork(fork: ForkRecord, targetSessionId: string): Promise<GroupRecord> {
+    const existingMember = this.tables.members.get(targetSessionId)
+    if (existingMember !== undefined) {
+      const existing = this.group(existingMember.groupId)
+      if (existing === undefined) throw new AccessError('GROUP_MISSING', 'fork group vanished')
+      return existing
+    }
+    const now = this.now()
+    const existingGroup = this.group(targetSessionId)
+    let group: GroupRecord
+    if (existingGroup === undefined) {
+      group = {
         version: 1,
         groupId: targetSessionId,
-        workspaceRoot: source.workspaceRoot,
+        workspaceRoot: fork.workspaceRoot,
         grants: fork.grants.map(path => ({ version: 1 as const, path, source: 'fork' as const, addedAt: now })),
         revision: 1,
         createdAt: now,
         updatedAt: now,
       }
       await this.tables.groups.put(group.groupId, group)
-      await this.tables.members.put(targetSessionId, {
-        version: 1,
-        sessionId: targetSessionId,
-        groupId: group.groupId,
-        role: 'root',
-        forkSourceSessionId: fork.sourceSessionId,
-        createdAt: now,
-      })
-      await this.tables.forks.put(fork.forkId, {
+    } else if (fork.grants.length > 0 && existingGroup.grants.length === 0) {
+      // Completing a group left empty by an interrupted commit. The target is
+      // the freshly forked session, which the pre-step gate kept from running.
+      group = {
+        ...existingGroup,
+        workspaceRoot: fork.workspaceRoot,
+        grants: fork.grants.map(path => ({ version: 1 as const, path, source: 'fork' as const, addedAt: now })),
+        revision: existingGroup.revision + 1,
+        updatedAt: now,
+      }
+      await this.tables.groups.put(group.groupId, group)
+    } else {
+      group = existingGroup
+    }
+    const member: MemberRecord = {
+      version: 1,
+      sessionId: targetSessionId,
+      groupId: group.groupId,
+      role: 'root',
+      forkSourceSessionId: fork.sourceSessionId,
+      createdAt: now,
+    }
+    await this.tables.members.put(member.sessionId, member)
+    return group
+  }
+
+  /**
+   * Publish the new group for a Fork after the host returned its session id.
+   * The `committing` record naming the target is the durable commit intent;
+   * group and member follow, then the final `committed` marker. A failure at
+   * any later write leaves records `reconcileForks` can finish.
+   * @param forkId - the Fork record.
+   * @param targetSessionId - the newly created session.
+   */
+  async commitFork(forkId: string, targetSessionId: string): Promise<GroupRecord> {
+    return this.enqueue(async () => {
+      const fork = this.tables.forks.get(forkId)
+      if (fork === undefined) throw new AccessError('FORK_MISSING', `fork ${JSON.stringify(forkId)} is missing`)
+      if (fork.stage === 'committed') {
+        const member = this.tables.members.get(targetSessionId)
+        if (member === undefined) throw new AccessError('GROUP_MISSING', 'committed fork has no membership')
+        const group = this.group(member.groupId)
+        if (group === undefined) throw new AccessError('GROUP_MISSING', 'fork group vanished')
+        return group
+      }
+      const intent: ForkRecord = {
         ...fork,
         targetSessionId,
+        stage: 'committing',
+        updatedAt: this.now(),
+      }
+      if (fork.stage !== 'committing' || fork.targetSessionId !== targetSessionId) {
+        await this.tables.forks.put(fork.forkId, intent)
+      }
+      const group = await this.materializeFork(intent, targetSessionId)
+      await this.tables.forks.put(fork.forkId, {
+        ...intent,
         stage: 'committed',
-        updatedAt: now,
+        updatedAt: this.now(),
       })
       return group
     })
   }
 
   /**
-   * Mark a Fork failed after the host call rejected. The created session (if
-   * any) keeps a default group, so nothing is inherited and nothing leaks.
-   * @param forkId - the pending Fork record.
+   * Mark a Fork failed when its inherited permissions were NOT applied. A
+   * `committed` record is never demoted.
+   * @param forkId - the Fork record.
    */
   async failFork(forkId: string): Promise<void> {
     await this.enqueue(async () => {
       const fork = this.tables.forks.get(forkId)
-      if (fork === undefined || fork.stage !== 'pending') return
+      if (fork === undefined || fork.stage === 'committed' || fork.stage === 'failed') return
       await this.tables.forks.put(fork.forkId, { ...fork, stage: 'failed', updatedAt: this.now() })
     })
   }
 
   /**
-   * Reconcile Fork records left behind by a crash. A record with a committed
-   * membership becomes committed; one with no target is marked failed so the
-   * panel can report it. Never invents a target.
+   * Reconcile Fork records left behind by a crash or a partial write.
+   * A `committing` record (or a legacy pending record with a target) is
+   * completed from its own snapshot and marked committed; a pending record
+   * without a target is marked failed. Never invents a target.
    */
   async reconcileForks(): Promise<void> {
     for (const fork of this.forks()) {
-      if (fork.stage !== 'pending') continue
-      if (fork.targetSessionId !== undefined && this.tables.members.get(fork.targetSessionId) !== undefined) {
-        await this.enqueue(async () => {
-          const current = this.tables.forks.get(fork.forkId)
-          if (current === undefined || current.stage !== 'pending') return
-          await this.tables.forks.put(fork.forkId, { ...current, stage: 'committed', updatedAt: this.now() })
-        })
-      } else if (fork.targetSessionId === undefined) {
-        await this.failFork(fork.forkId)
+      if (fork.stage !== 'pending' && fork.stage !== 'committing') continue
+      if (fork.targetSessionId === undefined) {
+        if (fork.stage === 'pending') await this.failFork(fork.forkId)
+        continue
       }
+      const target = fork.targetSessionId
+      await this.enqueue(async () => {
+        const current = this.tables.forks.get(fork.forkId)
+        if (current === undefined || current.stage === 'committed' || current.stage === 'failed') return
+        await this.materializeFork(current, target)
+        await this.tables.forks.put(fork.forkId, {
+          ...current,
+          targetSessionId: target,
+          stage: 'committed',
+          updatedAt: this.now(),
+        })
+      })
     }
   }
+
 }

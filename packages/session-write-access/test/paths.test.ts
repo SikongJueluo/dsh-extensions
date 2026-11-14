@@ -53,6 +53,13 @@ describe('overlap and merge rules', () => {
     expect(overlaps('/a/b', '/a/c')).toBe(false)
   })
 
+  it('treats the filesystem root as containing every absolute path', () => {
+    expect(overlaps('/', '/home/u/.dsh')).toBe(true)
+    expect(overlaps('/home/u/.dsh', '/')).toBe(true)
+    expect(overlaps('/', '/')).toBe(true)
+    expect(overlaps('/a', '/')).toBe(true)
+  })
+
   it('deduplicates deployment and group roots while preserving order', () => {
     expect(mergeWritableRoots(['/deploy'], ['/a', '/b'])).toEqual(['/deploy', '/a', '/b'])
     expect(mergeWritableRoots(['/a'], ['/a', '/b'])).toEqual(['/a', '/b'])
@@ -68,6 +75,7 @@ describe('configuration', () => {
     expect(defaults.protectedPaths).toEqual([])
     expect(defaults.protectHomeData).toBe(true)
     expect(defaults.protectPluginCode).toBe(true)
+    expect(defaults.managementIdentity).toBe('owner-cookie')
     expect(Config({ mode: 'workspace-write' }).mode).toBe('workspace-write')
   })
 
@@ -92,6 +100,14 @@ describe('configuration', () => {
       pluginRoot,
     )
     expect(narrowed).toEqual([])
+  })
+
+  it('refuses the filesystem root as a grant or deployment workspace', () => {
+    expect(() => admitWriteRoot('/', ['/home/u/.dsh'])).toThrow(ProtectedWriteRootError)
+    expect(() => assertDeploymentRootsSafe(
+      Config({ workspaceRoot: '/', additionalWritableRoots: [] }),
+      ['/home/u/.dsh'],
+    )).toThrow(/overlaps protected/)
   })
 
   it('refuses a deployment root overlapping protected data at load', () => {

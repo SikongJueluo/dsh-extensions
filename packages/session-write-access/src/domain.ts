@@ -79,11 +79,13 @@ const forkSchema = z.object({
   forkId: z.string().min(1),
   sourceSessionId: z.string().min(1),
   sourceGroupId: z.string().min(1),
+  /** The source group's frozen workspace, needed to rebuild a partial commit. */
+  workspaceRoot: z.string().min(1),
   /** Directory grants captured at click time. */
   grants: z.array(z.string()),
   /** Set only after the public Fork returned the new session id. */
   targetSessionId: z.string().min(1).optional(),
-  stage: z.enum(['pending', 'committed', 'failed']),
+  stage: z.enum(['pending', 'committing', 'committed', 'failed']),
   createdAt: z.number(),
   updatedAt: z.number(),
 })

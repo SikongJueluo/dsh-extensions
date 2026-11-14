@@ -29,6 +29,7 @@ function fakeStorageFacility() {
   const specTables = new Map<string, string[]>()
   const domain = {
     name: 'session-write-access',
+    tables,
     table(name: string) {
       let table = tables.get(name)
       if (table === undefined) {
@@ -41,6 +42,7 @@ function fakeStorageFacility() {
   }
   return {
     get: () => undefined,
+    tables,
     open: async (spec: DomainSpec) => {
       specTables.set(spec.name, Object.keys(spec.tables))
       return domain
@@ -62,15 +64,19 @@ async function mount(options: {
   workspace: string
   protectedRoots?: string[]
   headers?: Map<string, Record<string, unknown>>
+  reject?: number
+  sessionQuery?: { observeSession: (id: string) => Promise<{ header: Record<string, unknown>; events: unknown[] }> }
 }) {
   const ctx = new Context()
   const storage = fakeStorageFacility()
   const sessions = options.headers ?? new Map()
   const routes: Array<{ kind: string; path: string }> = []
+  const liveAgents = new Map<string, { session: { id: string; header: Record<string, unknown> } }>()
   ctx.provide('storageDomain', storage)
   ctx.provide('sessionProjections', { register: async () => ({ stateOf: () => null }) })
-  ctx.provide('sessionQuery', fakeSessionQuery(sessions))
-  ctx.provide('connection', { requestRejection: () => undefined })
+  ctx.provide('sessionQuery', options.sessionQuery ?? fakeSessionQuery(sessions))
+  ctx.provide('agents', { list: () => [...liveAgents.values()], get: (id: string) => liveAgents.get(id) })
+  ctx.provide('connection', { requestRejection: () => options.reject })
   ctx.provide('webServer', {
     register(route: { kind: string; path: string }) {
       routes.push(route)
@@ -87,7 +93,7 @@ async function mount(options: {
   })
   await ctx.plugin(SessionWriteAccessPolicy, config)
   const service = ctx.get('sandboxPolicy') as SessionWriteAccessPolicy
-  return { ctx, service, storage, routes }
+  return { ctx, service, storage, routes, liveAgents }
 }
 
 describe('SessionWriteAccessPolicy mounting', () => {
@@ -147,6 +153,77 @@ describe('SessionWriteAccessPolicy mounting', () => {
   })
 })
 
+describe('SessionWriteAccessPolicy live-child attribution', () => {
+  function preStep(ctx: Context, sessionId: string) {
+    return ctx.waterfall(
+      'agent/pre-step',
+      {
+        agent: { session: { id: sessionId } },
+        messages: [],
+        turn: 1,
+        step: 1,
+        signal: new AbortController().signal,
+        modelSelection: { provider: 'p', model: 'm' },
+      } as never,
+      async () => ({ kind: 'enter' as const }),
+    )
+  }
+
+  it('waits for a slow parent lookup and never resolves the child cwd meanwhile', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-live-'))
+    const workspace = join(root, 'workspace')
+    const childCwd = join(root, 'child-cwd')
+    mkdirSync(workspace)
+    mkdirSync(childCwd)
+    let releaseParent: () => void = () => {}
+    const parentGate = new Promise<void>((resolve) => { releaseParent = resolve })
+    const childHeader = { cwd: childCwd, parentSession: 'root', origin: 'subagent', isSeeded: false }
+    const { ctx, service, liveAgents } = await mount({
+      workspace,
+      sessionQuery: {
+        observeSession: async (id: string) => {
+          if (id !== 'root') throw new Error('unknown session')
+          await parentGate
+          return { header: { cwd: workspace }, events: [] }
+        },
+      },
+    })
+    liveAgents.set('child', { session: { id: 'child', header: childHeader } })
+    // The synchronous resolver must refuse, not fall back to child.cwd.
+    expect(() => service.resolve({ session: { id: 'child', header: childHeader } } as never))
+      .toThrow(/has no committed write-access group/)
+    let settled = false
+    const pending = preStep(ctx, 'child').then((decision: { kind: string }) => {
+      settled = true
+      return decision
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(settled).toBe(false)
+    releaseParent()
+    expect((await pending).kind).toBe('enter')
+    const policy = service.resolve({ session: { id: 'child', header: childHeader } } as never)
+    expect(policy.workspaceRoot).toBe(workspace)
+    expect(policy.workspaceRoot).not.toBe(childCwd)
+  })
+
+  it('rejects the step and keeps refusing resolve when attribution fails', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-live-'))
+    const workspace = join(root, 'workspace')
+    const childCwd = join(root, 'child-cwd')
+    mkdirSync(workspace)
+    mkdirSync(childCwd)
+    const childHeader = { cwd: childCwd, parentSession: 'missing', origin: 'subagent', isSeeded: false }
+    const { ctx, service, liveAgents } = await mount({
+      workspace,
+      sessionQuery: { observeSession: async () => { throw new Error('session not found') } },
+    })
+    liveAgents.set('child', { session: { id: 'child', header: childHeader } })
+    expect((await preStep(ctx, 'child')).kind).toBe('reject')
+    expect(() => service.resolve({ session: { id: 'child', header: childHeader } } as never))
+      .toThrow(/has no committed write-access group/)
+  })
+})
+
 describe('SessionWriteAccessPolicy fork integration', () => {
   function preStep(ctx: Context, sessionId: string) {
     return ctx.waterfall(
@@ -169,7 +246,7 @@ describe('SessionWriteAccessPolicy fork integration', () => {
     const extra = join(root, 'extra')
     mkdirSync(workspace)
     mkdirSync(extra)
-    const { ctx, service } = await mount({ workspace })
+    const { ctx, service, liveAgents } = await mount({ workspace })
     await ctx.serial('agent/created', { agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } }, source: 'fresh' } as never)
     await service.addDirectory('root', extra)
 
@@ -177,6 +254,7 @@ describe('SessionWriteAccessPolicy fork integration', () => {
     ctx.provide('sessionController', {
       fork: async () => {
         const child = { id: 'forked', header: { cwd: workspace, isSeeded: true } }
+        liveAgents.set('forked', { session: child })
         await ctx.serial('agent/created', { agent: { session: child }, source: 'fork' } as never)
         during = await preStep(ctx, 'forked')
         return { sessionId: 'forked' }
@@ -211,5 +289,103 @@ describe('SessionWriteAccessPolicy fork integration', () => {
     expect(service.view('orphan').grants).toEqual([])
     expect(service.view('root').grants.map(grant => grant.path)).toEqual([extra])
     expect(service.view('root').forks[0]?.stage).toBe('failed')
+  })
+})
+
+describe('SessionWriteAccessPolicy fork partial commit', () => {
+  it('returns success when a failed final marker left the inherited grants durably applied', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-fork-'))
+    const workspace = join(root, 'workspace')
+    const extra = join(root, 'extra')
+    mkdirSync(workspace)
+    mkdirSync(extra)
+    const { ctx, service, storage, liveAgents } = await mount({ workspace })
+    await ctx.serial('agent/created', { agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } }, source: 'fresh' } as never)
+    await service.addDirectory('root', extra)
+    const forks = storage.tables.get('forks') as unknown as {
+      put: (key: string, value: { stage?: string }) => Promise<void>
+      get: (key: string) => { stage?: string } | undefined
+    }
+    const put = forks.put.bind(forks)
+    let failMarker = true
+    forks.put = async (key, value) => {
+      if (value.stage === 'committed' && failMarker) {
+        failMarker = false
+        throw new Error('marker write failed')
+      }
+      return put(key, value)
+    }
+    ctx.provide('sessionController', {
+      fork: async () => {
+        const child = { id: 'forked', header: { cwd: workspace, isSeeded: true } }
+        liveAgents.set('forked', { session: child })
+        await ctx.serial('agent/created', { agent: { session: child }, source: 'fork' } as never)
+        return { sessionId: 'forked' }
+      },
+    })
+    const created = await service.forkSession('root')
+    expect(created.sessionId).toBe('forked')
+    expect(service.view('forked').grants.map(grant => grant.path)).toEqual([extra])
+    const record = [...service.view('root').forks][0]
+    expect(record?.stage).toBe('committed')
+  })
+})
+
+describe('write-scope route admission', () => {
+  function fakeRequest(body?: unknown) {
+    const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body))
+    return {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      [Symbol.asyncIterator]: async function* () {
+        if (payload !== undefined) yield payload
+      },
+    }
+  }
+
+  function fakeResponse() {
+    const state = {
+      status: 0,
+      body: '',
+      headers: {} as Record<string, string>,
+      writeHead(status: number, headers?: Record<string, string>) {
+        state.status = status
+        if (headers !== undefined) state.headers = headers
+      },
+      end(body?: string) { state.body = body ?? '' },
+    }
+    return state
+  }
+
+  it('rejects a request without an admitted peer before reading the body', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-route-'))
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const { routes } = await mount({ workspace, reject: 401 })
+    const route = routes.find(candidate => candidate.path === '/dsh-session-write-access') as unknown as {
+      handler: (req: unknown, res: unknown) => Promise<void>
+    }
+    const response = fakeResponse()
+    await route.handler(fakeRequest({ method: 'add', sessionId: 'root', path: '/tmp' }), response)
+    expect(response.status).toBe(401)
+    expect(response.body).toBe('unauthorized')
+  })
+
+  it('serves state for an admitted session', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-route-'))
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const { ctx, liveAgents, routes } = await mount({ workspace })
+    await ctx.serial('agent/created', { agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } }, source: 'fresh' } as never)
+    liveAgents.set('root', { session: { id: 'root', header: { cwd: workspace } } })
+    const route = routes.find(candidate => candidate.path === '/dsh-session-write-access') as unknown as {
+      handler: (req: unknown, res: unknown) => Promise<void>
+    }
+    const response = fakeResponse()
+    await route.handler(fakeRequest({ method: 'state', sessionId: 'root' }), response)
+    expect(response.status).toBe(200)
+    const envelope = JSON.parse(response.body) as { ok: boolean; value: { groupId: string } }
+    expect(envelope.ok).toBe(true)
+    expect(envelope.value.groupId).toBe('root')
   })
 })
