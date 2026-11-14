@@ -51,7 +51,6 @@ dsh --profile web --patch "$PWD/packages/session-write-access/dev.patch.yml" --n
 | `protectedPaths` | `[]` | 额外声明的受保护物理路径；支持 `~/`、`$DSH_HOME`、`$HOME` |
 | `protectHomeData` | `true` | 保护 DSH home（profile、bundle、授权存储） |
 | `protectPluginCode` | `true` | 保护本包安装目录 |
-| `managementIdentity` | `owner-cookie` | 管理路由身份策略；`isolated` 在 cookie secret 可读时拒绝加载（要求 Host 与 Agent 不同 OS 用户） |
 
 加载时核对部署级 roots，session 初始化时核对 workspace，新增授权时核对目标目录；任一覆盖受保护路径即报错拒绝，不会裁掉 workspace 或假装安全。`storageDomain` 不公开物理存储位置，因此部署必须保证受保护声明与实际 backend/profile 位置一致。
 
@@ -81,27 +80,18 @@ composer 左侧的「写入范围」按钮打开面板：
 - 磁盘记录是权限事实，内存是读取快照；写入成功后才发布新策略。授权组的 group record 是权限变更的提交点；申请状态是交互状态，可从 group 重新核对。
 - 同组变更串行化；用户决定校验 request id 与页面显示的 group revision，旧页面不能把已撤销目录重新放开。
 - 本地子会话按持久化的 `origin` / `parentSession` 链归属到根 session 的组；冷恢复找不到父信息会明确失败，不把 `child.cwd` 当授权根。
-- 浏览器操作走同源前缀路由，并复用 connection 服务的 Host/Origin 与已认证 Peer 检查；普通无 cookie 请求返回 401。这条边界的具体限制见下节。
+- 浏览器操作走同源前缀路由，并复用 connection 服务的 Host/Origin 与已认证 Peer 检查；普通无 cookie 请求返回 401。
 - 显式 Full access 仍按宿主原语义执行，本插件不宣称约束它。
 - 两个并行 DSH 进程之间不做实时同步；本版只承诺同一实例内与重启恢复。
 - 已运行的 bash/终端/后台进程保留启动时权限；撤销只影响后续调用。
 
-## 管理入口身份边界（未满足的部署前提）
+## 管理入口
 
-面板路由**不是 Agent-proof 的用户专用边界**。它只做 DSH 的 owner-cookie / live-peer 准入；在默认同一 UID 的 bwrap 沙箱中，模型 shell 可以读取 `$DSH_HOME/.credentials.yaml` 里的 cookie 签名 secret，也可以访问本机回环网络，因此能够离线伪造 owner 凭据并调用 `add` / `decide`。`protectHomeData` 只阻止写，不阻止读。插件加载时若发现该文件可读会打印警告（只检查可读性，不读取内容）。
-
-要真正保证“Agent 不能自授权”，需要宿主侧提供以下之一：
-
-- Host/浏览器与 Agent 运行在不同 OS 用户下，使 Agent 读不到 credentials；
-- 宿主为插件管理路由提供独立的人类在场授权能力（0.2.2-rc.1 没有此 seam）。
-
-在满足前，本包只把面板当作用户操作界面，不声称它是针对 Agent 的安全边界。模型工具仍只有查看与申请入口，普通无 cookie 请求返回 401；这不足以阻止读过 credentials 的同 UID shell。
-
-部署若已经让 Host 与 Agent 使用不同 OS 用户，可设 `managementIdentity: isolated`：加载时若仍能读到 cookie secret 就直接拒绝启动，而不是继续带着错误假设运行。默认 `owner-cookie` 保留可用性，但只打印警告。
+面板与浏览器操作沿用 DSH 原生的 owner-cookie / live-peer 准入；普通无 cookie 请求返回 401。管理路由不在模型工具表中：模型只能通过 `write_access_status` / `write_access_request` 查看和申请，添加、批准、撤销与 Fork 由浏览器操作调用同一内部实现。插件不额外引入身份隔离配置；认证边界的强度由当前 DSH 宿主决定。
 
 ## Fork
 
-面板入口（可带事件序号）在调用公开的 `sessionController.fork({ sessionId, atSeq? })` 前登记 Fork 记录并捕获授权快照。Fork 期间新建的 seeded root session 会在 `agent/pre-step` 被拒绝，直到 host 返回确切的新 session id 并写入新组；归属只使用返回值，不猜事件前缀。失败时会话若已创建，会落入只有默认 workspace 的独立组，不会继承或扩大权限；Fork 记录标为 failed 供面板展示。
+面板入口（可带事件序号）在调用公开的 `sessionController.fork({ sessionId, atSeq? })` 前登记 Fork 记录并捕获授权快照。Fork 期间新建的 seeded root session 会在 `agent/pre-step` 被拒绝，直到 host 返回确切的新 session id 并写入新组；归属只使用返回值，不猜事件前缀。正常回滚路径下，失败时会话若已创建，会落入只有默认 workspace 的独立组，不会继承或扩大权限，Fork 记录标为 failed 供面板展示；若清理写入本身也失败，错误会明确要求检查面板，不会宣称已回到默认范围。
 
 原生 Fork 按钮不经过本入口：新会话得到默认 workspace 与部署级 roots，不继承插件授权。这是刻意差异，界面和本文都明确说明。
 
@@ -119,17 +109,27 @@ composer 左侧的「写入范围」按钮打开面板：
 已运行：
 
 - `pnpm --filter dsh-session-write-access build`：通过，生成 `lib/index.js` / `lib/index.d.ts`。
-- `vitest run`（本包）：6 个测试文件、58 项通过。覆盖根路径包含判定、路径准入/保护重叠/symlink 拒绝、group 与 child 归属、慢父查询下的 pre-step 等待与 resolve fail-closed、申请去重与空理由拒绝、陈旧 revision、撤销不复活、Fork 首步闸门、group/member/fork 三个写入点失败后的重启对账、`sandboxPolicy` 实际挂载、`workspaceWritableRoots` 包含授权目录且不包含未授权 child cwd、管理路由 401/状态返回，以及 bundle patch/manifest 与身份边界闸门断言。
+- `vitest run`（本包）：5 个测试文件、58 项通过。覆盖根路径包含判定、路径准入/保护重叠/symlink 拒绝、group 与 child 归属、慢父查询下的 pre-step 等待与 resolve fail-closed、申请去重与空理由拒绝、陈旧 revision、撤销不复活、Fork 首步闸门、首次 intent 写入失败/宿主 attach 失败/catch 内 member 失败、abort 后重启不复活的回归、`sandboxPolicy` 实际挂载、`workspaceWritableRoots` 包含授权目录且不包含未授权 child cwd、管理路由 401/状态返回，以及 bundle patch/manifest 断言。
 - `node scripts/check-client-syntax.mjs`：8 个 client 文件通过。
 - 契约核对：安装包中 `dsh-fs-sandbox`、`dsh-bash-sandbox`、`dsh-terminal-bash`、`dsh-pwsh-sandbox` 均调用 `sandboxPolicy.resolve()`，因此本替换只改这一处策略即可同时覆盖文件围栏与进程沙箱。
 - `pnpm check`（仓库根）：通过（typecheck + 全包 build + client syntax，exit 0）。
 
-未运行（需要用户部署环境）：
+## 真实环境验收（2026-11-14）
 
-- 真实 DSH Web 组合中启动本行、真实文件工具与 bwrap bash 写 A/B/C 的端到端测试；
-- 与 `toolchain-access` 同时挂载的组合测试；
-- 真实浏览器上的面板点按与移动端验证；
-- `~/.dsh` / Nix profile 接入。宿主由用户的 Nix 配置声明式管理，本仓库不修改。
+在隔离 `DSH_HOME`（仓库内 `.smoke-dsh-home/`，已忽略）、独立 Web 端口 3181、测试项目 A/B/C 中启动真实 Web profile，加载 `dev.patch.yml`（`workspace-write`，与 profile 既有 `toolchain-access` 行共存），会话 cwd 为 A。结果：
+
+- 初始：文件工具写 A 成功，写 B 被拒绝，错误为 `[sandbox: file access denied under workspace-write mode]`。
+- 面板 `add B` 后 revision=2；文件工具写 B 成功，写 C 仍拒绝。普通 bash 命令写 A、B 成功，写 C 报 `Read-only file system`。
+- 停止并重启 DSH 后，同一 session 的 state 仍为 revision=2、B 在 grants 中；文件工具写 B 成功、写 C 拒绝，未再次确认。
+- Agent 调 `write_access_request` 申请 C，面板显示 pending；`decide allow` 后 revision=3，文件工具写 C 成功；面板撤销 C 后 revision=4，写 C 再次被拒绝。
+- 管理路由无 cookie 请求返回 401；带浏览器 cookie 的 state/add/remove/decide 返回预期结果；client bundle 由该服务实际提供，包含 `conversation.input.left` / `shell.overlay`。
+
+证据：`.dsh/accept/` 下的响应 JSON、会话日志副本路径与被拒绝的写结果；测试服务已停止。未自动点击 React 面板：安装的 Chromium 在当前文件沙箱内崩溃；面板按钮调用的正是上述同一路由，UI 模块已实际加载，但视觉/移动端点按仍需浏览器手工复核。
+
+仍未运行：
+
+- 生产 `~/.dsh` / Nix profile 接线与升级 DSH 后的重新验证；宿主由用户的 Nix 配置声明式管理，本仓库不修改。
+- 真实浏览器中的 React 面板点按与移动端布局；Chromium 在当前文件沙箱内无法稳定启动，面板后端路由已实测。
 
 ## 已知限制
 

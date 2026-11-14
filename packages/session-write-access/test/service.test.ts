@@ -18,6 +18,10 @@ class MemoryTable<V> {
     this.map.set(key, value)
   }
 
+  async delete(key: string): Promise<boolean> {
+    return this.map.delete(key)
+  }
+
   entries(): IterableIterator<[string, V]> {
     return this.map.entries()
   }
@@ -387,5 +391,104 @@ describe('write-scope route admission', () => {
     const envelope = JSON.parse(response.body) as { ok: boolean; value: { groupId: string } }
     expect(envelope.ok).toBe(true)
     expect(envelope.value.groupId).toBe('root')
+  })
+})
+
+describe('SessionWriteAccessPolicy fork intent and host failure', () => {
+  it('persists the target intent before retrying after the first intent write fails', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-fork-'))
+    const workspace = join(root, 'workspace')
+    const extra = join(root, 'extra')
+    mkdirSync(workspace)
+    mkdirSync(extra)
+    const { ctx, service, storage, liveAgents } = await mount({ workspace })
+    await ctx.serial('agent/created', { agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } }, source: 'fresh' } as never)
+    await service.addDirectory('root', extra)
+    const forks = storage.tables.get('forks') as unknown as {
+      put: (key: string, value: { stage?: string }) => Promise<void>
+    }
+    const put = forks.put.bind(forks)
+    let failIntent = true
+    forks.put = async (key, value) => {
+      if (value.stage === 'committing' && failIntent) {
+        failIntent = false
+        throw new Error('intent write failed')
+      }
+      return put(key, value)
+    }
+    ctx.provide('sessionController', {
+      fork: async () => {
+        const child = { id: 'forked', header: { cwd: workspace, isSeeded: true } }
+        liveAgents.set('forked', { session: child })
+        await ctx.serial('agent/created', { agent: { session: child }, source: 'fork' } as never)
+        return { sessionId: 'forked' }
+      },
+    })
+    const created = await service.forkSession('root')
+    expect(created.sessionId).toBe('forked')
+    const record = service.view('root').forks[0]
+    expect(record?.stage).toBe('committed')
+    expect(record?.targetSessionId).toBe('forked')
+    expect(service.view('forked').grants.map(grant => grant.path)).toEqual([extra])
+  })
+
+  it('does not inherit when the host Fork fails after creating the session', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-fork-'))
+    const workspace = join(root, 'workspace')
+    const extra = join(root, 'extra')
+    mkdirSync(workspace)
+    mkdirSync(extra)
+    const { ctx, service, liveAgents } = await mount({ workspace })
+    await ctx.serial('agent/created', { agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } }, source: 'fresh' } as never)
+    await service.addDirectory('root', extra)
+    ctx.provide('sessionController', {
+      fork: async () => {
+        const child = { id: 'forked', header: { cwd: workspace, isSeeded: true } }
+        liveAgents.set('forked', { session: child })
+        await ctx.serial('agent/created', { agent: { session: child }, source: 'fork' } as never)
+        throw Object.assign(new Error('workspace attach failed'), { details: { sessionId: 'forked' } })
+      },
+    })
+    await expect(service.forkSession('root')).rejects.toThrow(/Fork failed after creating session forked/)
+    const record = service.view('root').forks[0]
+    expect(record?.stage).toBe('failed')
+    expect(record?.targetSessionId).toBe('forked')
+    expect(service.view('forked').grants).toEqual([])
+    const policy = service.resolve({ session: { id: 'forked', header: { cwd: workspace } } } as never)
+    expect(policy.additionalWritableRoots).toBeUndefined()
+  })
+
+  it('reports a default-only session when cleanup cannot write membership', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-fork-'))
+    const workspace = join(root, 'workspace')
+    const extra = join(root, 'extra')
+    mkdirSync(workspace)
+    mkdirSync(extra)
+    const { ctx, service, storage, liveAgents } = await mount({ workspace })
+    await ctx.serial('agent/created', { agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } }, source: 'fresh' } as never)
+    await service.addDirectory('root', extra)
+    const members = storage.tables.get('members') as unknown as {
+      put: (key: string, value: unknown) => Promise<void>
+    }
+    const put = members.put.bind(members)
+    members.put = async (key, value) => {
+      if (key === 'forked') throw new Error('member write failed')
+      return put(key, value)
+    }
+    ctx.provide('sessionController', {
+      fork: async () => {
+        const child = { id: 'forked', header: { cwd: workspace, isSeeded: true } }
+        liveAgents.set('forked', { session: child })
+        await ctx.serial('agent/created', { agent: { session: child }, source: 'fork' } as never)
+        return { sessionId: 'forked' }
+      },
+    })
+    await expect(service.forkSession('root')).rejects.toThrow(/default workspace only/)
+    members.put = put
+    const record = service.view('root').forks[0]
+    expect(record?.stage).toBe('failed')
+    expect(record?.targetSessionId).toBe('forked')
+    await service.ensureSession('forked')
+    expect(service.view('forked').grants).toEqual([])
   })
 })

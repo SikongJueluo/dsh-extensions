@@ -24,6 +24,10 @@ class MemoryTable<V> implements AccessTable<V> {
     this.map.set(key, value)
   }
 
+  async delete(key: string): Promise<boolean> {
+    return this.map.delete(key)
+  }
+
   entries(): IterableIterator<[string, V]> {
     return this.map.entries()
   }
@@ -384,6 +388,37 @@ describe('AccessStore fork commit recovery', () => {
     })
     await reopened.reconcileForks()
     expect(reopened.status('forked').grants.map(grant => grant.path)).toEqual([shared])
+  })
+
+  it('aborts a partial commit and does not revive it after reopen', async () => {
+    const { root, workspace, store, tables: tableSet } = makeStore()
+    const shared = join(root, 'shared')
+    mkdirSync(shared)
+    await store.ensureRootSession({ sessionId: 'root', cwd: workspace })
+    await store.addGrant('root', shared)
+    const fork = await store.beginFork('root')
+    const putMember = tableSet.members.put.bind(tableSet.members)
+    tableSet.members.put = async (key, value) => {
+      if (key === 'forked') throw new Error('member write failed')
+      return putMember(key, value)
+    }
+    await expect(store.commitFork(fork.forkId, 'forked')).rejects.toThrow('member write failed')
+    tableSet.members.put = putMember
+    await store.abortFork(fork.forkId, 'forked')
+    expect(store.member('forked')).toBeUndefined()
+    expect(store.group('forked')).toBeUndefined()
+    const record = store.forks().find(candidate => candidate.forkId === fork.forkId)
+    expect(record?.stage).toBe('failed')
+    expect(record?.targetSessionId).toBe('forked')
+    const reopened = new AccessStore(tableSet, {
+      protectedRoots: [join(root, 'protected')],
+      workspaceFallback: workspace,
+      lookup: async () => undefined,
+    })
+    await reopened.reconcileForks()
+    expect(reopened.member('forked')).toBeUndefined()
+    await reopened.ensureRootSession({ sessionId: 'forked', cwd: workspace })
+    expect(reopened.status('forked').grants).toEqual([])
   })
 
   it('completes an empty group left by a partial commit on retry', async () => {

@@ -1,6 +1,6 @@
 # 计划：持久化的 Session 多项目写入授权
 
-状态（2026-11-14）：**需求已确认，首版实现已落地，真实部署集成与下方验收清单仍待用户环境验证**；其中“Agent 不能经 HTTP 自授权”一项在默认同 UID 沙箱下**未满足**，需要宿主 seam 或独立 OS 用户（见包 README 的管理入口身份边界）。实现见 [`packages/session-write-access`](../packages/session-write-access/)（包 README 记录已跑与未跑的验证）。本文仍是行为与验收依据；实现不修改 DSH、profile 或 Nix 配置。
+状态（2026-11-14）：**需求已确认，首版实现已落地；隔离环境真实 Web 验收已完成，生产 profile/Nix 接线与部分验收项仍待用户环境**；管理入口按用户决定沿用 DSH 原生认证标准（owner-cookie / live-peer），不额外引入风险选择；该边界的强度由宿主决定。真实 Web 隔离环境验收已完成，结果见包 README。实现见 [`packages/session-write-access`](../packages/session-write-access/)（包 README 记录已跑与未跑的验证）。本文仍是行为与验收依据；实现不修改 DSH、profile 或 Nix 配置。
 
 ## 1. 已确认的行为
 
@@ -140,7 +140,7 @@ bundle 禁用 stock `sandbox-policy` 行（附包名断言），插入 `SandboxP
 ```
 
 - 工具只开放查看、申请和查询结果；增加、批准、撤销等权限决策由用户专用命令或经授权的 Host 入口调用同一内部实现。
-- Host 入口验证有权管理目标 session 的真实调用者；不把模型传入的 `actor=user` 或任意 session id 当授权。自定义路由不能绕开 connection / Remote access。**已核实的限制**：connection 的 owner-cookie 准入仍允许同 UID 的 Agent shell 读取 credentials 后伪造凭据；在宿主提供独立人类在场授权或把 Agent 放到不同 OS 用户之前，此条只能算“路由准入”，不能算用户专用安全边界。
+- Host 入口验证有权管理目标 session 的真实调用者；不把模型传入的 `actor=user` 或任意 session id 当授权。自定义路由不能绕开 connection / Remote access。实现沿用 DSH 原生 owner-cookie / live-peer 准入；模型工具表只有查看与申请，用户操作由浏览器路由调用同一内部实现。
 - Agent 无须无限等待用户；可以继续其他工作。同组同目录的 pending 请求合并，拒绝后不自动重复提交。用户仍可手动授权或在明确新请求中重新考虑。
 - 当前普通拒绝提示未必会指向新工具。通过短的工具发现说明和 runtime context 明确申请入口；对文件工具拒绝结果能否追加提示需验证扩展点，不猜结构化 denied-path 字段。
 - 不尝试从任意 bash 文本或 stderr 自动推断授权根。Agent 提交具体目录；即使推荐了项目根，也必须让用户看到并确认准确范围。
@@ -233,11 +233,11 @@ bundle 禁用 stock `sandbox-policy` 行（附包名断言），插入 `SandboxP
 
 需求已定，不再把实现事实作为用户选择题。以下风险由实现阶段验证：
 
-1. 子类初始化、依赖和替换顺序是否在真实 Web composition 中保持 stock 行为，并与 toolchain-access 共存。
+1. 子类初始化、依赖和替换顺序是否在真实 Web composition 中保持 stock 行为，并与 toolchain-access 共存。**已用隔离 DSH_HOME + profile 副本验证**：policy 行替换生效，toolchain-access 行同时挂载，文件工具与 bash 的目录范围一致。
 2. 受保护物理路径的部署声明与实际 backend/profile/策略代码位置是否一致，覆盖校验是否完整；存储与已提交快照的发布次序是否在失败、重启、并发操作下始终一致。
 3. 本地子会话冷恢复的归属准备是否早于策略读取；不能以 `parentSession` 单字段猜来源。
 4. 插件 Fork 的来源关联、首步闸门与崩溃恢复是否能使用当前公开契约可靠完成。
 5. 用户专用 Host 入口、Remote access 和 Client slot 的实际接线；普通工具拒绝后的申请发现体验。
-6. 管理路由的用户身份隔离：同 UID 沙箱可读 credentials 并伪造 owner 凭据；需要独立 OS 用户或宿主人类在场授权 seam。实现提供 `managementIdentity: isolated` 作为部署闸门（cookie secret 可读时拒绝加载），默认 `owner-cookie` 仅警告。
+6. 管理路由的用户身份隔离：同 UID 沙箱可读 credentials 并伪造 owner 凭据；需要独立 OS 用户或宿主人类在场授权 seam。按用户决定沿用 DSH 原生认证，不增加额外身份闸门；真实 Web 环境已验证 add/allow/revoke、文件工具与 bash、重启恢复。
 
 上述未验证前，只能称为可行设计与实施计划，不称为已完成的权限能力。

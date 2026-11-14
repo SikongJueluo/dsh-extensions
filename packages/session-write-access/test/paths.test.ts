@@ -75,7 +75,6 @@ describe('configuration', () => {
     expect(defaults.protectedPaths).toEqual([])
     expect(defaults.protectHomeData).toBe(true)
     expect(defaults.protectPluginCode).toBe(true)
-    expect(defaults.managementIdentity).toBe('owner-cookie')
     expect(Config({ mode: 'workspace-write' }).mode).toBe('workspace-write')
   })
 

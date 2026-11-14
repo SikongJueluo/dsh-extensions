@@ -5,10 +5,9 @@
  * the connection service's Host/Origin fence and authenticated live-peer
  * check — the same boundary the rest of the page uses.
  *
- * This is an owner-cookie boundary, NOT an Agent-proof one: under the default
- * same-UID sandbox the credential secret is readable by a shell, so the route
- * is a convenience surface for the human UI rather than a proof that a grant
- * came from the user. `security.ts` reports that deployment condition.
+ * This is the same owner-cookie / live-peer boundary the rest of the Web app
+ * uses; the plugin adds no second identity gate. The management route is absent
+ * from the model tool surface, and only the browser panel calls its mutations.
  *
  * @module dsh-session-write-access/channel
  */

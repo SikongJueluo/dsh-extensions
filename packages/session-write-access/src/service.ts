@@ -26,7 +26,6 @@ import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { AccessError, AccessStore } from './access.js'
 import type { AccessStatus, DecisionResult, RemoveResult, RequestResult, SessionFacts } from './access.js'
 import { registerWriteAccessChannel } from './channel.js'
-import { assertManagementIdentity, ownerCookieBoundaryWarning } from './security.js'
 import { Config as ConfigSchema, assertDeploymentRootsSafe, resolveProtectedRoots } from './config.js'
 import type { Config } from './config.js'
 import { ACCESS_DOMAIN, SESSION_WRITE_ACCESS_DOMAIN } from './domain.js'
@@ -74,7 +73,6 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     super(ctx, config)
     this.protectedRoots = resolveProtectedRoots(config)
     assertDeploymentRootsSafe(config, this.protectedRoots)
-    assertManagementIdentity(config.managementIdentity)
   }
 
   protected async [Service.init](): Promise<void> {
@@ -124,8 +122,6 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     })
     await super[Service.init]()
     registerWriteAccessChannel(this.ctx, this)
-    const boundaryWarning = ownerCookieBoundaryWarning()
-    if (boundaryWarning !== undefined) this.ctx.logger('session-write-access').warn(boundaryWarning)
     this.ctx.inject(['systemPrompt'], (scope) => {
       scope.systemPrompt.context({
         name: 'sandbox:write-access',
@@ -244,36 +240,26 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
       await access.commitFork(fork.forkId, childId)
       return { sessionId: childId }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const hostSucceeded = childId !== undefined
       // The controller creates the session before workspace attach; a failure
-      // after creation reports the id in its details. Use it only for the safe
-      // default group and for an honest error message, never for inheritance.
+      // after creation reports the id in its details. Only a returned id means
+      // the Fork itself completed.
       const reported = childId ?? detailSessionId(error, sessionId)
-      if (fork !== undefined && reported !== undefined) {
-        // Finish a partially applied commit before judging it: the durable
-        // `committing` record names the target and carries the snapshot.
+      if (fork !== undefined && hostSucceeded && reported !== undefined) {
+        // Persist the exact target before retrying any permission write. The
+        // normal commit already wrote this intent first; this retry covers a
+        // failure of that first write.
+        let applied = false
         try {
+          await access.recordForkTarget(fork.forkId, reported)
           await access.reconcileForks()
-        } catch {
-          // The check below reports the actual committed state.
-        }
-        let applied = this.forkGrantsApplied(reported, fork)
-        if (!applied) {
-          try {
-            await access.ensureRootSession(
-              { sessionId: reported, ...this.held.get(reported) ?? {} },
-              {
-                workspaceRoot: fork.workspaceRoot,
-                grants: fork.grants,
-                forkSourceSessionId: sessionId,
-              },
-            )
-          } catch {
-            // Leave the session unattributed; pre-step retries attribution.
-          }
           applied = this.forkGrantsApplied(reported, fork)
+        } catch {
+          // Judged from the actual committed state below.
         }
         if (applied) {
-          // The directories are durably applied; the marker is bookkeeping.
+          // Host Fork succeeded and the inherited permissions are durable.
           try {
             await access.reconcileForks()
           } catch {
@@ -281,14 +267,60 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
           }
           return { sessionId: reported }
         }
-        await access.failFork(fork.forkId)
+        // Withdraw anything partially published so a reported failure cannot
+        // later resurrect the captured grants through orphan records.
+        let aborted = false
+        try {
+          await access.abortFork(fork.forkId, reported)
+          aborted = true
+        } catch {
+          aborted = false
+        }
+        if (!aborted) {
+          throw new Error(
+            `Fork created session ${reported}; its inherited directories are not confirmed and the Fork record `
+            + `could not be finalized: ${message}. Inspect the write-scope panel before using it.`,
+          )
+        }
+        const stillApplied = this.forkGrantsPresent(reported, fork)
+        if (stillApplied) {
+          throw new Error(
+            `Fork created session ${reported}; cleanup left its inherited directories applied and the Fork record `
+            + `failed: ${message}. Inspect the write-scope panel before using it.`,
+          )
+        }
+        try {
+          await access.ensureRootSession({ sessionId: reported, ...this.held.get(reported) ?? {} })
+        } catch {
+          // Pre-step retries attribution; no inherited permission is recorded.
+        }
         throw new Error(
-          `Fork created session ${reported}, but its inherited directories could not be confirmed: `
-          + `${error instanceof Error ? error.message : String(error)}. The session is refused at its first step `
-          + 'until attribution succeeds; do not assume it inherited the captured grants.',
+          `Fork created session ${reported} but its inherited directories could not be committed: ${message}. `
+          + 'It has the default workspace only.',
         )
       }
-      if (fork !== undefined) await access.failFork(fork.forkId)
+      if (fork !== undefined) {
+        if (reported !== undefined) {
+          // Host Fork failed after creating the session: never publish the
+          // captured permissions; keep the target for diagnosis and default
+          // the session to its own workspace.
+          try {
+            await access.recordForkFailure(fork.forkId, reported)
+          } catch {
+            // The record stays pending; no permission was published.
+          }
+          try {
+            await access.ensureRootSession({ sessionId: reported, ...this.held.get(reported) ?? {} })
+          } catch {
+            // Pre-step retries attribution; no inherited permission is recorded.
+          }
+          throw new Error(
+            `Fork failed after creating session ${reported}: ${message}. It has the default workspace only and `
+            + 'did not inherit the captured grants.',
+          )
+        }
+        await access.failFork(fork.forkId)
+      }
       throw error
     } finally {
       await this.releaseHeld(childId)
@@ -319,11 +351,18 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     return this.access
   }
 
+
+
   /** Whether the target has a group carrying every directory captured by the Fork. */
   private forkGrantsApplied(targetSessionId: string, fork: ForkRecord): boolean {
     const member = this.access?.member(targetSessionId)
     if (member === undefined) return false
-    const group = this.access?.group(member.groupId)
+    return this.forkGrantsPresent(targetSessionId, fork)
+  }
+
+  /** Whether an orphan group still carries the Fork's captured directories. */
+  private forkGrantsPresent(targetSessionId: string, fork: ForkRecord): boolean {
+    const group = this.access?.group(targetSessionId)
     if (group === undefined) return false
     return fork.grants.every(path => group.grants.some(grant => grant.path === path))
   }
@@ -415,7 +454,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
   }
 
   /** Submit an Agent request; returns the pending record (or the existing grant). */
-  requestDirectory(sessionId: string, path: string, reason: string): Promise<RequestResult> {
+  async requestDirectory(sessionId: string, path: string, reason: string): Promise<RequestResult> {
     return this.requireAccess().request(sessionId, path, reason)
   }
 

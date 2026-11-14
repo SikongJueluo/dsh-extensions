@@ -21,6 +21,7 @@ import { admitWriteRoot, canonicalDirectory, findProtectedOverlap, pathContains 
 export interface AccessTable<V> {
   get(key: string): V | undefined
   put(key: string, value: V): Promise<void>
+  delete(key: string): Promise<boolean>
   entries(): IterableIterator<[string, V]>
 }
 
@@ -671,6 +672,80 @@ export class AccessStore {
         updatedAt: this.now(),
       })
       return group
+    })
+  }
+
+  /**
+   * Persist the exact target session id as a `committing` intent. The service
+   * calls this before retrying any permission write in its error path, so a
+   * subsequent success or failure is always tied to a durable record.
+   * @param forkId - the Fork record.
+   * @param targetSessionId - the session the host created.
+   */
+  async recordForkTarget(forkId: string, targetSessionId: string): Promise<ForkRecord> {
+    return this.enqueue(async () => {
+      const fork = this.tables.forks.get(forkId)
+      if (fork === undefined) throw new AccessError('FORK_MISSING', `fork ${JSON.stringify(forkId)} is missing`)
+      if (fork.stage === 'committed') return fork
+      const intent: ForkRecord = {
+        ...fork,
+        targetSessionId,
+        stage: 'committing',
+        updatedAt: this.now(),
+      }
+      await this.tables.forks.put(fork.forkId, intent)
+      return intent
+    })
+  }
+
+  /**
+   * Record a host-side Fork failure that still reveals the created session.
+   * No inherited permission is published; the target is kept for diagnosis.
+   * @param forkId - the Fork record.
+   * @param targetSessionId - the session the host created before failing.
+   */
+  async recordForkFailure(forkId: string, targetSessionId: string): Promise<void> {
+    await this.enqueue(async () => {
+      const fork = this.tables.forks.get(forkId)
+      if (fork === undefined || fork.stage === 'committed') return
+      await this.tables.forks.put(fork.forkId, {
+        ...fork,
+        targetSessionId,
+        stage: 'failed',
+        updatedAt: this.now(),
+      })
+    })
+  }
+
+  /**
+   * Remove every permission record published for a target whose commit could
+   * not be confirmed, then mark the Fork failed. Membership is removed first
+   * so the target cannot keep executing with a partial group.
+   * @param forkId - the Fork record.
+   * @param targetSessionId - the partially committed session.
+   */
+  async abortFork(forkId: string, targetSessionId: string): Promise<void> {
+    await this.enqueue(async () => {
+      const fork = this.tables.forks.get(forkId)
+      if (fork === undefined) throw new AccessError('FORK_MISSING', `fork ${JSON.stringify(forkId)} is missing`)
+      if (fork.stage === 'committed') {
+        throw new AccessError('FORK_MISSING', 'a committed Fork cannot be aborted')
+      }
+      // Mark failed first so a crash during cleanup cannot be reconciled back
+      // into a committed, inherited group.
+      await this.tables.forks.put(fork.forkId, {
+        ...fork,
+        targetSessionId,
+        stage: 'failed',
+        updatedAt: this.now(),
+      })
+      const member = this.tables.members.get(targetSessionId)
+      if (member !== undefined && member.groupId === targetSessionId && member.role === 'root') {
+        await this.tables.members.delete(targetSessionId)
+      }
+      if (this.tables.members.get(targetSessionId) === undefined && this.group(targetSessionId) !== undefined) {
+        await this.tables.groups.delete(targetSessionId)
+      }
     })
   }
 
