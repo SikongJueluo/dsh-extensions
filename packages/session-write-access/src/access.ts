@@ -54,6 +54,7 @@ export type AccessErrorCode =
   | 'FORK_MISSING'
   | 'FORK_BUSY'
   | 'NOT_FORKABLE'
+  | 'NO_WORKSPACE'
 
 /** A refusal the caller can report without inventing a new one. */
 export class AccessError extends Error {
@@ -128,7 +129,7 @@ export function covers(parent: string, child: string): boolean {
 export class AccessStore {
   private readonly tables: AccessTables
   private readonly protectedRoots: readonly string[]
-  private readonly workspaceFallback: string
+  private readonly workspaceFallback: string | undefined
   private readonly lookup: SessionLookup
   private readonly newId: () => string
   private readonly now: () => number
@@ -136,12 +137,13 @@ export class AccessStore {
 
   /**
    * @param tables - the opened domain tables.
-   * @param options - protected paths, workspace fallback, cold-session lookup,
-   *   and injectable id/clock sources.
+   * @param options - protected paths, the deployment's stated workspace
+   *   fallback (absent when it stated none), cold-session lookup, and
+   *   injectable id/clock sources.
    */
   constructor(tables: AccessTables, options: {
     protectedRoots: readonly string[]
-    workspaceFallback: string
+    workspaceFallback?: string
     lookup: SessionLookup
     newId?: () => string
     now?: () => number
@@ -220,7 +222,15 @@ export class AccessStore {
 
   /** Validate and canonicalize a session workspace before recording it. */
   private admitWorkspace(path: string | undefined): string {
-    const physical = canonicalDirectory(path ?? this.workspaceFallback)
+    const candidate = path ?? this.workspaceFallback
+    if (candidate === undefined) {
+      throw new AccessError(
+        'NO_WORKSPACE',
+        'session-write-access: this session recorded no cwd and the deployment configures no workspaceRoot; '
+        + 'refusing to derive a writable workspace from the process cwd',
+      )
+    }
+    const physical = canonicalDirectory(candidate)
     const overlap = findProtectedOverlap(physical, this.protectedRoots)
     if (overlap !== undefined) {
       throw new Error(

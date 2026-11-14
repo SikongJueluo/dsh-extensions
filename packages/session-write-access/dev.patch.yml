@@ -23,6 +23,5 @@
       name: '/home/sikongjueluo/Projects/dsh-extensions/packages/session-write-access/lib/index.js'
       config:
         mode: workspace-write
-        workspaceRoot: !!js process.cwd()
         additionalWritableRoots: []
         protectPluginCode: false

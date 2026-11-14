@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { Config, assertDeploymentRootsSafe, resolveProtectedRoots } from '../src/config.js'
+import { Config, assertDeploymentRootsSafe, resolveConfiguredWorkspaceRoot, resolveProtectedRoots } from '../src/config.js'
 import {
   InvalidWriteRootError,
   ProtectedWriteRootError,
@@ -123,5 +123,16 @@ describe('configuration', () => {
       Config({ workspaceRoot: workspace, additionalWritableRoots: [] }),
       [protectedDir],
     )).not.toThrow()
+  })
+
+  it('derives no deployment root from the process cwd', () => {
+    // Nothing stated: the load check has no candidate, so a host started inside
+    // a protected path (a service manager unit runs in $HOME) cannot refuse it.
+    expect(resolveConfiguredWorkspaceRoot(Config({}))).toBeUndefined()
+    expect(() => assertDeploymentRootsSafe(Config({ additionalWritableRoots: [] }), [process.cwd()]))
+      .not.toThrow()
+    // A stated root is still checked.
+    expect(() => assertDeploymentRootsSafe(Config({ workspaceRoot: process.cwd() }), [process.cwd()]))
+      .toThrow(/overlaps protected/)
   })
 })

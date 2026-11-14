@@ -11,9 +11,11 @@
 # unknown service.
 #
 # Config is replaced wholesale by a later layer, so a deployment override must
-# restate `mode`, `workspaceRoot`, and `additionalWritableRoots` (plus any
-# protected paths it changes). `mode` and `workspaceRoot` mirror the stock base
-# layer so ordinary deployment env/flags keep working.
+# restate `mode` and `additionalWritableRoots` (plus any protected paths it
+# changes). `workspaceRoot` has no default: a deployment that omits it states
+# no fallback root, and the calls that would need one are refused instead of
+# inheriting the host process cwd. `mode` mirrors the stock base layer so
+# ordinary deployment env/flags keep working.
 - id: sandbox-policy
   name: '@deepseek-ai/dsh-sandbox-policy'
   disabled: true
@@ -23,5 +25,4 @@
       name: dsh-session-write-access
       config:
         mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
-        workspaceRoot: !!js process.cwd()
         additionalWritableRoots: []

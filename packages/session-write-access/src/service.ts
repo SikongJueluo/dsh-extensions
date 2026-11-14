@@ -26,7 +26,7 @@ import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { AccessError, AccessStore } from './access.js'
 import type { AccessStatus, DecisionResult, RemoveResult, RequestResult, SessionFacts } from './access.js'
 import { registerWriteAccessChannel } from './channel.js'
-import { Config as ConfigSchema, assertDeploymentRootsSafe, resolveProtectedRoots } from './config.js'
+import { Config as ConfigSchema, assertDeploymentRootsSafe, resolveConfiguredWorkspaceRoot, resolveProtectedRoots } from './config.js'
 import type { Config } from './config.js'
 import { ACCESS_DOMAIN, SESSION_WRITE_ACCESS_DOMAIN } from './domain.js'
 import type { ForkRecord } from './domain.js'
@@ -61,6 +61,8 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
 
   private access: AccessStore | undefined
   private readonly protectedRoots: readonly string[]
+  /** The deployment's stated fallback workspace, or undefined when it stated none. */
+  private readonly configuredWorkspaceRoot: string | undefined
   /** Sessions attributed to a plugin Fork but not yet committed: steps are refused. */
   private readonly held = new Map<string, { cwd?: string }>()
   /** Sessions whose attribution failed: steps are refused with the recorded reason. */
@@ -72,6 +74,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
   constructor(ctx: Context, config: Config) {
     super(ctx, config)
     this.protectedRoots = resolveProtectedRoots(config)
+    this.configuredWorkspaceRoot = resolveConfiguredWorkspaceRoot(config)
     assertDeploymentRootsSafe(config, this.protectedRoots)
   }
 
@@ -92,7 +95,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
       },
       {
         protectedRoots: this.protectedRoots,
-        workspaceFallback: this.workspaceRoot,
+        workspaceFallback: this.configuredWorkspaceRoot,
         lookup: sessionId => this.lookupSession(sessionId),
       },
     )
@@ -395,6 +398,19 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
   override resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy {
     const base = super.resolve(request)
     const session = request.session
+    // The stock fallback is `config.workspaceRoot ?? process.cwd()`. Once the
+    // deployment states none, a call with no session cwd has no stated root;
+    // refuse it instead of granting the directory the host happens to run in.
+    if (
+      base.mode === 'workspace-write'
+      && session?.header.cwd === undefined
+      && this.configuredWorkspaceRoot === undefined
+    ) {
+      throw new Error(
+        'session-write-access: this call has no session cwd and the deployment configures no workspaceRoot; '
+        + 'refusing to derive a writable workspace from the process cwd',
+      )
+    }
     if (session === undefined || this.access === undefined) return base
     const member = this.access.member(session.id)
     if (member === undefined) {

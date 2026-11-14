@@ -53,7 +53,7 @@ function fixtureSessions(): {
   }
 }
 
-function makeStore(overrides: { protectedRoots?: string[]; workspace?: string } = {}) {
+function makeStore(overrides: { protectedRoots?: string[]; workspace?: string; workspaceFallback?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'dsh-swa-'))
   const workspace = overrides.workspace ?? join(root, 'workspace')
   const protectedRoot = join(root, 'protected')
@@ -65,7 +65,7 @@ function makeStore(overrides: { protectedRoots?: string[]; workspace?: string } 
   let counter = 0
   const store = new AccessStore(tableSet, {
     protectedRoots: overrides.protectedRoots ?? [protectedRoot],
-    workspaceFallback: workspace,
+    workspaceFallback: 'workspaceFallback' in overrides ? overrides.workspaceFallback : workspace,
     lookup: sessions.lookup,
     newId: () => `id-${++counter}`,
     now: () => ++clock,
@@ -151,6 +151,16 @@ describe('AccessStore attribution', () => {
     const { root, protectedRoot, store } = makeStore()
     await expect(store.ensureRootSession({ sessionId: 'root', cwd: root })).rejects.toThrow(/overlaps protected/)
     await expect(store.ensureRootSession({ sessionId: 'other', cwd: protectedRoot })).rejects.toThrow(/overlaps protected/)
+  })
+
+  it('refuses a session without a cwd when the deployment states no fallback', async () => {
+    const { root, store } = makeStore({ workspaceFallback: undefined })
+    const failure = await store.ensureRootSession({ sessionId: 'root' }).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(AccessError)
+    expect((failure as AccessError).code).toBe('NO_WORKSPACE')
+    expect((failure as AccessError).message).toMatch(/no workspaceRoot/)
+    // A stated cwd still works: only the derived fallback is gone.
+    await expect(store.ensureRootSession({ sessionId: 'with-cwd', cwd: join(root, 'workspace') })).resolves.toBeDefined()
   })
 })
 

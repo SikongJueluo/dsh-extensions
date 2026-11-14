@@ -114,7 +114,7 @@ bundle 禁用 stock `sandbox-policy` 行（附包名断言），插入 `SandboxP
 2. 同组变更串行化；一次用户决策检查 request id 和预期版本，重复确认幂等。过期申请不能在撤销后通过旧按钮重新放开目录。
 3. 权限只从授权组的已提交记录派生。申请状态用于交互，不以某条申请标记为 approved 代替实际授权。
 4. `storageDomain` 未承诺多表事务；涉及多记录的步骤要有明确发布点和可恢复状态。撤销保存失败就报告失败，不能在重启后悄悄恢复一项界面声称已撤销的权限。
-5. 权限存储及能改变授权执行逻辑的 profile、策略配置和插件代码必须位于 standing `workspace-write` 策略不可写的宿主数据区。`storageDomain` 不公开物理存储位置，因此部署需通过插件 Config 显式声明实际受保护路径并保证与 backend、profile 配置一致；不能从 domain 名猜路径。生产策略代码应使用 Agent 不可写的安装产物；开发 overlay 的测试 session 使用与插件源码分离的项目目录。加载期核对部署级 roots，session 初始化核对默认 workspace，每次新增授权再核对目录覆盖关系；覆盖受保护路径时明确报错，不裁掉原始 workspace 或自动降级。显式 Full access 仍具有宿主原有写入能力，本插件不宣称抵御它。
+5. 权限存储及能改变授权执行逻辑的 profile、策略配置和插件代码必须位于 standing `workspace-write` 策略不可写的宿主数据区。`storageDomain` 不公开物理存储位置，因此部署需通过插件 Config 显式声明实际受保护路径并保证与 backend、profile 配置一致；不能从 domain 名猜路径。生产策略代码应使用 Agent 不可写的安装产物；开发 overlay 的测试 session 使用与插件源码分离的项目目录。保护范围由部署自行决定：默认保护 DSH home 与本包安装目录，`protectedPaths` 追加其他路径；若部署配置本身或本插件源码树就是会话 workspace，必须显式关掉对应那一项（`protectPluginCode: false` / 不声明该路径），并接受这些会话能改写策略代码——插件不会为了让会话能跑而自动裁掉工作区。加载期只核对显式声明的部署级 roots（缺省 `workspaceRoot` 不推导进程 cwd，这类无 cwd 调用在调用点显式拒绝），session 初始化核对 workspace，每次新增授权再核对目录覆盖关系；覆盖受保护路径时明确报错，不裁掉原始 workspace 或自动降级。显式 Full access 仍具有宿主原有写入能力，本插件不宣称抵御它。
 6. 不新增宿主不认识的 session 事件，不调用保留给实验包的 `appendPluginRecord()`，不解析普通 approval 历史作为持续授权依据。
 
 ## 5. 用户与 Agent 交互

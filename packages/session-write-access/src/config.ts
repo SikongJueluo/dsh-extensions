@@ -18,7 +18,11 @@ import { expandPath, findProtectedOverlap } from './paths.js'
 export interface Config {
   /** File-sandbox mode a session starts from (default: `read-only`, the fail-safe stock default). */
   mode?: SandboxMode
-  /** Absolute fallback workspace root for agentless calls or sessions without a cwd. */
+  /**
+   * Absolute fallback workspace root for agentless calls or sessions without a
+   * cwd. Absent means no fallback: such a `workspace-write` call is refused
+   * instead of inheriting whatever directory the host process started in.
+   */
   workspaceRoot?: string
   /** Extra physical absolute directories `workspace-write` may write under for every session. */
   additionalWritableRoots?: string[]
@@ -35,7 +39,7 @@ export const Config = Schema.object({
   mode: Schema.union(['read-only', 'workspace-write', 'danger-full-access']).default('read-only')
     .description('File-sandbox mode a session starts from (stock default: read-only).'),
   workspaceRoot: Schema.string()
-    .description('Absolute fallback workspace root for agentless calls or sessions without a cwd.'),
+    .description('Absolute fallback workspace root for agentless calls or sessions without a cwd. Absent means those calls are refused rather than inheriting the process cwd.'),
   additionalWritableRoots: Schema.array(Schema.string()).default([])
     .description('Physical absolute directories every workspace-write session may also write under.'),
   protectedPaths: Schema.array(Schema.string()).default([])
@@ -87,15 +91,32 @@ export function resolveProtectedRoots(
 }
 
 /**
+ * The fallback workspace root the deployment actually stated.
+ *
+ * Nothing is derived from `process.cwd()`: the host process directory is a
+ * deployment detail (a service manager unit usually starts in `$HOME`), not a
+ * stated grant. A missing fallback is refused at the call that would need it.
+ * @param config - validated plugin config.
+ * @returns the physical absolute fallback root, or undefined for none.
+ */
+export function resolveConfiguredWorkspaceRoot(config: Config): string | undefined {
+  return config.workspaceRoot === undefined
+    ? undefined
+    : canonicalOrResolve(expandPath(config.workspaceRoot))
+}
+
+/**
  * Verify the deployment-level roots at load. A deployment that makes the
  * authorization store or plugin code writable must fail loudly rather than
- * run with a policy that can rewrite itself.
+ * run with a policy that can rewrite itself. Only roots the deployment states
+ * are checked; an absent fallback contributes nothing here.
  * @param config - validated plugin config.
  * @param protectedRoots - resolved protected paths.
  */
 export function assertDeploymentRootsSafe(config: Config, protectedRoots: readonly string[]): void {
+  const workspace = resolveConfiguredWorkspaceRoot(config)
   const candidates = [
-    canonicalOrResolve(expandPath(config.workspaceRoot ?? process.cwd())),
+    ...workspace === undefined ? [] : [workspace],
     ...(config.additionalWritableRoots ?? []).map(path => canonicalOrResolve(expandPath(path))),
   ]
   for (const candidate of candidates) {

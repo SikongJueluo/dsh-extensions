@@ -37,22 +37,22 @@ pnpm build
 dsh --profile web --patch "$PWD/packages/session-write-access/dev.patch.yml" --no-open --port 3081
 ```
 
-`dev.patch.yml` 设置 `protectPluginCode: false`，因为本仓库通常就是开发会话的 workspace。生产部署必须保留默认保护，并从与本源码树分离的项目目录启动会话。
+`dev.patch.yml` 设置 `protectPluginCode: false`，因为本仓库通常就是开发会话的 workspace。默认保护（`protectHomeData` / `protectPluginCode` 和 `protectedPaths`）适合会话不落在授权存储与策略代码里的部署；若部署配置本身或本源码树就是日常 workspace，必须显式关掉对应那一项，代价是这些会话可以改写策略代码与部署配置——这是使用决策，插件不会替你裁掉工作区。
 
 ## 配置
 
-替换行会整体替换 config，覆盖时必须重述 `mode`、`workspaceRoot`、`additionalWritableRoots`。
+替换行会整体替换 config，覆盖时必须重述 `mode` 和 `additionalWritableRoots`（以及自己改动的受保护路径）。
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `mode` | `read-only`（bundle patch 设 `workspace-write`） | 会话初始文件策略；仍受宿主显式 mode override 影响 |
-| `workspaceRoot` | `process.cwd()` | 无 session cwd 时的回退根 |
+| `workspaceRoot` | 无 | 无 session cwd 时的回退根；缺省表示不提供回退——这类 `workspace-write` 调用显式拒绝，不会继承进程 cwd |
 | `additionalWritableRoots` | `[]` | 部署级额外可写目录，所有 session 共享，界面不可撤销 |
 | `protectedPaths` | `[]` | 额外声明的受保护物理路径；支持 `~/`、`$DSH_HOME`、`$HOME` |
 | `protectHomeData` | `true` | 保护 DSH home（profile、bundle、授权存储） |
 | `protectPluginCode` | `true` | 保护本包安装目录 |
 
-加载时核对部署级 roots，session 初始化时核对 workspace，新增授权时核对目标目录；任一覆盖受保护路径即报错拒绝，不会裁掉 workspace 或假装安全。`storageDomain` 不公开物理存储位置，因此部署必须保证受保护声明与实际 backend/profile 位置一致。
+加载时核对部署级 roots（只核对显式声明的 `workspaceRoot` / `additionalWritableRoots`，不从进程 cwd 推导），session 初始化时核对 workspace，新增授权时核对目标目录；任一覆盖受保护路径即报错拒绝，不会裁掉 workspace 或假装安全。`storageDomain` 不公开物理存储位置，因此部署必须保证受保护声明与实际 backend/profile 位置一致。
 
 ## 用户面板
 
@@ -109,8 +109,9 @@ composer 左侧的「写入范围」按钮打开面板：
 已运行：
 
 - `pnpm --filter dsh-session-write-access build`：通过，生成 `lib/index.js` / `lib/index.d.ts`。
-- `vitest run`（本包）：5 个测试文件、58 项通过。覆盖根路径包含判定、路径准入/保护重叠/symlink 拒绝、group 与 child 归属、慢父查询下的 pre-step 等待与 resolve fail-closed、申请去重与空理由拒绝、陈旧 revision、撤销不复活、Fork 首步闸门、首次 intent 写入失败/宿主 attach 失败/catch 内 member 失败、abort 后重启不复活的回归、`sandboxPolicy` 实际挂载、`workspaceWritableRoots` 包含授权目录且不包含未授权 child cwd、管理路由 401/状态返回，以及 bundle patch/manifest 断言。
+- `vitest run`（本包）：5 个测试文件、61 项通过。覆盖根路径包含判定、路径准入/保护重叠/symlink 拒绝、缺省 `workspaceRoot` 不推导进程 cwd 与无 cwd 会话的显式拒绝、group 与 child 归属、慢父查询下的 pre-step 等待与 resolve fail-closed、申请去重与空理由拒绝、陈旧 revision、撤销不复活、Fork 首步闸门、首次 intent 写入失败/宿主 attach 失败/catch 内 member 失败、abort 后重启不复活的回归、`sandboxPolicy` 实际挂载、`workspaceWritableRoots` 包含授权目录且不包含未授权 child cwd、管理路由 401/状态返回，以及 bundle patch/manifest 断言。
 - `node scripts/check-client-syntax.mjs`：8 个 client 文件通过。
+- 启动回归（隔离 `DSH_HOME`、独立端口、进程 cwd = `$HOME`）：不声明 `workspaceRoot` 的新代码在两种 config 下都只余 1 条未激活（`experimental-inspector` 的已知问题）：(a) 旧部署 config（`protectedPaths` 含 `~/.config/nixos`）；(b) 目标 config（只保护 `~/.ssh` / `~/.gpg`、`protectPluginCode: false`）。旧代码在同样输入下报 `deployment root "/home/sikongjueluo" overlaps protected "/home/sikongjueluo/.ssh"` 并留下 23 条未激活。
 - 契约核对：安装包中 `dsh-fs-sandbox`、`dsh-bash-sandbox`、`dsh-terminal-bash`、`dsh-pwsh-sandbox` 均调用 `sandboxPolicy.resolve()`，因此本替换只改这一处策略即可同时覆盖文件围栏与进程沙箱。
 - `pnpm check`（仓库根）：通过（typecheck + 全包 build + client syntax，exit 0）。
 

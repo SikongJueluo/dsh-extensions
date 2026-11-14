@@ -66,6 +66,8 @@ function fakeSessionQuery(headers: Map<string, Record<string, unknown>>) {
 
 async function mount(options: {
   workspace: string
+  /** Omit to mount a deployment that states no fallback workspace root. */
+  workspaceRoot?: string | null
   protectedRoots?: string[]
   headers?: Map<string, Record<string, unknown>>
   reject?: number
@@ -89,7 +91,7 @@ async function mount(options: {
   })
   const config = Config({
     mode: 'workspace-write',
-    workspaceRoot: options.workspace,
+    ...options.workspaceRoot === null ? {} : { workspaceRoot: options.workspaceRoot ?? options.workspace },
     additionalWritableRoots: [],
     protectedPaths: options.protectedRoots ?? [],
     protectHomeData: false,
@@ -154,6 +156,20 @@ describe('SessionWriteAccessPolicy mounting', () => {
       protectPluginCode: false,
     })
     await expect(ctx.plugin(SessionWriteAccessPolicy, config)).rejects.toThrow(/overlaps protected/)
+  })
+
+  it('mounts and refuses cwd-less calls when the deployment states no fallback root', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-service-'))
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    // The host process runs inside a protected path: with no stated fallback
+    // there is nothing to refuse at load, so the provider must still mount.
+    const { service } = await mount({ workspace, workspaceRoot: null, protectedRoots: [process.cwd()] })
+    const cwdless = { id: 'agentless', header: {} } as never
+    expect(() => service.resolve({ session: cwdless })).toThrow(/no workspaceRoot/)
+    // A call that carries a session cwd keeps working.
+    const stated = service.resolve({ session: { id: 'root', header: { cwd: workspace } } as never })
+    expect(stated.mode).toBe('workspace-write')
   })
 })
 
