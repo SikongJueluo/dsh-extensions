@@ -50,6 +50,8 @@ export interface CommandCodeSourceOptions {
   baseURL?: string
   /** Extra env var to try first, matching the provider row's apiKeyEnv override. */
   apiKeyEnv?: string
+  /** Optional external key resolver (dsh-more-providers' `providerKeys`). */
+  getKey?: (provider: string) => string | undefined
 }
 
 /** Plugin-row override for the Command Code monitor. */
@@ -240,6 +242,7 @@ export class CommandCodeSource {
   private readonly env: NodeJS.ProcessEnv
   private readonly baseURL: string
   private readonly apiKeyEnv: string | undefined
+  private readonly getKey: ((provider: string) => string | undefined) | undefined
 
   constructor(options: CommandCodeSourceOptions = {}) {
     this.fetchImpl = options.fetchImpl ?? ((url, init) => fetch(url, init))
@@ -249,10 +252,13 @@ export class CommandCodeSource {
     this.env = options.env ?? process.env
     this.baseURL = (options.baseURL ?? COMMAND_CODE_API_BASE).replace(/\/+$/, '')
     this.apiKeyEnv = options.apiKeyEnv?.trim() || undefined
+    this.getKey = options.getKey
   }
 
   private apiKeyOf(route: string): string | undefined {
     if (route !== 'command-code') return undefined
+    const external = this.getKey?.(route)?.trim()
+    if (external !== undefined && external !== '') return external
     const names = this.apiKeyEnv === undefined ? ENV_KEYS : [this.apiKeyEnv, ...ENV_KEYS]
     for (const name of names) {
       const value = this.env[name]?.trim()

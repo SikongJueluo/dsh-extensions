@@ -20,3 +20,15 @@ declare module '@deepseek-ai/cordis' {
     oauthProviders?: OAuthProvidersShim
   }
 }
+
+/** Minimal `ctx.providerKeys` surface provided by dsh-more-providers. */
+export interface ProviderKeysShim {
+  key(provider: string): string | undefined
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Present when the dsh-more-providers plugin is mounted. */
+    providerKeys?: ProviderKeysShim
+  }
+}

@@ -18,7 +18,8 @@
     "lib",
     "cordis.patch.yml",
     "dev.patch.yml",
-    "README.md"
+    "README.md",
+    "example.yaml"
   ],
   "scripts": {
     "build": "tsdown",
@@ -31,6 +32,9 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
+  },
+  "dependencies": {
+    "yaml": "^2.4.2"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.1.0",

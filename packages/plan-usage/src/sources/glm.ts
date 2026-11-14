@@ -209,6 +209,8 @@ export interface QuotaMonitorOptions {
   logger?: QuotaLogger
   /** Request timeout per quota call. */
   timeoutMs?: number
+  /** Optional external key resolver (dsh-more-providers' `providerKeys`). */
+  resolveKey?: (provider: string, monitor: MonitorConfig) => string | undefined
 }
 
 interface CacheEntry {
@@ -232,6 +234,7 @@ export class QuotaMonitor {
   private readonly now: () => number
   private readonly logger: QuotaLogger | undefined
   private readonly timeoutMs: number
+  private readonly resolveKey: ((provider: string, monitor: MonitorConfig) => string | undefined) | undefined
   private readonly cache = new Map<string, CacheEntry>()
   private readonly inflight = new Map<string, Promise<CacheEntry | undefined>>()
 
@@ -240,10 +243,15 @@ export class QuotaMonitor {
     this.now = options.now ?? (() => Date.now())
     this.logger = options.logger
     this.timeoutMs = options.timeoutMs ?? 10_000
+    this.resolveKey = options.resolveKey
   }
 
-  /** Resolve the API key for a monitor from its env candidates. */
-  apiKeyOf(monitor: MonitorConfig): string | undefined {
+  /** Resolve the API key from the external provider service, then env candidates. */
+  apiKeyOf(monitor: MonitorConfig, provider?: string): string | undefined {
+    if (provider !== undefined) {
+      const external = this.resolveKey?.(provider, monitor)?.trim()
+      if (external !== undefined && external !== '') return external
+    }
     for (const name of monitor.apiKeyEnv) {
       const value = process.env[name]
       if (typeof value === 'string' && value.trim() !== '') return value.trim()
@@ -262,7 +270,7 @@ export class QuotaMonitor {
     options: { maxAgeMs?: number; force?: boolean } = {},
   ): Promise<QuotaSnapshot | undefined> {
     const maxAgeMs = options.maxAgeMs ?? 60_000
-    const apiKey = this.apiKeyOf(monitor)
+    const apiKey = this.apiKeyOf(monitor, provider)
     if (apiKey === undefined) {
       this.logger?.warn(
         'auto-continue: no API key for provider "%s" quota monitor (tried env: %s)',

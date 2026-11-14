@@ -42,6 +42,8 @@ export interface MiniMaxSourceOptions {
   logger?: SourceLogger
   timeoutMs?: number
   env?: NodeJS.ProcessEnv
+  /** Optional external key resolver (dsh-more-providers' `providerKeys`). */
+  getKey?: (provider: string) => string | undefined
 }
 
 function finite(value: unknown): number | undefined {
@@ -164,19 +166,22 @@ export class MiniMaxSource {
   private readonly logger: SourceLogger | undefined
   private readonly timeoutMs: number
   private readonly env: NodeJS.ProcessEnv
+  private readonly getKey: ((provider: string) => string | undefined) | undefined
 
   constructor(options: MiniMaxSourceOptions = {}) {
     this.fetchImpl = options.fetchImpl ?? ((url, init) => fetch(url, init))
     this.logger = options.logger
     this.timeoutMs = options.timeoutMs ?? 10_000
     this.env = options.env ?? process.env
+    this.getKey = options.getKey
   }
 
   /** The route's host + resolved API key, when both are known. */
   private endpointOf(route: string, hostOverride?: string): { url: string; host: string; apiKey: string } | undefined {
     const envName = ENV_KEYS[route]
     if (HOSTS[route] === undefined || envName === undefined) return undefined
-    const apiKey = this.env[envName]?.trim()
+    const external = this.getKey?.(route)?.trim()
+    const apiKey = external !== undefined && external !== '' ? external : this.env[envName]?.trim()
     if (apiKey === undefined || apiKey === '') return undefined
     const host = hostOverride ?? this.hostOverrides.get(route) ?? HOSTS[route]
     if (host === undefined) return undefined

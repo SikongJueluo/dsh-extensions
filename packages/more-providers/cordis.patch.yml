@@ -1,13 +1,13 @@
-# dsh-more-providers bundle layer: env-driven extra LLM providers.
+# dsh-more-providers bundle layer: the YAML-driven provider registry.
 #
-# Command Code is the first module: when CMD_API_KEY (or
-# COMMAND_CODE_API_KEY) is present, the plugin fetches the live
-# /provider/v1/models catalog and registers one `command-code` route whose
-# models span the anthropic-messages, openai-responses and openai-completions
-# protocols. With no key the row loads and stays dormant, so installing the
-# bundle does not change the model picker.
-#
-# A later layer may override this row by id; config is replaced wholesale.
+# It owns every API-key LLM route, so the stock pi-ai adapter row is disabled
+# to avoid a second provider directory and duplicate-route conflicts. ChatGPT
+# OAuth stays with dsh-oauth-providers; deepseek-official stays with the stock
+# DeepSeek adapter. Provider definitions live in $DSH_HOME/more-providers.yaml.
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  disabled: true
+
 - insert:
     - id: more-providers
       name: dsh-more-providers

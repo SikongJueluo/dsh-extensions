@@ -68,16 +68,19 @@ class GlmSource implements QuotaSource {
   private readonly providersConfig: Record<string, ProviderMonitorSettings>
   private readonly quotaCacheMs: number
 
-  constructor(config: PlanUsageConfig, logger: Context['logger']) {
+  constructor(config: PlanUsageConfig, logger: Context['logger'], getKey?: (provider: string) => string | undefined) {
     this.routes = monitoredProviders(config.providers)
     this.providersConfig = config.providers
     this.quotaCacheMs = config.quotaCacheMs
-    this.monitor = new QuotaMonitor({ logger: { warn: (m, ...a) => logger.warn(m, ...a) } })
+    this.monitor = new QuotaMonitor({
+      resolveKey: (provider) => getKey?.(provider),
+      logger: { warn: (m, ...a) => logger.warn(m, ...a) },
+    })
   }
 
   ready(route: string): boolean {
     const monitorConfig = resolveMonitor(route, this.providersConfig)
-    return monitorConfig !== undefined && this.monitor.apiKeyOf(monitorConfig) !== undefined
+    return monitorConfig !== undefined && this.monitor.apiKeyOf(monitorConfig, route) !== undefined
   }
 
   get(route: string, options: { force?: boolean }): Promise<QuotaSnapshot | undefined> {
@@ -101,19 +104,27 @@ export class PlanUsageService extends Service {
 
   constructor(ctx: Context, config: PlanUsageConfig) {
     super(ctx, SERVICE_NAME)
+    const getKey = (provider: string) => ctx.get('providerKeys')?.key(provider)
     this.sources = [
-      new GlmSource(config, ctx.logger),
+      new GlmSource(config, ctx.logger, getKey),
       new OpenAiUsageSource({
         getToken: () => ctx.get('oauthProviders')?.token('chatgpt') ?? Promise.resolve(undefined),
         logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) },
       }),
-      new MiniMaxSource({ logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) } }),
+      new MiniMaxSource({
+        getKey,
+        logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) },
+      }),
       new CommandCodeSource({
         apiKeyEnv: config.commandCode?.apiKeyEnv,
         baseURL: config.commandCode?.baseURL,
+        getKey,
         logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) },
       }),
-      new OpenCodeGoSource({ logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) } }),
+      new OpenCodeGoSource({
+        getKey,
+        logger: { warn: (m, ...a) => ctx.logger.warn(m, ...a) },
+      }),
     ]
     this.refreshLiveRoutes()
     ctx.on('llm/adapters-updated', () => this.refreshLiveRoutes())

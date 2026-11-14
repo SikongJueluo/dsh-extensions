@@ -15,9 +15,10 @@
 - 用户已有的接入点：`~/.config/nixos/home/ai/dsh/providers.nix` 的 `programs.dsh.piAiProviders`（静态 allowlist，
   `apiKeyEnv` 按请求解析）；`secrets.nix` 里已经有 `CMD_API_KEY`。所以“env 驱动”与现有部署方式同构。
 
-> **落地状态（2026-11-14）**：provider 侧已实现为 `packages/more-providers`（bundle 名
-> `dsh-more-providers`），plan-usage 侧已加入 `src/sources/commandcode.ts`；`pnpm check` 与两个
-> `smoke` 均通过。下文的包名/路径已按最终实现更新。
+> **落地状态（2026-11-15）**：`packages/more-providers` 已从 CommandCode 专用插件扩展为
+> YAML 驱动的全量 provider registry（`$DSH_HOME/more-providers.yaml`，stock `llm-pi-ai`
+> 被禁用），plan-usage 通过其 `providerKeys` 服务读取文件 key；自动多账号切换仍是 TODO。
+> 当前实现细节以 [more-providers README](../packages/more-providers/README.md) 为准。
 
 ---
 

@@ -24,6 +24,8 @@
 
 共享同一端点+key 的路由合并为一次上游调用；服务层再按路由做 TTL 缓存 + 并发去重（等待中的恢复 agent 与设置页共用）。
 
+**key 解析**：装了 [dsh-more-providers](../more-providers/) 时，GLM / OpenCode / MiniMax / CommandCode source 优先调用 `ctx.get('providerKeys')?.key(route)`，再回退各 source 的 env / `providers` 配置；未装该插件时行为与旧版完全一致。`chatgpt` 仍走 `oauthProviders`。
+
 ## 服务契约
 
 ```ts
@@ -41,7 +43,7 @@ interface PlanUsageService {
 
 **OpenAI 依赖说明**：`chatgpt` 路由的 token 经 `oauthProviders` 服务（[dsh-oauth-providers](../oauth-providers/) v0.4+ 提供）获取，未装该插件或未登录时此源优雅降级为 `undefined`。
 
-**Command Code 依赖说明**：卡片只在 `command-code` 路由实际注册时出现，通常由 [dsh-more-providers](../more-providers/) 在 `CMD_API_KEY` 存在时注册；source 本身只读环境变量，不依赖该插件的服务。
+**Command Code 依赖说明**：卡片只在 `command-code` 路由实际注册时出现，通常由 [dsh-more-providers](../more-providers/) 注册；source 优先用该插件的 `providerKeys` 服务，回退 `CMD_API_KEY` / `COMMAND_CODE_API_KEY` 环境变量。
 
 ## 配置（cordis 行）
 
@@ -59,8 +61,8 @@ interface PlanUsageService {
       baseURL: https://api.commandcode.ai
 ```
 
-`commandCode.apiKeyEnv` 用于 provider 侧改了 `apiKeyEnv` 的场景；默认仍会尝试
-`CMD_API_KEY` 与 `COMMAND_CODE_API_KEY`。
+`commandCode.apiKeyEnv` 用于 provider 侧改了 `apiKeyEnv` 的场景；装了 dsh-more-providers 时，
+它的 `providerKeys` 服务会先于本项和默认 env 被尝试。
 
 ## 设置页
 

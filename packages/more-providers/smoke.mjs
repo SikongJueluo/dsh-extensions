@@ -1,17 +1,25 @@
-/* Runtime smoke test for dsh-more-providers: catalog parsing, the three-way
- * protocol mapping, env key resolution, and registration on a stub llm
- * service. The adapter is the real PiAiAdapter, so listModels/resolveModel
- * exercise the same path the host uses. */
+/* Runtime smoke test for dsh-more-providers: YAML validation/inheritance, key
+ * sources, builtin + custom provider construction, the providerKeys service,
+ * Command Code's three-protocol mapping, and the plugin apply path. It never
+ * touches the network: custom catalogs are either static or served by a stub
+ * fetch. */
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Context, Service } from '@deepseek-ai/cordis'
 import {
-  COMMAND_CODE_ROUTE,
-  CommandCodeConfig,
   Config,
-  createCommandCodeAdapter,
-  inject,
-  name,
+  ConfigError,
+  ProviderKeys,
+  apply,
+  buildAdapter,
+  buildCommandCodeProvider,
+  buildProviders,
+  defaultSecretDir,
+  loadConfig,
   parseCatalog,
-  registerCommandCode,
-  resolveApiKey,
+  resolveConfig,
+  resolveConfigPath,
   toPiModels,
 } from './lib/index.js'
 
@@ -25,126 +33,247 @@ function check(label, condition) {
   }
 }
 
-// ── defaults ─────────────────────────────────────────────────────────────────
-const defaults = CommandCodeConfig({})
-check('plugin name', name === 'dsh-more-providers')
-check('injects llm', inject.includes('llm'))
-check('config default apiKeyEnv', defaults.apiKeyEnv === 'CMD_API_KEY')
-check('config default baseURL', defaults.baseURL === 'https://api.commandcode.ai/provider')
-check('config default zdr off', defaults.zdr === false)
-check('row config fills commandCode defaults', Config({}).commandCode.apiKeyEnv === 'CMD_API_KEY')
-check('row config merges a partial section', Config({ commandCode: { zdr: true } }).commandCode.zdr === true && Config({ commandCode: { zdr: true } }).commandCode.timeoutMs === 10_000)
-
-// ── catalog parsing ──────────────────────────────────────────────────────────
-const items = [
-  { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', context_length: 1_000_000, supported_endpoints: ['/messages'] },
-  { id: 'gpt-6-astra', name: 'GPT-6 Astra', context_length: 1_050_000, supported_endpoints: ['/chat/completions', '/responses'] },
-  { id: 'deepseek/deepseek-v4-pro', supported_endpoints: ['/chat/completions', '/responses'] },
-  { id: 'no-route', supported_endpoints: ['/embeddings'] },
-  { noId: true },
-]
-check('parse data envelope', parseCatalog({ data: items }).length === 4)
-check('parse bare array', parseCatalog(items).length === 4)
-check('drop entries without an id', parseCatalog({ data: [{ noId: true }] }).length === 0)
-let threw = false
-try {
-  parseCatalog({})
-} catch {
-  threw = true
-}
-check('reject a body without data', threw)
-
-// ── protocol mapping ─────────────────────────────────────────────────────────
-const models = toPiModels(parseCatalog({ data: items }), { baseURL: 'https://api.commandcode.ai/provider', provider: COMMAND_CODE_ROUTE })
-check('skip unsupported endpoints', models.length === 3)
-const claude = models.find((model) => model.id === 'claude-sonnet-5')
-const gpt = models.find((model) => model.id === 'gpt-6-astra')
-const deepseek = models.find((model) => model.id === 'deepseek/deepseek-v4-pro')
-check('claude uses anthropic-messages', claude?.api === 'anthropic-messages')
-check('claude base URL is the API root', claude?.baseUrl === 'https://api.commandcode.ai/provider')
-check('claude forces adaptive thinking', claude?.compat?.forceAdaptiveThinking === true)
-check('claude declares vision', JSON.stringify(claude?.input) === '["text","image"]')
-check('gpt uses openai-responses', gpt?.api === 'openai-responses')
-check('gpt base URL is /v1', gpt?.baseUrl === 'https://api.commandcode.ai/provider/v1')
-check('deepseek uses openai-completions', deepseek?.api === 'openai-completions')
-check('completions disables developer role', deepseek?.compat?.supportsDeveloperRole === false)
-check('completions uses max_tokens field', deepseek?.compat?.maxTokensField === 'max_tokens')
-check('missing context falls back to 131072', deepseek?.contextWindow === 131_072)
-check('missing maxTokens falls back to 32768', deepseek?.maxTokens === 32_768)
-check('unknown families stay text-only', JSON.stringify(deepseek?.input) === '["text"]')
-
-// ── env key resolution ──────────────────────────────────────────────────────
-check('CMD_API_KEY wins', resolveApiKey({ apiKeyEnv: 'CMD_API_KEY' }, { CMD_API_KEY: 'a', COMMAND_CODE_API_KEY: 'b' }) === 'a')
-check('COMMAND_CODE_API_KEY fallback', resolveApiKey({ apiKeyEnv: 'CMD_API_KEY' }, { COMMAND_CODE_API_KEY: 'b' }) === 'b')
-check('missing key is undefined', resolveApiKey({ apiKeyEnv: 'CMD_API_KEY' }, {}) === undefined)
-check('blank key is undefined', resolveApiKey({ apiKeyEnv: 'CMD_API_KEY' }, { CMD_API_KEY: '   ' }) === undefined)
-
-// ── adapter: listModels + resolveModel through the real PiAiAdapter ─────────
-const registration = createCommandCodeAdapter(parseCatalog({ data: items }), defaults, 'sk-smoke')
-check('adapter reports the model count', registration?.modelCount === 3)
-check('no usable models yields no adapter', createCommandCodeAdapter([], defaults, 'sk-smoke') === undefined)
-const listed = await registration.adapter.listModels(COMMAND_CODE_ROUTE)
-check('adapter lists three models', listed.length === 3)
-const resolved = await registration.adapter.resolveModel(COMMAND_CODE_ROUTE, 'claude-sonnet-5')
-check('adapter resolves context', resolved.context.contextWindow === 1_000_000)
-check('adapter resolves reasoning efforts', resolved.reasoning.efforts.some((effort) => effort.id === 'high'))
-
-// ── registration on a stub llm service ─────────────────────────────────────
-function stubContext(registrations, logs = []) {
-  return {
-    logger: () => ({
-      info: (...args) => logs.push(['info', ...args]),
-      error: (...args) => logs.push(['error', ...args]),
-    }),
-    llm: {
-      registerAdapter: (routes, adapter) => {
-        registrations.push({ routes, adapter })
-      },
-    },
+function throwsConfig(fn, label) {
+  try {
+    fn()
+    check(label, false)
+  } catch (error) {
+    check(label, error instanceof ConfigError)
   }
 }
 
-const registrations = []
-const logs = []
-const ctx = stubContext(registrations, logs)
-let requestedURL
-await registerCommandCode(ctx, defaults, {
-  env: { CMD_API_KEY: 'sk-smoke' },
-  fetchImpl: async (url) => {
-    requestedURL = url
-    return new Response(JSON.stringify({ data: items }), { status: 200, headers: { 'content-type': 'application/json' } })
+const root = mkdtempSync(join(tmpdir(), 'dsh-more-providers-'))
+const keyFile = join(root, 'mdkj-key')
+const secretKey = join(root, 'secret-key')
+writeFileSync(keyFile, 'file-key\n')
+writeFileSync(secretKey, 'secret-key\n')
+
+const baseConfig = {
+  secretDir: root,
+  providers: {
+    mdkj: {
+      kind: 'custom',
+      displayName: 'MDKJ',
+      api: 'openai-responses',
+      baseURL: 'https://mdkj.lol/v1',
+      models: [
+        {
+          id: 'gpt-6.1-sol',
+          name: 'GPT-6.1 Sol',
+          contextWindow: 524288,
+          maxTokens: 32768,
+          input: ['text', 'image'],
+        },
+      ],
+      accounts: {
+        stable: { displayName: 'MDKJ Stable', apiKeyFile: keyFile },
+        cheap: { displayName: 'MDKJ Cheap', apiKeyFile: keyFile },
+      },
+    },
+    'zai-coding-cn': {
+      kind: 'builtin',
+      apiKeyFile: keyFile,
+    },
   },
-})
-check('register uses the default catalog URL', requestedURL === 'https://api.commandcode.ai/provider/v1/models')
-check('register calls registerAdapter once', registrations.length === 1)
-check('register owns only command-code', JSON.stringify(registrations[0]?.routes) === '["command-code"]')
+}
+const configPath = join(root, 'more-providers.yaml')
+writeFileSync(configPath, JSON.stringify(baseConfig))
 
-const dormant = []
-await registerCommandCode(stubContext(dormant), defaults, {
-  env: {},
-  fetchImpl: async () => {
-    throw new Error('must not fetch without a key')
+// ── defaults / paths ────────────────────────────────────────────────────────
+const previousHome = process.env.DSH_HOME
+process.env.DSH_HOME = root
+check('default config path under DSH_HOME', resolveConfigPath() === join(root, 'more-providers.yaml'))
+if (previousHome === undefined) delete process.env.DSH_HOME
+else process.env.DSH_HOME = previousHome
+check('explicit config path wins', resolveConfigPath(configPath) === configPath)
+const previousRuntime = process.env.XDG_RUNTIME_DIR
+process.env.XDG_RUNTIME_DIR = root
+check('default secret dir is XDG_RUNTIME_DIR/agenix', defaultSecretDir() === join(root, 'agenix'))
+if (previousRuntime === undefined) delete process.env.XDG_RUNTIME_DIR
+else process.env.XDG_RUNTIME_DIR = previousRuntime
+
+// ── config resolution / inheritance ─────────────────────────────────────────
+const resolved = await loadConfig(configPath)
+check('account routes are provider-account', JSON.stringify(resolved.map((r) => r.route)) === '["mdkj-stable","mdkj-cheap","zai-coding-cn"]')
+check('account display name', resolved[0]?.displayName === 'MDKJ Stable')
+check('account inherits custom fields', resolved[0]?.api === 'openai-responses' && resolved[0]?.baseURL === 'https://mdkj.lol/v1')
+check('account key file wins', resolved[0]?.keySource.kind === 'file' && resolved[0]?.keySource.path === keyFile)
+check('single provider keeps its id', resolved[2]?.route === 'zai-coding-cn' && resolved[2]?.catalog === 'zai-coding-cn')
+
+// apiKeyFile wins over secretName at the same level.
+const precedencePath = join(root, 'precedence.yaml')
+writeFileSync(precedencePath, JSON.stringify({
+  secretDir: root,
+  providers: {
+    p: {
+      kind: 'builtin',
+      catalog: 'zai-coding-cn',
+      apiKeyFile: keyFile,
+      secretName: 'secret-key',
+    },
   },
-})
-check('no key registers nothing', dormant.length === 0)
+}))
+const precedence = await loadConfig(precedencePath)
+check('apiKeyFile wins over secretName', precedence[0]?.keySource.kind === 'file' && precedence[0]?.keySource.path === keyFile)
 
-const unavailable = []
-await registerCommandCode(stubContext(unavailable), defaults, {
-  env: { CMD_API_KEY: 'sk-smoke', CMD_MODELS_URL: 'https://staging.example/models' },
-  fetchImpl: async (url) => {
-    check('CMD_MODELS_URL overrides', url === 'https://staging.example/models')
-    return new Response('down', { status: 503 })
+// ── strict config errors ────────────────────────────────────────────────────
+throwsConfig(() => resolveConfig({ providers: {} , extra: true }), 'unknown top-level key rejected')
+throwsConfig(() => resolveConfig({ providers: { p: { kind: 'nope' } } }), 'unknown kind rejected')
+throwsConfig(() => resolveConfig({ providers: { p: { kind: 'custom', api: 'openai-responses', baseURL: 'https://x.test/v1' } } }), 'custom without models rejected')
+throwsConfig(() => resolveConfig({ providers: { p: { kind: 'builtin', catalog: 'zai-coding-cn', models: [{ id: 'x' }] } } }), 'builtin models rejected')
+throwsConfig(() => resolveConfig({ providers: { p: { kind: 'builtin', accounts: {} } } }), 'empty accounts rejected')
+throwsConfig(() => resolveConfig({ providers: { p: { kind: 'builtin' } } }), 'missing key source rejected')
+throwsConfig(() => resolveConfig({
+  secretDir: root,
+  providers: {
+    p: {
+      kind: 'builtin',
+      catalog: 'zai-coding-cn',
+      accounts: {
+        a: { routeId: 'same', secretName: 'not-used' },
+        b: { routeId: 'same', secretName: 'not-used' },
+      },
+    },
   },
-})
-check('catalog failure registers nothing', unavailable.length === 0)
+}), 'duplicate route rejected')
 
-const unroutable = []
-await registerCommandCode(stubContext(unroutable), defaults, {
-  env: { CMD_API_KEY: 'sk-smoke' },
-  fetchImpl: async () => new Response(JSON.stringify({ data: [{ id: 'embeddings-only', supported_endpoints: ['/embeddings'] }] }), { status: 200, headers: { 'content-type': 'application/json' } }),
-})
-check('catalog with no routable models registers nothing', unroutable.length === 0)
+// ── missing key is dormant, not config-invalid ──────────────────────────────
+const dormantPath = join(root, 'dormant.yaml')
+writeFileSync(dormantPath, JSON.stringify({
+  secretDir: root,
+  providers: {
+    p: { kind: 'builtin', catalog: 'zai-coding-cn', secretName: 'missing-key' },
+  },
+}))
+const dormant = await buildProviders(await loadConfig(dormantPath), { info() {}, warn() {}, error() {} })
+check('missing key file skips only that route', dormant.profiles.size === 0)
 
+// ── builtin + custom provider construction ─────────────────────────────────
+const built = await buildProviders(resolved, { info() {}, warn() {}, error() {} })
+check('build registers all keyed routes', built.profiles.size === 3)
+check('build keeps key sources', built.keys.get('mdkj-stable')?.kind === 'file')
+check('builtin models come from pi-ai catalog', (await built.profiles.get('zai-coding-cn').piProvider.getModels()).length > 0)
+check('custom model has 512K context', (await built.profiles.get('mdkj-stable').piProvider.getModels())[0]?.contextWindow === 524288)
+check('custom reasoning defaults to low/medium/high', JSON.stringify((await built.profiles.get('mdkj-stable').piProvider.getModels())[0]?.thinkingLevelMap) === '{"off":null,"minimal":null,"low":"low","medium":"medium","high":"high","xhigh":null,"max":null}')
+check('custom image input', JSON.stringify((await built.profiles.get('mdkj-stable').piProvider.getModels())[0]?.input) === '["text","image"]')
+
+// reasoning: false removes the thinking map.
+const noThinkingPath = join(root, 'no-thinking.yaml')
+writeFileSync(noThinkingPath, JSON.stringify({
+  secretDir: root,
+  providers: {
+    p: {
+      kind: 'custom',
+      api: 'openai-responses',
+      baseURL: 'https://x.test/v1',
+      models: [{ id: 'plain', reasoning: false }],
+      apiKeyFile: keyFile,
+    },
+  },
+}))
+const noThinking = await buildProviders(await loadConfig(noThinkingPath), { info() {}, warn() {}, error() {} })
+const plain = noThinking.profiles.get('p')?.piProvider.getModels()[0]
+check('reasoning:false removes thinking levels', plain?.reasoning === false && plain?.thinkingLevelMap === undefined)
+
+// ── model discovery + static fallback (stubbed fetch) ─────────────────────
+const originalFetch = globalThis.fetch
+let discoveryCalls = 0
+globalThis.fetch = async (url) => {
+  discoveryCalls += 1
+  return new Response(JSON.stringify({
+    data: [{ id: 'gpt-6.1-sol' }],
+  }), { status: 200, headers: { 'content-type': 'application/json' } })
+}
+const discoveryPath = join(root, 'discovery.yaml')
+writeFileSync(discoveryPath, JSON.stringify({
+  secretDir: root,
+  providers: {
+    p: {
+      kind: 'custom',
+      api: 'openai-responses',
+      baseURL: 'https://x.test/v1',
+      modelsURL: 'https://x.test/v1/models',
+      models: [{ id: 'gpt-6.1-sol', contextWindow: 524288, maxTokens: 32768, input: ['text', 'image'] }],
+      apiKeyFile: keyFile,
+    },
+  },
+}))
+const discovered = await buildProviders(await loadConfig(discoveryPath), { info() {}, warn() {}, error() {} })
+check('modelsURL is fetched once per provider', discoveryCalls === 1)
+check('discovered model inherits static metadata', discovered.profiles.get('p')?.piProvider.getModels()[0]?.contextWindow === 524288 && discovered.profiles.get('p')?.piProvider.getModels()[0]?.maxTokens === 32768)
+globalThis.fetch = async () => new Response('down', { status: 503 })
+const fallbackPath = join(root, 'fallback.yaml')
+writeFileSync(fallbackPath, JSON.stringify({
+  secretDir: root,
+  providers: {
+    p: {
+      kind: 'custom',
+      api: 'openai-responses',
+      baseURL: 'https://x.test/v1',
+      modelsURL: 'https://x.test/v1/models',
+      models: [{ id: 'fallback' }],
+      apiKeyFile: keyFile,
+    },
+  },
+}))
+const fallback = await buildProviders(await loadConfig(fallbackPath), { info() {}, warn() {}, error() {} })
+check('failed catalog falls back to static models', fallback.profiles.get('p')?.piProvider.getModels()[0]?.id === 'fallback')
+globalThis.fetch = originalFetch
+
+// ── providerKeys service ───────────────────────────────────────────────────
+const serviceContext = new Context()
+const keyService = new ProviderKeys(serviceContext, built.keys)
+check('providerKeys service resolves a file key', keyService.key('mdkj-stable') === 'file-key')
+check('providerKeys service misses unknown route', keyService.key('unknown') === undefined)
+writeFileSync(keyFile, 'rotated-key\n')
+const future = new Date(Date.now() + 2000)
+utimesSync(keyFile, future, future)
+check('providerKeys service reloads by mtime', keyService.key('mdkj-stable') === 'rotated-key')
+writeFileSync(keyFile, 'file-key\n')
+
+// ── Command Code three-protocol mapping ────────────────────────────────────
+const commandCodeItems = parseCatalog({
+  data: [
+    { id: 'claude-sonnet-5', context_length: 1_000_000, supported_endpoints: ['/messages'] },
+    { id: 'gpt-6-astra', context_length: 1_050_000, supported_endpoints: ['/chat/completions', '/responses'] },
+    { id: 'deepseek/deepseek-v4-pro', supported_endpoints: ['/chat/completions', '/responses'] },
+    { id: 'skip', supported_endpoints: ['/embeddings'] },
+  ],
+})
+const commandCodeModels = toPiModels(commandCodeItems, { baseURL: 'https://api.commandcode.ai/provider', provider: 'command-code' })
+check('command-code maps three protocols', commandCodeModels.length === 3 && commandCodeModels[0]?.api === 'anthropic-messages' && commandCodeModels[1]?.api === 'openai-responses' && commandCodeModels[2]?.api === 'openai-completions')
+const commandCodeProvider = buildCommandCodeProvider(commandCodeItems, {
+  route: 'command-code',
+  displayName: 'Command Code',
+  baseURL: 'https://api.commandcode.ai/provider',
+  zdr: true,
+})
+check('command-code provider builds', commandCodeProvider.provider.getModels().length === 3)
+
+// ── plugin apply path ──────────────────────────────────────────────────────
+class StubLlm extends Service {
+  constructor(ctx) {
+    super(ctx, 'llm')
+    this.registrations = []
+  }
+  registerAdapter(routes, adapter) {
+    this.registrations.push({ routes, adapter })
+  }
+}
+const appContext = new Context()
+const llm = new StubLlm(appContext)
+await apply(appContext, Config({ configFile: configPath }))
+check('apply registers one adapter', llm.registrations.length === 1)
+check('apply registers all routes', JSON.stringify(llm.registrations[0]?.routes) === '["mdkj-stable","mdkj-cheap","zai-coding-cn"]')
+check('apply exposes providerKeys', appContext.get('providerKeys')?.key('mdkj-stable') === 'file-key')
+check('apply adapter lists custom models', (await llm.registrations[0]?.adapter.listModels('mdkj-stable')).length === 1)
+
+const missingContext = new Context()
+const missingLlm = new StubLlm(missingContext)
+await apply(missingContext, Config({ configFile: join(root, 'missing.yaml') }))
+check('missing config does not throw or register', missingLlm.registrations.length === 0)
+
+rmSync(root, { recursive: true, force: true })
 if (failures > 0) {
   console.error(`${failures} check(s) failed`)
   process.exit(1)

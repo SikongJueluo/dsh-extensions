@@ -1,0 +1,43 @@
+# Copy to $DSH_HOME/more-providers.yaml and adjust secret names.
+# secretDir defaults to $XDG_RUNTIME_DIR/agenix.
+providers:
+  zai-coding-cn:
+    kind: builtin
+    secretName: zhipu-coding-api-key
+
+  opencode-go:
+    kind: builtin
+    secretName: opencode-api-key
+
+  moonshotai:
+    kind: builtin
+    secretName: moonshot-api-key
+
+  minimax:
+    kind: builtin
+    secretName: minimax-coding-api-key
+
+  command-code:
+    kind: command-code
+    displayName: Command Code
+    secretName: commandcode-api-key
+
+  mdkj:
+    kind: custom
+    displayName: MDKJ
+    api: openai-responses
+    baseURL: https://mdkj.lol/v1
+    modelsURL: https://mdkj.lol/v1/models
+    models:
+      - id: gpt-6.1-sol
+        name: GPT-6.1 Sol
+        contextWindow: 524288
+        maxTokens: 32768
+        input: [text, image]
+    accounts:
+      stable:
+        displayName: MDKJ Stable
+        secretName: mdkj-stable-gpt-api-key
+      cheap:
+        displayName: MDKJ Cheap
+        secretName: mdkj-cheap-gpt-api-key

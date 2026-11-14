@@ -229,6 +229,21 @@ const opencodeBadJson = new OpenCodeGoSource({
 })
 check('opencode: invalid JSON resolves undefined', (await opencodeBadJson.get('opencode-go')) === undefined)
 
+// The optional providerKeys service wins over env; absent service keeps env behavior.
+const keyedCalls = []
+const keyedSource = new OpenCodeGoSource({
+  env: {},
+  getKey: (route) => route === 'opencode-go' ? 'service-key' : undefined,
+  fetchImpl: async (url, init) => {
+    keyedCalls.push({ url: String(url), auth: init?.headers?.authorization })
+    return new Response(JSON.stringify(opencodeLive), { status: 200, headers: { 'content-type': 'application/json' } })
+  },
+  logger: { warn() {} },
+})
+check('opencode: providerKeys makes a keyless env ready', keyedSource.ready('opencode-go') === true)
+const keyedSnapshot = await keyedSource.get('opencode-go')
+check('opencode: providerKeys key is used', keyedSnapshot !== undefined && keyedCalls[0]?.auth === 'Bearer service-key')
+
 // ── Command Code credits parsing (alpha billing routes, 2026-11) ────────────
 const commandCodeCredits = {
   credits: { monthlyCredits: 57.6, monthlyCreditsGranted: 70 },
@@ -317,6 +332,22 @@ const commandCodeCreditsDown = new CommandCodeSource({
   logger: { warn() {} },
 })
 check('command-code: credits failure resolves undefined', (await commandCodeCreditsDown.get('command-code')) === undefined)
+
+// ── GLM QuotaMonitor providerKeys resolver ─────────────────────────────────
+const serviceKeyCalls = []
+const serviceMonitor = new QuotaMonitor({
+  resolveKey: (provider) => provider === 'zai-coding-cn' ? 'service-glm-key' : undefined,
+  fetchImpl: async (url, init) => {
+    serviceKeyCalls.push(init?.headers?.authorization)
+    return new Response(JSON.stringify({
+      success: true,
+      data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 9, nextResetTime: 1790003600000 }] },
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  },
+  logger: { warn() {} },
+})
+const serviceGlm = await serviceMonitor.get('zai-coding-cn', { monitorBaseUrl: 'https://open.bigmodel.cn', apiKeyEnv: ['MISSING_ENV'] }, { force: true })
+check('glm: providerKeys resolver supplies the key', serviceGlm?.fiveHour?.percent === 9 && serviceKeyCalls[0] === 'Bearer service-glm-key')
 
 // ── GLM QuotaMonitor with a stub fetch (shared-monitor dedupe) ───────────────
 let fetchCalls = 0

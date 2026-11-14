@@ -37,6 +37,8 @@ export interface OpenCodeGoSourceOptions {
   logger?: SourceLogger
   timeoutMs?: number
   env?: NodeJS.ProcessEnv
+  /** Optional external key resolver (dsh-more-providers' `providerKeys`). */
+  getKey?: (provider: string) => string | undefined
 }
 
 function finite(value: unknown): number | undefined {
@@ -121,17 +123,21 @@ export class OpenCodeGoSource {
   private readonly logger: SourceLogger | undefined
   private readonly timeoutMs: number
   private readonly env: NodeJS.ProcessEnv
+  private readonly getKey: ((provider: string) => string | undefined) | undefined
 
   constructor(options: OpenCodeGoSourceOptions = {}) {
     this.fetchImpl = options.fetchImpl ?? ((url, init) => fetch(url, init))
     this.logger = options.logger
     this.timeoutMs = options.timeoutMs ?? 10_000
     this.env = options.env ?? process.env
+    this.getKey = options.getKey
   }
 
   /** The route's API key, when the route is known and the key is non-empty. */
   private apiKeyOf(route: string): string | undefined {
     if (route !== 'opencode-go') return undefined
+    const external = this.getKey?.(route)?.trim()
+    if (external !== undefined && external !== '') return external
     const apiKey = this.env[ENV_KEY]?.trim()
     return apiKey === undefined || apiKey === '' ? undefined : apiKey
   }
