@@ -88,7 +88,7 @@ reasoning 档位在模型选择器里按请求选择。
   providers/status/begin/poll/submit/decline/cancel/logout；
   每个厂商模块注册自己的 `ctx.llm` 路由与 `ctx.authorization` 登录流程；
   配置即插件行 config（0.2 无独立 settings 配置节）。
-- **浏览器半**（`client/client.js`）：设置页 "OAuth 登录" 分区，每厂商一张
+- **浏览器半**（`src/client/index.tsx`，构建为 `lib/client.js`）：设置页 "OAuth 登录" 分区，每厂商一张
   卡片（状态灯 / 登录流 / 模型 / 配置表单），经 Typed Client Remote 读状态、
   经共享通道完成登录。
 - **新厂商**：加 `src/providers/<id>/`（identity + oauth 协议 + token 存取 +

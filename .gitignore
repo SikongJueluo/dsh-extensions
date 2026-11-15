@@ -2,8 +2,8 @@
 node_modules/
 .pnpm-store/
 
-# build output
-lib/
+# build output only at package roots (source dirs such as src/lib stay tracked)
+/packages/*/lib/
 *.tsbuildinfo
 
 # pack output
@@ -26,3 +26,9 @@ lib/
 # bwrap/toolchain-access verification fixtures (sandbox)
 .bw-fixture/
 .tca-runtime-*/
+
+# storybook output
+storybook-static/
+
+# local scratch
+.tmp/

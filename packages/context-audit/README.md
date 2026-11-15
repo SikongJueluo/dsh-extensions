@@ -46,7 +46,7 @@ dsh --profile <profile> --dump-config   # 应出现 "# == dsh-context-audit" 层
 
 - 宿主半：无自有 service；命令走 `ctx.commands`，通道软注入 `connection` + `webServer`
   （connection RPC 信封，同 dsh-plan-usage 的语法），扫描在通道侧串行化防连点。
-- 浏览器半：手写 client.js（无 JSX），UI 只经 contribution slot 挂载
+- 浏览器半：`src/client/index.tsx`（TSX + 共享 UI，构建为 `lib/client.js`），UI 只经 contribution slot 挂载
   （`main` + `sidebar.panellist`），通信走本包 webServer 前缀路由的相对路径 fetch；
   交互全部 `onClick`，触摸可用。
 - 日志解析容错：损坏/半写的 zstd 日志跳过不报错；标题来自

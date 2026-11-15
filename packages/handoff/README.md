@@ -223,7 +223,7 @@ needs_user），审核 prompt 自动排队回**当前会话**（保留讨论上�
   `storageDomain` 用本地最小类型 shim 或 `ctx.get()` 可选获取，组合里没有对应服务时照常加载。
 - 模型偏好走插件自己的 storage domain（`handoff`），不写 `agentDefaultModel`；没有 `storageDomain`
   的组装只是不记忆，交接本身不受影响。
-- 浏览器 half：`client/client.js`（`window.__ModuleLoader__.load`，纯 JS + `React.createElement`），
+- 浏览器 half：`src/client/index.tsx`（TSX + 共享 `@dsh-extensions/ui`，构建为 `lib/client.js` 的 `window.__ModuleLoader__.load` factory），
   经 `dsh.client` 声明，注册 `shell.overlay` 槽；模型目录取 `ctx.remote.session.modelCatalog()`，
   工作区名单随 pending 请求经通道下发（无需新 remote 依赖），与宿主通信走 `/dsh-handoff` 前缀路由
   （`ctx.connection` 的 client-request/server-response 信封 + `ctx.webServer`），与 `oauth-providers`

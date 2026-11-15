@@ -29,9 +29,9 @@ describe('bundle manifest', () => {
       dsh: { bundle: { patch: string }, client: { platform: string } }
     }
     expect(pkg.main).toBe('./lib/index.js')
-    expect(pkg.exports['./client']).toBe('./client/client.js')
+    expect(pkg.exports['./client']).toBe('./lib/client.js')
     expect(pkg.dsh.bundle.patch).toBe('./cordis.patch.yml')
     expect(pkg.dsh.client.platform).toBe('web')
-    expect(pkg.files).toEqual(expect.arrayContaining(['lib', 'client', 'cordis.patch.yml', 'dev.patch.yml', 'README.md']))
+    expect(pkg.files).toEqual(expect.arrayContaining(['lib', 'cordis.patch.yml', 'dev.patch.yml', 'README.md']))
   })
 })

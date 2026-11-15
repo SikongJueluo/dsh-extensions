@@ -38,15 +38,15 @@
     "dsh-auto-env": "^0.2.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.1.0",
-    "@deepseek-ai/dsh-bash-local": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-bash-sandbox": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-sandbox": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-sandbox-policy": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-shell": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-shell-env": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-subprocess": "0.2.2-rc.1",
-    "@deepseek-ai/schemastery": "3.19.0",
+    "@deepseek-ai/cordis": "catalog:",
+    "@deepseek-ai/dsh-bash-local": "catalog:",
+    "@deepseek-ai/dsh-bash-sandbox": "catalog:",
+    "@deepseek-ai/dsh-sandbox": "catalog:",
+    "@deepseek-ai/dsh-sandbox-policy": "catalog:",
+    "@deepseek-ai/dsh-shell": "catalog:",
+    "@deepseek-ai/dsh-shell-env": "catalog:",
+    "@deepseek-ai/dsh-subprocess": "catalog:",
+    "@deepseek-ai/schemastery": "catalog:",
     "dsh-auto-env": "workspace:*"
   }
 }

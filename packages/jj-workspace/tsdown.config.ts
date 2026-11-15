@@ -1,11 +1,3 @@
-import { defineConfig } from 'tsdown'
+import { defineHostConfig } from '../../tooling/host/index.ts'
 
-export default defineConfig({
-  entry: ['src/index.ts', 'src/tool.ts'],
-  outDir: 'lib',
-  outExtensions: () => ({ js: '.js', dts: '.d.ts' }),
-  format: 'esm',
-  platform: 'node',
-  target: 'node20',
-  dts: true,
-})
+export default defineHostConfig({ entry: ['src/index.ts', 'src/tool.ts'] })

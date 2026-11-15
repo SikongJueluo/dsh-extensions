@@ -66,7 +66,7 @@ interface PlanUsageService {
 
 ## 设置页
 
-浏览器半（`client/client.js`）在设置页增加「Coding 套餐用量」分区：每个可监控路由一张卡——滚动窗（API 上报窗口大小时按实际显示，如 "5h 窗口"）、周窗、月度窗（OpenCode Go / Command Code；GLM 的月度 MCP 预算另有一条）的消耗进度条、重置倒计时（秒级跳动）、手动刷新，可见时每分钟自动刷新。Command Code 的月度窗额外显示 `$x.xx left` 形式的剩余额度。经本包自有通道 `POST /dsh-plan-usage/quota` 读取（与连接 RPC 同信封、同鉴权）。
+浏览器半（`src/client/index.tsx`，构建为 `lib/client.js`）在设置页增加「Coding 套餐用量」分区：每个可监控路由一张卡——滚动窗（API 上报窗口大小时按实际显示，如 "5h 窗口"）、周窗、月度窗（OpenCode Go / Command Code；GLM 的月度 MCP 预算另有一条）的消耗进度条、重置倒计时（秒级跳动）、手动刷新，可见时每分钟自动刷新。Command Code 的月度窗额外显示 `$x.xx left` 形式的剩余额度。经本包自有通道 `POST /dsh-plan-usage/quota` 读取（与连接 RPC 同信封、同鉴权）。
 
 ## 开发
 

@@ -40,11 +40,11 @@
     "@deepseek-ai/schemastery": "^3.19.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.1.0",
-    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-sandbox": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-sandbox-local": "0.2.2-rc.1",
-    "@deepseek-ai/schemastery": "3.19.0",
+    "@deepseek-ai/cordis": "catalog:",
+    "@deepseek-ai/dsh-llm": "catalog:",
+    "@deepseek-ai/dsh-sandbox": "catalog:",
+    "@deepseek-ai/dsh-sandbox-local": "catalog:",
+    "@deepseek-ai/schemastery": "catalog:",
     "vitest": "^3.2.4"
   }
 }

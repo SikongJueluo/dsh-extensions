@@ -11,22 +11,21 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./client": "./client/client.js",
+    "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
-    "client",
     "cordis.patch.yml",
     "dev.patch.yml",
     "README.md"
   ],
   "scripts": {
-    "build": "tsdown",
-    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsdown && vite build --config vite.client.config.ts",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
     "clean": "rm -rf lib",
-    "prepare": "tsdown",
+    "prepare": "tsdown && vite build --config vite.client.config.ts",
     "smoke": "node smoke.mjs"
   },
   "dsh": {
@@ -51,10 +50,16 @@
     "@deepseek-ai/schemastery": "^3.19.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.1.0",
-    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-commands": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-host-webserver": "0.2.2-rc.1",
-    "@deepseek-ai/schemastery": "3.19.0"
+    "@deepseek-ai/cordis": "catalog:",
+    "@deepseek-ai/dsh-client-connection": "catalog:",
+    "@deepseek-ai/dsh-commands": "catalog:",
+    "@deepseek-ai/dsh-host-webserver": "catalog:",
+    "@deepseek-ai/schemastery": "catalog:",
+    "@dsh-extensions/ui": "workspace:*",
+    "@tailwindcss/vite": "catalog:",
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "tailwindcss": "catalog:",
+    "vite": "catalog:"
   }
 }

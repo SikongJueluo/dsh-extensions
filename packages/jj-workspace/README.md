@@ -37,7 +37,7 @@
 
 Git 实现不是复制：本提供者在 `ctx.isolate('worktrees')` 的私有 realm 里构造**原 `WorktreeService`**，Git 请求原样委托。这样 Git 的 behavior/config/卸载都还是 stock 实现，只有 jj 分支是本包的。
 
-浏览器半（`client/client.js`）同样通过官方 slot 覆盖原控件：`conversation.hero.options` 的 `forge-panel.worktree` cell 用 priority `-1` 占据，jj（colocated 与非 colocated）默认请求 `null`（服务端解释为 `@`），用户从 `<select>` 显式选择 bookmark 时才传名字；纯 Git 沿用「当前分支」请求。请求仍走 Forge 的 `forgePanel.requestWorktree/cancelWorktree/follow`，首条消息等待、进度卡、重试/撤回都是 Forge 原有生命周期。Session / 目录 / 权限变化时先丢弃旧 status（并清空 Git 分支缓存）再重取，失败每 2 秒重试；未确认前不渲染、也不按旧 VCS 语义发请求，不把未确认的 jj 当 Git 回退。Session header 的 `jj-workspace.task` pill 显示统一任务状态；它只读、无操作入口。
+浏览器半（`src/client/index.tsx`）同样通过官方 slot 覆盖原控件：`conversation.hero.options` 的 `forge-panel.worktree` cell 用 priority `-1` 占据，jj（colocated 与非 colocated）默认请求 `null`（服务端解释为 `@`），用户从 `<select>` 显式选择 bookmark 时才传名字；纯 Git 沿用「当前分支」请求。请求仍走 Forge 的 `forgePanel.requestWorktree/cancelWorktree/follow`，首条消息等待、进度卡、重试/撤回都是 Forge 原有生命周期。Session / 目录 / 权限变化时先丢弃旧 status（并清空 Git 分支缓存）再重取，失败每 2 秒重试；未确认前不渲染、也不按旧 VCS 语义发请求，不把未确认的 jj 当 Git 回退。Session header 的 `jj-workspace.task` pill 显示统一任务状态；它只读、无操作入口。
 
 ## 配置（`jj-worktree` / `jj-forge-worktree` 行）
 
@@ -111,5 +111,5 @@ pnpm check                                # 全仓 typecheck + build + client sy
 - `src/service.ts` — `worktrees` 提供者：jj 分流 + 隔离 realm 里的 stock Git 委托 + status/tasks 只读状态。
 - `src/tool.ts` — VCS 中立的 `create_worktree`。
 - `src/channel.ts` — 浏览器 status/tasks 通道（连接 RPC 信封 + `requestRejection`）。
-- `client/client.js` — 覆盖原新会话控件 + Session header 任务 pill。
+- `src/client/index.tsx` — 覆盖原新会话控件 + Session header 任务 pill（构建为 `lib/client.js`）。
 - `test/`、`smoke.mjs`、`client-smoke.mjs` — 验证。

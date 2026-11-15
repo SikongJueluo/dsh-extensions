@@ -110,7 +110,7 @@ composer 左侧的「写入范围」按钮打开面板：
 
 - `pnpm --filter dsh-session-write-access build`：通过，生成 `lib/index.js` / `lib/index.d.ts`。
 - `vitest run`（本包）：5 个测试文件、61 项通过。覆盖根路径包含判定、路径准入/保护重叠/symlink 拒绝、缺省 `workspaceRoot` 不推导进程 cwd 与无 cwd 会话的显式拒绝、group 与 child 归属、慢父查询下的 pre-step 等待与 resolve fail-closed、申请去重与空理由拒绝、陈旧 revision、撤销不复活、Fork 首步闸门、首次 intent 写入失败/宿主 attach 失败/catch 内 member 失败、abort 后重启不复活的回归、`sandboxPolicy` 实际挂载、`workspaceWritableRoots` 包含授权目录且不包含未授权 child cwd、管理路由 401/状态返回，以及 bundle patch/manifest 断言。
-- `node scripts/check-client-syntax.mjs`：8 个 client 文件通过。
+- `pnpm check:client`：校验 `lib/client.js` 的 DSH factory 包装、外部请求、内联样式，并 materialize/apply/render 每个注册组件。
 - 启动回归（隔离 `DSH_HOME`、独立端口、进程 cwd = `$HOME`）：不声明 `workspaceRoot` 的新代码在两种 config 下都只余 1 条未激活（`experimental-inspector` 的已知问题）：(a) 旧部署 config（`protectedPaths` 含 `~/.config/nixos`）；(b) 目标 config（只保护 `~/.ssh` / `~/.gpg`、`protectPluginCode: false`）。旧代码在同样输入下报 `deployment root "/home/sikongjueluo" overlaps protected "/home/sikongjueluo/.ssh"` 并留下 23 条未激活。
 - 契约核对：安装包中 `dsh-fs-sandbox`、`dsh-bash-sandbox`、`dsh-terminal-bash`、`dsh-pwsh-sandbox` 均调用 `sandboxPolicy.resolve()`，因此本替换只改这一处策略即可同时覆盖文件围栏与进程沙箱。
 - `pnpm check`（仓库根）：通过（typecheck + 全包 build + client syntax，exit 0）。

@@ -9,19 +9,8 @@ import { Context, Service } from '@deepseek-ai/cordis'
 // the plugin must wait for it before registering the replacement worktree
 // control, which the plain-object mocks in client.test.mjs cannot enforce.
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
-let factory
-globalThis.window = {
-  __ModuleLoader__: {
-    load(definition) {
-      factory = definition.factory
-    },
-  },
-}
-await import('../client/client.js')
-const client = factory((name) => {
-  if (name === 'react') return React
-  throw new Error(`unexpected module ${name}`)
-})
+import { apply as applyClient, inject as clientInject } from '../src/client/index.tsx'
+const client = { apply: applyClient, inject: clientInject }
 
 const PANEL = {
   directory: '/fixture',

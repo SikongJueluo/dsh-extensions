@@ -1,0 +1,51 @@
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme) prefix(dshx);
+@import "tailwindcss/utilities.css" layer(utilities) prefix(dshx);
+@import "../packages/ui/src/theme.css";
+
+@source "../packages/ui/src/**/*.tsx";
+@source "./**/*.tsx";
+
+/*
+ * Storybook-only stand-in for the host's public alias tokens, copied from the
+ * pinned DSH 0.2.2-rc.1 theme package so stories render on the real palette.
+ * Production CSS never defines these; it reads the live body variables.
+ */
+.storybook-canvas[data-theme="light"] {
+  --dsw-alias-bg-base: #ffffff;
+  --dsw-alias-bg-layer-1: #ffffff;
+  --dsw-alias-bg-layer-2: #ffffff;
+  --dsw-alias-border-l1: #0000000a;
+  --dsw-alias-border-l2: #0000001a;
+  --dsw-alias-brand-primary: #0f1115;
+  --dsw-alias-label-primary: #000000;
+  --dsw-alias-label-secondary: #61666b;
+  --dsw-alias-state-error-primary: #ec1313;
+  --dsw-alias-state-warn-primary: #f59e0b;
+  --dsw-alias-state-success-primary: #22c55e;
+  --dsw-alias-state-idle-primary: #d4d4d4;
+}
+
+.storybook-canvas[data-theme="dark"] {
+  --dsw-alias-bg-base: #151517;
+  --dsw-alias-bg-layer-1: #232324;
+  --dsw-alias-bg-layer-2: #2c2c2e;
+  --dsw-alias-border-l1: #ffffff0f;
+  --dsw-alias-border-l2: #ffffff1f;
+  --dsw-alias-brand-primary: #f9fafb;
+  --dsw-alias-label-primary: #ffffff;
+  --dsw-alias-label-secondary: #adb2b8;
+  --dsw-alias-state-error-primary: #ec1313;
+  --dsw-alias-state-warn-primary: #f59e0b;
+  --dsw-alias-state-success-primary: #22c55e;
+  --dsw-alias-state-idle-primary: #d4d4d4;
+}
+
+.storybook-canvas {
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}

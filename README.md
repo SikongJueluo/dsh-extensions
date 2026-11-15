@@ -22,6 +22,8 @@ Out-of-tree [DeepSeek Harness](https://www.deepseek.com/harness/en/) 插件 bund
 | [`dsh-session-write-access`](packages/session-write-access/) | 持久化的 Session 多项目写入授权：替换 `sandboxPolicy`，用户可在面板提前添加或批准 Agent 申请的目录，主会话与本地子 Agent 共享、重启恢复；文件工具与 bash 同一策略，显式「Fork 并继承授权」；接入与回滚见包 README |
 | [`dsh-toolchain-access`](packages/toolchain-access/) | 沙箱窄目录授权：默认开启 uv/Cargo/pnpm/Gradle/Maven 缓存、共享锁目录与 Semgrep 私有 state，workspace-write 下精确 bind（钉版 bwrap 布局、fail-closed）；可显式缩减或全关，整套工具链安装另行 opt-in；接入见 [plan-dsh-toolchain-access.md](docs/plan-dsh-toolchain-access.md) |
 | [`dsh-recursive-skills`](packages/recursive-skills/) | 分类目录里嵌套的 `SKILL.md` 自动进入原生技能目录：追加 provider、按需加载、增删与 frontmatter 变化热刷新；原生直接技能仍优先；接入见 [plan-dsh-recursive-skills.md](docs/plan-dsh-recursive-skills.md) |
+| [`dsh-more-providers`](packages/more-providers/) | 用 YAML 注册额外 LLM 厂商（当前：Command Code 订阅），模型目录按三种 wire 协议映射 |
+| [`dsh-triggers`](packages/triggers/) | 双会话 execute → review → rework 触发循环：轮次预算、暂停/恢复、会话内浏览器视图 |
 
 ## 安装
 
@@ -33,6 +35,10 @@ dsh --profile <profile>
 
 - 插件按 profile 安装，多个 profile 需分别 `add`。
 - 从 git 安装时 pnpm ≥ 10 会拦截 `prepare` 脚本，需按提示在 profile 的 `pnpm-workspace.yaml` 里 `allowBuilds` 放行——等于授权安装期执行代码，先审阅并钉住 commit。
+
+## 客户端 UI
+
+八个浏览器半插件共享 [`packages/ui`](packages/ui/)：shadcn 组合 API + Base UI 原语 + Tailwind CSS v4，颜色只使用公开的 `--dsw-alias-*` token。它是私有 workspace 包，构建期按需打进各插件的 `lib/client.js`，不单独安装或启用。构建约定见 [packages/ui/README.md](packages/ui/README.md)，迁移范围与验证记录见 [docs/client-ui-migration.md](docs/client-ui-migration.md)。
 
 ## 开发
 

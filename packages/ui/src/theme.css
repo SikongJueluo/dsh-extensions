@@ -1,0 +1,80 @@
+@theme inline {
+  /* Public DSH alias tokens only. Everything here resolves to the host's
+     light/dark variables at use time, so no color is hard-coded here. */
+  --color-bg: var(--dsw-alias-bg-base);
+  --color-surface: var(--dsw-alias-bg-layer-1);
+  --color-surface-2: var(--dsw-alias-bg-layer-2);
+  --color-border: var(--dsw-alias-border-l1);
+  --color-border-strong: var(--dsw-alias-border-l2);
+  --color-fg: var(--dsw-alias-label-primary);
+  --color-fg-secondary: var(--dsw-alias-label-secondary);
+  --color-fg-muted: color-mix(in srgb, var(--dsw-alias-label-secondary) 72%, transparent);
+  --color-brand: var(--dsw-alias-brand-primary);
+  --color-on-brand: var(--dsw-alias-bg-base);
+  --color-danger: var(--dsw-alias-state-error-primary);
+  --color-warn: var(--dsw-alias-state-warn-primary);
+  --color-ok: var(--dsw-alias-state-success-primary);
+
+  --radius-control: 10px;
+  --radius-card: 14px;
+
+  --text-2xs: 11px;
+  --text-2xs--line-height: 16px;
+  --text-xs: 12px;
+  --text-xs--line-height: 18px;
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+  --text-base: 14px;
+  --text-base--line-height: 22px;
+}
+
+/* Scoped reset: the host owns global CSS, so we replace only Preflight's
+   effects inside our own roots instead of importing it. */
+@layer base {
+  .dshx-root,
+  .dshx-root *,
+  .dshx-root *::before,
+  .dshx-root *::after {
+    box-sizing: border-box;
+    border: 0 solid var(--dsw-alias-border-l1);
+  }
+
+  .dshx-root {
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 20px;
+    color: var(--dsw-alias-label-primary);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .dshx-root button,
+  .dshx-root input,
+  .dshx-root select,
+  .dshx-root textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  .dshx-root button {
+    background: transparent;
+    background-image: none;
+    appearance: none;
+  }
+
+  .dshx-root button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  .dshx-root :focus-visible {
+    outline: 2px solid var(--dsw-alias-brand-primary);
+    outline-offset: 1px;
+  }
+
+  .dshx-root h1,
+  .dshx-root h2,
+  .dshx-root h3,
+  .dshx-root h4,
+  .dshx-root p {
+    margin: 0;
+  }
+}

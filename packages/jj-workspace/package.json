@@ -15,24 +15,23 @@
       "types": "./lib/tool.d.ts",
       "default": "./lib/tool.js"
     },
-    "./client": "./client/client.js",
+    "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
-    "client",
     "cordis.patch.yml",
     "dev.patch.yml",
     "README.md"
   ],
   "scripts": {
-    "build": "tsdown",
-    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsdown && vite build --config vite.client.config.ts",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
     "test": "vitest run",
     "clean": "rm -rf lib",
-    "prepare": "tsdown",
-    "smoke": "node smoke.mjs && node client-smoke.mjs"
+    "prepare": "tsdown && vite build --config vite.client.config.ts",
+    "smoke": "node smoke.mjs"
   },
   "dsh": {
     "bundle": {
@@ -65,22 +64,27 @@
     "@deepseek-ai/schemastery": "^3.19.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.1.0",
-    "@deepseek-ai/dsh-agent": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-experimental-worktree": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-fs": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-host-webserver": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-sandbox": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-sandbox-policy": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-session": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-subprocess": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-timeout": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-working-directory": "0.2.2-rc.1",
-    "@deepseek-ai/schemastery": "3.19.0",
-    "vitest": "^3.2.4",
-    "react": "^19.3.1",
-    "react-test-renderer": "^19.3.1"
+    "@deepseek-ai/cordis": "catalog:",
+    "@deepseek-ai/dsh-agent": "catalog:",
+    "@deepseek-ai/dsh-client-connection": "catalog:",
+    "@deepseek-ai/dsh-experimental-worktree": "catalog:",
+    "@deepseek-ai/dsh-fs": "catalog:",
+    "@deepseek-ai/dsh-host-webserver": "catalog:",
+    "@deepseek-ai/dsh-sandbox": "catalog:",
+    "@deepseek-ai/dsh-sandbox-policy": "catalog:",
+    "@deepseek-ai/dsh-session": "catalog:",
+    "@deepseek-ai/dsh-subprocess": "catalog:",
+    "@deepseek-ai/dsh-timeout": "catalog:",
+    "@deepseek-ai/dsh-tools": "catalog:",
+    "@deepseek-ai/dsh-working-directory": "catalog:",
+    "@deepseek-ai/schemastery": "catalog:",
+    "@dsh-extensions/ui": "workspace:*",
+    "@tailwindcss/vite": "catalog:",
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "react-test-renderer": "catalog:",
+    "tailwindcss": "catalog:",
+    "vite": "catalog:",
+    "vitest": "^3.2.4"
   }
 }

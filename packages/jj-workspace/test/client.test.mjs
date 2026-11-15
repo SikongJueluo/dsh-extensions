@@ -1,25 +1,15 @@
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Select } from '@dsh-extensions/ui'
 
 // The browser module registers through the page loader; this harness keeps the
 // real component, effects, and Forge Remote calls, and replaces only the page
 // services around them. Panel frames are queued so tests can drive several
 // directory/permission states through the real stream effect.
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
-let factory
-globalThis.window = {
-  __ModuleLoader__: {
-    load(definition) {
-      factory = definition.factory
-    },
-  },
-}
-await import('../client/client.js')
-const client = factory((name) => {
-  if (name === 'react') return React
-  throw new Error(`unexpected module ${name}`)
-})
+import { apply as applyClient, inject as clientInject } from '../src/client/index.tsx'
+const client = { apply: applyClient, inject: clientInject }
 
 const t = (key, params) => (params === undefined ? key : `${key}${JSON.stringify(params)}`)
 const calls = []
@@ -220,11 +210,11 @@ describe('new-session worktree control', () => {
       panel: jjPanel({ request: { from: null } }),
       status: () => Promise.resolve({ kind: 'jj', hasGit: false, blocker: null, bookmarks: ['base-bm'] }),
     })
-    const select = renderer.root.findByType('select')
+    const select = renderer.root.findByType(Select)
     expect(select.props.value).toBe('@')
-    expect(select.findAllByType('option').map((option) => option.props.value)).toEqual(['@', 'base-bm'])
+    expect(select.props.options.map((option) => option.value)).toEqual(['@', 'base-bm'])
     await act(async () => {
-      select.props.onChange({ currentTarget: { value: 'base-bm' } })
+      select.props.onValueChange('base-bm')
       await flush()
     })
     expect(calls).toContainEqual(['request', 'session-1', 'base-bm'])
@@ -251,10 +241,10 @@ describe('new-session worktree control', () => {
     await act(async () => {
       await flush()
     })
-    const select = renderer.root.findByType('select')
-    expect(select.findAllByType('option').map((option) => option.props.value)).toEqual(['main', 'other'])
+    const select = renderer.root.findByType(Select)
+    expect(select.props.options.map((option) => option.value)).toEqual(['main', 'other'])
     await act(async () => {
-      select.props.onChange({ currentTarget: { value: 'other' } })
+      select.props.onValueChange('other')
       await flush()
     })
     expect(calls).toContainEqual(['request', 'session-1', 'other'])
@@ -432,7 +422,7 @@ describe('task pill', () => {
         baseChange: 'base',
       },
     ])
-    const pill = renderer.root.findByProps({ className: 'dsh-jjw-task' })
+    const pill = renderer.root.findByProps({ 'data-state': 'moved' })
     expect(pill.props['data-state']).toBe('moved')
     expect(pill.props.title).toContain('taskDetail')
     expect(JSON.stringify(renderer.toJSON())).toContain('taskMoved')

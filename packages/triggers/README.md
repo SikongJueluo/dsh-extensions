@@ -191,7 +191,7 @@ dsh plugin --profile <name> add ./packages/triggers
 - 宿主运行时 peer：`@deepseek-ai/cordis`、`dsh-llm`（defineTool 类型）、`dsh-storage-domain`
   （+ zod，宿主自带）、`dsh-tools`、`schemastery`；`dsh-agent` / `dsh-session` /
   `dsh-api-session-controller` / `dsh-client-connection` / `dsh-host-webserver` 为 type-only。
-- 浏览器 half：`client/client.js`（React.createElement，无 JSX），唯一 slot：
+- 浏览器 half：`src/client/index.tsx`（TSX + 共享 UI，构建为 `lib/client.js`），唯一 slot：
   `conversation.view`（id `triggers`，order 30）；通信走 `/dsh-triggers` 前缀路由
   （connection 信封 + webServer）。
 - 发布可选服务 `triggerBindings`（`ctx.get('triggerBindings')`）；无 handoff 的组装照常加载。
