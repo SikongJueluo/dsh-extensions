@@ -49,7 +49,7 @@ dsh 本体与 `$DSH_HOME`（`~/.dsh` 下 profiles、patch 层、bin 等运行时
 - **bundle**：带 `dsh.bundle` 声明的 npm 包 = 一层配置；`cordis.patch.yml` 的行以 `id` + `name`（npm 包名）表示。
 - **profile**：`$DSH_HOME/profiles/<name>` 下的可启动组合。层序：bundles → profile 自身 patch → 用户层 patch → `--patch` overlays。后层按 id 覆盖前层，且 config 整体替换而非深合并——覆盖一行必须重述它需要的所有键。
 - **双半插件**：`package.json` 的 `dsh.client`（`platform` + `inject` 依赖图）声明浏览器半插件，代码经 `exports["./client"]` 装载；宿主半插件走 `lib/index.js`。两侧经 Typed Client Remote wire（`ctx.remote.*`）或插件自有 webServer 前缀路由通信。
-  浏览器半的源码在 `src/client/index.tsx`，由 Vite 构建成 `lib/client.js`：Vite 负责 TSX、组件打包与 Tailwind，`tooling/client` 把它包成 DSH 的 `window.__ModuleLoader__.load({ id, factory })`，并把抽取出的 CSS 内联进 factory（loader 会在插件卸载/HMR 时清理这个 `<style data-plugin>`）。只把 `react` / `react/jsx-runtime` / `react-dom` / `react-dom/client` 留给宿主平台表，Base UI 等第三方依赖全部打进 bundle。`exports["./client"]` 指向 `./lib/client.js`；`pnpm check` 的 `scripts/check-client.mjs` 校验产物包装、注册 id、外部请求、样式内联，并实际 materialize factory、执行 `apply`、渲染每个注册的 slot 组件。
+  浏览器半的源码在 `src/client/index.tsx`，由 Vite 构建成 `lib/client.js`：Vite 负责 TSX、组件打包与 Tailwind，`tooling/client` 把它包成 DSH 的 `window.__ModuleLoader__.load({ id, factory })`，并把抽取出的 CSS 内联进 factory（loader 会在插件卸载/HMR 时清理这个 `<style data-plugin>`）。只把 `react` / `react/jsx-runtime` / `react-dom` / `react-dom/client` 留给宿主平台表，Base UI 等第三方依赖全部打进 bundle；唯一例外是钉版的 `@deepseek-ai/dsh-client-ui-primitives`（经 `@dsh-extensions/ui/host` 使用），必须在 `dsh.client.external` 精确声明。`exports["./client"]` 指向 `./lib/client.js`；`pnpm check` 的 `scripts/check-client.mjs` 校验产物包装、注册 id、外部请求、样式内联，并实际 materialize factory、执行 `apply`、渲染每个注册的 slot 组件。
 - **凭据**：秘密只存 `ctx.credentials`（`<scope>/<id>`），`modifyRecord` 的独占写窗口即跨进程刷新锁；settings 只有引用。
 - **settings（0.2 模型）**：无自定义配置节——`ctx.settings` 自动把每个在挂插件行的 `Config` schema 投影成表单，namespace ≡ profile 行 id；编辑写入即改行 config。volatile 字段（`.volatile()`）热生效不重挂（通过 `Volatile.get()` 读活值、监听 `loader/volatile-update`），非 volatile 字段编辑则重挂插件行。LLM 目录的 `settingsNs` 填行 id、`settingsPath` 填行 config 内的路径。
 - service（`ctx.llm` / `ctx.settings` / `ctx.authorization` / `ctx.credentials` / `ctx.logger` 等）由宿主提供；`inject` 列表让 `apply` 等到 service 就绪才执行，`ctx.inject([...], fn)` 等运行期才出现的 service。
@@ -67,6 +67,7 @@ dsh 本体与 `$DSH_HOME`（`~/.dsh` 下 profiles、patch 层、bin 等运行时
 
 - [`packages/ui`](packages/ui/) 是私有 workspace 包（不单独安装/启用）：shadcn 组合 API + Base UI 原语 + Tailwind CSS v4，颜色只映射公开的 `--dsw-alias-*` token。各插件构建时把用到的组件打进自己的 `lib/client.js`。
 - `tooling/host` 是共享 tsdown 预设；`tooling/client` 是共享 Vite→DSH factory 构建（含样式内联）。包内配置只写入口与真实差异。
+- `packages/ui/src/host/` 是有意接受的宿主耦合：把钉版 `@deepseek-ai/dsh-client-ui-primitives` 作为 `@dsh-extensions/ui/host` 子路径导出（不进 barrel），供需要原生控件观感的插件复用；它随宿主 release 精确钉版，升级 dsh 时核对组件类型/样式/行为，见 [docs/client-ui-migration.md](docs/client-ui-migration.md)。宿主 `Menu` 会自带一个 `aria-hidden` 的 `data-menu-backing` 装饰节点到 body（已批准的窄例外，关闭即移除）；业务代码仍不得向 body 挂载。
 - 版本集中在 `pnpm-workspace.yaml` 的 `catalog:`；包仍声明自己的真实 dev/peer/runtime 依赖。React 对齐宿主 18.3.1。新增客户端按 [packages/ui/README.md](packages/ui/README.md) 的三行 `styles.css` 与 `Root`/`dshx:` 规则写；本次迁移的范围、验证与未验证项见 [docs/client-ui-migration.md](docs/client-ui-migration.md)。
 
 ## 新增插件

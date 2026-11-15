@@ -8,6 +8,15 @@ The stack is shadcn/ui composition on **Base UI** primitives
 (`@base-ui/react`), **Tailwind CSS v4** utilities, and the public DSH theme
 tokens. It is not a general-purpose component library.
 
+The one exception is `src/host/primitives.ts`: it re-exports the host's own
+`@deepseek-ai/dsh-client-ui-primitives` for controls whose look and keyboard
+behavior must match the stock UI. That package is pinned to the host release,
+requested from the shell's frozen module table at runtime, and never bundled.
+Import it from the `@dsh-extensions/ui/host` subpath so plugins that do not use
+it never request the module. Those devDependencies below `@shikijs/langs` exist
+only because the published primitives manifest omits its own runtime imports;
+they serve Storybook and the jsdom tests and never reach a production bundle.
+
 ## Layout
 
 | Path | Purpose |
@@ -16,6 +25,7 @@ tokens. It is not a general-purpose component library.
 | `src/theme.css` | `@theme inline` mappings from `--dsw-alias-*` tokens, scoped base rules |
 | `src/lib/cn.ts` | `clsx` + `tailwind-merge`, configured for the `dshx:` utility prefix |
 | `src/types.ts` | the client-half context contract (`apply(ctx)` surface) |
+| `src/host/primitives.ts` | the pinned host `dsh-client-ui-primitives` re-exports, exposed as `@dsh-extensions/ui/host` |
 
 ## Rules
 
@@ -30,15 +40,21 @@ tokens. It is not a general-purpose component library.
 3. **Prefix every utility with `dshx:`.** Variants come after the prefix:
    `dshx:hover:bg-surface-2`, `dshx:pointer-coarse:min-h-11`,
    `dshx:data-[checked]:bg-brand`.
-4. **Interactive controls are Base UI.** `Switch`, `Select`, and `Dialog` are
-   the shared wrappers. Their popups portal into a container inside the
-   component subtree, not `document.body`, so theme inheritance and slot DOM
+4. **Interactive controls are Base UI by default.** `Switch`, `Select`, and
+   `Dialog` are the shared wrappers. Their popups portal into a container inside
+   the component subtree, not `document.body`, so theme inheritance and slot DOM
    ownership stay intact. Dialogs keep Base UI's focus trap, Escape handling,
    and focus return. `Select` defaults to an `align="start"` popup and offers
-   `variant="ghost"` for the DSH inline selector (transparent, borderless,
-   compact, arrow at the right); use the ghost variant inside dense controls
-   such as the jj-workspace hero row. Pass `align="end"` when the control sits
-   at the right edge so the popup keeps its right edge fixed and expands left.
+   `variant="ghost"` for DSH inline selectors; it stays the shared control for
+   ordinary selects. Pass `align="end"` when the control sits at the right edge
+   so the popup keeps its right edge fixed and expands left.
+   The jj-workspace worktree option is the exception: it uses the host `Menu`
+   and `Tooltip` through `@dsh-extensions/ui/host`, renders the menu in place,
+   flips to the side with room, and caps the list height instead of portaling
+   out of the hero scroll container. The host `MenuSurface` itself still
+   portals one inert `aria-hidden` `[data-menu-backing]` decoration to the body
+   (removed on close/unmount); that host-managed node is the only approved body
+   exception, and plugin code must not add body nodes itself.
 5. **Touch first.** Click handlers only; hover is an enhancement. Shared
    controls add `pointer-coarse` minimum targets. Tests for a new component
    should cover disabled, loading/empty, error, and long-content states.
@@ -73,8 +89,11 @@ tsconfig.client.json    # tsconfig.client.base.json + src/client
 
 `pnpm build` runs tsdown for the host half and `vite build --config vite.client.config.ts` for the client half (the client-only name keeps Vitest from loading the library build settings). Vite
 externalizes only the frozen platform table (`react`, `react/jsx-runtime`,
-`react/jsx-dev-runtime`, `react-dom`, `react-dom/client`); Base UI, CVA,
-tailwind-merge, and lucide are bundled.
+`react/jsx-dev-runtime`, `react-dom`, `react-dom/client`) plus an exact host
+module a package declares in `dsh.client.external` (today only
+`@deepseek-ai/dsh-client-ui-primitives`); Base UI, CVA, tailwind-merge, and
+lucide are bundled. `pnpm check:client` rejects a request that is neither a
+platform module nor a declared external.
 
 ## Adding a control
 

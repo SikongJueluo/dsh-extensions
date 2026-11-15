@@ -44,6 +44,9 @@
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-experimental-client-ui-forge"
+      ],
+      "external": [
+        "@deepseek-ai/dsh-client-ui-primitives"
       ]
     }
   },
@@ -79,6 +82,7 @@
     "@deepseek-ai/dsh-working-directory": "catalog:",
     "@deepseek-ai/schemastery": "catalog:",
     "@dsh-extensions/ui": "workspace:*",
+    "@storybook/react-vite": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@types/react": "catalog:",
     "react": "catalog:",

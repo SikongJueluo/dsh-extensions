@@ -1,7 +1,7 @@
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Select } from '@dsh-extensions/ui'
+import { Menu, Tooltip } from '@dsh-extensions/ui/host'
 
 // The browser module registers through the page loader; this harness keeps the
 // real component, effects, and Forge Remote calls, and replaces only the page
@@ -210,11 +210,14 @@ describe('new-session worktree control', () => {
       panel: jjPanel({ request: { from: null } }),
       status: () => Promise.resolve({ kind: 'jj', hasGit: false, blocker: null, bookmarks: ['base-bm'] }),
     })
-    const select = renderer.root.findByType(Select)
-    expect(select.props.value).toBe('@')
-    expect(select.props.options.map((option) => option.value)).toEqual(['@', 'base-bm'])
+    const menu = renderer.root.findByType(Menu)
+    expect(menu.props.selectedId).toBe('@')
+    expect(menu.props.items.filter((item) => item.id !== 'base').map((item) => item.id)).toEqual([
+      '@',
+      'base-bm',
+    ])
     await act(async () => {
-      select.props.onValueChange('base-bm')
+      menu.props.onSelect('base-bm')
       await flush()
     })
     expect(calls).toContainEqual(['request', 'session-1', 'base-bm'])
@@ -241,10 +244,13 @@ describe('new-session worktree control', () => {
     await act(async () => {
       await flush()
     })
-    const select = renderer.root.findByType(Select)
-    expect(select.props.options.map((option) => option.value)).toEqual(['main', 'other'])
+    const menu = renderer.root.findByType(Menu)
+    expect(menu.props.items.filter((item) => item.id !== 'base').map((item) => item.id)).toEqual([
+      'main',
+      'other',
+    ])
     await act(async () => {
-      select.props.onValueChange('other')
+      menu.props.onSelect('other')
       await flush()
     })
     expect(calls).toContainEqual(['request', 'session-1', 'other'])
@@ -375,7 +381,9 @@ describe('new-session worktree control', () => {
     })
     const input = blocked.root.findByType('input')
     expect(input.props.disabled).toBe(true)
-    expect(blocked.root.findByType('label').props.title).toBe('blockerReadOnly')
+    expect(blocked.root.findAllByType(Tooltip).map((tooltip) => tooltip.props.label)).toContain(
+      'blockerReadOnly',
+    )
   })
 
   it('allows a requested workspace to be withdrawn while blocked', async () => {

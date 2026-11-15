@@ -17,6 +17,30 @@ const nodeRequire = createRequire(import.meta.url)
 const React = nodeRequire('react')
 const { renderToStaticMarkup } = nodeRequire('react-dom/server')
 
+// Host primitives ship as browser ESM with CSS Module imports. The artifact
+// check materializes the real pinned module (identity, exports, SSR markup) and
+// stubs only the CSS modules: class names drive the browser's stylesheet and
+// have no meaning in this Node process. Storybook/Vitest load the same files
+// through Vite with real CSS.
+const { registerHooks } = nodeRequire('node:module')
+// Node 20 cannot require the ESM package at all; it falls back to a shape stub
+// below, while the Vitest/Storybook runs still exercise the real module.
+const canMaterializeHostEsm = typeof registerHooks === 'function'
+if (canMaterializeHostEsm) {
+  registerHooks({
+    load(url, context, nextLoad) {
+      if (url.endsWith('.css')) {
+        return {
+          format: 'module',
+          source: 'export default new Proxy({}, { get: (_, key) => String(key) })',
+          shortCircuit: true,
+        }
+      }
+      return nextLoad(url, context)
+    },
+  })
+}
+
 // Base UI's floating primitives use useLayoutEffect; server rendering (used
 // only to prove a component mounts) logs a harmless warning for each one.
 const consoleError = console.error
@@ -33,6 +57,47 @@ const PLATFORM_REQUESTS = new Set([
   'react-dom',
   'react-dom/client',
 ])
+
+// Exact host rows a client half may request from the shell's frozen table. A
+// package must also declare the same name in `dsh.client.external`.
+const HOST_REQUESTS = new Set(['@deepseek-ai/dsh-client-ui-primitives'])
+const PRIMITIVES = '@deepseek-ai/dsh-client-ui-primitives'
+
+/** Module-shape stand-in for runtimes that cannot require the host ESM package. */
+function stubHostPrimitives() {
+  const component = () => null
+  return new Proxy({}, { get: () => component })
+}
+
+function checkRequire(request) {
+  if (!canMaterializeHostEsm && request === PRIMITIVES) return stubHostPrimitives()
+  return nodeRequire(request)
+}
+
+const failures = []
+
+// The primitives coupling is only sound when the installed package is the exact
+// version pinned for this host release; a stale or floating install would
+// typecheck against a different module than the shell serves.
+const catalog = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8')
+const pinnedPrimitives = catalog.match(/^\s+'@deepseek-ai\/dsh-client-ui-primitives':\s*(\S+)\s*$/m)?.[1]
+if (pinnedPrimitives === undefined) {
+  failures.push(['catalog', [`${PRIMITIVES} is not pinned in pnpm-workspace.yaml`]])
+} else {
+  try {
+    const installed = JSON.parse(
+      readFileSync(join(root, 'node_modules', PRIMITIVES, 'package.json'), 'utf8'),
+    ).version
+    if (installed !== pinnedPrimitives) {
+      failures.push([
+        'catalog',
+        [`installed ${PRIMITIVES} ${installed} != pinned ${pinnedPrimitives}`],
+      ])
+    }
+  } catch {
+    failures.push(['catalog', [`${PRIMITIVES} is not installed; run pnpm install`]])
+  }
+}
 
 function fakeElement() {
   return {
@@ -98,7 +163,6 @@ function createContext(registrations, cleanups) {
   return context
 }
 
-const failures = []
 const checked = []
 
 for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })) {
@@ -115,6 +179,15 @@ for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })
   const problems = []
   let documentStub
 
+  const declared = Array.isArray(manifest.dsh.client.external) ? manifest.dsh.client.external : []
+  for (const name of declared) {
+    if (!HOST_REQUESTS.has(name) && !PLATFORM_REQUESTS.has(name)) {
+      problems.push(`unknown dsh.client.external entry ${JSON.stringify(name)}`)
+    }
+  }
+  const allowedRequests = new Set([...PLATFORM_REQUESTS, ...declared])
+
+
   if (!target) problems.push('exports["./client"] is missing')
   if (existsSync(join(dir, 'client'))) problems.push('legacy client/ source directory still present')
   if (!existsSync(file)) {
@@ -129,8 +202,8 @@ for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })
     }
     const requires = [...new Set([...code.matchAll(/\brequire\("([^"]+)"\)/g)].map((match) => match[1]))]
     for (const request of requires) {
-      if (!PLATFORM_REQUESTS.has(request)) {
-        problems.push(`non-platform require(${JSON.stringify(request)})`)
+      if (!allowedRequests.has(request)) {
+        problems.push(`undeclared require(${JSON.stringify(request)})`)
       }
     }
 
@@ -146,7 +219,7 @@ for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })
           },
         },
         document: documentStub,
-        require: (request) => nodeRequire(request),
+        require: checkRequire,
         console,
         setTimeout: () => 0,
         clearTimeout: () => {},
@@ -168,7 +241,7 @@ for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })
       }
       const registrations = []
       try {
-        const exports = loaded.factory((request) => nodeRequire(request))
+        const exports = loaded.factory(checkRequire)
         if (typeof exports.apply !== 'function') problems.push('missing apply export')
         if (!Array.isArray(exports.inject)) problems.push('missing inject export')
         if (typeof exports.apply === 'function') {

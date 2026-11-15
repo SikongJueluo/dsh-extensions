@@ -4,16 +4,15 @@
 // (`forge-panel.worktree`, priority -1), so unloading this plugin restores the
 // stock control. Requests still go through the stock Forge Remote, which keeps
 // the first-message hold, progress card, retry, and withdraw lifecycle.
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Root,
-  Select,
   cn,
   type DshClientContext,
-  type SelectOption,
   type SlotRegistration,
   type SlotsService,
 } from '@dsh-extensions/ui'
+import { WorktreeOption, type WorktreeChoice } from './worktree-option'
 import './styles.css'
 
 const LOCALE_NS = 'jj-workspace'
@@ -30,7 +29,9 @@ const en: Record<string, string> = {
   hintGit: 'Create a Git worktree from the selected branch and enter it for this session.',
   requested: 'The workspace is created before the first message.',
   baseAt: 'current change (@)',
-  baseCurrent: '{name} (current)',
+  baseMenuJj: 'Base change or bookmark',
+  baseMenuGit: 'Base branch',
+  currentNote: 'current',
   baseHead: 'HEAD',
   detached: 'detached {commit}',
   blockerReadOnly: 'This session is read-only.',
@@ -55,7 +56,9 @@ const zh: Record<string, string> = {
   hintGit: '从所选分支创建 Git 工作树，并让本会话在其中工作。',
   requested: '首条消息发送前会创建工作区。',
   baseAt: '当前 change (@)',
-  baseCurrent: '{name}（当前）',
+  baseMenuJj: '基准 change 或 bookmark',
+  baseMenuGit: '选择基准分支',
+  currentNote: '当前',
   baseHead: 'HEAD',
   detached: 'detached {commit}',
   blockerReadOnly: '本会话是只读的。',
@@ -404,7 +407,7 @@ function Toggle({ sessionId, t, status, follow, branches, request, cancel, usePr
       })
   }
 
-  let base: ReactNode
+  let choices: WorktreeChoice[] = []
   if (requested && usable) {
     const optionValues: string[] = []
     if (jj) {
@@ -419,78 +422,36 @@ function Toggle({ sessionId, t, status, follow, branches, request, cancel, usePr
       if (currentBranch === null && baseValue === '') optionValues.push(DETACHED)
       optionValues.push(...listed)
     }
-    const options: SelectOption[] = optionValues.map((name) => ({
+    choices = optionValues.map((name) => ({
       value: name === '' ? DETACHED : name,
       label:
         name === '@'
           ? t('baseAt')
           : name === ''
             ? t('detached', { commit: currentCommit || '?' })
-            : !jj && name === currentBranch
-              ? t('baseCurrent', { name })
-              : name,
+            : name,
+      note: !jj && name === currentBranch ? t('currentNote') : undefined,
     }))
-    base = (
-      <Select
-        variant="ghost"
-        align="end"
-        className="dshx:max-w-[min(200px,45vw)]"
-        value={baseValue === '' || baseValue === null ? DETACHED : baseValue}
-        options={options}
-        disabled={pending || held}
-        aria-label={jj ? t('jj') : t('git')}
-        onValueChange={(value) => {
-          pick(value === DETACHED ? '' : value)
-        }}
-      />
-    )
-  } else {
-    base = (
-      <span
-        className="dshx:max-w-[min(200px,45vw)] dshx:truncate dshx:text-xs dshx:text-fg-muted"
-        title={hint}
-      >
-        {baseText}
-      </span>
-    )
   }
 
   return (
-    <Root className="dshx:inline-flex dshx:items-center dshx:gap-1 dshx:min-w-0">
-      <span data-jj-workspace-toggle="" data-vcs={jj ? 'jj' : 'git'} className="dshx:contents">
-        {base}
-        <label
-          className={cn(
-            'dshx:inline-flex dshx:cursor-pointer dshx:items-center dshx:gap-1.5 dshx:min-h-8 dshx:px-2',
-            'dshx:rounded-[6px] dshx:text-sm dshx:font-medium dshx:leading-5 dshx:text-fg-secondary',
-            'dshx:whitespace-nowrap dshx:select-none dshx:hover:bg-surface-2',
-            'dshx:pointer-coarse:min-h-11',
-            disabled && 'dshx:cursor-default dshx:text-fg-muted',
-          )}
-          data-disabled={disabled ? '' : undefined}
-          title={hint}
-        >
-          <input
-            type="checkbox"
-            className="dshx:size-[15px] dshx:m-0 dshx:shrink-0 dshx:accent-brand"
-            checked={requested}
-            disabled={disabled}
-            onChange={(event) => {
-              change(event.currentTarget.checked)
-            }}
-          />
-          <span>{jj ? t('jj') : t('git')}</span>
-        </label>
-        {error ? (
-          <span
-            role="alert"
-            className="dshx:max-w-[min(240px,60vw)] dshx:truncate dshx:text-xs dshx:font-normal dshx:text-danger"
-          >
-            {error}
-          </span>
-        ) : null}
-      </span>
-    </Root>
+    <WorktreeOption
+      kind={jj ? 'jj' : 'git'}
+      label={jj ? t('jj') : t('git')}
+      menuLabel={jj ? t('baseMenuJj') : t('baseMenuGit')}
+      requested={requested}
+      usable={usable}
+      disabled={disabled}
+      baseText={baseText}
+      hint={hint}
+      choices={choices}
+      selected={baseValue === '' || baseValue === null ? DETACHED : baseValue}
+      error={error}
+      onCheckedChange={change}
+      onPick={(value) => {
+        pick(value === DETACHED ? '' : value)
+      }}
+    />
   )
 }
 

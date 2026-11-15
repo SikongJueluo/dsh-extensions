@@ -7,8 +7,9 @@
 | 位置 | 作用 |
 | --- | --- |
 | `packages/ui/` | 私有 workspace 包：shadcn 组合 API、Base UI 原语、Tailwind v4 工具类、DSH 公开 alias token 映射 |
+| `packages/ui/src/host/` | 唯一导入钉版宿主 `dsh-client-ui-primitives` 的适配层，经 `@dsh-extensions/ui/host` 子路径导出 |
 | `tooling/host/` | 共享 tsdown 预设（ESM、Node 20、`lib/index.js` + `.d.ts`、`clean: false`） |
-| `tooling/client/` | 共享 Vite 客户端构建：CJS → DSH `window.__ModuleLoader__.load` factory，CSS 内联，仅 external 宿主平台表 |
+| `tooling/client/` | 共享 Vite 客户端构建：CJS → DSH `window.__ModuleLoader__.load` factory，CSS 内联，external 平台表 + 精确的已声明宿主模块 |
 | `packages/<name>/src/client/index.tsx` | 浏览器半入口，导出 `apply` / `inject` |
 | `packages/<name>/src/client/styles.css` | Tailwind v4 入口（`dshx` 前缀 + `@source`） |
 | `packages/<name>/vite.client.config.ts` | 三行 `defineClientConfig({ id, entry })` |
@@ -27,12 +28,12 @@ pnpm build:storybook
 pnpm storybook      # 6006
 ```
 
-`scripts/check-client.mjs` 检查每个 `lib/client.js` 的 factory 包装、注册 id、仅平台表 `require`、内联 `<style data-plugin>`、`apply`/`inject`，并 materialize factory、执行 `apply`、SSR 渲染每个注册组件。
+`scripts/check-client.mjs` 检查每个 `lib/client.js` 的 factory 包装、注册 id、`require` 只落在平台表或该包 `dsh.client.external` 声明的精确宿主模块、内联 `<style data-plugin>`、`apply`/`inject`，并 materialize factory、执行 `apply`、SSR 渲染每个注册组件。宿主 primitives 以真实模块 materialize（只 stub CSS Modules），同时校验 installed 版本等于 catalog 钉版。
 
 ## 验证记录（2026-11-15）
 
 - `pnpm run typecheck`：22 个 workspace 项目全过。
-- `pnpm run build`：20 个 bundle 全过；8 个 `lib/client.js` 均为 145–480 kB（gzip 34–97 kB），只 `require` `react` / `react/jsx-runtime`（Dialog 相关另需 `react-dom`）。
+- `pnpm run build`：20 个 bundle 全过；8 个 `lib/client.js` 均为 145–480 kB（gzip 34–97 kB），只 `require` `react` / `react/jsx-runtime`（Dialog 相关另需 `react-dom`；2026-11-16 起 jj-workspace 另 require 钉版宿主 primitives，见下节）。
 - `pnpm run test`：全仓通过。`packages/ui` 的 jsdom 交互测试确认 Dialog 在 slot 子树内渲染、Escape 关闭并返回焦点，Select 弹层也在子树内且点选回调正确；handoff 测试覆盖 Escape 折叠/取消、搜索过滤与提交 payload。
 - `pnpm run check:client`：8/8 通过。
 - `node scripts/check-pack.mjs`：20/20 tarball 通过，`lib/client.js` 在包内、无 `src/` 或旧 `client/`。
@@ -42,6 +43,25 @@ pnpm storybook      # 6006
 - 干净跟踪树：把 `jj file list -r @` 的 439 个文件复制到独立目录，按 pnpm 的 workspace 链接方式链接 `@dsh-extensions/ui`，`tsc -p packages/ui/tsconfig.json`、`tsc -p packages/auto-permit/tsconfig.client.json` 与 `vite build` 均通过；`packages/ui/src/lib/cn.ts` 在跟踪树中。
 - Chromium 计算样式：深色 token 下 Button 的 default/secondary/ghost/danger/link 与 Input 均 `focusVisible=true`、`outline: solid 2px`（brand）；ghost/danger/link 背景为透明 `rgba(0,0,0,0)`，不再回退到 UA 按钮底色。
 - 控件观感：Input/Textarea/Button secondary/Select default 使用 `bg-surface-2` + `border-l1`，Card/Alert 使用 `border-l1`，避免暗色下统一的「黑底白框」；ghost Select 完全透明无边框。Selector 的 trigger 尺寸、28px 高度、max-content popup（min 240 / max 420）与 34px option 对照了宿主 `dsh-client-ui-model-selection` 的公开样式。
+
+## 宿主 primitives 混用（2026-11-16）
+
+jj-workspace 的新会话 worktree 入口不再用 Base UI Select 复刻宿主 selector，而是复用宿主 `@deepseek-ai/dsh-client-ui-primitives` 的 `Menu`、`Tooltip` 和分支/箭头图标。范围只有这一组控件；共享 `Select` 保留给其他消费者。
+
+- **单一导入点**：`packages/ui/src/host/primitives.ts` 经 `@dsh-extensions/ui/host` 子路径导出，不进共享 barrel；其他插件不会请求该模块，生产 bundle 只有 `dsh-jj-workspace` 出现该 `require`。
+- **精确钉版**：`pnpm-workspace.yaml` 钉 `0.2.2-rc.1`。`tooling/client` 只 external 这个精确模块名；`dsh-jj-workspace` 在 `dsh.client.external` 声明；`check-client` 拒绝未声明请求、未知声明，并校验 installed 版本等于 catalog。该模块是宿主冻结表的一项，不是官方支持的第三方 SDK；check 只能核对 catalog 与 installed，运行中的 shell 版本仍需在升级 dsh 时人工核对（`dsh --version`、shell 的 module table，再跑 Storybook/真实页），并核对组件 props、CSS Modules 与行为。
+- **运行身份**：生产 bundle 只 `require` 宿主表里的同一实例，Menu 的 CSS Modules class 与 shell 样式表天然一致；primitives 不被打进 bundle。
+- **预览/测试依赖**：上游包只把运行时 import 列在自己的 devDependencies，因此 Storybook 与 jsdom 测试用 catalog 中的 shiki、simple-icons、mdast/micromark、dsh-client-store 等 devDependency 补齐；这些不进生产。
+- **视觉参照**：同位置原生 Forge `WorktreeToggle`。28px 透明 trigger、4px 小间距、13px/20px/500、宿主 `radius-sm`、品牌色 focus ring、14px 原生 checkbox；Menu 卡片、34px 行、check 标记、Escape/Tab/焦点返回都由宿主原语提供。未复制宿主 hash class。未请求时 Tooltip 显示完整 base；请求后菜单列出 `@`/bookmark（Git 为分支，当前分支带 current 注记）；阻塞时保留已选项并允许撤回。
+- **挂载边界**：菜单内容与 Tooltip 仍在 slot 子树内；`Menu` 原地渲染，按可用空间选上/下，并用 `max-height: min(320px, 40vh)`（`!important` 盖过宿主视图口头）让列表在宿主 `.viewport` 内滚动。但宿主 `MenuSurface` 自身会无条件向 `document.body` portal 一块 `aria-hidden`、`pointer-events:none` 的 `[data-menu-backing]` 装饰背板（仅 macOS vibrancy 用，Linux 下 `display:none`，关闭/卸载即移除）。用户已批准这一条**仅限宿主组件自带装饰背板**的例外；业务代码仍不得向 body 挂任何节点，菜单内容也不在 body。已用 jsdom 与 Chromium 验证关闭、卸载后计数归零。
+- **同值重提交**：点击已选中的 base 仍调用 `pick`，与旧 Select 一致；Forge `requestWorktree` 会 forget 失败 attempt、记录请求并 recheck，所以这是重试语义，不是无操作。
+- **粗指针**：菜单作用域内 `[role=menuitem]` 在 `(pointer: coarse)` 下 `min-height: 44px !important`；trigger/label 也是 44px，checkbox 视觉 14px 但整行可点。原生宿主行高 34px 不满足本仓 ≥44px 规则，此为本组控件的局部覆盖。
+
+验证证据（2026-11-16）：
+
+- `pnpm check`、`pnpm test`、`pnpm check:pack`、`pnpm build:storybook` 通过；jj-workspace 42 个测试，含真实 Menu 的打开/选择/Escape 焦点返回、同值重提交、阻塞撤回、加载禁用、body 背板关闭/卸载清理。
+- Storybook + Chromium（1280×800、390×844；触摸模拟 `pointer: coarse`）：21 项菜单在 hero 滚动容器内不越界，320px 上限生效、内部滚动（clientHeight 312 / scrollHeight 741）；trigger 28px、13px/500、8px 圆角、透明背景、checkbox 14px 且 `accent-color` 为品牌色；Tooltip fixed、不被裁剪。粗指针下 trigger/label/菜单行均 44px，`data-menu-backing` 为 body 子节点、`aria-hidden=true`、`display:none`，Escape 与卸载后均移除。
+- 真实 DSH 页面尚未验证（缺页面 token，需用户启动 overlay）：slot 内实际遮挡/层级、深色/浅色、窄屏触摸、长列表滚动与菜单选中后的焦点。
 
 ## 未由 agent 验证（需在真实 DSH 页面确认）
 

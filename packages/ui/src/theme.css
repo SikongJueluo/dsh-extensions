@@ -6,8 +6,11 @@
   --color-surface-2: var(--dsw-alias-bg-layer-2);
   --color-border: var(--dsw-alias-border-l1);
   --color-border-strong: var(--dsw-alias-border-l2);
+  --color-surface-hover: var(--dsw-alias-interactive-bg-hover);
   --color-fg: var(--dsw-alias-label-primary);
   --color-fg-secondary: var(--dsw-alias-label-secondary);
+  --color-fg-tertiary: var(--dsw-alias-label-tertiary);
+  --color-fg-dimmed: var(--dsw-alias-label-dimmed);
   --color-fg-muted: color-mix(in srgb, var(--dsw-alias-label-secondary) 72%, transparent);
   --color-brand: var(--dsw-alias-brand-primary);
   --color-on-brand: var(--dsw-alias-bg-base);
@@ -17,6 +20,8 @@
 
   --radius-control: 10px;
   --radius-card: 14px;
+
+  --font-code: var(--ds-font-family-code);
 
   --text-2xs: 11px;
   --text-2xs--line-height: 16px;

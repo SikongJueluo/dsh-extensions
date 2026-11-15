@@ -15,6 +15,15 @@ const DSH_PLATFORM_MODULES = [
   /^react-dom\/client$/,
 ]
 
+/**
+ * Exact host module rows outside React that the shell seeds into its frozen
+ * table. Requesting one is a deliberate, pinned host coupling: the package must
+ * also declare it under `dsh.client.external`, and `scripts/check-client.mjs`
+ * rejects an undeclared request. Keep this list exact; never widen it to a
+ * package prefix.
+ */
+export const DSH_HOST_MODULES = ['@deepseek-ai/dsh-client-ui-primitives']
+
 export interface DshClientOptions {
   /** Package name the module loader registers; must equal `package.json` name. */
   id: string
@@ -116,7 +125,7 @@ export function defineClientConfig({ id, entry }: DshClientOptions): UserConfig 
         cssFileName: 'client',
       },
       rollupOptions: {
-        external: DSH_PLATFORM_MODULES,
+        external: [...DSH_PLATFORM_MODULES, ...DSH_HOST_MODULES],
         output: { exports: 'named' },
         onwarn(warning, defaultHandler) {
           // Base UI and lucide ship React Server Component directives; they

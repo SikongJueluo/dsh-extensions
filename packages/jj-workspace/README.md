@@ -37,7 +37,7 @@
 
 Git 实现不是复制：本提供者在 `ctx.isolate('worktrees')` 的私有 realm 里构造**原 `WorktreeService`**，Git 请求原样委托。这样 Git 的 behavior/config/卸载都还是 stock 实现，只有 jj 分支是本包的。
 
-浏览器半（`src/client/index.tsx`）同样通过官方 slot 覆盖原控件：`conversation.hero.options` 的 `forge-panel.worktree` cell 用 priority `-1` 占据，jj（colocated 与非 colocated）默认请求 `null`（服务端解释为 `@`），用户从 `<select>` 显式选择 bookmark 时才传名字；纯 Git 沿用「当前分支」请求。请求仍走 Forge 的 `forgePanel.requestWorktree/cancelWorktree/follow`，首条消息等待、进度卡、重试/撤回都是 Forge 原有生命周期。Session / 目录 / 权限变化时先丢弃旧 status（并清空 Git 分支缓存）再重取，失败每 2 秒重试；未确认前不渲染、也不按旧 VCS 语义发请求，不把未确认的 jj 当 Git 回退。Session header 的 `jj-workspace.task` pill 显示统一任务状态；它只读、无操作入口。
+浏览器半（`src/client/index.tsx`）同样通过官方 slot 覆盖原控件：`conversation.hero.options` 的 `forge-panel.worktree` cell 用 priority `-1` 占据，jj（colocated 与非 colocated）默认请求 `null`（服务端解释为 `@`），用户从基准菜单显式选择 bookmark 时才传名字；该菜单复用钉版宿主 `Menu` / `Tooltip`，菜单内容原地渲染在 slot 内，按可用空间开在上/下并限制高度，列表在宿主菜单自己的 viewport 内滚动；宿主组件会自带一个 `aria-hidden` 的 `data-menu-backing` 装饰节点挂到 body（仅 macOS vibrancy 可见，关闭即移除，已批准的窄例外）；纯 Git 沿用「当前分支」请求。请求仍走 Forge 的 `forgePanel.requestWorktree/cancelWorktree/follow`，首条消息等待、进度卡、重试/撤回都是 Forge 原有生命周期。Session / 目录 / 权限变化时先丢弃旧 status（并清空 Git 分支缓存）再重取，失败每 2 秒重试；未确认前不渲染、也不按旧 VCS 语义发请求，不把未确认的 jj 当 Git 回退。Session header 的 `jj-workspace.task` pill 显示统一任务状态；它只读、无操作入口。
 
 ## 配置（`jj-worktree` / `jj-forge-worktree` 行）
 

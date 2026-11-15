@@ -36,6 +36,10 @@ catalog:
   '@deepseek-ai/dsh-bash-local': 0.2.2-rc.1
   '@deepseek-ai/dsh-bash-sandbox': 0.2.2-rc.1
   '@deepseek-ai/dsh-client-connection': 0.2.2-rc.1
+  # Deliberate, pinned host coupling: the DSH web shell exposes this module in
+  # its frozen table, and the jj-workspace worktree option reuses it. It is not
+  # a supported third-party SDK; see docs/client-ui-migration.md before bumping.
+  '@deepseek-ai/dsh-client-ui-primitives': 0.2.2-rc.1
   '@deepseek-ai/dsh-commands': 0.2.2-rc.1
   '@deepseek-ai/dsh-credentials': 0.2.2-rc.1
   '@deepseek-ai/dsh-experimental-worktree': 0.2.2-rc.1
@@ -68,6 +72,36 @@ catalog:
   '@deepseek-ai/dsh-util-values': 0.2.2-rc.1
   '@deepseek-ai/dsh-working-directory': 0.2.2-rc.1
   '@deepseek-ai/dsh-workspace': 0.2.2-rc.1
+  # Preview/test graph of the pinned host primitives package. That package ships
+  # only `lib/` and lists its runtime imports as devDependencies in its own
+  # manifest, so Storybook and the jsdom tests must supply them. Versions follow
+  # the 0.2.2-rc.1 primitives manifest; production never loads these directly.
+  '@deepseek-ai/dsh-client-store': 0.2.2-rc.1
+  '@deepseek-ai/dsh-util-code-language': 0.2.2-rc.1
+  '@deepseek-ai/dsh-util-file-drag': 0.2.2-rc.1
+  '@deepseek-ai/dsh-util-workspace-path': 0.2.2-rc.1
+  '@shikijs/langs': ^4.4.3
+  '@types/mdast': ^4.0.4
+  anser: ^2.3.5
+  diff: ^9.0.0
+  katex: ^0.18.7
+  mdast-util-from-markdown: ^2.0.3
+  mdast-util-gfm: ^3.1.0
+  mdast-util-math: ^3.0.0
+  micromark-core-commonmark: ^2.0.3
+  micromark-extension-gfm: ^3.0.0
+  micromark-extension-math: ^3.1.0
+  micromark-factory-space: ^2.0.1
+  micromark-util-character: ^2.1.1
+  micromark-util-classify-character: ^2.0.1
+  micromark-util-decode-string: ^2.0.1
+  micromark-util-sanitize-uri: ^2.0.1
+  micromark-util-symbol: ^2.0.1
+  micromark-util-types: ^2.0.2
+  shiki: ^4.4.3
+  simple-icons: 16.31.0
+  immer: ^10.1.1
+  zustand: ~4.5.7
 allowBuilds:
   # Transitive deps of @earendil-works/pi-ai (local typecheck/smoke only);
   # neither install script is needed at runtime.
