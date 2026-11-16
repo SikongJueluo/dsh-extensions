@@ -371,8 +371,8 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
             return
           }
           if (v.done && v.done.status === 'authorized') {
-            discover()
-            refreshProviders()
+            void discover()
+            void refreshProviders()
           }
         }
       })
@@ -387,7 +387,7 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
       .then((result) => {
         if (result.ok) {
           setAuth({ running: true })
-          pollSignIn()
+          void pollSignIn()
         } else {
           const msg = result.error ? result.error.message : 'sign-in failed'
           const c = classify(msg)
@@ -405,28 +405,52 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
 
   function submitPaste() {
     const input = paste
-    callRpc('submit', { provider: id, input }).then(() => {
-      setPaste('')
-    })
+    callRpc('submit', { provider: id, input })
+      .then(() => {
+        setPaste('')
+      })
+      .catch((err: unknown) => {
+        setStatus({
+          kind: 'yellow',
+          key: 'statusCheckError',
+          params: { detail: err instanceof Error && err.message ? err.message : asText(err) },
+        })
+      })
   }
 
   function cancelSignIn() {
-    callRpc('cancel', { provider: id }).then(() => {
-      /* poll picks up the settlement */
-    })
+    callRpc('cancel', { provider: id })
+      .then(() => {
+        /* poll picks up the settlement */
+      })
+      .catch((err: unknown) => {
+        setStatus({
+          kind: 'yellow',
+          key: 'statusCheckError',
+          params: { detail: err instanceof Error && err.message ? err.message : asText(err) },
+        })
+      })
   }
 
   function signOut() {
-    callRpc('logout', { provider: id }).then(() => {
-      setModels([])
-      setStatus({ kind: 'yellow', key: 'statusNotSignedIn' })
-      refreshProviders()
-    })
+    callRpc('logout', { provider: id })
+      .then(() => {
+        setModels([])
+        setStatus({ kind: 'yellow', key: 'statusNotSignedIn' })
+        void refreshProviders()
+      })
+      .catch((err: unknown) => {
+        setStatus({
+          kind: 'yellow',
+          key: 'statusCheckError',
+          params: { detail: err instanceof Error && err.message ? err.message : asText(err) },
+        })
+      })
   }
 
   useEffect(() => {
     aliveRef.current = true
-    checkStatus()
+    void checkStatus()
     return () => {
       aliveRef.current = false
     }

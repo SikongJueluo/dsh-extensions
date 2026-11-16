@@ -329,9 +329,9 @@ function Section({ operations, t }: { operations: Operations; t: Translate }) {
 
   useEffect(() => {
     aliveRef.current = true
-    load(false)
+    void load(false)
     const poll = setInterval(() => {
-      if (aliveRef.current) load(false)
+      if (aliveRef.current) void load(false)
     }, AUTO_REFRESH_MS)
     const tick = setInterval(() => {
       if (aliveRef.current) setNowTick(Date.now())
@@ -357,7 +357,7 @@ function Section({ operations, t }: { operations: Operations; t: Translate }) {
           size="sm"
           disabled={busy}
           onClick={() => {
-            load(true)
+            void load(true)
           }}
         >
           {busy ? t('refreshing') : t('refresh')}

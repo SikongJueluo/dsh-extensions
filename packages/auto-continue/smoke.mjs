@@ -593,7 +593,6 @@ await rm(spoolDir, { recursive: true, force: true })
     (await handle.cancel('sess-n')) === true && sp.get('sess-n') === undefined,
   )
   check('cancel of nothing reports false', (await handle.cancel('sess-n')) === false)
-  ;(await noticeCtx.effect) === undefined ? undefined : undefined
   // timer fires into a missing record: no followup sent
   await settle(50)
   check('cancelled timer never sends a followup', noticeAgent.followupCalls === undefined)

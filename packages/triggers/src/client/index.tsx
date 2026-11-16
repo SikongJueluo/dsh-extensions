@@ -1180,6 +1180,7 @@ function TriggerRow(props: {
       <div className="dshx:flex dshx:min-h-16 dshx:items-stretch">
         <button
           type="button"
+          aria-label={title}
           aria-expanded={expanded}
           aria-controls={detailId}
           onClick={toggle}

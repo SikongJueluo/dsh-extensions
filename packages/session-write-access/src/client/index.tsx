@@ -306,7 +306,7 @@ function apply(ctx: DshClientContext) {
       if (!sessionId) return undefined
       if (S.open && S.sessionId !== sessionId) {
         setState({ sessionId, view: null })
-        refresh()
+        void refresh()
       } else if (!S.open) {
         // Keep the compact count current without opening the panel.
         setState({ sessionId })
@@ -329,7 +329,7 @@ function apply(ctx: DshClientContext) {
           aria-label={t('panel')}
           onClick={() => {
             setState({ open: true, sessionId, view: null, error: null, notice: null })
-            refresh()
+            void refresh()
           }}
         >
           <span>{t('panelCompact', { dirs })}</span>
@@ -361,7 +361,7 @@ function apply(ctx: DshClientContext) {
         .then((picked) => {
           if (typeof picked === 'string' && picked.length > 0) {
             setPath(picked)
-            mutate('add', { path: picked })
+            void mutate('add', { path: picked })
           }
         })
         .catch((error: unknown) => {
@@ -586,7 +586,7 @@ function apply(ctx: DshClientContext) {
                       setState({ error: `${t('forkSeq')}: ${forkSeq}` })
                       return
                     }
-                    fork(parsed)
+                    void fork(parsed)
                   }}
                 >
                   {t('fork')}

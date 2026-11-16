@@ -174,7 +174,7 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 `reportUnusedDisableDirectives: error` 已开：当前 1 处已无用（`oauth-providers/src/client/index.tsx:246`）。
 这 7 处按“逐处审查”处理，不自动迁移成新豁免。
 
-### 3.7 修复积压（2064 条，分层计划）
+### 3.7 修复积压（2039 条，分层计划）
 
 | 层 | 内容 | 数量 |
 | --- | --- | --- |
@@ -357,6 +357,8 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 | A12 | 给 `WaitSpool.set` 与 `DirenvLoader.snapshot` 加两条带理由的 `fallow-ignore` 内联抑制（它们只在 `.mjs` smoke 里被调用，静态图无法归属类型） | 批准 |
 | A13 | 删除 `RewriteCache.size`（未使用的公开 getter）。它是已发布包导出的类表面，删除属 API 收窄 | 批准 |
 | A14 | 给 `handoff/src/selection.ts:195` 的 `await llm.listModels(...)` 加一条带理由的 `oxlint-disable-next-line typescript/await-thenable`（tsgolint 误报，`tsc` 证明该调用返回 Promise） | 批准 |
+| A15 | `handoff/src/client/index.tsx` 的 `autoFocus={!COARSE}` 加一条带理由的抑制（AGENTS 明确：autoFocus 只作桌面增强、`pointer: coarse` 时关闭） | 批准 |
+| A16 | `remote-exec/src/display.ts` 与 `auto-env/src/direnv.ts` 的 ANSI 正则加两条带理由的 `no-control-regex` 抑制（正则本身就是要匹配控制字符） | 批准 |
 
 若希望更严：`require-unicode-regexp`（228）、`prefer-strict-equal` 与
 `prefer-to-be-truthy/falsy`（vitest 风格，606）、`strict-boolean-expressions`（B2）

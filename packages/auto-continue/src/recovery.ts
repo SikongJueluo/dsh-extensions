@@ -243,7 +243,10 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
       return { kind: 'retry' as const }
     })()
     active.add(operation)
-    operation.finally(() => active.delete(operation))
+    void operation.then(
+      () => active.delete(operation),
+      () => active.delete(operation),
+    )
     return operation
   })
 

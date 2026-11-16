@@ -426,13 +426,16 @@ describe('judge investigation loop', () => {
     // test; this one rejects when the judge aborts it.
     const hanging = {
       stream: (request: { signal?: AbortSignal }) =>
-        (async function* () {
-          await new Promise<void>((_resolve, reject) => {
-            request.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
-              once: true,
-            })
-          })
-        })(),
+        ({
+          [Symbol.asyncIterator]: () => ({
+            next: () =>
+              new Promise<never>((_resolve, reject) => {
+                request.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+                  once: true,
+                })
+              }),
+          }),
+        }) as AsyncIterable<never>,
     }
     const result = await judgeWith(hanging, evidenceFor(root), 25)
     expect(result.verdict).toBe('defer')
