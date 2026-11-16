@@ -18,8 +18,8 @@
  * @module dsh-auto-continue/resume
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Agent, AgentRegistry } from '@deepseek-ai/dsh-agent'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from './shims.js'
 import type { PendingWait, WaitSpool } from './spool.js'
@@ -45,9 +45,10 @@ export function resumeMessage(entry: PendingWait): string {
 /** Latest user-authored message seq in the session, or 0 (the "user moved on" probe). */
 function lastUserSeq(agent: Agent): number {
   let last = 0
+  // oxlint-disable-next-line typescript/no-deprecated -- A25: the deprecated synchronous session-log readers have no sync replacement; the sanctioned ones are async and optional, so migrating changes exported contracts and control flow.
   for (const event of agent.session.ownEvents()) {
     if (event.type !== 'user/message') continue
-    const source = (event.data as { source?: { kind?: unknown } } | null)?.source
+    const source = event.data.source
     if (source?.kind === 'user' && event.seq > last) last = event.seq
   }
   return last
@@ -110,7 +111,8 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
     // Prefer an agent that is already live (restored at boot, or opened by
     // the user); otherwise cold-open the session the same way the browser
     // does, so the preset composition is rebuilt.
-    let agent: Agent | undefined = ctx.get('agents')?.get(entry.sessionId as SessionId)
+    const registry: AgentRegistry | undefined = ctx.get('agents')
+    let agent: Agent | undefined = registry?.get(SessionId(entry.sessionId))
     if (agent === undefined) {
       const controller = ctx.get('sessionController')
       if (controller === undefined) {
@@ -120,7 +122,7 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
         )
         throw new RetryLater()
       }
-      const result = await controller.agents.resolveAgent(entry.sessionId as SessionId)
+      const result = await controller.agents.resolveAgent(SessionId(entry.sessionId))
       if ('error' in result) {
         await spool.delete(entry.sessionId)
         ctx.logger.warn(
@@ -172,20 +174,20 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
     if (lifetime.signal.aborted || pending.has(entry.sessionId)) return
     const task = cancellableSleep(Math.max(0, entry.retryAt - Date.now()), lifetime.signal)
       .then(async (slept) => {
-        if (!slept) return
+        if (!slept) return undefined
         const fresh = spool.get(entry.sessionId)
-        if (fresh === undefined) return
+        if (fresh === undefined) return undefined
         // A newer cycle replaced this wait: follow it instead.
         if (fresh.retryAt !== entry.retryAt) {
           schedule(fresh)
-          return
+          return undefined
         }
         try {
           await attemptResume(fresh)
         } catch (error) {
           if (error instanceof RetryLater && !expired(fresh)) {
             schedule({ ...fresh, retryAt: Date.now() + RETRY_LATER_MS })
-            return
+            return undefined
           }
           if (!(error instanceof RetryLater)) {
             ctx.logger.warn(
@@ -195,6 +197,7 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
             )
           }
         }
+        return undefined
       })
       .finally(() => {
         pending.delete(entry.sessionId)
@@ -205,12 +208,13 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
   // Boot scan: adopt every persisted wait once the spool is loaded.
   void spool.load().then(async () => {
     await spool.pruneExpired(config.maxWaitMs)
-    const registry = ctx.get('agents')
+    const registry: AgentRegistry | undefined = ctx.get('agents')
     for (const entry of spool.all()) {
       schedule(entry)
-      const live = registry?.get(entry.sessionId as Parameters<typeof registry.get>[0])
+      const live = registry?.get(SessionId(entry.sessionId))
       if (live !== undefined) notice(entry, live)
     }
+    return undefined
   })
 
   // Sessions the user (or boot restore) opened after our start: adopt them.

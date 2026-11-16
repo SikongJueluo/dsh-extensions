@@ -43,6 +43,26 @@ class Crash extends Error {
   }
 }
 
+/** Disposer that does nothing: the initial `release` before a gate arms. */
+const noop = (): void => {}
+
+/** Await one timer tick of `ms`. */
+const sleep = (ms: number): Promise<void> =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms)
+  })
+
+/** Settle queued promise chains (bounded), so commits and sends can land. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i++) await sleep(5)
+}
+
+/** Narrow a possibly-absent fixture lookup; the test fails loud at the site. */
+function present<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`expected ${what} to exist`)
+  return value
+}
+
 /**
  * Minimal host surface. Differences from the plain service-test fake, both
  * deliberate: `sessionQuery.readSession` serves a per-session durable log, and
@@ -57,7 +77,7 @@ function createFakeHost() {
     deliveries: new Map<string, unknown>(),
   }
   const logs = new Map<string, LogEvent[]>()
-  const listeners = new Map<string, Array<(session: { id: string }, event: unknown) => void>>()
+  const listeners = new Map<string, ((session: { id: string }, event: unknown) => void)[]>()
   const prompts: FakePromptCall[] = []
   /** RequestIds the queue already accepted (host dedupe state). */
   const admitted = new Set<string>()
@@ -71,18 +91,13 @@ function createFakeHost() {
   const slowPuts = { runs: false }
   let readGate: Promise<void> | undefined
   /** Fault injection: a non-`undefined` value makes every log read reject with it. */
-  let readFailure: unknown
+  let readFailure: Error | undefined
   /** Fault injection: called around the interesting durable effects. */
   const hooks: {
     beforeRunsPut?: () => void
     afterRunsPut?: () => void
     afterPrompt?: (requestId: string) => void
   } = {}
-
-  const sleep = (ms: number) =>
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, ms)
-    })
 
   const tableFor = (name: keyof typeof tables) => ({
     get: (key: string) => tables[name].get(key),
@@ -177,12 +192,6 @@ function createFakeHost() {
     log(sessionId, event.type, event.data)
     for (const listener of listeners.get('session/event') ?? []) listener({ id: sessionId }, event)
   }
-  const flush = async (): Promise<void> => {
-    for (let i = 0; i < 5; i++)
-      await new Promise((resolve) => {
-        setTimeout(resolve, 5)
-      })
-  }
   /** A fresh plugin instance over the SAME tables/logs: a restart. Kills the old listeners. */
   const service = (): TriggerService => {
     listeners.set('session/event', [])
@@ -194,7 +203,7 @@ function createFakeHost() {
   const setReadGate = (gate: Promise<void> | undefined): void => {
     readGate = gate
   }
-  const failReads = (failure: unknown): void => {
+  const failReads = (failure: Error): void => {
     readFailure = failure
   }
   return {
@@ -219,6 +228,13 @@ function createFakeHost() {
 const EXECUTOR = 'sess-exec'
 const PARENT = 'sess-parent'
 
+/** Drop the checkpoint field from a run record, simulating a pre-checkpoint build. */
+const stripCheckpoint = (host: ReturnType<typeof createFakeHost>, runId: string): void => {
+  const run = { ...(host.tables.runs.get(runId) as object) } as Record<string, unknown>
+  delete run.consumedTurns
+  host.tables.runs.set(runId, run)
+}
+
 describe('atomic commit: state advance and owed prompt are one write', () => {
   it('a crash after the commit write leaves the review delivery in the outbox; restart re-sends it under the same requestId', async () => {
     const host = createFakeHost()
@@ -240,11 +256,12 @@ describe('atomic commit: state advance and owed prompt are one write', () => {
     await host.flush()
 
     // The run advanced AND the owed prompt exists — never one without the other.
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-review')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-review')
     const owed = host.outboxOf(bound.runId)
     expect(owed).toHaveLength(1)
-    expect(owed[0]!.kind).toBe('review')
-    expect(owed[0]!.state).toBe('pending')
+    const owedEntry = present(owed[0], 'the owed outbox entry')
+    expect(owedEntry.kind).toBe('review')
+    expect(owedEntry.state).toBe('pending')
     expect(host.prompts).toHaveLength(0) // nothing was sent
 
     // Restart: the outbox row is re-sent under its original requestId.
@@ -252,13 +269,13 @@ describe('atomic commit: state advance and owed prompt are one write', () => {
     await host.flush()
     void svc2
     expect(host.prompts).toHaveLength(1)
-    expect(host.prompts[0]!.requestId).toBe(owed[0]!.requestId)
-    expect(host.prompts[0]!.sessionId).toBe(PARENT)
-    expect(host.prompts[0]!.text).toContain(`runId=${bound.runId}`)
+    expect(present(host.prompts[0], 'first prompt').requestId).toBe(owedEntry.requestId)
+    expect(present(host.prompts[0], 'first prompt').sessionId).toBe(PARENT)
+    expect(present(host.prompts[0], 'first prompt').text).toContain(`runId=${bound.runId}`)
     // Confirmed send leaves the outbox and marks the projection row sent.
     expect(host.outboxOf(bound.runId)).toHaveLength(0)
     const projected = [...host.tables.deliveries.values()].find(
-      (d) => (d as { id: string }).id === owed[0]!.id,
+      (d) => (d as { id: string }).id === owedEntry.id,
     ) as { state: string }
     expect(projected.state).toBe('sent')
   })
@@ -282,7 +299,7 @@ describe('atomic commit: state advance and owed prompt are one write', () => {
     await host.flush()
 
     // Halfway state: nothing advanced, nothing owed, nothing sent.
-    const parked = host.run(bound.runId)!
+    const parked = present(host.run(bound.runId), `run ${bound.runId}`)
     expect(parked.phase).toBe('awaiting-delivery')
     expect(parked.pendingSignal).toBeDefined()
     expect(host.outboxOf(bound.runId)).toHaveLength(0)
@@ -292,10 +309,10 @@ describe('atomic commit: state advance and owed prompt are one write', () => {
     const svc2 = host.service()
     await host.flush()
     void svc2
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-review')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-review')
     expect(host.prompts).toHaveLength(1)
-    expect(host.prompts[0]!.sessionId).toBe(PARENT)
-    expect(host.prompts[0]!.text).toContain(`runId=${bound.runId}`)
+    expect(present(host.prompts[0], 'first prompt').sessionId).toBe(PARENT)
+    expect(present(host.prompts[0], 'first prompt').text).toContain(`runId=${bound.runId}`)
   })
 
   it('a crash after the send but before the sent-mark re-sends on restart; the queue dedupe keeps one copy', async () => {
@@ -354,17 +371,17 @@ describe('atomic commit: state advance and owed prompt are one write', () => {
         deliverStart: true,
       }),
     ).rejects.toThrow('simulated crash')
-    const runId = [...host.tables.runs.keys()].at(-1)!
+    const runId = present([...host.tables.runs.keys()].at(-1), 'the newly created run id')
     expect(host.outboxOf(runId)).toHaveLength(1)
-    expect(host.outboxOf(runId)[0]!.kind).toBe('start')
+    expect(present(host.outboxOf(runId)[0], 'the owed start entry').kind).toBe('start')
     expect(host.prompts).toHaveLength(0)
 
     const svc2 = host.service()
     await host.flush()
     void svc2
     expect(host.prompts).toHaveLength(1)
-    expect(host.prompts[0]!.sessionId).toBe(EXECUTOR)
-    expect(host.prompts[0]!.text).toContain(`runId=${runId}`)
+    expect(present(host.prompts[0], 'first prompt').sessionId).toBe(EXECUTOR)
+    expect(present(host.prompts[0], 'first prompt').text).toContain(`runId=${runId}`)
     expect(host.outboxOf(runId)).toHaveLength(0)
   })
 })
@@ -391,10 +408,10 @@ describe('restart replay against the durable session log', () => {
     const svc2 = host.service()
     await host.flush()
     void svc2
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-review')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-review')
     expect(host.prompts).toHaveLength(1)
-    expect(host.prompts[0]!.sessionId).toBe(PARENT)
-    expect(host.prompts[0]!.text).toContain('日志里完成的交付')
+    expect(present(host.prompts[0], 'first prompt').sessionId).toBe(PARENT)
+    expect(present(host.prompts[0], 'first prompt').text).toContain('日志里完成的交付')
   })
 
   it('completed turns from BEFORE the binding existed are never mistaken for deliveries', async () => {
@@ -422,7 +439,7 @@ describe('restart replay against the durable session log', () => {
     const svc2 = host.service()
     await host.flush()
     void svc2
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-delivery')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-delivery')
     expect(host.prompts).toHaveLength(0)
   })
 
@@ -442,11 +459,11 @@ describe('restart replay against the durable session log', () => {
     const svc2 = host.service()
     await host.flush()
     void svc2
-    const run = host.run(bound.runId)!
+    const run = present(host.run(bound.runId), `run ${bound.runId}`)
     expect(run.phase).toBe('awaiting-review')
     expect(run.pendingSignal).toBeUndefined()
     expect(host.prompts).toHaveLength(1)
-    expect(host.prompts[0]!.text).toContain('显式交付')
+    expect(present(host.prompts[0], 'first prompt').text).toContain('显式交付')
   })
 
   it('a pending signal whose turn ended abnormally parks after restart; a turn still open keeps waiting', async () => {
@@ -474,9 +491,9 @@ describe('restart replay against the durable session log', () => {
     await host.flush()
     void svc
     void svc2
-    expect(host.run(aborted.runId)!.status).toBe('paused-error')
-    expect(host.run(stillOpen.runId)!.status).toBe('active')
-    expect(host.run(stillOpen.runId)!.pendingSignal).toBeDefined()
+    expect(present(host.run(aborted.runId), `run ${aborted.runId}`).status).toBe('paused-error')
+    expect(present(host.run(stillOpen.runId), `run ${stillOpen.runId}`).status).toBe('active')
+    expect(present(host.run(stillOpen.runId), `run ${stillOpen.runId}`).pendingSignal).toBeDefined()
   })
 
   it('goal state is re-folded from the log: an active goal holds delivery after restart too', async () => {
@@ -508,7 +525,7 @@ describe('restart replay against the durable session log', () => {
     await host.flush()
     void svc2
     // Goal was active AT that turn end (point-in-time fold): no delivery.
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-delivery')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-delivery')
     expect(host.prompts).toHaveLength(0)
 
     // The goal settles, the next turn finishes — all in the log, plugin still down.
@@ -530,9 +547,9 @@ describe('restart replay against the durable session log', () => {
     const svc3 = host.service()
     await host.flush()
     void svc3
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-review')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-review')
     expect(host.prompts).toHaveLength(1)
-    expect(host.prompts[0]!.text).toContain('goal 落定后的交付')
+    expect(present(host.prompts[0], 'first prompt').text).toContain('goal 落定后的交付')
   })
 })
 
@@ -552,12 +569,12 @@ describe('outbox carry-through for nudges and legacy rows', () => {
     await host.flush()
     void svc
 
-    const run = host.run(bound.runId)!
+    const run = present(host.run(bound.runId), `run ${bound.runId}`)
     expect(run.status).toBe('active') // best-effort semantics survive the outbox
     const owed = host.outboxOf(bound.runId)
     expect(owed).toHaveLength(1)
-    expect(owed[0]!.kind).toBe('nudge')
-    expect(owed[0]!.state).toBe('failed')
+    expect(present(owed[0], 'the owed outbox entry').kind).toBe('nudge')
+    expect(present(owed[0], 'the owed outbox entry').state).toBe('failed')
 
     // Restart with a healed queue: failed outbox rows wait for MANUAL
     // redelivery (bounded reminders must not loop on their own).
@@ -566,7 +583,7 @@ describe('outbox carry-through for nudges and legacy rows', () => {
     await host.flush()
     void svc2
     expect(host.prompts).toHaveLength(0)
-    expect(host.outboxOf(bound.runId)[0]!.state).toBe('failed')
+    expect(present(host.outboxOf(bound.runId)[0], 'the failed outbox entry').state).toBe('failed')
   })
 
   it('legacy pending delivery rows (pre-outbox data) are still re-sent on restart', async () => {
@@ -628,10 +645,10 @@ describe('serialization of bursts on one session', () => {
     // executor-side auto pass or deliver nudge is out of the question.
     const reviews = host.prompts.filter((p) => p.sessionId === PARENT)
     expect(reviews).toHaveLength(1)
-    expect(reviews[0]!.text).toContain('第一轮交付')
+    expect(present(reviews[0], 'the review prompt').text).toContain('第一轮交付')
     const nudges = host.prompts.filter((p) => p.sessionId === EXECUTOR)
     expect(nudges).toHaveLength(0)
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-review')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-review')
   })
 })
 
@@ -657,14 +674,14 @@ describe('review round 2: replay must not re-consume round 1 (checkpoint commit)
     await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: '第一轮交付' })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-review')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-review')
 
     // Rework: round 2 opens, waiting for a NEW delivery.
     host.emit(PARENT, { type: 'turn/start', data: { turn: 5 } })
     await svc.signal(PARENT, { runId: bound.runId, outcome: 'rework', summary: '改第二轮' })
     host.emit(PARENT, { type: 'turn/end', data: { turn: 5, reason: { kind: 'completed' } } })
     await host.flush()
-    const before = host.run(bound.runId)!
+    const before = present(host.run(bound.runId), `run ${bound.runId}`)
     expect(before.round).toBe(2)
     expect(before.phase).toBe('awaiting-delivery')
     const promptsBefore = host.prompts.length
@@ -676,7 +693,7 @@ describe('review round 2: replay must not re-consume round 1 (checkpoint commit)
     const svc2 = host.service()
     await host.flush()
     void svc2
-    const after = host.run(bound.runId)!
+    const after = present(host.run(bound.runId), `run ${bound.runId}`)
     expect(after.round).toBe(2)
     expect(after.phase).toBe('awaiting-delivery')
     expect(
@@ -697,7 +714,7 @@ describe('review round 2: replay must not re-consume round 1 (checkpoint commit)
     })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-review')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-review')
     const reviews = host.prompts.filter((p) => p.sessionId === PARENT)
     expect(reviews.some((p) => p.text.includes('真正的第二轮交付'))).toBe(true)
   })
@@ -706,7 +723,7 @@ describe('review round 2: replay must not re-consume round 1 (checkpoint commit)
 describe('boot handoff: live events during a frozen session-log read', () => {
   it('events buffered while init waits for the log read survive into the live caches', async () => {
     const host = createFakeHost()
-    let release: () => void = () => {}
+    let release: () => void = noop
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
@@ -761,7 +778,7 @@ describe('boot handoff: live events during a frozen session-log read', () => {
       parentSession: PARENT,
     })
     void svc1
-    let release: () => void = () => {}
+    let release: () => void = noop
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
@@ -810,7 +827,7 @@ describe('log reads: a genuinely absent session is empty history, anything else 
     const svc = host.service()
     await expect(
       svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT }),
-    ).rejects.toThrow(/persistence offline/)
+    ).rejects.toThrow(/persistence offline/u)
   })
 })
 
@@ -842,7 +859,7 @@ describe('stopped runs are not re-served by the drain', () => {
     const svc2 = host.service()
     await host.flush()
     void svc2
-    expect(host.run(bound.runId)!.status).toBe('cancelled')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).status).toBe('cancelled')
     expect(host.prompts).toHaveLength(0)
   })
 
@@ -866,7 +883,7 @@ describe('stopped runs are not re-served by the drain', () => {
     const svc2 = host.service()
     await host.flush()
     void svc2
-    expect(host.run(bound.runId)!.status).toBe('paused-user')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).status).toBe('paused-user')
     expect(host.prompts).toHaveLength(0)
   })
 
@@ -897,14 +914,14 @@ describe('stopped runs are not re-served by the drain', () => {
     await svc.signal(PARENT, { runId: bound.runId, outcome: 'pass', summary: '通过' })
     host.emit(PARENT, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.run(bound.runId)!.status).toBe('completed')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).status).toBe('completed')
     expect(host.outboxOf(bound.runId)).toHaveLength(1) // the notice is owed
 
     const svc2 = host.service()
     await host.flush()
     void svc2
-    expect(host.prompts.at(-1)!.sessionId).toBe(EXECUTOR)
-    expect(host.prompts.at(-1)!.text).toContain('审核通过')
+    expect(present(host.prompts.at(-1), 'last prompt').sessionId).toBe(EXECUTOR)
+    expect(present(host.prompts.at(-1), 'last prompt').text).toContain('审核通过')
   })
 })
 
@@ -923,13 +940,14 @@ describe('projection/authority divergence heals on restart', () => {
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     void svc
-    const entry = host.outboxOf(bound.runId)[0]!
+    const entry = present(host.outboxOf(bound.runId)[0], 'the failed outbox entry')
     expect(entry.state).toBe('failed')
 
     // Simulate the divergence the reviewer produced: the projection write
     // never landed, so the UI row is still pending with no redeliver button.
+    const previous = host.tables.deliveries.get(entry.id)
     host.tables.deliveries.set(entry.id, {
-      ...host.tables.deliveries.get(entry.id)!,
+      ...(typeof previous === 'object' && previous !== null ? previous : {}),
       state: 'pending',
     })
 
@@ -941,7 +959,7 @@ describe('projection/authority divergence heals on restart', () => {
     // And manual redelivery works off the healed row.
     host.queue.fail = false
     await svc2.controlRun(bound.runId, 'redeliver', { deliveryId: entry.id })
-    expect(host.prompts.at(-1)!.requestId).toBe(entry.requestId)
+    expect(present(host.prompts.at(-1), 'last prompt').requestId).toBe(entry.requestId)
   })
 
   it('a sent projection with the entry still in the outbox clears via deduped re-drain', async () => {
@@ -965,7 +983,7 @@ describe('projection/authority divergence heals on restart', () => {
     expect(sentRow.state).toBe('sent')
     // …but the crash hit before the entry left the outbox: rebuild exactly
     // that diverged authority state by hand (deterministic window).
-    const run = host.run(bound.runId)!
+    const run = present(host.run(bound.runId), `run ${bound.runId}`)
     const diverged: OutboxEntry = {
       id: sentRow.id,
       runId: bound.runId,
@@ -1005,7 +1023,7 @@ describe('same-run read-modify-write serialization under host-realistic puts', (
       svc.controlRun(bound.runId, 'extend', { newMaxRounds: 6 }),
     ])
     await host.flush()
-    const run = host.run(bound.runId)!
+    const run = present(host.run(bound.runId), `run ${bound.runId}`)
     expect(run.status).toBe('cancelled')
   })
 
@@ -1028,7 +1046,7 @@ describe('same-run read-modify-write serialization under host-realistic puts', (
       })(),
     ])
     await host.flush()
-    const run = host.run(bound.runId)!
+    const run = present(host.run(bound.runId), `run ${bound.runId}`)
     // Either the cancel won (terminal, nothing owed) or the transition won
     // (awaiting-review with exactly one review owed) — never a cancelled run
     // with a review still in the outbox, never an active run half-advanced.
@@ -1043,13 +1061,6 @@ describe('same-run read-modify-write serialization under host-realistic puts', (
 })
 
 describe('round 3: legacy-record migration must not lose sides or swallow verdicts', () => {
-  /** Drop the checkpoint field from a run record, simulating a pre-checkpoint build. */
-  const stripCheckpoint = (host: ReturnType<typeof createFakeHost>, runId: string): void => {
-    const run = { ...(host.tables.runs.get(runId) as object) } as Record<string, unknown>
-    delete run.consumedTurns
-    host.tables.runs.set(runId, run)
-  }
-
   it('a legacy multi-round record migrates BOTH sides at once; round 1 stays consumed', async () => {
     const host = createFakeHost()
     const svc = host.service()
@@ -1074,7 +1085,7 @@ describe('round 3: legacy-record migration must not lose sides or swallow verdic
     await svc.signal(PARENT, { runId: bound.runId, outcome: 'rework', summary: '改第二轮' })
     host.emit(PARENT, { type: 'turn/end', data: { turn: 5, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.run(bound.runId)!.round).toBe(2)
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).round).toBe(2)
     const promptsBefore = host.prompts.length
     void svc
 
@@ -1084,7 +1095,7 @@ describe('round 3: legacy-record migration must not lose sides or swallow verdic
     await host.flush()
     void svc2
 
-    const after = host.run(bound.runId)!
+    const after = present(host.run(bound.runId), `run ${bound.runId}`)
     expect(after.phase).toBe('awaiting-delivery')
     expect(after.round).toBe(2)
     // BOTH sides migrated: neither round 1's turn nor the rework turn replays.
@@ -1108,7 +1119,7 @@ describe('round 3: legacy-record migration must not lose sides or swallow verdic
     await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: '第一轮' })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-review')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-review')
 
     // The reviewer signaled; its turn ended completed in the log only.
     host.emit(PARENT, { type: 'turn/start', data: { turn: 5 } })
@@ -1120,7 +1131,7 @@ describe('round 3: legacy-record migration must not lose sides or swallow verdic
     const svc2 = host.service()
     await host.flush()
     void svc2
-    const after = host.run(bound.runId)!
+    const after = present(host.run(bound.runId), `run ${bound.runId}`)
     expect(after.phase).toBe('awaiting-delivery')
     expect(after.round).toBe(2)
     expect(after.pendingSignal).toBeUndefined()
@@ -1147,7 +1158,7 @@ describe('round 3: legacy-record migration must not lose sides or swallow verdic
     const svc2 = host.service()
     await host.flush()
     void svc2
-    const after = host.run(bound.runId)!
+    const after = present(host.run(bound.runId), `run ${bound.runId}`)
     expect(after.phase).toBe('awaiting-review')
     expect(after.pendingSignal).toBeUndefined()
     expect(host.prompts.some((p) => p.sessionId === PARENT && p.text.includes('执行侧交付'))).toBe(
@@ -1176,7 +1187,7 @@ describe('round 3: legacy-record migration must not lose sides or swallow verdic
     const svc2 = host.service()
     await host.flush()
     void svc2
-    const after = host.run(bound.runId)!
+    const after = present(host.run(bound.runId), `run ${bound.runId}`)
     expect(after.status).toBe('paused-error')
     expect(after.pendingSignal).toBeUndefined()
   })
@@ -1202,7 +1213,7 @@ describe('round 3: a cold goal in the log must gate boot-time turn ends', () => 
       createdAt: 1,
       updatedAt: 1,
     })
-    let release: () => void = () => {}
+    let release: () => void = noop
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
@@ -1228,7 +1239,7 @@ describe('round 3: a cold goal in the log must gate boot-time turn ends', () => 
     await host.flush()
     void svc2
 
-    const run = host.run(bound.runId)!
+    const run = present(host.run(bound.runId), `run ${bound.runId}`)
     expect(run.phase).toBe('awaiting-delivery') // goal active at that turn end: no premature review
     expect(host.prompts.filter((p) => p.sessionId === PARENT)).toHaveLength(0)
   })
@@ -1262,7 +1273,7 @@ describe('round 3: a cold goal in the log must gate boot-time turn ends', () => 
     })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-delivery')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-delivery')
     expect(host.prompts.filter((p) => p.sessionId === PARENT)).toHaveLength(0)
   })
 })
@@ -1304,7 +1315,7 @@ describe('round 4: seeding must not mistake a transient live fold for a seeded o
     })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-delivery') // cold goal gates the delivery
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-delivery') // cold goal gates the delivery
     expect(host.prompts.filter((p) => p.sessionId === PARENT)).toHaveLength(0)
   })
 
@@ -1321,7 +1332,7 @@ describe('round 4: seeding must not mistake a transient live fold for a seeded o
       createdAt: 1,
       updatedAt: 1,
     })
-    let release: () => void = () => {}
+    let release: () => void = noop
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
@@ -1351,7 +1362,7 @@ describe('round 4: seeding must not mistake a transient live fold for a seeded o
     })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 7, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-delivery')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-delivery')
     expect(host.prompts.filter((p) => p.sessionId === PARENT)).toHaveLength(0)
 
     // And the fold is fully alive afterwards: the goal settles, the next
@@ -1378,7 +1389,7 @@ describe('round 4: seeding must not mistake a transient live fold for a seeded o
     })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 8, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.run(bound.runId)!.phase).toBe('awaiting-review')
+    expect(present(host.run(bound.runId), `run ${bound.runId}`).phase).toBe('awaiting-review')
     expect(
       host.prompts.some((p) => p.sessionId === PARENT && p.text.includes('goal 落定交付')),
     ).toBe(true)
@@ -1397,7 +1408,7 @@ describe('round 4: seeding must not mistake a transient live fold for a seeded o
     await svc.signal(EXECUTOR, { runId: first.runId, outcome: 'deliver', summary: '第一轮' })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.run(first.runId)!.phase).toBe('awaiting-review')
+    expect(present(host.run(first.runId), `run ${first.runId}`).phase).toBe('awaiting-review')
 
     // A second loop binds the SAME executor: seeding must early-return on
     // the seeded marker, not overwrite the fold with a stale snapshot (the
@@ -1416,8 +1427,8 @@ describe('round 4: seeding must not mistake a transient live fold for a seeded o
     expect(accepted).toMatchObject({ ok: true }) // currentTurn=2 still live
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.run(second.runId)!.phase).toBe('awaiting-review')
-    expect(host.run(first.runId)!.phase).toBe('awaiting-review')
+    expect(present(host.run(second.runId), `run ${second.runId}`).phase).toBe('awaiting-review')
+    expect(present(host.run(first.runId), `run ${first.runId}`).phase).toBe('awaiting-review')
   })
 })
 
@@ -1435,7 +1446,7 @@ describe('round 5: seeding is shared and buffer timing is point-in-time', () => 
       createdAt: 1,
       updatedAt: 1,
     })
-    let release: () => void = () => {}
+    let release: () => void = noop
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
@@ -1502,7 +1513,7 @@ describe('round 5: seeding is shared and buffer timing is point-in-time', () => 
     })
     void svc1
     // Restart: a paused run seeds nothing, so the executor has no baseline.
-    let release: () => void = () => {}
+    let release: () => void = noop
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
@@ -1559,11 +1570,13 @@ describe('round 5: seeding is shared and buffer timing is point-in-time', () => 
 
     // Turn 7 was judged AT ITS OWN MOMENT (goal still active): held, never
     // reviewed. Turn 8 delivered the actual final.
-    const run = host.run(bound.runId)!
+    const run = present(host.run(bound.runId), `run ${bound.runId}`)
     expect(run.phase).toBe('awaiting-review')
     const reviews = host.prompts.filter((p) => p.sessionId === PARENT)
     expect(reviews).toHaveLength(1)
-    expect(reviews[0]!.text).toContain('actual final')
-    expect(reviews[0]!.text).not.toContain('GOAL STILL ACTIVE intermediate')
+    expect(present(reviews[0], 'the review prompt').text).toContain('actual final')
+    expect(present(reviews[0], 'the review prompt').text).not.toContain(
+      'GOAL STILL ACTIVE intermediate',
+    )
   })
 })

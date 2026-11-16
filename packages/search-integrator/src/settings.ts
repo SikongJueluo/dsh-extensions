@@ -17,6 +17,9 @@
 import type { Volatile } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 
+/** Maximum seed queries the tool accepts / the planner may emit. */
+export const MAX_QUERIES = 4
+
 /** Snapshot of the live settings the pipeline consumes. */
 export interface SearchIntegratorSettings {
   readonly zhipuEnabled: boolean

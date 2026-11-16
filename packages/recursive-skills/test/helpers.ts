@@ -7,8 +7,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import SkillRegistry from '@deepseek-ai/dsh-skill'
-import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
+import { SkillRegistry } from '@deepseek-ai/dsh-skill'
+import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import {
   apply as stockApply,
   Config as StockConfig,
@@ -76,7 +76,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 
 /** Create a temporary directory outside a harness (extra roots, external targets). */
 export async function tempDir(prefix = 'dsh-recursive-skills-extra-'): Promise<string> {
-  return await mkdtemp(join(tmpdir(), prefix))
+  return mkdtemp(join(tmpdir(), prefix))
 }
 
 /** Write one skill bundle: `<directory>/SKILL.md` with the given frontmatter lines. */

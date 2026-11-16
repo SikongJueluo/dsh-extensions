@@ -39,11 +39,7 @@ function pointLine(point: ResearchResult['points'][number]): string {
 }
 
 function sourceLine(source: ResearchResult['sources'][number]): string {
-  const meta = [
-    source.title ?? '',
-    source.publishedAt === undefined ? '' : String(source.publishedAt),
-    source.providers.join('+'),
-  ]
+  const meta = [source.title ?? '', source.publishedAt ?? '', source.providers.join('+')]
     .filter((part) => part !== '')
     .join(' — ')
   return `[${source.id}] ${source.url}${meta === '' ? '' : ` — ${meta}`}`

@@ -15,16 +15,18 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { RPC_CHANNEL } from './identity.js'
 import type { PlanUsageService } from './service.js'
+import { isRecord } from './sources/contracts.js'
+import type { QuotaSnapshot } from './types.js'
 
 /** One endpoint segment of the channel (same grammar as connection RPC). */
-const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
 /** Quota requests are tiny; anything bigger is a misbehaving client. */
 const MAX_CHANNEL_BODY_BYTES = 16 * 1024
 
 /** What the browser sees for one monitored provider. */
 interface ProviderQuotaView {
   provider: string
-  snapshot?: import('./types.js').QuotaSnapshot
+  snapshot?: QuotaSnapshot
   /** Why the quota is unavailable, when known. */
   error?: string
 }
@@ -65,7 +67,7 @@ export function registerChannel(ctx: Context, service: PlanUsageService): void {
     | { ok: false; error: { code: string; message: string; details: object } }
   > => {
     if (endpoint === 'quota') {
-      const refresh = (payload as { refresh?: unknown } | null | undefined)?.refresh === true
+      const refresh = isRecord(payload) && payload.refresh === true
       return { ok: true, value: await quotaView(service, refresh) }
     }
     return {
@@ -104,23 +106,35 @@ export function registerChannel(ctx: Context, service: PlanUsageService): void {
     }
     const chunks: Buffer[] = []
     let received = 0
-    for await (const chunk of req) {
-      received += (chunk as Buffer).byteLength
+    for await (const raw of req) {
+      // The request stream emits Buffers only (`setEncoding` is never called
+      // on it); the guard makes that assumption explicit instead of asserting
+      // it per chunk.
+      if (!Buffer.isBuffer(raw)) {
+        respond(413, '{}')
+        req.destroy()
+        return
+      }
+      received += raw.byteLength
       if (received > MAX_CHANNEL_BODY_BYTES) {
         respond(413, '{}')
         req.destroy()
         return
       }
-      chunks.push(chunk as Buffer)
+      chunks.push(raw)
     }
-    let envelope: { type?: unknown; rpcId?: unknown; method?: unknown; payload?: unknown }
+    let envelope:
+      | { type?: unknown; rpcId?: unknown; method?: unknown; payload?: unknown }
+      | undefined
     try {
-      envelope = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof envelope
+      const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      envelope = isRecord(parsed) ? parsed : undefined
     } catch {
       respond(400, '{}')
       return
     }
     if (
+      envelope === undefined ||
       envelope.type !== 'client-request' ||
       typeof envelope.rpcId !== 'string' ||
       envelope.rpcId.length === 0 ||

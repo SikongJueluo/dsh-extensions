@@ -14,6 +14,7 @@
 import { mkdir, readFile, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { isRecord } from './goal-evidence.js'
 
 /** Bump on any incompatible anchor change; readers refuse other versions. */
 export const ANCHOR_SCHEMA_VERSION = 2
@@ -65,7 +66,48 @@ export interface AnchorComparison {
   readonly goalPhaseMatches: boolean | undefined
 }
 
-const GOAL_PHASES = ['active', 'paused', 'blocked', 'complete'] as const
+const GOAL_PHASES: ReadonlySet<string> = new Set(['active', 'paused', 'blocked', 'complete'])
+
+function isJjSection(value: unknown): value is TaskAnchor['vcs'] {
+  return (
+    isRecord(value) &&
+    value.tool === 'jj' &&
+    typeof value.changeId === 'string' &&
+    Array.isArray(value.parentChangeIds) &&
+    value.parentChangeIds.every((id) => typeof id === 'string')
+  )
+}
+
+function isGoalSection(value: unknown): value is NonNullable<TaskAnchor['goal']> {
+  if (value === undefined) return true
+  if (!isRecord(value)) return false
+  if (typeof value.goalId !== 'string' || typeof value.revision !== 'number') return false
+  if (value.proof !== 'fold-agrees' && value.proof !== 'args-only-unverified') return false
+  if (
+    value.phase !== undefined &&
+    (typeof value.phase !== 'string' || !GOAL_PHASES.has(value.phase))
+  )
+    return false
+  return true
+}
+
+function isAnchorShape(value: unknown): value is TaskAnchor {
+  if (!isRecord(value)) return false
+  if (value.schemaVersion !== ANCHOR_SCHEMA_VERSION) return false
+  if (
+    typeof value.sessionId !== 'string' ||
+    typeof value.repoRoot !== 'string' ||
+    typeof value.phase !== 'string'
+  )
+    return false
+  if (
+    typeof value.createdAt !== 'number' ||
+    !Array.isArray(value.ownedFiles) ||
+    typeof value.verification !== 'string'
+  )
+    return false
+  return isJjSection(value.vcs) && isGoalSection(value.goal)
+}
 
 /**
  * Compare an anchor with current facts; absent facts read as `undefined`
@@ -108,46 +150,7 @@ export function parseAnchor(raw: string): TaskAnchor | undefined {
   } catch {
     return undefined
   }
-  if (typeof value !== 'object' || value === null) return undefined
-  const a = value as Record<string, unknown>
-  if (a.schemaVersion !== ANCHOR_SCHEMA_VERSION) return undefined
-  if (
-    typeof a.sessionId !== 'string' ||
-    typeof a.repoRoot !== 'string' ||
-    typeof a.phase !== 'string'
-  )
-    return undefined
-  if (
-    typeof a.createdAt !== 'number' ||
-    !Array.isArray(a.ownedFiles) ||
-    typeof a.verification !== 'string'
-  )
-    return undefined
-  const vcs = a.vcs as Record<string, unknown> | undefined
-  if (
-    vcs === undefined ||
-    vcs.tool !== 'jj' ||
-    typeof vcs.changeId !== 'string' ||
-    !Array.isArray(vcs.parentChangeIds) ||
-    !vcs.parentChangeIds.every((id) => typeof id === 'string')
-  ) {
-    return undefined
-  }
-  const goal = a.goal as Record<string, unknown> | undefined
-  if (
-    goal !== undefined &&
-    (typeof goal.goalId !== 'string' ||
-      typeof goal.revision !== 'number' ||
-      (goal.proof !== 'fold-agrees' && goal.proof !== 'args-only-unverified'))
-  )
-    return undefined
-  if (
-    goal?.phase !== undefined &&
-    (typeof goal.phase !== 'string' ||
-      !GOAL_PHASES.includes(goal.phase as (typeof GOAL_PHASES)[number]))
-  )
-    return undefined
-  return value as TaskAnchor
+  return isAnchorShape(value) ? value : undefined
 }
 
 /** Options for {@link AnchorStore}: where corrupt/unsupported loads report. */
@@ -172,7 +175,7 @@ export class AnchorStore {
 
   /** Anchor path for one session (no I/O). */
   pathFor(sessionId: string): string {
-    return join(this.dir, 'anchors', `${sessionId.replaceAll(/[^A-Za-z0-9._-]/g, '_')}.json`)
+    return join(this.dir, 'anchors', `${sessionId.replaceAll(/[^A-Za-z0-9._-]/gu, '_')}.json`)
   }
 
   /**

@@ -17,6 +17,7 @@ import {
   openAICompletionsApi,
   openAIResponsesApi,
 } from '@earendil-works/pi-ai/compat'
+import { isRecord } from './record.js'
 
 /** Provider API root; the Anthropic SDK appends `/v1/messages` itself. */
 export const DEFAULT_BASE_URL = 'https://api.commandcode.ai/provider'
@@ -35,10 +36,10 @@ const FALLBACK_MAX_TOKENS = 32_768
 
 /** Claude models from Opus/Sonnet 4.6 and Fable 5 onward require adaptive thinking. */
 const ADAPTIVE_THINKING =
-  /(opus[-.](4[-.]6|4[-.]7|4[-.]8|5)|sonnet[-.](4[-.]6|5)|fable[-.]5|mythos[-.]5)/
+  /(opus[-.](4[-.]6|4[-.]7|4[-.]8|5)|sonnet[-.](4[-.]6|5)|fable[-.]5|mythos[-.]5)/u
 
 /** Vision-capable families while the catalog reports no modalities. */
-const VISION_FAMILIES = [/^claude-/, /^gpt-/, /^google\//]
+const VISION_FAMILIES = [/^claude-/u, /^gpt-/u, /^google\//u]
 
 /** One entry from `GET /provider/v1/models`. */
 export interface CommandCodeCatalogItem {
@@ -64,9 +65,7 @@ export interface CommandCodeProviderOptions {
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined
+  return isRecord(value) ? value : undefined
 }
 
 function finite(value: unknown): number | undefined {
@@ -74,7 +73,8 @@ function finite(value: unknown): number | undefined {
 }
 
 function isCatalogItem(value: unknown): value is CommandCodeCatalogItem {
-  return asRecord(value) !== undefined && typeof (value as Record<string, unknown>).id === 'string'
+  const record = asRecord(value)
+  return record !== undefined && typeof record.id === 'string'
 }
 
 /**
@@ -84,8 +84,9 @@ function isCatalogItem(value: unknown): value is CommandCodeCatalogItem {
  */
 export function parseCatalog(body: unknown): CommandCodeCatalogItem[] {
   const data = Array.isArray(body) ? body : asRecord(body)?.data
-  if (!Array.isArray(data)) throw new Error('Command Code /models response carried no data array')
-  return data.filter(isCatalogItem)
+  if (!Array.isArray(data))
+    throw new TypeError('Command Code /models response carried no data array')
+  return data.filter((item) => isCatalogItem(item))
 }
 
 /** The protocol one catalog entry must use; the gateway rejects any other. */
@@ -99,7 +100,7 @@ function apiOf(item: CommandCodeCatalogItem): Api | undefined {
 }
 
 /** Declared modalities when the endpoint reports them, else the family fallback. */
-function inputOf(item: CommandCodeCatalogItem): Array<'text' | 'image'> {
+function inputOf(item: CommandCodeCatalogItem): ('text' | 'image')[] {
   const declared = item.modalities?.input?.filter(
     (value): value is 'text' | 'image' => value === 'text' || value === 'image',
   )
@@ -126,7 +127,7 @@ export function toPiModels(
   items: readonly CommandCodeCatalogItem[],
   options: { baseURL: string; provider: string },
 ): Model<Api>[] {
-  const baseURL = options.baseURL.replace(/\/+$/, '')
+  const baseURL = options.baseURL.replace(/\/+$/u, '')
   const openaiBaseURL = `${baseURL}/v1`
   const models: Model<Api>[] = []
   for (const item of items) {
@@ -134,15 +135,23 @@ export function toPiModels(
     if (api === undefined) continue
     const model: Model<Api> = {
       id: item.id,
-      name: item.name || item.id,
+      // An empty catalog name means "no display name" (kept from the old `||`).
+      name: item.name !== undefined && item.name !== '' ? item.name : item.id,
       api,
       provider: options.provider,
       baseUrl: api === 'anthropic-messages' ? baseURL : openaiBaseURL,
       reasoning: item.reasoning ?? true,
       input: inputOf(item),
       cost: costOf(item),
-      contextWindow: item.context_length || FALLBACK_CONTEXT_WINDOW,
-      maxTokens: item.max_output_tokens || FALLBACK_MAX_TOKENS,
+      // Zero/absent fall back to the defaults (kept from the old `||`).
+      contextWindow:
+        item.context_length !== undefined && item.context_length !== 0
+          ? item.context_length
+          : FALLBACK_CONTEXT_WINDOW,
+      maxTokens:
+        item.max_output_tokens !== undefined && item.max_output_tokens !== 0
+          ? item.max_output_tokens
+          : FALLBACK_MAX_TOKENS,
     }
     if (api === 'openai-completions') {
       model.compat = { supportsDeveloperRole: false, maxTokensField: 'max_tokens' }

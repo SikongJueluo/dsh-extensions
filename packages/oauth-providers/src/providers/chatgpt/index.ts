@@ -21,6 +21,7 @@ import type { OAuthProvidersService } from '../../service.js'
 import { PACKAGE_NAME, PLUGIN_NAME } from '../../identity.js'
 import { CREDENTIAL_ID, DISPLAY_NAME, PROVIDER, SETTINGS_NAMESPACE } from './identity.js'
 import type { AuthChannel } from '../../channel.js'
+import { isRecord } from '../../record.js'
 import { createFetch } from '../../transport.js'
 import type { FetchLike } from '../../transport.js'
 
@@ -110,8 +111,9 @@ function resolveAdapterOptions(config: ResolvedChatGptConfig = {}): ResolvedOpti
     throw new Error(`${PACKAGE_NAME}/chatgpt: defaultContextWindow must be a positive integer`)
   }
   return {
-    baseURL: (config.baseURL ?? DEFAULT_BASE_URL).replace(/\/+$/, ''),
-    clientVersion: config.clientVersion || undefined,
+    baseURL: (config.baseURL ?? DEFAULT_BASE_URL).replace(/\/+$/u, ''),
+    // An empty string means "derive from npm", as before.
+    clientVersion: config.clientVersion === '' ? undefined : config.clientVersion,
     refreshMarginMs,
     defaultContextWindow,
     defaultReasoningEffort: 'high',
@@ -197,8 +199,15 @@ export function registerChatGpt(
   // `current()` below reads live; `options()` re-resolves on the next use.
   // `fiber.entry` is attached at runtime by cordis-plugin-loader (untyped in
   // cordis 4.0.4's Fiber declaration); fall back to the stock row id.
-  const entry = (ctx.fiber as { entry?: { options: { id: string } } }).entry
-  const settingsNs = entry?.options.id ?? SETTINGS_NAMESPACE
+  const fiber: unknown = ctx.fiber
+  const entryId =
+    isRecord(fiber) &&
+    isRecord(fiber.entry) &&
+    isRecord(fiber.entry.options) &&
+    typeof fiber.entry.options.id === 'string'
+      ? fiber.entry.options.id
+      : undefined
+  const settingsNs = entryId ?? SETTINGS_NAMESPACE
   ctx.llm.registerConfigurableProviders([
     {
       provider: PROVIDER,

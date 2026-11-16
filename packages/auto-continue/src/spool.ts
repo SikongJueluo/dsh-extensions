@@ -18,6 +18,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { isRecord } from './guards.js'
 
 /** One pending auto-continue wait, as persisted across restarts. */
 export interface PendingWait {
@@ -55,8 +56,8 @@ export interface SpoolOptions {
 }
 
 function isPendingWait(value: unknown): value is PendingWait {
-  if (typeof value !== 'object' || value === null) return false
-  const v = value as Record<string, unknown>
+  if (!isRecord(value)) return false
+  const v = value
   return (
     typeof v.sessionId === 'string' &&
     v.sessionId.length > 0 &&
@@ -100,9 +101,9 @@ export class WaitSpool {
     }
     try {
       const parsed: unknown = JSON.parse(raw)
-      const list = Array.isArray((parsed as { pending?: unknown })?.pending)
-        ? (parsed as { pending: unknown[] }).pending
-        : []
+      const record = isRecord(parsed) ? parsed : undefined
+      const pending = record?.pending
+      const list: unknown[] = Array.isArray(pending) ? pending : []
       for (const entry of list) {
         if (isPendingWait(entry)) this.entries.set(entry.sessionId, entry)
       }
@@ -156,6 +157,7 @@ export class WaitSpool {
         const tmp = `${this.path}.tmp`
         await writeFile(tmp, `${JSON.stringify(snapshot, null, 1)}\n`, 'utf8')
         await rename(tmp, this.path)
+        return undefined
       })
       .catch(() => {
         // A failed spool write degrades to in-memory-only waiting; the next

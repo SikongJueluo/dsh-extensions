@@ -194,7 +194,7 @@ function outputValueText(values: readonly unknown[]): string {
 function stopReasonError(result: SubagentResult): string | undefined {
   switch (result.stopReason) {
     case 'completed':
-      return
+      return undefined
     case 'aborted':
       return 'subagent run was cancelled'
     case 'error':
@@ -264,8 +264,7 @@ async function settleForegroundRun(
         return {
           kind: 'foreground' as const,
           runId: activation.childId,
-          // ContentBlocks travel the session log as lossless JSON; the output
-          // schema types them as the broader JsonValue[].
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- A28: ContentBlocks travel the session log as lossless JSON, but the tool's output schema types this value as the broader JsonValue[] and the SDK block interfaces carry no index signature; no public converter bridges the two.
           output: [...result.output] as unknown as JsonValue[],
         }
       }),
@@ -382,7 +381,7 @@ export function callConfigOf(target: RouteTarget): LlmCallConfig {
 /** A short, single-line rendering of a preflight failure. */
 function failureDetail(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
-  const single = message.replaceAll(/\s+/g, ' ').trim()
+  const single = message.replaceAll(/\s+/gu, ' ').trim()
   return single.length > 200 ? `${single.slice(0, 197)}…` : single
 }
 
@@ -391,13 +390,20 @@ const PLAN_SNAPSHOT_MAX_AGE_MS = 60_000
 /** A routing hint must never delay the delegation it routes: a quota read gets this budget. */
 const PLAN_READ_BUDGET_MS = 2_000
 
+/** Narrow the optional `planUsage` service without an assertion. */
+function isPlanUsageService(value: unknown): value is PlanUsageServiceShim {
+  return (
+    typeof value === 'object' && value !== null && 'get' in value && typeof value.get === 'function'
+  )
+}
+
 /** Read the pinned route's coding-plan snapshot; any failure or overrun reads as "no quota data". */
 async function planSnapshotOf(
   ctx: RouteSelectionContext,
   provider: string,
 ): Promise<PlanUsageSnapshotShim | undefined> {
-  const planUsage = ctx.get('planUsage') as PlanUsageServiceShim | undefined
-  if (planUsage === undefined) return undefined
+  const planUsage = ctx.get('planUsage')
+  if (!isPlanUsageService(planUsage)) return undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const budget = new Promise<undefined>((resolve) => {
@@ -461,10 +467,13 @@ export async function selectTierRoute(
     await ctx.llm.resolveCallConfig(callConfigOf(fallback), signal)
   } catch (error) {
     if (signal.aborted) throw error
-    throw new Error(
+    // Built first so the blocker's preflight failure (when present) stays the
+    // cause; `throw failure` keeps that chain identical.
+    const failure = new Error(
       `crew: neither ${routeName(tier)} (${blocker.detail}) nor its fallback ${routeName(fallback)} (route unavailable: ${failureDetail(error)}) can serve this delegation`,
       { cause: blocker.error ?? error },
     )
+    throw failure
   }
   const notice = `${routeName(tier)} ${blocker.detail} — ran on the fallback ${routeName(fallback)}`
   ctx.logger.warn('crew: %s', notice)
@@ -528,6 +537,16 @@ async function startTierChild(
   }
 }
 
+/** Verify one provider supports everything the crew tools mount against. */
+function assertProviderConfiguration(subagentProvider: SubagentProvider) {
+  if (!subagentProvider.capabilities.agentOptions)
+    throw new Error(`crew: provider "${subagentProvider.name}" does not support child agentOptions`)
+  if (subagentProvider.prepareContinuable === undefined)
+    throw new Error(
+      `crew: provider "${subagentProvider.name}" does not support continuable children`,
+    )
+}
+
 /** Install the crew delegation composition. */
 export function apply(ctx: Context, config: Config) {
   const tiers = [
@@ -538,17 +557,6 @@ export function apply(ctx: Context, config: Config) {
   const tierRoutes = { quick: config.quick, workhorse: config.workhorse, smart: config.smart }
   const toolNames = new Set([...tiers.map((tier) => tier.route.toolName), 'create_agent'])
   if (toolNames.size !== 4) throw new Error('crew: tier toolNames must be distinct')
-
-  const assertProviderConfiguration = (subagentProvider: SubagentProvider) => {
-    if (!subagentProvider.capabilities.agentOptions)
-      throw new Error(
-        `crew: provider "${subagentProvider.name}" does not support child agentOptions`,
-      )
-    if (subagentProvider.prepareContinuable === undefined)
-      throw new Error(
-        `crew: provider "${subagentProvider.name}" does not support continuable children`,
-      )
-  }
 
   let mounted: (() => void)[] | undefined
   const mount = (subagentProvider: SubagentProvider) => {

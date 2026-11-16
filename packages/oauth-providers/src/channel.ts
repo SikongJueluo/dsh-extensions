@@ -28,10 +28,11 @@ import type {
 import { credentialKeyScope } from '@deepseek-ai/dsh-credentials'
 import type { CredentialKey } from '@deepseek-ai/dsh-credentials'
 import { PLUGIN_NAME, RPC_CHANNEL } from './identity.js'
+import { isRecord } from './record.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 /** One endpoint segment of the channel (same grammar as connection RPC). */
-const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
 /** Sign-in requests are tiny; anything bigger is a misbehaving client. */
 const MAX_CHANNEL_BODY_BYTES = 64 * 1024
 
@@ -40,7 +41,7 @@ interface WirePrompt {
   kind: 'text' | 'secret' | 'select'
   message: string
   placeholder?: string
-  options?: Array<{ id: string; label: string }>
+  options?: { id: string; label: string }[]
 }
 
 /** Everything the browser may poll about one provider's attempt. */
@@ -93,8 +94,25 @@ function wirePrompt(prompt: AuthorizationPrompt): WirePrompt {
 
 /** Extract a string field from an unknown JSON payload. */
 function field(payload: unknown, name: string): string | undefined {
-  const value = (payload as Record<string, unknown> | null | undefined)?.[name]
+  if (!isRecord(payload)) return undefined
+  const value = payload[name]
   return typeof value === 'string' ? value : undefined
+}
+
+/** The failure envelope every error path returns. */
+function failure(
+  code: string,
+  message: string,
+): { ok: false; error: { code: string; message: string; details: object } } {
+  return { ok: false, error: { code, message, details: {} } }
+}
+
+/** Look up a registered provider by its id (absent → `undefined`). */
+function entryOf(
+  providers: Map<string, ProviderEntry>,
+  id: string | undefined,
+): ProviderEntry | undefined {
+  return id !== undefined ? providers.get(id) : undefined
 }
 
 /**
@@ -155,7 +173,9 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
     void svcCtx.authorization
       .begin({ key: entry.key, interaction: interactionOf(entry) })
       .then((outcome) => settle(entry, outcome.status))
-      .catch((error: Error) => settle(entry, 'failed', error.message))
+      .catch((error: unknown) =>
+        settle(entry, 'failed', error instanceof Error ? error.message : String(error)),
+      )
     return { started: true, running: true }
   }
 
@@ -167,33 +187,24 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
     | { ok: true; value: unknown }
     | { ok: false; error: { code: string; message: string; details: object } }
   > => {
-    const failure = (
-      code: string,
-      message: string,
-    ): { ok: false; error: { code: string; message: string; details: object } } => ({
-      ok: false,
-      error: { code, message, details: {} },
-    })
-    const entryOf = (id: string | undefined): ProviderEntry | undefined =>
-      id !== undefined ? providers.get(id) : undefined
     try {
       switch (endpoint) {
         case 'providers': {
-          const list: Array<Record<string, unknown>> = []
+          const list: Record<string, unknown>[] = []
           for (const entry of providers.values()) {
             const info = await svcCtx.credentials.describeRecord(entry.key)
             list.push({
               id: entry.id,
               label: entry.label,
               settingsNs: entry.settingsNs,
-              signedIn: info?.configured === true,
+              signedIn: info?.configured,
               running: entry.bridge !== undefined && entry.bridge.done === undefined,
             })
           }
           return { ok: true, value: { providers: list } }
         }
         default: {
-          const entry = entryOf(field(payload, 'provider'))
+          const entry = entryOf(providers, field(payload, 'provider'))
           if (entry === undefined)
             return failure(
               'UNKNOWN_PROVIDER',
@@ -205,7 +216,7 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
               return {
                 ok: true,
                 value: {
-                  signedIn: info?.configured === true,
+                  signedIn: info?.configured,
                   running: entry.bridge !== undefined && entry.bridge.done === undefined,
                 },
               }
@@ -263,7 +274,7 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
         }
       }
     } catch (error) {
-      return failure('SIGNIN_FAILED', (error as Error).message)
+      return failure('SIGNIN_FAILED', error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -303,17 +314,23 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
     const chunks: Buffer[] = []
     let received = 0
     for await (const chunk of req) {
-      received += (chunk as Buffer).byteLength
+      const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))
+      received += data.byteLength
       if (received > MAX_CHANNEL_BODY_BYTES) {
         respond(413, '{}')
         req.destroy()
         return
       }
-      chunks.push(chunk as Buffer)
+      chunks.push(data)
     }
     let envelope: { type?: unknown; rpcId?: unknown; method?: unknown; payload?: unknown }
     try {
-      envelope = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof envelope
+      const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      if (!isRecord(parsed)) {
+        respond(400, '{}')
+        return
+      }
+      envelope = parsed
     } catch {
       respond(400, '{}')
       return

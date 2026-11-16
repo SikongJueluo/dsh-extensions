@@ -1,15 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { decodeGoalChangeV1, foldGoalEvents, mergeGoal } from '../src/goal-evidence.js'
 
 let seq = 0
-function ev(type: string, data: Record<string, unknown>): SessionEvent {
+function ev(type: string, data: Record<string, unknown>) {
   seq += 1
-  return { type, seq, time: 0, data } as unknown as SessionEvent
+  return { type, seq, time: 0, data }
 }
 
 /** Real `GoalSnapshotChangeMeta` v1 shape from dsh-goal domain.d.ts. */
-function goalChange(overrides: Record<string, unknown> = {}): SessionEvent {
+function goalChange(overrides: Record<string, unknown> = {}) {
   return ev('goal/change', {
     kind: 'goal/change',
     version: 1,
@@ -23,7 +22,7 @@ function goalChange(overrides: Record<string, unknown> = {}): SessionEvent {
 }
 
 /** Real `GoalClearChangeMeta` v1 tombstone shape. */
-function goalClear(goalId = 'g1', revision = 3): SessionEvent {
+function goalClear(goalId = 'g1', revision = 3) {
   return ev('goal/change', {
     kind: 'goal/change',
     version: 1,
@@ -33,21 +32,17 @@ function goalClear(goalId = 'g1', revision = 3): SessionEvent {
   })
 }
 
-function toolCall(
-  name: string,
-  args: Record<string, unknown>,
-  callId = `c${seq + 1}`,
-): SessionEvent {
+function toolCall(name: string, args: Record<string, unknown>, callId = `c${seq + 1}`) {
   seq += 1
   return {
     type: 'tool/call',
     seq,
     time: 0,
     data: { turn: 1, step: 1, callId, name, arguments: JSON.stringify(args) },
-  } as unknown as SessionEvent
+  }
 }
 
-function toolResult(callId: string, isError: boolean): SessionEvent {
+function toolResult(callId: string, isError: boolean) {
   return ev('tool/result', {
     turn: 1,
     step: 1,
@@ -209,19 +204,18 @@ describe('mergeGoal (CAS against the durable fold only)', () => {
   })
 
   it('conflicts on revision drift (update happened)', () => {
-    expect(
-      mergeGoal({ goalId: 'g', goalRevision: 2 }, { kind: 'snapshot', snapshot: snap }),
-    ).toMatchObject({
-      conflict: expect.stringContaining('goal revision mismatch'),
-    })
+    const result = mergeGoal({ goalId: 'g', goalRevision: 2 }, { kind: 'snapshot', snapshot: snap })
+    if (!('conflict' in result)) throw new Error('expected a conflict')
+    expect(result.conflict).toContain('goal revision mismatch')
   })
 
   it('conflicts when a NEW goal reuses the same revision number', () => {
-    expect(
-      mergeGoal({ goalId: 'old', goalRevision: 3 }, { kind: 'snapshot', snapshot: snap }),
-    ).toMatchObject({
-      conflict: expect.stringContaining('goal id mismatch'),
-    })
+    const result = mergeGoal(
+      { goalId: 'old', goalRevision: 3 },
+      { kind: 'snapshot', snapshot: snap },
+    )
+    if (!('conflict' in result)) throw new Error('expected a conflict')
+    expect(result.conflict).toContain('goal id mismatch')
   })
 
   it('records an unverified assertion only when durable proof is absent or unreadable', () => {
@@ -234,9 +228,9 @@ describe('mergeGoal (CAS against the durable fold only)', () => {
   })
 
   it('a cleared fold is counter-evidence: an asserted goal conflicts, not unverified', () => {
-    expect(mergeGoal({ goalId: 'g', goalRevision: 2 }, { kind: 'cleared' })).toMatchObject({
-      conflict: expect.stringContaining('cleared'),
-    })
+    const result = mergeGoal({ goalId: 'g', goalRevision: 2 }, { kind: 'cleared' })
+    if (!('conflict' in result)) throw new Error('expected a conflict')
+    expect(result.conflict).toContain('cleared')
   })
 
   it('yields nothing without an asserted identity', () => {

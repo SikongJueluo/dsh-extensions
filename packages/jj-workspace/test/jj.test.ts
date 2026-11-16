@@ -31,7 +31,7 @@ function run(cwd: string, args: readonly string[], signal?: AbortSignal): Promis
       { cwd, env: fixture.env, signal, maxBuffer: 4 * 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error !== null) {
-          reject(new Error(`${stderr.trim() || error.message}`))
+          reject(new Error(stderr.trim() || error.message))
           return
         }
         resolve(stdout)
@@ -266,7 +266,7 @@ describe('createJjWorkspace', () => {
         poolDirectory: '.agents/workspaces',
         signal: new AbortController().signal,
       }),
-    ).rejects.toThrow(/workspace already exists/)
+    ).rejects.toThrow(/workspace already exists/u)
 
     expect((await stat(first.path)).isDirectory()).toBe(true)
     expect(await bookmarkTarget(fixture.repo, 'task')).toBe(first.changeId)
@@ -280,7 +280,7 @@ describe('createJjWorkspace', () => {
         poolDirectory: '.agents/workspaces',
         signal: new AbortController().signal,
       }),
-    ).rejects.toThrow(/bookmark already exists/)
+    ).rejects.toThrow(/bookmark already exists/u)
     await expect(stat(join(fixture.repo, '.agents/workspaces/base-bm'))).rejects.toMatchObject({
       code: 'ENOENT',
     })

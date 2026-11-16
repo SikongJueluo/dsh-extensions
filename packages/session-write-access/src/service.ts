@@ -15,7 +15,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
+import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import type { SandboxPolicyRequest } from '@deepseek-ai/dsh-sandbox-policy'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-query'
@@ -98,7 +98,8 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     const domain =
       existing === undefined
         ? await facility.open(SESSION_WRITE_ACCESS_DOMAIN)
-        : (existing as unknown as Domain<typeof SESSION_WRITE_ACCESS_DOMAIN>)
+        : // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- A24: `DomainFacility.get` is the SDK's untyped diagnostic surface by design (only `open` is typed, and it rejects an already-open domain on hot reload), so the reuse path has no typed handle.
+          (existing as unknown as Domain<typeof SESSION_WRITE_ACCESS_DOMAIN>)
     this.domain = domain
     this.domainOwned = existing === undefined
     this.access = new AccessStore(
@@ -305,6 +306,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
           throw new Error(
             `Fork created session ${reported}; its inherited directories are not confirmed and the Fork record ` +
               `could not be finalized: ${message}. Inspect the write-scope panel before using it.`,
+            { cause: error },
           )
         }
         const stillApplied = this.forkGrantsPresent(reported, fork)
@@ -312,6 +314,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
           throw new Error(
             `Fork created session ${reported}; cleanup left its inherited directories applied and the Fork record ` +
               `failed: ${message}. Inspect the write-scope panel before using it.`,
+            { cause: error },
           )
         }
         try {
@@ -325,6 +328,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
         throw new Error(
           `Fork created session ${reported} but its inherited directories could not be committed: ${message}. ` +
             'It has the default workspace only.',
+          { cause: error },
         )
       }
       if (fork !== undefined) {
@@ -348,6 +352,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
           throw new Error(
             `Fork failed after creating session ${reported}: ${message}. It has the default workspace only and ` +
               'did not inherit the captured grants.',
+            { cause: error },
           )
         }
         await access.failFork(fork.forkId)
@@ -474,7 +479,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     const forks = access
       .forks()
       .filter((fork) => fork.sourceSessionId === sessionId)
-      .sort((left, right) => right.createdAt - left.createdAt)
+      .toSorted((left, right) => right.createdAt - left.createdAt)
       .slice(0, 5)
     return {
       ...status,

@@ -65,7 +65,7 @@ async function discover() {
       found.push(join(scriptsDir, file.name))
     }
   }
-  return found.toSorted()
+  return found.toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 }
 
 function run(script, { verbose }) {

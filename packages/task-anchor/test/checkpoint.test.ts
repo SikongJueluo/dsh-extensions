@@ -131,7 +131,7 @@ describe('parseAnchor', () => {
 
   it('rejects malformed JSON, wrong schemaVersion (v1 single-parent era), bad vcs, and bad phase', () => {
     expect(parseAnchor('{')).toBeUndefined()
-    expect(parseAnchor(JSON.stringify(anchor({ schemaVersion: 1 as never })))).toBeUndefined()
+    expect(parseAnchor(JSON.stringify({ ...anchor(), schemaVersion: 1 }))).toBeUndefined()
     expect(
       parseAnchor(JSON.stringify({ ...anchor(), vcs: { tool: 'jj', changeId: 'm' } })),
     ).toBeUndefined()
@@ -201,6 +201,8 @@ describe('AnchorStore', () => {
     const loaded = await store.load('s1')
     expect(loaded).toEqual(anchor())
     const raw = await readFile(target, 'utf8')
-    expect(() => JSON.parse(raw)).not.toThrow()
+    expect(() => {
+      JSON.parse(raw)
+    }).not.toThrow()
   })
 })

@@ -8,11 +8,11 @@ import type { Plugin, UserConfig } from 'vite'
  * exact package rows, never arbitrary npm dependencies.
  */
 const DSH_PLATFORM_MODULES = [
-  /^react$/,
-  /^react\/jsx-runtime$/,
-  /^react\/jsx-dev-runtime$/,
-  /^react-dom$/,
-  /^react-dom\/client$/,
+  /^react$/u,
+  /^react\/jsx-runtime$/u,
+  /^react\/jsx-dev-runtime$/u,
+  /^react-dom$/u,
+  /^react-dom\/client$/u,
 ]
 
 /**
@@ -56,7 +56,7 @@ function dshClientPlugin({ id }: DshClientOptions): Plugin {
 
       const stylesheet = css
         .join('\n')
-        .replaceAll(/\/\*# sourceMappingURL=[^*]*\*\/\s*/g, '')
+        .replaceAll(/\/\*# sourceMappingURL=[^*]*\*\/\s*/gu, '')
         .trim()
 
       for (const output of Object.values(bundle)) {

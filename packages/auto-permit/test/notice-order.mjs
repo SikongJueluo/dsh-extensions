@@ -98,9 +98,11 @@ function makeContext(sessions) {
   return { ctx, listeners }
 }
 
+/** One volatile config cell: the plugin only calls `.get()`. */
+const cell = (v) => ({ get: () => v })
+
 /** Volatile row config: the plugin only calls `.get()`. */
 function makeConfig() {
-  const cell = (v) => ({ get: () => v })
   return {
     enabled: cell(true),
     provider: cell('deepseek-official'),

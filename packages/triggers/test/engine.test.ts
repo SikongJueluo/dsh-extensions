@@ -160,16 +160,22 @@ describe('session-scoped signal ownership', () => {
   it('an outsider session is never the signal owner', () => {
     const accepted = submitSignal(freshRun(), EXECUTOR, 'deliver', 'done', 1, 1100)
     if (!accepted.ok) throw new Error('rejected')
-    expect(signalBelongsTo(accepted.run.pendingSignal!, accepted.run, OUTSIDER)).toBe(false)
+    const pending = accepted.run.pendingSignal
+    expect(pending).toBeDefined()
+    if (pending === undefined) throw new Error('pending signal missing')
+    expect(signalBelongsTo(pending, accepted.run, OUTSIDER)).toBe(false)
     expect(commitTurnEnd(accepted.run, OUTSIDER, 1, 'completed', 1200)).toEqual({ kind: 'ignored' })
   })
 
   it('legacy pending signals without a session still commit from either bound side', () => {
     const accepted = submitSignal(freshRun(), EXECUTOR, 'deliver', 'done', 1, 1100)
     if (!accepted.ok) throw new Error('rejected')
+    const pending = accepted.run.pendingSignal
+    expect(pending).toBeDefined()
+    if (pending === undefined) throw new Error('pending signal missing')
     const legacy = {
       ...accepted.run,
-      pendingSignal: { ...accepted.run.pendingSignal!, session: undefined },
+      pendingSignal: { ...pending, session: undefined },
     }
     expect(commitTurnEnd(legacy, PARENT, 1, 'completed', 1200).kind).toBe('advance')
   })
@@ -230,7 +236,7 @@ describe('duplicate and late signals', () => {
 describe('round budget', () => {
   it('the last allowed delivery still goes to review in full', () => {
     let run = freshRun(2)
-    let step = deliver(run, 2, 1200)
+    const step = deliver(run, 2, 1200)
     run = step.run
     const accepted = submitSignal(run, PARENT, 'rework', 'more', 5, 1300)
     if (!accepted.ok) throw new Error(`rejected: ${accepted.code}`)
@@ -362,10 +368,9 @@ describe('turn-end auto-delivery', () => {
     expect(outcome.run.phase).toBe('awaiting-review')
     expect(outcome.run.pendingSignal).toBeUndefined()
     expect(outcome.intents).toEqual([{ runId: 'run-1', round: 1, to: PARENT, kind: 'review' }])
-    expect(outcome.run.history.at(-2)).toMatchObject({
-      kind: 'signal',
-      detail: expect.stringContaining('auto'),
-    })
+    const historyEntry = outcome.run.history.at(-2)
+    expect(historyEntry?.kind).toBe('signal')
+    expect(historyEntry?.detail).toContain('auto')
   })
 
   it('refuses anything but a completed executor delivery turn', () => {

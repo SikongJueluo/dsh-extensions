@@ -17,6 +17,7 @@
  * @module dsh-plan-usage/sources/openai
  */
 import type { QuotaSnapshot } from '../types.js'
+import { isRecord } from './contracts.js'
 import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
 /** The ChatGPT backend usage endpoint Codex clients poll. */
@@ -38,9 +39,7 @@ function finiteNumber(value: unknown): number | undefined {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
+  return isRecord(value) ? value : null
 }
 
 /** One `rate_limit.{primary,secondary}_window` object → window facts. */

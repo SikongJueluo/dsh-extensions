@@ -16,6 +16,7 @@
 import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { PACKAGE_NAME } from '../../identity.js'
+import { isRecord } from '../../record.js'
 import type { FetchLike } from '../../transport.js'
 
 /** The public OAuth client id the Codex CLI uses for the ChatGPT login. */
@@ -116,11 +117,11 @@ export function parseAuthorizationInput(input: string): { code?: string; state?:
 function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
   const parts = jwt.split('.')
   if (parts.length !== 3) return null
+  const payload = parts[1]
+  if (payload === undefined) return null
   try {
-    return JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8')) as Record<
-      string,
-      unknown
-    >
+    const parsed: unknown = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+    return isRecord(parsed) ? parsed : null
   } catch {
     return null
   }
@@ -128,29 +129,29 @@ function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
 
 /** Extract the ChatGPT account id from an access token's claims. */
 function accountIdOf(accessToken: string): string | undefined {
-  const auth = decodeJwtPayload(accessToken)?.[JWT_CLAIM_PATH] as
-    | { chatgpt_account_id?: unknown }
-    | undefined
-  const accountId = auth?.chatgpt_account_id
+  const claim = decodeJwtPayload(accessToken)?.[JWT_CLAIM_PATH]
+  const accountId = isRecord(claim) ? claim.chatgpt_account_id : undefined
   return typeof accountId === 'string' && accountId.length > 0 ? accountId : undefined
 }
 
 /** Validate a token-endpoint response and map it into an {@link OAuthGrant}. */
 function grantFromTokenResponse(json: unknown): OAuthGrant {
-  const body = json as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown }
   if (
-    typeof body?.access_token !== 'string' ||
-    typeof body?.refresh_token !== 'string' ||
-    typeof body?.expires_in !== 'number'
+    !isRecord(json) ||
+    typeof json.access_token !== 'string' ||
+    typeof json.refresh_token !== 'string' ||
+    typeof json.expires_in !== 'number'
   ) {
-    throw new Error(`OpenAI token response missing fields: ${JSON.stringify(json).slice(0, 200)}`)
+    throw new TypeError(
+      `OpenAI token response missing fields: ${JSON.stringify(json).slice(0, 200)}`,
+    )
   }
-  const accountId = accountIdOf(body.access_token)
+  const accountId = accountIdOf(json.access_token)
   if (!accountId) throw new Error('OpenAI token response carries no ChatGPT account id')
   return {
-    access: body.access_token,
-    refresh: body.refresh_token,
-    expires: Date.now() + body.expires_in * 1000,
+    access: json.access_token,
+    refresh: json.refresh_token,
+    expires: Date.now() + json.expires_in * 1000,
     accountId,
   }
 }

@@ -28,7 +28,9 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
-import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {
   SessionPromptRequest,
   SessionRequestId,
@@ -67,6 +69,7 @@ import {
   type DeliveryIntent,
 } from './engine.js'
 import { composeDeliveryPrompt, nudgeLine } from './prompts.js'
+import { isRecord } from './record.js'
 import { emptyFold, foldEvent, scanTurnEnds, type SessionFold, type TurnEndFact } from './replay.js'
 import { openStore, type TriggerStore } from './store.js'
 
@@ -354,7 +357,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
    */
   private async readSessionLog(sessionId: string): Promise<readonly SessionEvent[]> {
     try {
-      return (await this.ctx.sessionQuery.readSession(sessionId as SessionId)).events
+      return (await this.ctx.sessionQuery.readSession(SessionId(sessionId))).events
     } catch (failure) {
       if (!isSessionNotFound(failure)) throw failure
       this.ctx.logger(PACKAGE_NAME).info('session has no durable log yet', { sessionId })
@@ -384,7 +387,11 @@ export class TriggerService extends Service implements TriggerBindingsService {
       .filter(([, run]) => run.status === 'active')
       .map(([id]) => id)
     if (activeIds.length === 0) return
-    const active = activeIds.map((id) => store.runs.get(id)!)
+    const active: RunRecord[] = []
+    for (const id of activeIds) {
+      const run = store.runs.get(id)
+      if (run !== undefined) active.push(run)
+    }
     const sessions = new Set<string>()
     for (const run of active) {
       sessions.add(run.executor)
@@ -416,7 +423,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
         // committed by either side, so both sides stay below it.)
         const ownsThisSide = pending.session === undefined || pending.session === sessionId
         if (ownsThisSide && pending.turn <= (facts.at(-1)?.turn ?? 0)) {
-          return facts.filter((fact) => fact.turn < pending.turn).at(-1)?.turn ?? 0
+          return facts.findLast((fact) => fact.turn < pending.turn)?.turn ?? 0
         }
         return facts.at(-1)?.turn ?? 0
       }
@@ -466,6 +473,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
     this.runChains.set(runId, tail)
     void tail.then(() => {
       if (this.runChains.get(runId) === tail) this.runChains.delete(runId)
+      return undefined
     })
     return chained
   }
@@ -510,9 +518,10 @@ export class TriggerService extends Service implements TriggerBindingsService {
       this.folds.set(sessionId, fold)
       return
     }
-    const data = event.data as { turn?: unknown; reason?: { kind?: unknown } } | undefined
+    const data = isRecord(event.data) ? event.data : undefined
+    const reason = isRecord(data?.reason) ? data.reason : undefined
     const turn = data?.turn
-    const reasonKind = data?.reason?.kind
+    const reasonKind = reason?.kind
     if (typeof turn !== 'number' || typeof reasonKind !== 'string') return
     // Snapshot the point-in-time context synchronously: a replayed turn/end
     // must not see (and re-deliver) the same final answer twice, and the goal
@@ -530,6 +539,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
     const chained = (this.chains.get(sessionId) ?? Promise.resolve())
       .then(async () => {
         await this.commitTurnEnd(sessionId, turn, reasonKind, reply, goalActive)
+        return undefined
       })
       .catch((error: unknown) => {
         this.ctx
@@ -602,7 +612,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
           .map(([id]) => id)
     const context = {
       turnSpokenFor,
-      autoWinner: autoCandidates.length === 1 ? autoCandidates[0]! : undefined,
+      autoWinner: autoCandidates.length === 1 ? autoCandidates[0] : undefined,
       autoAmbiguous: autoCandidates.length > 1,
     }
     const now = Date.now()
@@ -918,12 +928,11 @@ export class TriggerService extends Service implements TriggerBindingsService {
   private withOutboxEntryFailed(run: RunRecord, entryId: string): RunRecord {
     const outbox = run.outbox ?? []
     if (!outbox.some((entry) => entry.id === entryId)) return run
-    return {
-      ...run,
-      outbox: outbox.map((entry) =>
-        entry.id === entryId ? { ...entry, state: 'failed' as const } : entry,
-      ),
+    const failed: OutboxEntry[] = []
+    for (const entry of outbox) {
+      failed.push(entry.id === entryId ? { ...entry, state: 'failed' as const } : entry)
     }
+    return { ...run, outbox: failed }
   }
 
   /**
@@ -958,8 +967,8 @@ export class TriggerService extends Service implements TriggerBindingsService {
     let error: string | undefined
     try {
       const request: SessionPromptRequest = {
-        requestId: delivery.requestId as SessionRequestId,
-        sessionId: delivery.to as SessionPromptRequest['sessionId'],
+        requestId: brandString<SessionRequestId>(delivery.requestId),
+        sessionId: SessionId(delivery.to),
         mode: 'queue',
         content: [{ type: 'text', text: delivery.content }],
       }
@@ -1185,7 +1194,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
     maxRounds: number | undefined,
     bindingName: string | undefined,
     templateRefs?: { start: string; review: string; rework: string },
-    autoDeliver = false,
+    autoDeliverDefault = false,
     deliverStart = false,
   ): Promise<{ binding: BindingRecord; run: RunRecord }> {
     const store = await this.ready()
@@ -1200,7 +1209,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
         Math.max(1, Math.round(maxRounds ?? DEFAULT_MAX_ROUNDS)),
       ),
       enabled: true,
-      ...(autoDeliver ? { autoDeliver: true } : {}),
+      ...(autoDeliverDefault ? { autoDeliver: true } : {}),
       templates: templateRefs ?? defaultTemplateRefs(),
       createdAt: now,
       updatedAt: now,
@@ -1351,13 +1360,13 @@ export class TriggerService extends Service implements TriggerBindingsService {
     const runs = [...store.runs.entries()]
       .map(([, value]) => value)
       .filter((run) => scope === undefined || run.executor === scope || run.parent === scope)
-      .sort((a, b) => runSnapshotRank(a) - runSnapshotRank(b) || b.startedAt - a.startedAt)
+      .toSorted((a, b) => runSnapshotRank(a) - runSnapshotRank(b) || b.startedAt - a.startedAt)
       .slice(0, SNAPSHOT_RUN_LIMIT)
     const visibleRunIds = new Set(runs.map((run) => run.id))
     const deliveries = [...store.deliveries.entries()]
       .map(([, value]) => value)
       .filter((delivery) => scope === undefined || visibleRunIds.has(delivery.runId))
-      .sort((a, b) => b.createdAt - a.createdAt)
+      .toSorted((a, b) => b.createdAt - a.createdAt)
       .slice(0, SNAPSHOT_DELIVERY_LIMIT)
     return { templates, bindings, runs, deliveries }
   }
@@ -1367,22 +1376,22 @@ export class TriggerService extends Service implements TriggerBindingsService {
     await this.ready()
     const signal = new AbortController().signal
     const list = await this.ctx.sessionController.list({}, signal)
-    return list.items
-      .map((item) => {
-        // The title rides the session-summary projection block when the host
-        // folds one in; it is display-only, so an absent block degrades to the
-        // distinguishable short id the client derives.
-        const title = (item.projections?.values as { title?: unknown } | undefined)?.title
-        return {
-          id: String(item.sessionId),
-          updatedAt: item.updatedAt,
-          running: item.running,
-          ...(item.cwd !== undefined ? { cwd: item.cwd } : {}),
-          ...(typeof title === 'string' && title.length > 0 ? { title } : {}),
-        }
-      })
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, 200)
+    const rows: SessionRow[] = []
+    for (const item of list.items) {
+      // The title rides the session-summary projection block when the host
+      // folds one in; it is display-only, so an absent block degrades to the
+      // distinguishable short id the client derives.
+      const title = (item.projections?.values as { title?: unknown } | undefined)?.title
+      const row: SessionRow = {
+        id: String(item.sessionId),
+        updatedAt: item.updatedAt,
+        running: item.running,
+        ...(item.cwd !== undefined ? { cwd: item.cwd } : {}),
+        ...(typeof title === 'string' && title.length > 0 ? { title } : {}),
+      }
+      rows.push(row)
+    }
+    return rows.toSorted((a, b) => b.updatedAt - a.updatedAt).slice(0, 200)
   }
 
   /** Upsert one template (built-ins keep their row: edits allowed, deletes refused). */
@@ -1439,15 +1448,13 @@ export class TriggerService extends Service implements TriggerBindingsService {
     const existing =
       typeof input.id === 'string' && input.id.length > 0 ? store.bindings.get(input.id) : undefined
     const defaults = defaultTemplateRefs()
-    const rawRefs = (
-      typeof input.templates === 'object' && input.templates !== null ? input.templates : {}
-    ) as Record<string, unknown>
+    const rawRefs = isRecord(input.templates) ? input.templates : {}
     const pickRef = (key: 'start' | 'review' | 'rework'): string => {
       const raw = rawRefs[key]
       return typeof raw === 'string' && store.templates.get(raw) !== undefined ? raw : defaults[key]
     }
     const refs = { start: pickRef('start'), review: pickRef('review'), rework: pickRef('rework') }
-    const autoDeliver =
+    const autoDeliverValue =
       typeof input.autoDeliver === 'boolean' ? input.autoDeliver : (existing?.autoDeliver ?? false)
     const now = Date.now()
     const record: BindingRecord = {
@@ -1470,7 +1477,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
         ),
       ),
       enabled: typeof input.enabled === 'boolean' ? input.enabled : (existing?.enabled ?? true),
-      ...(autoDeliver ? { autoDeliver: true } : {}),
+      ...(autoDeliverValue ? { autoDeliver: true } : {}),
       templates: refs,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -1533,7 +1540,11 @@ export class TriggerService extends Service implements TriggerBindingsService {
       if (delivery !== undefined && delivery.state !== 'sent') {
         await this.sendQueued(store, delivery)
       }
-      return store.runs.get(runId)!
+      // Entry was proven present above; a vanished run hits the same error
+      // this method already raises for an unknown runId.
+      const run = store.runs.get(runId)
+      if (run === undefined) throw new Error(`运行 ${runId} 不存在。`)
+      return run
     }
     return this.synchronize(runId, () => this.controlRunOnChain(store, runId, action, options))
   }
@@ -1660,7 +1671,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
     return [...store.runs.entries()]
       .map(([, value]) => value)
       .filter((run) => run.executor === sessionId || run.parent === sessionId)
-      .sort((a, b) => b.startedAt - a.startedAt)
+      .toSorted((a, b) => b.startedAt - a.startedAt)
   }
 
   /** Shutdown: close the domain (drains queued writes). */

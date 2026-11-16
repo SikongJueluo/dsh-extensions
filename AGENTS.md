@@ -17,7 +17,7 @@ pnpm format:check   # 只检查
 pnpm fallow         # fallow dead-code：死代码、依赖卫生、循环依赖（阻塞）
 pnpm fallow:health  # 复杂度报告（不阻塞）
 pnpm fallow:dupes   # 重复度报告（不阻塞）
-pnpm check:quality  # 全部门禁：format → lint → fallow → typecheck → build → test → smoke → client → pack → storybook
+pnpm check:quality  # 全部门禁：format → lint → suppressions → fallow → typecheck → build → test → smoke → client → pack → storybook
 pnpm check          # 旧聚合：typecheck + build + client 产物检查（保留但不含新门禁）
 pnpm check:smoke    # 跑 11 个可无人值守的 smoke；1 个需真实凭据的显式排除并打印理由
 pnpm check:client   # 校验 packages/*/lib/client.js：DSH factory 包装、注册 id、外部请求、内联样式、apply/render

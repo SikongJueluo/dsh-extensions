@@ -6,6 +6,7 @@ import type { SearchAdapter } from '../src/providers.js'
 import { renderResearch } from '../src/render.js'
 import type { SearchIntegratorSettings } from '../src/settings.js'
 import type { AuditRef, RawHit } from '../src/types.js'
+import { isRecord } from '../src/types.js'
 
 function baseSettings(overrides: Partial<SearchIntegratorSettings> = {}): SearchIntegratorSettings {
   return {
@@ -69,8 +70,9 @@ function integrationJson(overrides: Record<string, unknown> = {}): string {
 
 function fakeLlmPort(
   responses: (string | { error: string })[],
-  usage = { inputTokens: 5, outputTokens: 3 },
+  usage?: { inputTokens: number; outputTokens: number },
 ) {
+  const fixedUsage = usage ?? { inputTokens: 5, outputTokens: 3 }
   const calls: { system: string; user: string }[] = []
   const queue = [...responses]
   return {
@@ -83,7 +85,7 @@ function fakeLlmPort(
         if (typeof next !== 'string') {
           return { ok: false, text: '', finishKind: 'error', error: next.error }
         }
-        return { ok: true, text: next, finishKind: 'stop', usage }
+        return { ok: true, text: next, finishKind: 'stop', usage: fixedUsage }
       },
     } as PipelineDeps['llm'],
   }
@@ -154,8 +156,8 @@ describe('runResearch', () => {
     expect(result.summary).toBe('Integrated answer.')
     const shared = result.sources.find((source) => source.url === 'https://shared.example/one')
     expect(shared).toBeDefined()
-    expect([...(shared?.providers ?? [])].sort()).toEqual(['exa', 'tavily'])
-    expect([...result.coverage.searched].sort()).toEqual(['exa', 'tavily'])
+    expect((shared?.providers ?? []).toSorted()).toEqual(['exa', 'tavily'])
+    expect(result.coverage.searched.toSorted()).toEqual(['exa', 'tavily'])
     expect(result.coverage.failed).toEqual([])
     expect(result.coverage.resultsFound).toBe(4)
     expect(result.coverage.evidenceCount).toBeLessThanOrEqual(result.coverage.resultsFound)
@@ -168,9 +170,13 @@ describe('runResearch', () => {
       { question: 'q', queries: ['q'] },
     )
     expect(audit.payloads).toHaveLength(1)
-    const payload = JSON.parse(audit.payloads[0] ?? '{}')
+    const payload: unknown = JSON.parse(audit.payloads[0] ?? '{}')
+    if (!isRecord(payload)) throw new Error('audit payload was not an object')
     expect(payload.question).toBe('q')
-    expect(payload.rounds[0].hitCount).toBe(4)
+    const rounds: unknown[] = Array.isArray(payload.rounds) ? payload.rounds : []
+    const round = rounds[0]
+    if (!isRecord(round)) throw new Error('audit payload had no round record')
+    expect(round.hitCount).toBe(4)
     expect(payload.llmRawOutputs).toHaveLength(1)
     expect(result.audit?.locator).toBe('spill://audit-1')
   })
@@ -192,7 +198,7 @@ describe('runResearch', () => {
     )
     expect(result.status).toBe('ok')
     expect(result.coverage.failed).toEqual([
-      { source: 'exa', reason: expect.stringContaining('429') },
+      { source: 'exa', reason: expect.stringContaining('429') as string },
     ])
     expect(result.coverage.searched).toEqual(['tavily'])
   })
@@ -215,7 +221,7 @@ describe('runResearch', () => {
     expect(result.status).toBe('failed')
     expect(result.summary).toContain('no search results')
     expect(result.sources).toEqual([])
-    expect(result.coverage.failed.map((f) => f.source).sort()).toEqual(['exa', 'tavily'])
+    expect(result.coverage.failed.map((f) => f.source).toSorted()).toEqual(['exa', 'tavily'])
   })
 
   it('fails when sources return nothing', async () => {
@@ -348,7 +354,7 @@ describe('runResearch', () => {
       }),
     ]
     await run({ adapters, llm: llm.port }, { question: 'the question' })
-    expect(seen.sort()).toEqual(['planned one', 'planned two'])
+    expect(seen.toSorted()).toEqual(['planned one', 'planned two'])
   })
 
   it('propagates cancellation from the caller signal', async () => {
@@ -391,7 +397,7 @@ describe('runResearch', () => {
         },
         { question: 'q', queries: ['q'] },
       ),
-    ).rejects.toThrow(/abort/i)
+    ).rejects.toThrow(/abort/iu)
   })
 
   it('honors the render budget for large results', async () => {
@@ -457,7 +463,7 @@ describe('v3 retrieval context and URL-only sources', () => {
       },
       { question: 'q', queries: ['q'] },
     )
-    expect(llm.calls[0]?.user).toMatch(/tavily \(.*429/)
+    expect(llm.calls[0]?.user).toMatch(/tavily \(.*429/u)
   })
 
   it('marks undated sources and keeps URL-only entries resolvable in the digest', async () => {

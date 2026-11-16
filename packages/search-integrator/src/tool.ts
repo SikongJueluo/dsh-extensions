@@ -10,22 +10,21 @@
  */
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { Context } from '@deepseek-ai/cordis'
-import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
+import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { createAuditPort } from './audit.js'
 import { getJson, postJson } from './http.js'
-import { fetchRawPost } from './mcp.js'
-import type { RawPost } from './mcp.js'
-import { MAX_QUERIES } from './integrate.js'
 import { createLlmPort } from './llm.js'
+import type { RawPost } from './mcp.js'
+import { fetchRawPost } from './mcp.js'
 import { runResearch } from './pipeline.js'
 import { buildAdapters } from './providers.js'
 import { renderResearch, researchMeta } from './render.js'
-import { integratorConfigured } from './settings.js'
+import { MAX_QUERIES, integratorConfigured, readSettings } from './settings.js'
 import type { Config, SearchIntegratorSettings } from './settings.js'
-import { readSettings } from './settings.js'
 import type { ResearchResult } from './types.js'
+import { isRecord } from './types.js'
 
 const TOOL_DESCRIPTION = [
   'Research a question across multiple web search sources and return one integrated answer:',
@@ -70,6 +69,15 @@ export interface ToolHostLlm {
   }>
 }
 
+/** The `token(provider)` shape the pipeline needs from oauth-providers. */
+interface OAuthProvidersService {
+  token?: (provider: string) => Promise<{ access: string; accountId?: string } | undefined>
+}
+
+function isOAuthProviders(value: unknown): value is OAuthProvidersService {
+  return isRecord(value) && (value.token === undefined || typeof value.token === 'function')
+}
+
 /** The host-bound wiring used by the real plugin entry. */
 export function createToolHost(ctx: Context, config: Config): ToolHost {
   return {
@@ -91,7 +99,7 @@ export function createToolHost(ctx: Context, config: Config): ToolHost {
       createAuditPort(ctx, {
         toolName: config.toolName,
         callId,
-        ...(sessionId === undefined ? {} : { sessionId: sessionId as never }),
+        ...(sessionId === undefined ? {} : { sessionId }),
       }),
     postJson,
     getJson,
@@ -99,14 +107,9 @@ export function createToolHost(ctx: Context, config: Config): ToolHost {
     chatgptToken: async () => {
       // Opportunistic: the oauthProviders service exists only while the
       // oauth-providers plugin is mounted and signed in.
-      const service = ctx.get('oauthProviders') as
-        | {
-            token?: (
-              provider: string,
-            ) => Promise<{ access: string; accountId?: string } | undefined>
-          }
-        | undefined
-      return service?.token?.('chatgpt')
+      const service: unknown = ctx.get('oauthProviders')
+      if (!isOAuthProviders(service)) return undefined
+      return service.token?.('chatgpt')
     },
     warn: (message, error) => {
       ctx.logger.warn(message, error)
@@ -121,11 +124,11 @@ interface ParsedArgs {
 
 /** Defensive argument validation (defineTool already enforces the schema). */
 function parseArgs(args: unknown): ParsedArgs {
-  const record = args as { question?: unknown; queries?: unknown }
+  const record = isRecord(args) ? args : {}
   const question = typeof record.question === 'string' ? record.question.trim() : ''
-  if (question === '') throw new Error('question must be a non-empty string')
+  if (question === '') throw new TypeError('question must be a non-empty string')
   if (record.queries === undefined) return { question }
-  if (!Array.isArray(record.queries)) throw new Error('queries must be an array of strings')
+  if (!Array.isArray(record.queries)) throw new TypeError('queries must be an array of strings')
   const queries = [
     ...new Set(
       record.queries
@@ -203,7 +206,7 @@ export function makeResearchTool(
                   },
                 },
                 quote: { type: 'string' },
-                citationFailed: { type: 'boolean' },
+                citationFailed: { type: 'boolean', enum: [true] },
               },
             },
           },
@@ -263,13 +266,10 @@ export function makeResearchTool(
       render: (_args, value) => [
         {
           type: 'text',
-          text: renderResearch(
-            value as unknown as ResearchResult,
-            host.readSettings().maxRenderChars,
-          ),
+          text: renderResearch(value, host.readSettings().maxRenderChars),
         },
       ],
-      presentationMeta: (_args, value) => researchMeta(value as unknown as ResearchResult),
+      presentationMeta: (_args, value) => researchMeta(value),
     },
     timeoutMs: options.timeoutMs,
     isConcurrencySafe: () => true,
@@ -289,9 +289,14 @@ export function makeResearchTool(
         wanted.map(async ([, ref]) => host.resolveCredential(ref)),
       )
       resolvedKeys.forEach((outcome, index) => {
-        if (outcome.status === 'fulfilled' && outcome.value !== undefined && outcome.value !== '') {
-          keys[wanted[index]?.[0] as 'zhipu' | 'tavily' | 'exa' | 'brave' | 'openai'] =
-            outcome.value
+        const entry = wanted[index]
+        if (
+          entry !== undefined &&
+          outcome.status === 'fulfilled' &&
+          outcome.value !== undefined &&
+          outcome.value !== ''
+        ) {
+          keys[entry[0]] = outcome.value
         }
       })
 
@@ -302,7 +307,7 @@ export function makeResearchTool(
         chatgptToken: host.chatgptToken,
       })
       try {
-        return (await runResearch(
+        return await runResearch(
           {
             adapters,
             configFailures: failures,
@@ -312,13 +317,13 @@ export function makeResearchTool(
           },
           parsed,
           exec.signal,
-        )) as never
+        )
       } catch (error) {
         if (exec.signal.aborted) throw error
         host.warn('search-integrator: research run crashed:', error)
         // A crash outside the pipeline's own semantics still returns an
         // explicit failure value rather than an opaque tool error.
-        return {
+        const crash: ResearchResult = {
           status: 'failed',
           question: parsed.question,
           summary: `research run crashed: ${String(error)}`,
@@ -327,14 +332,15 @@ export function makeResearchTool(
           sources: [],
           coverage: {
             rounds: 0,
-            queries: parsed.queries ?? [],
+            queries: [...(parsed.queries ?? [])],
             searched: adapters.map((adapter) => adapter.id),
             failed: failures,
             resultsFound: 0,
             evidenceCount: 0,
           },
           degradedReason: String(error),
-        } as never
+        }
+        return crash
       }
     },
   })

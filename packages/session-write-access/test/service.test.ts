@@ -2,8 +2,17 @@ import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it } from 'vitest'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { DomainSpec } from '@deepseek-ai/dsh-storage-domain'
+import {
+  SESSION_FORMAT_VERSION,
+  Session,
+  SessionId,
+  SessionLogOffset,
+  type SessionHeader,
+} from '@deepseek-ai/dsh-session'
+import { describe, expect, it } from 'vitest'
+import { isRecord } from '../src/channel.js'
 import { Config } from '../src/config.js'
 import { SessionWriteAccessPolicy } from '../src/service.js'
 
@@ -29,7 +38,7 @@ class MemoryTable<V> {
 
 /** The smallest storage-domain facility the policy needs. */
 function fakeStorageFacility() {
-  const tables = new Map<string, MemoryTable<unknown>>()
+  const tables = new Map<string, MemoryTable<Record<string, unknown>>>()
   const specTables = new Map<string, string[]>()
   const domain = {
     name: 'session-write-access',
@@ -37,7 +46,7 @@ function fakeStorageFacility() {
     table(name: string) {
       let table = tables.get(name)
       if (table === undefined) {
-        table = new MemoryTable<unknown>()
+        table = new MemoryTable<Record<string, unknown>>()
         tables.set(name, table)
       }
       return table
@@ -64,6 +73,78 @@ function fakeSessionQuery(headers: Map<string, Record<string, unknown>>) {
   }
 }
 
+/**
+ * A real detached `Session` carrying exactly the header the fixture states —
+ * the SDK-advertised constructor instead of an `as never` payload.
+ */
+function fakeSession(
+  id: string,
+  header?: { cwd?: string; parentSession?: string; origin?: 'subagent'; isSeeded?: boolean },
+): Session {
+  const base: SessionHeader = {
+    version: SESSION_FORMAT_VERSION,
+    id: SessionId(id),
+    createdAt: 0,
+    isSeeded: header?.isSeeded === true,
+    ...(header?.cwd === undefined ? {} : { cwd: header.cwd }),
+    ...(header?.parentSession === undefined
+      ? {}
+      : { parentSession: SessionId(header.parentSession) }),
+    ...(header?.origin === undefined ? {} : { origin: header.origin }),
+  }
+  return header?.isSeeded === true
+    ? Session.create(SessionId(id), [], base, SessionLogOffset(0))
+    : Session.create(SessionId(id), undefined, base)
+}
+
+/** The `Agent` surface the dispatched events demand; only `session` is read. */
+function fakeAgent(session: Session, ctx: Context): Agent {
+  return {
+    id: session.id,
+    options: {},
+    session,
+    model: { current: () => undefined, select: () => undefined },
+    inbox: {
+      nextTurn: [],
+      nextStep: [],
+      clear: () => {},
+      append: () => {},
+      prepend: () => {},
+      replace: () => false,
+      remove: () => false,
+      splice: () => [],
+    },
+    status: 'idle',
+    ctx,
+    cancel: () => {},
+    whenIdle: async () => {},
+    runMaintenance: (task) => task(new AbortController().signal),
+    send: () => {},
+    followup: () => {},
+    steer: () => {},
+    inject: () => {},
+  }
+}
+
+/** Placeholder assignment for a variable that a Promise executor fills in. */
+const noop: () => void = () => {}
+
+/** Dispatch one `agent/pre-step` waterfall with the loop's default admission. */
+function preStep(ctx: Context, sessionId: string) {
+  return ctx.waterfall(
+    'agent/pre-step',
+    {
+      agent: fakeAgent(fakeSession(sessionId), ctx),
+      messages: [],
+      turn: 1,
+      step: 1,
+      signal: new AbortController().signal,
+      modelSelection: { provider: 'p', model: 'm' },
+    },
+    async () => ({ kind: 'enter' as const, messages: [] }),
+  )
+}
+
 async function mount(options: {
   workspace: string
   /** Omit to mount a deployment that states no fallback workspace root. */
@@ -77,9 +158,13 @@ async function mount(options: {
 }) {
   const ctx = new Context()
   const storage = fakeStorageFacility()
-  const sessions = options.headers ?? new Map()
-  const routes: Array<{ kind: string; path: string }> = []
-  const liveAgents = new Map<string, { session: { id: string; header: Record<string, unknown> } }>()
+  const sessions = options.headers ?? new Map<string, Record<string, unknown>>()
+  const routes: {
+    kind: string
+    path: string
+    handler(req: unknown, res: unknown): Promise<void>
+  }[] = []
+  const liveAgents = new Map<string, { session: Session }>()
   ctx.provide('storageDomain', storage)
   ctx.provide('sessionProjections', { register: async () => ({ stateOf: () => null }) })
   ctx.provide('sessionQuery', options.sessionQuery ?? fakeSessionQuery(sessions))
@@ -89,7 +174,11 @@ async function mount(options: {
   })
   ctx.provide('connection', { requestRejection: () => options.reject })
   ctx.provide('webServer', {
-    register(route: { kind: string; path: string }) {
+    register(route: {
+      kind: string
+      path: string
+      handler(req: unknown, res: unknown): Promise<void>
+    }) {
       routes.push(route)
       return () => {}
     },
@@ -105,7 +194,10 @@ async function mount(options: {
     protectPluginCode: false,
   })
   await ctx.plugin(SessionWriteAccessPolicy, config)
-  const service = ctx.get('sandboxPolicy') as SessionWriteAccessPolicy
+  const service: unknown = ctx.get('sandboxPolicy')
+  if (!(service instanceof SessionWriteAccessPolicy)) {
+    throw new TypeError('sandboxPolicy was not mounted')
+  }
   return { ctx, service, storage, routes, liveAgents }
 }
 
@@ -120,15 +212,15 @@ describe('SessionWriteAccessPolicy mounting', () => {
     expect(
       routes.some((route) => route.kind === 'prefix' && route.path === '/dsh-session-write-access'),
     ).toBe(true)
-    const session = { id: 'root', header: { cwd: workspace, isSeeded: false } }
-    await ctx.serial('agent/created', { agent: { session }, source: 'fresh' } as never)
+    const session = fakeSession('root', { cwd: workspace })
+    await ctx.serial('agent/created', { agent: fakeAgent(session, ctx), source: 'startup' })
     expect(service.view('root').groupId).toBe('root')
-    const before = service.resolve({ session: { id: 'root', header: { cwd: workspace } } } as never)
+    const before = service.resolve({ session: fakeSession('root', { cwd: workspace }) })
     expect(before.mode).toBe('workspace-write')
     expect(before.workspaceRoot).toBe(workspace)
     expect(before.additionalWritableRoots).toBeUndefined()
     await service.addDirectory('root', extra)
-    const after = service.resolve({ session: { id: 'root', header: { cwd: workspace } } } as never)
+    const after = service.resolve({ session: fakeSession('root', { cwd: workspace }) })
     expect(after.additionalWritableRoots).toEqual([extra])
   })
 
@@ -140,20 +232,20 @@ describe('SessionWriteAccessPolicy mounting', () => {
     for (const path of [workspace, extra, childCwd]) mkdirSync(path)
     const { ctx, service } = await mount({ workspace })
     await ctx.serial('agent/created', {
-      agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } },
-      source: 'fresh',
-    } as never)
+      agent: fakeAgent(fakeSession('root', { cwd: workspace }), ctx),
+      source: 'startup',
+    })
     await service.addDirectory('root', extra)
     await ctx.serial('agent/created', {
-      agent: {
-        session: {
-          id: 'child',
-          header: { cwd: childCwd, parentSession: 'root', origin: 'subagent', isSeeded: false },
-        },
-      },
-      source: 'fresh',
-    } as never)
-    const policy = service.resolve({ session: { id: 'child', header: { cwd: childCwd } } } as never)
+      agent: fakeAgent(
+        fakeSession('child', { cwd: childCwd, parentSession: 'root', origin: 'subagent' }),
+        ctx,
+      ),
+      source: 'startup',
+    })
+    const policy = service.resolve({
+      session: fakeSession('child', { cwd: childCwd, parentSession: 'root', origin: 'subagent' }),
+    })
     expect(policy.workspaceRoot).toBe(workspace)
     expect(policy.additionalWritableRoots).toEqual([extra])
   })
@@ -172,7 +264,9 @@ describe('SessionWriteAccessPolicy mounting', () => {
       protectHomeData: false,
       protectPluginCode: false,
     })
-    await expect(ctx.plugin(SessionWriteAccessPolicy, config)).rejects.toThrow(/overlaps protected/)
+    await expect(ctx.plugin(SessionWriteAccessPolicy, config)).rejects.toThrow(
+      /overlaps protected/u,
+    )
   })
 
   it('mounts and refuses cwd-less calls when the deployment states no fallback root', async () => {
@@ -186,46 +280,30 @@ describe('SessionWriteAccessPolicy mounting', () => {
       workspaceRoot: null,
       protectedRoots: [process.cwd()],
     })
-    const cwdless = { id: 'agentless', header: {} } as never
-    expect(() => service.resolve({ session: cwdless })).toThrow(/no workspaceRoot/)
+    const cwdless = fakeSession('agentless')
+    expect(() => service.resolve({ session: cwdless })).toThrow(/no workspaceRoot/u)
     // A call that carries a session cwd keeps working.
-    const stated = service.resolve({ session: { id: 'root', header: { cwd: workspace } } as never })
+    const stated = service.resolve({ session: fakeSession('root', { cwd: workspace }) })
     expect(stated.mode).toBe('workspace-write')
   })
 })
 
 describe('SessionWriteAccessPolicy live-child attribution', () => {
-  function preStep(ctx: Context, sessionId: string) {
-    return ctx.waterfall(
-      'agent/pre-step',
-      {
-        agent: { session: { id: sessionId } },
-        messages: [],
-        turn: 1,
-        step: 1,
-        signal: new AbortController().signal,
-        modelSelection: { provider: 'p', model: 'm' },
-      } as never,
-      async () => ({ kind: 'enter' as const }),
-    )
-  }
-
   it('waits for a slow parent lookup and never resolves the child cwd meanwhile', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-swa-live-'))
     const workspace = join(root, 'workspace')
     const childCwd = join(root, 'child-cwd')
     mkdirSync(workspace)
     mkdirSync(childCwd)
-    let releaseParent: () => void = () => {}
+    let releaseParent: () => void = noop
     const parentGate = new Promise<void>((resolve) => {
       releaseParent = resolve
     })
-    const childHeader = {
+    const childSession = fakeSession('child', {
       cwd: childCwd,
       parentSession: 'root',
       origin: 'subagent',
-      isSeeded: false,
-    }
+    })
     const { ctx, service, liveAgents } = await mount({
       workspace,
       sessionQuery: {
@@ -236,13 +314,13 @@ describe('SessionWriteAccessPolicy live-child attribution', () => {
         },
       },
     })
-    liveAgents.set('child', { session: { id: 'child', header: childHeader } })
+    liveAgents.set('child', { session: childSession })
     // The synchronous resolver must refuse, not fall back to child.cwd.
-    expect(() =>
-      service.resolve({ session: { id: 'child', header: childHeader } } as never),
-    ).toThrow(/has no committed write-access group/)
+    expect(() => service.resolve({ session: childSession })).toThrow(
+      /has no committed write-access group/u,
+    )
     let settled = false
-    const pending = preStep(ctx, 'child').then((decision: { kind: string }) => {
+    const pending = preStep(ctx, 'child').then((decision) => {
       settled = true
       return decision
     })
@@ -252,7 +330,7 @@ describe('SessionWriteAccessPolicy live-child attribution', () => {
     expect(settled).toBe(false)
     releaseParent()
     expect((await pending).kind).toBe('enter')
-    const policy = service.resolve({ session: { id: 'child', header: childHeader } } as never)
+    const policy = service.resolve({ session: childSession })
     expect(policy.workspaceRoot).toBe(workspace)
     expect(policy.workspaceRoot).not.toBe(childCwd)
   })
@@ -263,12 +341,11 @@ describe('SessionWriteAccessPolicy live-child attribution', () => {
     const childCwd = join(root, 'child-cwd')
     mkdirSync(workspace)
     mkdirSync(childCwd)
-    const childHeader = {
+    const childSession = fakeSession('child', {
       cwd: childCwd,
       parentSession: 'missing',
       origin: 'subagent',
-      isSeeded: false,
-    }
+    })
     const { ctx, service, liveAgents } = await mount({
       workspace,
       sessionQuery: {
@@ -277,30 +354,15 @@ describe('SessionWriteAccessPolicy live-child attribution', () => {
         },
       },
     })
-    liveAgents.set('child', { session: { id: 'child', header: childHeader } })
+    liveAgents.set('child', { session: childSession })
     expect((await preStep(ctx, 'child')).kind).toBe('reject')
-    expect(() =>
-      service.resolve({ session: { id: 'child', header: childHeader } } as never),
-    ).toThrow(/has no committed write-access group/)
+    expect(() => service.resolve({ session: childSession })).toThrow(
+      /has no committed write-access group/u,
+    )
   })
 })
 
 describe('SessionWriteAccessPolicy fork integration', () => {
-  function preStep(ctx: Context, sessionId: string) {
-    return ctx.waterfall(
-      'agent/pre-step',
-      {
-        agent: { session: { id: sessionId } },
-        messages: [],
-        turn: 1,
-        step: 1,
-        signal: new AbortController().signal,
-        modelSelection: { provider: 'p', model: 'm' },
-      } as never,
-      async () => ({ kind: 'enter' as const }),
-    )
-  }
-
   it('holds a seeded creation during the host Fork, then inherits the click-time grants', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-swa-fork-'))
     const workspace = join(root, 'workspace')
@@ -309,17 +371,17 @@ describe('SessionWriteAccessPolicy fork integration', () => {
     mkdirSync(extra)
     const { ctx, service, liveAgents } = await mount({ workspace })
     await ctx.serial('agent/created', {
-      agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } },
-      source: 'fresh',
-    } as never)
+      agent: fakeAgent(fakeSession('root', { cwd: workspace }), ctx),
+      source: 'startup',
+    })
     await service.addDirectory('root', extra)
 
     let during: unknown
     ctx.provide('sessionController', {
       fork: async () => {
-        const child = { id: 'forked', header: { cwd: workspace, isSeeded: true } }
+        const child = fakeSession('forked', { cwd: workspace, isSeeded: true })
         liveAgents.set('forked', { session: child })
-        await ctx.serial('agent/created', { agent: { session: child }, source: 'fork' } as never)
+        await ctx.serial('agent/created', { agent: fakeAgent(child, ctx), source: 'startup' })
         during = await preStep(ctx, 'forked')
         return { sessionId: 'forked' }
       },
@@ -339,16 +401,16 @@ describe('SessionWriteAccessPolicy fork integration', () => {
     mkdirSync(extra)
     const { ctx, service } = await mount({ workspace })
     await ctx.serial('agent/created', {
-      agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } },
-      source: 'fresh',
-    } as never)
+      agent: fakeAgent(fakeSession('root', { cwd: workspace }), ctx),
+      source: 'startup',
+    })
     await service.addDirectory('root', extra)
     ctx.provide('sessionController', {
       fork: async () => {
         await ctx.serial('agent/created', {
-          agent: { session: { id: 'orphan', header: { cwd: workspace, isSeeded: true } } },
-          source: 'fork',
-        } as never)
+          agent: fakeAgent(fakeSession('orphan', { cwd: workspace, isSeeded: true }), ctx),
+          source: 'startup',
+        })
         throw new Error('workspace attach failed')
       },
     })
@@ -368,14 +430,12 @@ describe('SessionWriteAccessPolicy fork partial commit', () => {
     mkdirSync(extra)
     const { ctx, service, storage, liveAgents } = await mount({ workspace })
     await ctx.serial('agent/created', {
-      agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } },
-      source: 'fresh',
-    } as never)
+      agent: fakeAgent(fakeSession('root', { cwd: workspace }), ctx),
+      source: 'startup',
+    })
     await service.addDirectory('root', extra)
-    const forks = storage.tables.get('forks') as unknown as {
-      put: (key: string, value: { stage?: string }) => Promise<void>
-      get: (key: string) => { stage?: string } | undefined
-    }
+    const forks = storage.tables.get('forks')
+    if (forks === undefined) throw new Error('forks table is missing')
     const put = forks.put.bind(forks)
     let failMarker = true
     forks.put = async (key, value) => {
@@ -387,9 +447,9 @@ describe('SessionWriteAccessPolicy fork partial commit', () => {
     }
     ctx.provide('sessionController', {
       fork: async () => {
-        const child = { id: 'forked', header: { cwd: workspace, isSeeded: true } }
+        const child = fakeSession('forked', { cwd: workspace, isSeeded: true })
         liveAgents.set('forked', { session: child })
-        await ctx.serial('agent/created', { agent: { session: child }, source: 'fork' } as never)
+        await ctx.serial('agent/created', { agent: fakeAgent(child, ctx), source: 'startup' })
         return { sessionId: 'forked' }
       },
     })
@@ -401,44 +461,43 @@ describe('SessionWriteAccessPolicy fork partial commit', () => {
   })
 })
 
+/** One incoming channel request whose body is the given (optional) payload. */
+function fakeRequest(body?: unknown) {
+  const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body))
+  return {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    async *[Symbol.asyncIterator]() {
+      if (payload !== undefined) yield payload
+    },
+  }
+}
+
+/** One channel response captured in memory. */
+function fakeResponse() {
+  const state = {
+    status: 0,
+    body: '',
+    headers: {} as Record<string, string>,
+    writeHead(status: number, headers?: Record<string, string>) {
+      state.status = status
+      if (headers !== undefined) state.headers = headers
+    },
+    end(body?: string) {
+      state.body = body ?? ''
+    },
+  }
+  return state
+}
+
 describe('write-scope route admission', () => {
-  function fakeRequest(body?: unknown) {
-    const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body))
-    return {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      [Symbol.asyncIterator]: async function* () {
-        if (payload !== undefined) yield payload
-      },
-    }
-  }
-
-  function fakeResponse() {
-    const state = {
-      status: 0,
-      body: '',
-      headers: {} as Record<string, string>,
-      writeHead(status: number, headers?: Record<string, string>) {
-        state.status = status
-        if (headers !== undefined) state.headers = headers
-      },
-      end(body?: string) {
-        state.body = body ?? ''
-      },
-    }
-    return state
-  }
-
   it('rejects a request without an admitted peer before reading the body', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-swa-route-'))
     const workspace = join(root, 'workspace')
     mkdirSync(workspace)
     const { routes } = await mount({ workspace, reject: 401 })
-    const route = routes.find(
-      (candidate) => candidate.path === '/dsh-session-write-access',
-    ) as unknown as {
-      handler: (req: unknown, res: unknown) => Promise<void>
-    }
+    const route = routes.find((candidate) => candidate.path === '/dsh-session-write-access')
+    if (route === undefined) throw new Error('write-scope route is not registered')
     const response = fakeResponse()
     await route.handler(fakeRequest({ method: 'add', sessionId: 'root', path: '/tmp' }), response)
     expect(response.status).toBe(401)
@@ -451,21 +510,20 @@ describe('write-scope route admission', () => {
     mkdirSync(workspace)
     const { ctx, liveAgents, routes } = await mount({ workspace })
     await ctx.serial('agent/created', {
-      agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } },
-      source: 'fresh',
-    } as never)
-    liveAgents.set('root', { session: { id: 'root', header: { cwd: workspace } } })
-    const route = routes.find(
-      (candidate) => candidate.path === '/dsh-session-write-access',
-    ) as unknown as {
-      handler: (req: unknown, res: unknown) => Promise<void>
-    }
+      agent: fakeAgent(fakeSession('root', { cwd: workspace }), ctx),
+      source: 'startup',
+    })
+    liveAgents.set('root', { session: fakeSession('root', { cwd: workspace }) })
+    const route = routes.find((candidate) => candidate.path === '/dsh-session-write-access')
+    if (route === undefined) throw new Error('write-scope route is not registered')
     const response = fakeResponse()
     await route.handler(fakeRequest({ method: 'state', sessionId: 'root' }), response)
     expect(response.status).toBe(200)
-    const envelope = JSON.parse(response.body) as { ok: boolean; value: { groupId: string } }
+    const envelope: unknown = JSON.parse(response.body)
+    if (!isRecord(envelope)) throw new Error('state response is not an object')
+    const value = isRecord(envelope.value) ? envelope.value : undefined
     expect(envelope.ok).toBe(true)
-    expect(envelope.value.groupId).toBe('root')
+    expect(value?.groupId).toBe('root')
   })
 })
 
@@ -478,13 +536,12 @@ describe('SessionWriteAccessPolicy fork intent and host failure', () => {
     mkdirSync(extra)
     const { ctx, service, storage, liveAgents } = await mount({ workspace })
     await ctx.serial('agent/created', {
-      agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } },
-      source: 'fresh',
-    } as never)
+      agent: fakeAgent(fakeSession('root', { cwd: workspace }), ctx),
+      source: 'startup',
+    })
     await service.addDirectory('root', extra)
-    const forks = storage.tables.get('forks') as unknown as {
-      put: (key: string, value: { stage?: string }) => Promise<void>
-    }
+    const forks = storage.tables.get('forks')
+    if (forks === undefined) throw new Error('forks table is missing')
     const put = forks.put.bind(forks)
     let failIntent = true
     forks.put = async (key, value) => {
@@ -496,9 +553,9 @@ describe('SessionWriteAccessPolicy fork intent and host failure', () => {
     }
     ctx.provide('sessionController', {
       fork: async () => {
-        const child = { id: 'forked', header: { cwd: workspace, isSeeded: true } }
+        const child = fakeSession('forked', { cwd: workspace, isSeeded: true })
         liveAgents.set('forked', { session: child })
-        await ctx.serial('agent/created', { agent: { session: child }, source: 'fork' } as never)
+        await ctx.serial('agent/created', { agent: fakeAgent(child, ctx), source: 'startup' })
         return { sessionId: 'forked' }
       },
     })
@@ -518,30 +575,28 @@ describe('SessionWriteAccessPolicy fork intent and host failure', () => {
     mkdirSync(extra)
     const { ctx, service, liveAgents } = await mount({ workspace })
     await ctx.serial('agent/created', {
-      agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } },
-      source: 'fresh',
-    } as never)
+      agent: fakeAgent(fakeSession('root', { cwd: workspace }), ctx),
+      source: 'startup',
+    })
     await service.addDirectory('root', extra)
     ctx.provide('sessionController', {
       fork: async () => {
-        const child = { id: 'forked', header: { cwd: workspace, isSeeded: true } }
+        const child = fakeSession('forked', { cwd: workspace, isSeeded: true })
         liveAgents.set('forked', { session: child })
-        await ctx.serial('agent/created', { agent: { session: child }, source: 'fork' } as never)
+        await ctx.serial('agent/created', { agent: fakeAgent(child, ctx), source: 'startup' })
         throw Object.assign(new Error('workspace attach failed'), {
           details: { sessionId: 'forked' },
         })
       },
     })
     await expect(service.forkSession('root')).rejects.toThrow(
-      /Fork failed after creating session forked/,
+      /Fork failed after creating session forked/u,
     )
     const record = service.view('root').forks[0]
     expect(record?.stage).toBe('failed')
     expect(record?.targetSessionId).toBe('forked')
     expect(service.view('forked').grants).toEqual([])
-    const policy = service.resolve({
-      session: { id: 'forked', header: { cwd: workspace } },
-    } as never)
+    const policy = service.resolve({ session: fakeSession('forked', { cwd: workspace }) })
     expect(policy.additionalWritableRoots).toBeUndefined()
   })
 
@@ -553,13 +608,12 @@ describe('SessionWriteAccessPolicy fork intent and host failure', () => {
     mkdirSync(extra)
     const { ctx, service, storage, liveAgents } = await mount({ workspace })
     await ctx.serial('agent/created', {
-      agent: { session: { id: 'root', header: { cwd: workspace, isSeeded: false } } },
-      source: 'fresh',
-    } as never)
+      agent: fakeAgent(fakeSession('root', { cwd: workspace }), ctx),
+      source: 'startup',
+    })
     await service.addDirectory('root', extra)
-    const members = storage.tables.get('members') as unknown as {
-      put: (key: string, value: unknown) => Promise<void>
-    }
+    const members = storage.tables.get('members')
+    if (members === undefined) throw new Error('members table is missing')
     const put = members.put.bind(members)
     members.put = async (key, value) => {
       if (key === 'forked') throw new Error('member write failed')
@@ -567,13 +621,13 @@ describe('SessionWriteAccessPolicy fork intent and host failure', () => {
     }
     ctx.provide('sessionController', {
       fork: async () => {
-        const child = { id: 'forked', header: { cwd: workspace, isSeeded: true } }
+        const child = fakeSession('forked', { cwd: workspace, isSeeded: true })
         liveAgents.set('forked', { session: child })
-        await ctx.serial('agent/created', { agent: { session: child }, source: 'fork' } as never)
+        await ctx.serial('agent/created', { agent: fakeAgent(child, ctx), source: 'startup' })
         return { sessionId: 'forked' }
       },
     })
-    await expect(service.forkSession('root')).rejects.toThrow(/default workspace only/)
+    await expect(service.forkSession('root')).rejects.toThrow(/default workspace only/u)
     members.put = put
     const record = service.view('root').forks[0]
     expect(record?.stage).toBe('failed')

@@ -620,7 +620,7 @@ async function resolveChoice(input: ResolveChoiceInput): Promise<AskOutcome> {
       choice,
       workspace,
       preset,
-      ...(review === undefined || review.enabled !== true ? {} : { review }),
+      ...(review !== undefined && review.enabled ? { review } : {}),
       confirmedModel,
     }
   }
@@ -752,17 +752,19 @@ async function resolveChoice(input: ResolveChoiceInput): Promise<AskOutcome> {
   return finish(baseChoice, workspace.pick, review?.enabled === true ? review : undefined, false)
 }
 
+/** One picker row's display name, falling back to the bare route. */
+function named(label: string, route: RouteSummary | undefined): string {
+  if (route === undefined) return label
+  const effort = route.reasoningEffort === undefined ? '' : ` · 强度 ${route.reasoningEffort}`
+  return `${label}（${route.provider}/${route.model}${effort}）`
+}
+
 /** Human-readable name of a resolved choice for the command result. */
 function describeChoice(
   choice: ModelChoice,
   inherited: RouteSummary | undefined,
   fallback: RouteSummary | undefined,
 ): string {
-  const named = (label: string, route: RouteSummary | undefined): string => {
-    if (route === undefined) return label
-    const effort = route.reasoningEffort === undefined ? '' : ` · 强度 ${route.reasoningEffort}`
-    return `${label}（${route.provider}/${route.model}${effort}）`
-  }
   if (choice.kind === 'model') {
     const route = `${choice.provider}/${choice.model}`
     return choice.reasoningEffort === undefined
@@ -834,7 +836,10 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
           const rest = task.slice(REVIEW_ROUNDS_FLAG.length + 1).trim()
           const space = rest.indexOf(' ')
           const token = space === -1 ? rest : rest.slice(0, space)
-          const rounds = Number.parseInt(token, 10)
+          // `Number` over `Number.parseInt`: the token is the first space-delimited
+          // slice of the flag argument, so it is a plain integer on every reachable
+          // input; a garbage token must fail the usage check, not parse as a prefix.
+          const rounds = Number(token)
           if (!Number.isInteger(rounds) || rounds < 1 || rounds > 50) return fail(usage)
           reviewFlag = true
           reviewRoundsFlag = rounds
@@ -902,10 +907,10 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       const roster = await snapshotRoster(ctx, cwd)
       const needWorkspace = flagTarget === undefined && roster.others.some((row) => !row.missing)
 
-      const workspace = cwd.replace(/\/+$/, '')
+      const workspace = cwd.replace(/\/+$/u, '')
       const dir =
         config.dir?.startsWith('/') === true
-          ? config.dir.replace(/\/+$/, '')
+          ? config.dir.replace(/\/+$/u, '')
           : `${workspace}/${config.dir ?? DEFAULT_BRIEF_DIR}`
 
       // --- retry recovery -------------------------------------------------
@@ -1100,8 +1105,7 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         preset = outcome.preset ?? defaultPreset
         dialogReview = outcome.review
         confirmedModel = outcome.confirmedModel
-        const resolved =
-          flagTarget !== undefined ? flagTarget : await resolvePick(ctx, roster, outcome.workspace)
+        const resolved = flagTarget ?? (await resolvePick(ctx, roster, outcome.workspace))
         if ('error' in resolved) return fail(resolved.error)
         target = resolved
       } else if (previous !== undefined) {

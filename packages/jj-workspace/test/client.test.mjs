@@ -19,6 +19,15 @@ let panels
 let panelWaiters
 let statusCalls
 
+/** Resolve once a panel frame is pushed or the stream is aborted. */
+function waitForPanel(signal) {
+  return new Promise((resolve) => {
+    const wake = () => resolve()
+    panelWaiters.push(wake)
+    signal.addEventListener('abort', wake, { once: true })
+  })
+}
+
 function mount() {
   calls.length = 0
   registrations = {}
@@ -64,11 +73,7 @@ function mount() {
                 yield panels.shift()
                 continue
               }
-              await new Promise((resolve) => {
-                const wake = () => resolve()
-                panelWaiters.push(wake)
-                signal.addEventListener('abort', wake, { once: true })
-              })
+              await waitForPanel(signal)
             }
           })()
         },

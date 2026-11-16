@@ -34,7 +34,7 @@ export const DenseStats: Story = {
         ].map((row) => (
           <TableRow key={row[0]}>
             {row.map((cell, index) => (
-              <TableCell key={index} className={index === 0 ? 'dshx:break-all' : undefined}>
+              <TableCell key={cell} className={index === 0 ? 'dshx:break-all' : undefined}>
                 {cell}
               </TableCell>
             ))}

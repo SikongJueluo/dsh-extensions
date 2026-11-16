@@ -9,6 +9,7 @@
  * @module dsh-auto-continue/command
  */
 import type { CommandDefinition, CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
+import type { Context } from '@deepseek-ai/cordis'
 import type { ResumeHandle } from './resume.js'
 import type { WaitSpool } from './spool.js'
 
@@ -68,7 +69,7 @@ function statusDefinition(spool: WaitSpool): CommandDefinition {
 
 /** Register both commands once the host command registry exists. */
 export function registerCommands(
-  ctx: import('@deepseek-ai/cordis').Context,
+  ctx: Context,
   deps: { adopter: ResumeHandle; spool: WaitSpool; cancelled: Set<string> },
 ): void {
   ctx.inject(['commands'], (svcCtx) => {

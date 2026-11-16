@@ -643,16 +643,16 @@ function derivePaths(
         // The version-check cache is a separate ordinary file outside the
         // data folder (~/.cache/semgrep_version), written by the CLI after
         // the version fetch; its absence likewise fails the run.
-        const cacheBase = semgrepCacheBase(env, fs)
+        const stateCacheBase = semgrepCacheBase(env, fs)
         const stateOverride = overrides.semgrepState
         const stateExplicit = stateOverride !== undefined && stateOverride !== ''
-        const state = stateExplicit ? stateOverride : joinDir(cacheBase, 'semgrep-state')
+        const state = stateExplicit ? stateOverride : joinDir(stateCacheBase, 'semgrep-state')
         const dataDir = semgrepDataDir(env, fs)
         named.push({
           preset,
           path: state,
           explicit: stateExplicit,
-          base: cacheBase,
+          base: stateCacheBase,
           prepare: stateExplicit ? 'none' : 'cache-dir',
           destination: dataDir,
           prepareDestination: 'mount-dir',
@@ -719,8 +719,7 @@ function resolveShadowDestination(input: {
   } catch {
     const rejected = preflightRejects(destination, env, fs, 'mount-point')
     const kind = prepareDestination
-    const guarded =
-      prepare === true && kind !== undefined && fs.ensure !== undefined && rejected === false
+    const guarded = prepare === true && kind !== undefined && fs.ensure !== undefined && !rejected
     if (!guarded || kind === undefined) {
       return issue(
         rejected ? 'floor-path' : 'missing',
@@ -780,6 +779,12 @@ function resolveShadowDestination(input: {
  *   missing implicit defaults may be prepared (confine time only).
  * @returns the plan (binds may be empty; issues mean "cannot honor").
  */
+/** Drop trailing slashes; a root-only path stays `/`. */
+function stripSlashes(path: string): string {
+  const stripped = path.replace(/\/+$/u, '')
+  return stripped === '' ? '/' : stripped
+}
+
 export function resolveGrants(input: {
   presets: readonly PresetId[]
   overrides: Readonly<GrantOverrides>
@@ -792,10 +797,6 @@ export function resolveGrants(input: {
   // Normalize the ambient anchors first: a trailing-slash HOME (real on
   // some hosts — os.homedir() returns it verbatim) would otherwise make
   // every path-cover comparison miss and refuse all defaults fail-closed.
-  const stripSlashes = (path: string): string => {
-    const stripped = path.replace(/\/+$/u, '')
-    return stripped === '' ? '/' : stripped
-  }
   const env: GrantEnv = {
     ...input.env,
     home: stripSlashes(input.env.home),
@@ -956,10 +957,10 @@ export function resolveGrants(input: {
         !entry.explicit &&
         kind !== undefined &&
         fs.ensure !== undefined &&
-        preflight === false
+        !preflight
       if (!guarded || kind === undefined) {
         issues.push(
-          preflight === true
+          preflight
             ? {
                 preset: entry.preset,
                 path: entry.path,
@@ -1114,7 +1115,7 @@ export function resolveGrants(input: {
         }
       }
       const spelled = defaultBaseTrees(env)
-      const canonicalBases = spelled.map(canonicalOf)
+      const canonicalBases = spelled.map((candidate) => canonicalOf(candidate))
       const homeBase = canonicalOf(env.home)
       const base =
         canonicalBases.find((candidate) => pathCovers(candidate, canonical)) ??
@@ -1178,7 +1179,7 @@ export function resolveGrants(input: {
 
   // Subtract what the sandbox already writes: a grant inside the workspace
   // root adds no capability, so it becomes a note instead of a bind.
-  const workspace = workspaceRoots.filter(isAbsolute)
+  const workspace = workspaceRoots.filter((root) => isAbsolute(root))
   const kept: Resolved[] = resolved.filter((entry) => {
     if (workspace.some((root) => pathCovers(root, entry.canonical))) {
       notes.push({ preset: entry.preset, path: entry.path, covered: 'workspace' })
@@ -1191,7 +1192,7 @@ export function resolveGrants(input: {
   // Walk a length-sorted copy so the kept SET is independent of preset
   // order (pnpm-engine + pnpm-store keep the pnpm home either way), then
   // emit in the original derivation order for stable, readable argvs.
-  const ordered = [...kept].sort((a, b) => a.canonical.length - b.canonical.length)
+  const ordered = [...kept].toSorted((a, b) => a.canonical.length - b.canonical.length)
   const keptCanonical = new Set<string>()
   for (const entry of ordered) {
     const covered = [...keptCanonical].some((parent) => pathCovers(parent, entry.canonical))

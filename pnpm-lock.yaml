@@ -134,6 +134,9 @@ catalogs:
     '@deepseek-ai/dsh-bash-sandbox':
       specifier: 0.2.2-rc.1
       version: 0.2.2-rc.1
+    '@deepseek-ai/dsh-brand':
+      specifier: 0.2.2-rc.1
+      version: 0.2.2-rc.1
     '@deepseek-ai/dsh-client-connection':
       specifier: 0.2.2-rc.1
       version: 0.2.2-rc.1
@@ -965,6 +968,9 @@ importers:
       '@deepseek-ai/dsh-agent':
         specifier: 'catalog:'
         version: 0.2.2-rc.1(d90336c53efa47bd679f0600fc18066a)
+      '@deepseek-ai/dsh-spill':
+        specifier: 'catalog:'
+        version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-brand@0.2.2-rc.1(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-llm@0.2.2-rc.1(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-session@0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-scope@0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)))
       '@deepseek-ai/dsh-subprocess':
         specifier: 'catalog:'
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-http-proxy@0.2.2-rc.1(@deepseek-ai/cordis@4.1.0))
@@ -1175,6 +1181,9 @@ importers:
       '@deepseek-ai/dsh-api-session-controller':
         specifier: 'catalog:'
         version: 0.2.2-rc.1(f54c09a03ca234a17ba5fa8b4d8b8f5f)
+      '@deepseek-ai/dsh-brand':
+        specifier: 'catalog:'
+        version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/dsh-client-connection':
         specifier: 'catalog:'
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-scope@0.2.2-rc.1(@deepseek-ai/cordis@4.1.0))

@@ -93,30 +93,39 @@ export function nudgeLine(
   run: RunRecord,
   kind: 'deliver-missing-signal' | 'deliver-empty' | 'deliver-ambiguous' | 'review',
 ): string {
-  switch (kind) {
-    case 'deliver-missing-signal':
-      return `[triggers] runId=${run.id}：第 ${run.round}/${run.maxRounds} 轮回合已正常结束，但未收到交付信号。本轮工作完成时请调用 trigger_signal 提交 deliver（summary 写明改动、验证与证据）；需要用户决定请提交 needs_user；仍在进行中则继续工作。`
-    case 'deliver-empty':
-      return `[triggers] runId=${run.id}：第 ${run.round}/${run.maxRounds} 轮回合正常结束，但没有可作为交付说明的最终回复。请补一条总结性最终回复（写明改了什么、如何验证、证据在哪里）并正常结束回合，它会自动送审；需要用户决定请调用 trigger_signal 提交 needs_user。`
-    case 'deliver-ambiguous':
-      return [
-        `[triggers] runId=${run.id}（第 ${run.round}/${run.maxRounds} 轮）：本会话当前有多个自动送审运行同时在等待交付，一条普通回复无法区分交付对象——正常结束回合不会自动送审任何运行。`,
-        `若本运行的工作已完成，必须调用 trigger_signal 工具显式交付本运行（runId=${run.id}、outcome=deliver、summary 写明改了什么、如何验证、证据在哪里）；其他运行请分别在各自完成的回合显式交付。需要用户决定请对相应运行提交 needs_user。`,
-      ].join('\n')
-    case 'review':
-      return `[triggers] runId=${run.id}：第 ${run.round}/${run.maxRounds} 轮交付仍在等待审核结论。请审核本轮交付并调用 trigger_signal 提交 rework（仅阻塞项）/ pass / needs_user；未提交结论前循环不会推进。`
+  if (kind === 'deliver-missing-signal') {
+    return `[triggers] runId=${run.id}：第 ${run.round}/${run.maxRounds} 轮回合已正常结束，但未收到交付信号。本轮工作完成时请调用 trigger_signal 提交 deliver（summary 写明改动、验证与证据）；需要用户决定请提交 needs_user；仍在进行中则继续工作。`
   }
+  if (kind === 'deliver-empty') {
+    return `[triggers] runId=${run.id}：第 ${run.round}/${run.maxRounds} 轮回合正常结束，但没有可作为交付说明的最终回复。请补一条总结性最终回复（写明改了什么、如何验证、证据在哪里）并正常结束回合，它会自动送审；需要用户决定请调用 trigger_signal 提交 needs_user。`
+  }
+  if (kind === 'deliver-ambiguous') {
+    return [
+      `[triggers] runId=${run.id}（第 ${run.round}/${run.maxRounds} 轮）：本会话当前有多个自动送审运行同时在等待交付，一条普通回复无法区分交付对象——正常结束回合不会自动送审任何运行。`,
+      `若本运行的工作已完成，必须调用 trigger_signal 工具显式交付本运行（runId=${run.id}、outcome=deliver、summary 写明改了什么、如何验证、证据在哪里）；其他运行请分别在各自完成的回合显式交付。需要用户决定请对相应运行提交 needs_user。`,
+    ].join('\n')
+  }
+  return `[triggers] runId=${run.id}：第 ${run.round}/${run.maxRounds} 轮交付仍在等待审核结论。请审核本轮交付并调用 trigger_signal 提交 rework（仅阻塞项）/ pass / needs_user；未提交结论前循环不会推进。`
 }
 
 /** Terminal or pause notices: informational only, no signal expected. */
 function noticeText(run: RunRecord, summary: string): string {
+  const fallback = `[triggers] runId=${run.id} 状态更新：${summary}`
   switch (run.status) {
     case 'completed':
       return `[triggers] runId=${run.id} 审核通过（第 ${run.round}/${run.maxRounds} 轮），循环结束。审核结论：${summary}`
     case 'paused-user':
       return `[triggers] runId=${run.id} 对方提交了 needs_user，循环暂停等待用户决定。其说明：${summary}`
+    case 'active':
+      return fallback
+    case 'cancelled':
+      return fallback
+    case 'paused-budget':
+      return fallback
+    case 'paused-error':
+      return fallback
     default:
-      return `[triggers] runId=${run.id} 状态更新：${summary}`
+      return fallback
   }
 }
 
@@ -134,24 +143,26 @@ export function composeDeliveryPrompt(
 ): string {
   const round = String(intent.round)
   const maxRounds = String(run.maxRounds)
-  switch (intent.kind) {
-    case 'start':
-      return `${renderTemplate(run.templates.start, { task: run.task, round, maxRounds })}\n\n${signalInstructions(run, 'executor')}`
-    case 'review':
-      return `${renderTemplate(run.templates.review, { summary: summary ?? '', round, maxRounds })}\n\n${signalInstructions(run, 'parent')}`
-    case 'rework':
-      return `${renderTemplate(run.templates.rework, { summary: summary ?? '', round, maxRounds })}\n\n${signalInstructions(run, 'executor')}`
-    case 'notice':
-      return noticeText(run, summary ?? '')
-    case 'resume':
-      return `[triggers] runId=${run.id} 已恢复（第 ${round}/${maxRounds} 轮）。用户的答复：${summary ?? '（无附加说明）'}\n\n${signalInstructions(run, run.phase === 'awaiting-delivery' ? 'executor' : 'parent')}`
-    case 'nudge':
-      // The summary IS the nudge line (see nudgeLine); re-wrap it with the
-      // standing block so the reminded side still sees runId and its role —
-      // unless the flavor carries standalone instructions that the standing
-      // block (an autoDeliver run promises normal-end delivery) would
-      // directly contradict.
-      if (standalone) return summary ?? ''
-      return `${summary ?? ''}\n\n${signalInstructions(run, run.phase === 'awaiting-delivery' ? 'executor' : 'parent')}`
+  if (intent.kind === 'start') {
+    return `${renderTemplate(run.templates.start, { task: run.task, round, maxRounds })}\n\n${signalInstructions(run, 'executor')}`
   }
+  if (intent.kind === 'review') {
+    return `${renderTemplate(run.templates.review, { summary: summary ?? '', round, maxRounds })}\n\n${signalInstructions(run, 'parent')}`
+  }
+  if (intent.kind === 'rework') {
+    return `${renderTemplate(run.templates.rework, { summary: summary ?? '', round, maxRounds })}\n\n${signalInstructions(run, 'executor')}`
+  }
+  if (intent.kind === 'notice') {
+    return noticeText(run, summary ?? '')
+  }
+  if (intent.kind === 'resume') {
+    return `[triggers] runId=${run.id} 已恢复（第 ${round}/${maxRounds} 轮）。用户的答复：${summary ?? '（无附加说明）'}\n\n${signalInstructions(run, run.phase === 'awaiting-delivery' ? 'executor' : 'parent')}`
+  }
+  // The summary IS the nudge line (see nudgeLine); re-wrap it with the
+  // standing block so the reminded side still sees runId and its role —
+  // unless the flavor carries standalone instructions that the standing
+  // block (an autoDeliver run promises normal-end delivery) would
+  // directly contradict.
+  if (standalone) return summary ?? ''
+  return `${summary ?? ''}\n\n${signalInstructions(run, run.phase === 'awaiting-delivery' ? 'executor' : 'parent')}`
 }

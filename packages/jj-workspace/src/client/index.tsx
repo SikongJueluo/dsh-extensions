@@ -128,9 +128,14 @@ interface TaskListResult {
   tasks?: TaskEntry[]
 }
 
-/** `permissions` session projection (absent key → capability absent). */
-interface PermissionSelection {
-  currentValue?: string
+/** Whether a status response value is an object (every field is optional). */
+function isVcsStatus(value: unknown): value is VcsStatus {
+  return isRecord(value)
+}
+
+/** Whether a tasks response value is an object (every field is optional). */
+function isTaskList(value: unknown): value is TaskListResult {
+  return isRecord(value)
 }
 
 type UseProjection = (key: string) => unknown
@@ -159,15 +164,31 @@ interface JjwClientContext extends DshClientContext {
 
 let rpcSeq = 0
 
-function unwrap<T>(envelope: unknown): T | null {
-  if (typeof envelope !== 'object' || envelope === null) return null
-  const record = envelope as { type?: unknown; result?: { ok?: unknown; value?: unknown } }
-  if (record.type !== 'server-response' || !record.result || record.result.ok !== true) return null
-  return record.result.value as T
+/** Whether a decoded value is an object that can be read field by field. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Pull the result out of one server-response envelope. A well-formed success
+ * frame yields its `value` only when it has the shape the caller's predicate
+ * accepts; every other frame folds into `null`.
+ */
+function unwrap<T>(envelope: unknown, is: (value: unknown) => value is T): T | null {
+  if (!isRecord(envelope)) return null
+  if (envelope.type !== 'server-response') return null
+  const result = envelope.result
+  if (!isRecord(result) || result.ok !== true) return null
+  return is(result.value) ? result.value : null
 }
 
 /** POST one plugin-routed RPC; every failure mode folds into `null`. */
-function call<T>(sessionId: string, method: string, signal?: AbortSignal): Promise<T | null> {
+function call<T>(
+  sessionId: string,
+  method: string,
+  is: (value: unknown) => value is T,
+  signal?: AbortSignal,
+): Promise<T | null> {
   rpcSeq += 1
   const rpcId = `jj-workspace-${method}-${String(rpcSeq)}`
   const run = async (): Promise<T | null> => {
@@ -183,7 +204,7 @@ function call<T>(sessionId: string, method: string, signal?: AbortSignal): Promi
       signal,
     })
     if (!response.ok) return null
-    return unwrap<T>(await response.json())
+    return unwrap(await response.json(), is)
   }
   return run().catch(() => null)
 }
@@ -220,8 +241,8 @@ function Toggle({
   cancel,
   useProjection,
 }: ToggleProps) {
-  const permissions = useProjection('permissions') as PermissionSelection | undefined
-  const permissionValue = permissions?.currentValue
+  const permissions = useProjection('permissions')
+  const permissionValue = isRecord(permissions) ? permissions.currentValue : undefined
   const [panel, setPanel] = useState<PanelFrame | null>(null)
   const [statusState, setStatusState] = useState<VcsStatus | null>(null)
   const [branchList, setBranchList] = useState<BranchList | null>(null)
@@ -282,10 +303,14 @@ function Toggle({
       const current = new AbortController()
       controller = current
       void status(sessionId, current.signal).then(
-        (next) => {
-          if (!alive) return
-          if (next === null) schedule()
-          else setStatusState(next)
+        (resolved) => {
+          if (!alive) return undefined
+          if (resolved === null) {
+            schedule()
+            return undefined
+          }
+          setStatusState(resolved)
+          return undefined
         },
         () => {
           schedule()
@@ -309,13 +334,7 @@ function Toggle({
   const kind = statusState && statusState.kind
   const jj = kind === 'jj'
   const gitBlocker = worktree ? worktree.blocker : null
-  const blocker = jj
-    ? statusState?.blocker === undefined
-      ? null
-      : statusState.blocker
-    : gitBlocker === undefined
-      ? null
-      : gitBlocker
+  const blocker = jj ? (statusState?.blocker ?? null) : (gitBlocker ?? null)
   const usable = blocker === null
   const readyCheckout =
     !jj && panel && panel.checkout && panel.checkout.state === 'ready'
@@ -333,6 +352,7 @@ function Toggle({
     void branches().then(
       (result) => {
         if (alive && result && result.ok) setBranchList(result.value ?? null)
+        return undefined
       },
       () => {},
     )
@@ -351,18 +371,13 @@ function Toggle({
   const held = worktree.creation !== null
   const disabled = held || pending || (!usable && !requested)
   const from: string | null = requested && worktree ? (worktree.request?.from ?? null) : null
-  const baseValue = jj ? (from === null ? '@' : from) : from === null ? currentBranch : from
+  const baseValue = jj ? (from ?? '@') : (from ?? currentBranch)
   const baseText = jj
-    ? from === null
-      ? t('baseAt')
-      : from
-    : from !== null
-      ? from
-      : requested
+    ? (from ?? t('baseAt'))
+    : (from ??
+      (requested
         ? t('baseHead')
-        : currentBranch !== null
-          ? currentBranch
-          : t('detached', { commit: currentCommit || '?' })
+        : (currentBranch ?? t('detached', { commit: currentCommit ?? '?' }))))
   const reason = error || blockerText(t, blocker)
   const hint = reason || (requested ? t('requested') : jj ? t('hintJj') : t('hintGit'))
 
@@ -376,20 +391,18 @@ function Toggle({
       .then(
         (result) => {
           if (!result || result.ok !== true) {
-            setError(t('failed', { message: result?.error?.message || 'unknown error' }))
+            setError(t('failed', { message: result?.error?.message ?? 'unknown error' }))
           }
+          return undefined
         },
         (failure: unknown) => {
-          const reason = failure as { message?: unknown } | null
-          setError(
-            t('failed', {
-              message: String(reason && reason.message ? reason.message : failure),
-            }),
-          )
+          const detail = isRecord(failure) && failure.message ? failure.message : undefined
+          setError(t('failed', { message: String(detail ?? failure) }))
         },
       )
       .then(() => {
         setPending(false)
+        return undefined
       })
   }
 
@@ -402,20 +415,18 @@ function Toggle({
       .then(
         (result) => {
           if (!result || result.ok !== true) {
-            setError(t('failed', { message: result?.error?.message || 'unknown error' }))
+            setError(t('failed', { message: result?.error?.message ?? 'unknown error' }))
           }
+          return undefined
         },
         (failure: unknown) => {
-          const reason = failure as { message?: unknown } | null
-          setError(
-            t('failed', {
-              message: String(reason && reason.message ? reason.message : failure),
-            }),
-          )
+          const detail = isRecord(failure) && failure.message ? failure.message : undefined
+          setError(t('failed', { message: String(detail ?? failure) }))
         },
       )
       .then(() => {
         setPending(false)
+        return undefined
       })
   }
 
@@ -440,7 +451,7 @@ function Toggle({
         name === '@'
           ? t('baseAt')
           : name === ''
-            ? t('detached', { commit: currentCommit || '?' })
+            ? t('detached', { commit: currentCommit ?? '?' })
             : name,
       note: !jj && name === currentBranch ? t('currentNote') : undefined,
     }))
@@ -482,9 +493,11 @@ function TaskPill({ sessionId, t, tasks }: TaskPillProps) {
       void tasks().then(
         (value) => {
           if (alive) setList(value && Array.isArray(value.tasks) ? value.tasks : [])
+          return undefined
         },
         () => {
           if (alive) setList([])
+          return undefined
         },
       )
     }
@@ -498,9 +511,9 @@ function TaskPill({ sessionId, t, tasks }: TaskPillProps) {
   }, [sessionId])
 
   if (!list || list.length === 0) return null
-  const task = list[list.length - 1]
-  if (!task) return null
-  const state = task.state || 'unavailable'
+  const task = list.at(-1)
+  if (task === undefined) return null
+  const state = task.state ?? 'unavailable'
   const labelKey =
     state === 'ok'
       ? 'taskOk'
@@ -528,7 +541,7 @@ function TaskPill({ sessionId, t, tasks }: TaskPillProps) {
           workspace: task.workspace,
           path: task.path,
           bookmark: task.bookmark,
-          change: task.currentChangeId || task.changeId,
+          change: task.currentChangeId ?? task.changeId,
           base: task.baseChange,
           state,
         })}
@@ -570,7 +583,7 @@ function apply(ctx: JjwClientContext) {
           const id = sessionId ?? ''
           return {
             t,
-            status: (target, signal) => call<VcsStatus>(target, 'status', signal),
+            status: (target, signal) => call(target, 'status', isVcsStatus, signal),
             follow: (signal) => scope.remote.forgePanel.follow(id, signal),
             branches: () => scope.remote.forgePanel.branches(id),
             request: (from) => scope.remote.forgePanel.requestWorktree(id, from),
@@ -590,7 +603,7 @@ function apply(ctx: JjwClientContext) {
       locale: LOCALE_NS,
       inject: (sessionId) => ({
         t,
-        tasks: () => call<TaskListResult>(sessionId ?? '', 'tasks'),
+        tasks: () => call(sessionId ?? '', 'tasks', isTaskList),
       }),
     }
     return ctx.slots.register(registration, TaskPill)

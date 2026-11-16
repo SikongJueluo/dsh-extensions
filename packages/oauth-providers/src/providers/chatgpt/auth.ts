@@ -14,6 +14,7 @@
  */
 import type { LoggerService } from '@deepseek-ai/cordis'
 import type { CredentialKey, CredentialRecord } from '@deepseek-ai/dsh-credentials'
+import { isRecord } from '../../record.js'
 import { refreshGrant } from './oauth.js'
 import type { OAuthGrant } from './oauth.js'
 import type { FetchLike } from '../../transport.js'
@@ -73,7 +74,7 @@ function parseGrant(record: CredentialRecord | undefined): OAuthGrant {
       `oauth-providers/chatgpt: credential record has kind "${record.kind}", expected "grant"`,
     )
   }
-  const payload = record.payload as Partial<OAuthGrant> | null
+  const payload = isRecord(record.payload) ? record.payload : null
   if (
     typeof payload?.access !== 'string' ||
     payload.access.length === 0 ||
@@ -159,7 +160,9 @@ export class TokenStore {
       if (error instanceof AuthError) throw error
       throw new AuthError(
         'AUTH_REFRESH_FAILED',
-        `oauth-providers/chatgpt: token refresh failed (${(error as Error).message}) — sign in again`,
+        `oauth-providers/chatgpt: token refresh failed (${
+          error instanceof Error ? error.message : String(error)
+        }) — sign in again`,
         { cause: error },
       )
     }

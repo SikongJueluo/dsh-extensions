@@ -29,13 +29,13 @@
  */
 
 /** Any bash input that names a supported container engine. */
-const ENGINE = /\b(?:podman|docker)\b/
+const ENGINE = /\b(?:podman|docker)\b/u
 
 /** Engine binaries that resolve a compose file instead of a visible argv. */
-const COMPOSE_BINARY = /^(?:podman|docker)-compose$/
+const COMPOSE_BINARY = /^(?:podman|docker)-compose$/u
 
 /** One shell segment; splitting is deliberately coarse (over-splitting is safe). */
-const SEGMENT_SEPARATOR = /(?:&&|\|\||[;|\n])/
+const SEGMENT_SEPARATOR = /(?:&&|\|\||[;|\n])/u
 
 /**
  * Engine-level options that consume the following token. The list only needs
@@ -119,16 +119,16 @@ const COMMAND_GROUPS = new Set([
 
 /** Strip shell quotes a token may carry (the shell removes them before exec). */
 function bare(token: string): string {
-  return token.trim().replaceAll(/^["']+|["']+$/g, '')
+  return token.trim().replaceAll(/^["']+|["']+$/gu, '')
 }
 
 /** Mount sources may be quoted per component; drop every quote there. */
 function barePath(value: string): string {
-  return value.replaceAll(/["']/g, '')
+  return value.replaceAll(/["']/gu, '')
 }
 
 function engineNameOf(token: string): string | undefined {
-  const name = bare(token).replaceAll(/^[<($]+|[)>)]+$/g, '')
+  const name = bare(token).replaceAll(/^[<($]+|[)>)]+$/gu, '')
   const base = name.split('/').pop() ?? name
   if (base === 'podman' || base === 'docker') return base
   if (base === 'podman-remote') return base
@@ -139,7 +139,7 @@ function engineNameOf(token: string): string | undefined {
 function segmentsOf(command: string): string[][] {
   return command
     .split(SEGMENT_SEPARATOR)
-    .map((segment) => segment.trim().split(/\s+/).filter(Boolean))
+    .map((segment) => segment.trim().split(/\s+/u).filter(Boolean))
 }
 
 /** The first non-option token after an engine, skipping option values. */
@@ -188,7 +188,7 @@ function isHostTarget(value: string | undefined): boolean {
 
 function securityRelaxed(value: string | undefined): boolean {
   if (value === undefined) return false
-  return /^(?:seccomp|apparmor|label|systempaths)=/.test(value)
+  return /^(?:seccomp|apparmor|label|systempaths)=/u.test(value)
 }
 
 /** Host paths the input exposes to a container, best effort. */
@@ -210,7 +210,7 @@ function hostPathSources(tokens: readonly string[]): string[] {
       if (spec === undefined) continue
       const parts = spec.split(',')
       const source =
-        parts.find((part) => /^(?:source|src)=/.test(part))?.replace(/^(?:source|src)=/, '') ??
+        parts.find((part) => /^(?:source|src)=/u.test(part))?.replace(/^(?:source|src)=/u, '') ??
         (name === '--mount' ? parts[0]?.split(':')[0] : undefined)
       if (source !== undefined) sources.push(barePath(source))
       continue
@@ -218,9 +218,9 @@ function hostPathSources(tokens: readonly string[]): string[] {
     // pflag shorthand value: `-vSOURCE:DEST`, `-v=SOURCE`, and the same
     // option grouped behind boolean shorthands (`-itvSOURCE:DEST`,
     // `-itv SOURCE:DEST`). All name the same mount as `-v SOURCE:DEST`.
-    const shortVolume = clean.startsWith('--') ? null : /^-[A-Za-z]*v(.*)$/.exec(clean)
+    const shortVolume = clean.startsWith('--') ? null : /^-[A-Za-z]*v(.*)$/u.exec(clean)
     if (shortVolume !== null) {
-      const attached = (shortVolume[1] ?? '').replace(/^=/, '')
+      const attached = (shortVolume[1] ?? '').replace(/^=/u, '')
       const value = attached !== '' ? attached : tokens[i + 1]
       if (value !== undefined) sources.push(barePath(value.split(':')[0] ?? ''))
       continue
@@ -244,20 +244,20 @@ function sensitiveSource(raw: string): boolean {
   // Strip the slash spellings that don't change the named directory
   // (`/home/u/`, `//home/u`, `/home/u/.`). A `..` segment is not resolved
   // textually (symlinks decide it), so it goes to the human.
-  const collapsed = raw.replaceAll(/\/{2,}/g, '/')
-  const trimmed = collapsed.length > 1 ? collapsed.replace(/\/+$/, '') : collapsed
+  const collapsed = raw.replaceAll(/\/{2,}/gu, '/')
+  const trimmed = collapsed.length > 1 ? collapsed.replace(/\/+$/u, '') : collapsed
   const value = trimmed === '' ? '/' : trimmed
-  if (/(?:^|\/)\.\.(?:\/|$)/.test(value)) return true
-  const source = value.replaceAll(/\/\.(?=\/|$)/g, '')
+  if (/(?:^|\/)\.\.(?:\/|$)/u.test(value)) return true
+  const source = value.replaceAll(/\/\.(?=\/|$)/gu, '')
   // `/.` normalizes to the host root.
   if (source === '') return true
   if (source === '~' || source.startsWith('~/')) return true
-  if (/^\$(?:\{HOME\}|HOME)(?:\/|$)/.test(source)) return true
+  if (/^\$(?:\{HOME\}|HOME)(?:\/|$)/u.test(source)) return true
   if (source === '/root' || source.startsWith('/root/')) return true
   if (source === '/') return true
-  if (/^\/home\/[^/]+$/.test(source) || /^\/Users\/[^/]+$/.test(source)) return true
+  if (/^\/home\/[^/]+$/u.test(source) || /^\/Users\/[^/]+$/u.test(source)) return true
   if (
-    /^\/run\/user\/[^/]+$/.test(source) ||
+    /^\/run\/user\/[^/]+$/u.test(source) ||
     (source.startsWith('/run/user/') && source.endsWith('/podman'))
   ) {
     return true
@@ -266,7 +266,7 @@ function sensitiveSource(raw: string): boolean {
   if (source === '/proc' || source.startsWith('/proc/')) return true
   if (source === '/sys' || source.startsWith('/sys/')) return true
   if (
-    /(?:^|\/)(?:\.ssh|\.gnupg|\.aws|\.kube|\.docker|\.config|\.netrc|\.git-credentials|\.password-store)(?:\/|$)/.test(
+    /(?:^|\/)(?:\.ssh|\.gnupg|\.aws|\.kube|\.docker|\.config|\.netrc|\.git-credentials|\.password-store)(?:\/|$)/u.test(
       source,
     )
   ) {
@@ -281,7 +281,7 @@ function sensitiveSource(raw: string): boolean {
 
 function segmentRisk(tokens: readonly string[]): string | undefined {
   for (const token of tokens) {
-    if (/^(?:CONTAINER_HOST|CONTAINER_CONNECTION|DOCKER_HOST|DOCKER_CONTEXT)=/.test(bare(token))) {
+    if (/^(?:CONTAINER_HOST|CONTAINER_CONNECTION|DOCKER_HOST|DOCKER_CONTEXT)=/u.test(bare(token))) {
       return CONTAINER_RISKS.remote
     }
   }
@@ -317,10 +317,11 @@ function segmentRisk(tokens: readonly string[]): string | undefined {
         if (next === 'prune' || next === 'reset') return CONTAINER_RISKS.prune
         if (next === 'service' || next === 'connection') return CONTAINER_RISKS.hostConfig
       }
-      if (sub.name === 'machine') {
-        if (['init', 'rm', 'rmi', 'reset', 'start', 'stop', 'set', 'ssh'].includes(next)) {
-          return CONTAINER_RISKS.hostConfig
-        }
+      if (
+        sub.name === 'machine' &&
+        ['init', 'rm', 'rmi', 'reset', 'start', 'stop', 'set', 'ssh'].includes(next)
+      ) {
+        return CONTAINER_RISKS.hostConfig
       }
       if (
         sub.name === 'swarm' &&
@@ -359,7 +360,7 @@ function segmentRisk(tokens: readonly string[]): string | undefined {
       hasOption(tokens, '--cap-add') ||
       hasOption(tokens, '--device') ||
       hasOption(tokens, '--ssh') ||
-      optionValues(tokens, '--security-opt').some(securityRelaxed)
+      optionValues(tokens, '--security-opt').some((value) => securityRelaxed(value))
     ) {
       return CONTAINER_RISKS.privilege
     }
@@ -373,10 +374,14 @@ function segmentRisk(tokens: readonly string[]): string | undefined {
       '--userns',
       '--cgroupns',
     ]) {
-      if (optionValues(tokens, flag).some(isHostTarget)) return CONTAINER_RISKS.namespace
+      if (optionValues(tokens, flag).some((value) => isHostTarget(value)))
+        return CONTAINER_RISKS.namespace
     }
 
-    if (hasOption(tokens, '--volumes-from') || hostPathSources(tokens).some(sensitiveSource)) {
+    if (
+      hasOption(tokens, '--volumes-from') ||
+      hostPathSources(tokens).some((source) => sensitiveSource(source))
+    ) {
       return CONTAINER_RISKS.mount
     }
   }
@@ -392,7 +397,7 @@ function segmentRisk(tokens: readonly string[]): string | undefined {
  */
 export function containerRisk(command: string): string | undefined {
   if (!ENGINE.test(command)) return undefined
-  if (/\b(?:podman|docker)\.sock\b/.test(command)) return CONTAINER_RISKS.socket
+  if (/\b(?:podman|docker)\.sock\b/u.test(command)) return CONTAINER_RISKS.socket
   for (const tokens of segmentsOf(command)) {
     const risk = segmentRisk(tokens)
     if (risk !== undefined) return risk
@@ -412,5 +417,5 @@ export function containerRisk(command: string): string | undefined {
  */
 export function isMutableFileDependent(command: string): boolean {
   if (ENGINE.test(command)) return true
-  return /(?:^|[\s;&|"'=])(?:\.{0,2}\/)?[\w.@+/-]+\.(?:sh|bash)\b/.test(command)
+  return /(?:^|[\s;&|"'=])(?:\.{0,2}\/)?[\w.@+/-]+\.(?:sh|bash)\b/u.test(command)
 }

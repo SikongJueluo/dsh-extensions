@@ -300,7 +300,7 @@ export class DirenvLoader {
       })
       return EMPTY_OVERLAY
     }
-    if (typeof dump !== 'object' || dump === null || Array.isArray(dump)) {
+    if (!isJsonObject(dump)) {
       this.#record(rcDir, gen, {
         status: 'error',
         overlay: EMPTY_OVERLAY,
@@ -308,7 +308,7 @@ export class DirenvLoader {
       })
       return EMPTY_OVERLAY
     }
-    const overlay = sanitizeDirenvDump(dump as Record<string, unknown>)
+    const overlay = sanitizeDirenvDump(dump)
     this.#record(rcDir, gen, { status: 'active', overlay, rcDir })
     return overlay
   }
@@ -376,7 +376,9 @@ export class DirenvLoader {
         this.#watchers.delete(rcDir)
         try {
           watcher.close()
-        } catch {}
+        } catch {
+          // The watcher already stopped; nothing left to release.
+        }
         this.#ctx
           .logger('auto-env')
           .warn(`direnv input watcher stopped for ${rcDir}: ${describeError(error)}`)
@@ -412,7 +414,9 @@ export class DirenvLoader {
         if (this.#allowWatcher === watcher) this.#allowWatcher = undefined
         try {
           watcher.close()
-        } catch {}
+        } catch {
+          // The watcher already stopped; nothing left to release.
+        }
       })
       this.#allowWatcher = watcher
     } catch {
@@ -424,7 +428,9 @@ export class DirenvLoader {
     if (watcher === undefined) return
     try {
       watcher.close()
-    } catch {}
+    } catch {
+      // The watcher already stopped; nothing left to release.
+    }
   }
 
   /** Evict one `.envrc` directory: facts, generation, and watcher. */
@@ -436,6 +442,11 @@ export class DirenvLoader {
     this.#watchers.delete(rcDir)
     this.#closeWatcher(watcher)
   }
+}
+
+/** Narrow a parsed JSON document to an indexable record (arrays are rejected). */
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**
@@ -456,7 +467,7 @@ export function sanitizeDirenvDump(dump: Record<string, unknown>): EnvOverlay {
 
 /** ANSI escape sequences (direnv colorizes stderr for terminals). */
 // oxlint-disable-next-line eslint/no-control-regex -- the pattern exists to match ANSI escapes
-const ANSI_PATTERN = /\x1b\[[0-9;?]*[A-Za-z]/g
+const ANSI_PATTERN = /\u001B\[[0-9;?]*[A-Za-z]/gu
 
 function firstLine(text: string): string | undefined {
   // direnv colorizes stderr when it believes a terminal is attached.
@@ -467,5 +478,5 @@ function firstLine(text: string): string | undefined {
 function describeError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error)
   const line = firstLine(text)
-  return line === undefined ? 'unknown error' : line
+  return line ?? 'unknown error'
 }

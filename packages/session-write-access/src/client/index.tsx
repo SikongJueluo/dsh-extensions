@@ -167,11 +167,6 @@ interface WriteAccessView {
   forks?: ForkRecord[]
 }
 
-interface WorkspaceClient {
-  openSession?(sessionId: string): unknown
-  pickDirectory?(): unknown
-}
-
 interface SharedState {
   open: boolean
   sessionId: string | null
@@ -179,7 +174,7 @@ interface SharedState {
   busy: boolean
   error: string | null
   notice: string | null
-  listeners: Array<() => void>
+  listeners: (() => void)[]
 }
 
 // --- module-level panel state (two slots share it) ---
@@ -208,17 +203,20 @@ function subscribe(listener: () => void) {
   }
 }
 
+/** Close the panel; shared by the Dialog's onOpenChange. */
+function close() {
+  setState({ open: false, error: null, notice: null })
+}
+
 function useShared(): SharedState {
   const [, force] = useState(0)
   useEffect(() => subscribe(() => force((value) => value + 1)), [])
   return S
 }
 
-interface RpcEnvelope<T> {
-  ok?: boolean
-  error?: { message?: string }
-  value?: T
-}
+type RpcEnvelope<T> =
+  | { ok: true; value: T; error?: undefined }
+  | { ok: false; value?: undefined; error?: { message?: string } }
 
 function rpc<T = WriteAccessView>(method: string, args: Record<string, unknown>): Promise<T> {
   return fetch(RPC, {
@@ -229,13 +227,13 @@ function rpc<T = WriteAccessView>(method: string, args: Record<string, unknown>)
   })
     .then((response) => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      return response.json() as Promise<RpcEnvelope<T>>
+      return response.json()
     })
-    .then((envelope) => {
-      if (!envelope || envelope.ok !== true) {
+    .then((envelope: RpcEnvelope<T> | undefined) => {
+      if (!envelope || !envelope.ok) {
         throw new Error(envelope && envelope.error ? envelope.error.message : 'invalid response')
       }
-      return envelope.value as T
+      return envelope.value
     })
 }
 
@@ -243,28 +241,29 @@ function messageOf(error: unknown): string {
   return error instanceof Error && error.message ? error.message : String(error)
 }
 
+function refresh() {
+  const sessionId = S.sessionId
+  if (!sessionId) return Promise.resolve()
+  setState({ busy: true, error: null })
+  return rpc('state', { sessionId })
+    .then((view) => {
+      if (S.sessionId === sessionId) setState({ view, busy: false })
+      return undefined
+    })
+    .catch((error: unknown) => {
+      setState({ busy: false, error: messageOf(error) })
+    })
+}
+
 function apply(ctx: DshClientContext) {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'session-write-access: locale')
   const t = ctx.locale.bind(NS)
-  const workspaceClient = ctx.get<WorkspaceClient | undefined>('uiWorkspace')
-
-  function refresh() {
-    const sessionId = S.sessionId
-    if (!sessionId) return Promise.resolve()
-    setState({ busy: true, error: null })
-    return rpc<WriteAccessView>('state', { sessionId })
-      .then((view) => {
-        if (S.sessionId === sessionId) setState({ view, busy: false })
-      })
-      .catch((error: unknown) => {
-        setState({ busy: false, error: messageOf(error) })
-      })
-  }
+  const workspaceClient = ctx.get('uiWorkspace')
 
   function mutate(method: string, extra: Record<string, unknown>) {
     const sessionId = S.sessionId
     setState({ busy: true, error: null, notice: null })
-    return rpc<WriteAccessView>(method, { sessionId, ...extra })
+    return rpc(method, { sessionId, ...extra })
       .then((view) => {
         if (S.sessionId === sessionId) {
           setState({
@@ -305,15 +304,16 @@ function apply(ctx: DshClientContext) {
     const pending = shared.view?.pending?.length ?? 0
     useEffect(() => {
       if (!sessionId) return undefined
-      if (S.open && S.sessionId !== sessionId) {
+      if (shared.open && S.sessionId !== sessionId) {
         setState({ sessionId, view: null })
         void refresh()
-      } else if (!S.open) {
+      } else if (!shared.open) {
         // Keep the compact count current without opening the panel.
         setState({ sessionId })
-        rpc<WriteAccessView>('state', { sessionId })
+        rpc('state', { sessionId })
           .then((view) => {
             if (!S.open && S.sessionId === sessionId) setState({ view })
+            return undefined
           })
           .catch(() => {
             /* unattributed sessions simply show no counts */
@@ -352,10 +352,6 @@ function apply(ctx: DshClientContext) {
       }
     }, [shared.open])
 
-    function close() {
-      setState({ open: false, error: null, notice: null })
-    }
-
     function choose() {
       if (!workspaceClient || typeof workspaceClient.pickDirectory !== 'function') return
       Promise.resolve(workspaceClient.pickDirectory())
@@ -364,6 +360,7 @@ function apply(ctx: DshClientContext) {
             setPath(picked)
             void mutate('add', { path: picked })
           }
+          return undefined
         })
         .catch((error: unknown) => {
           setState({ error: messageOf(error) })
@@ -397,7 +394,11 @@ function apply(ctx: DshClientContext) {
           {view ? (
             <div className="dshx:mb-3.5 dshx:grid dshx:grid-cols-[auto_1fr] dshx:gap-x-3 dshx:gap-y-1.5 dshx:text-xs dshx:leading-[18px]">
               <span className="dshx:text-fg-muted">{t('mode')}</span>
-              <span className="dshx:break-all">{view.effectiveMode || view.defaultMode}</span>
+              <span className="dshx:break-all">
+                {view.effectiveMode === undefined || view.effectiveMode === ''
+                  ? view.defaultMode
+                  : view.effectiveMode}
+              </span>
               <span className="dshx:text-fg-muted">{t('workspace')}</span>
               <span className="dshx:break-all">{view.workspaceRoot}</span>
             </div>
@@ -480,7 +481,10 @@ function apply(ctx: DshClientContext) {
                         {request.path}
                       </div>
                       <div className="dshx:mt-0.5 dshx:text-2xs dshx:leading-4 dshx:text-fg-muted">
-                        {t('reason')}: {request.reason || t('empty')}
+                        {t('reason')}:{' '}
+                        {request.reason === undefined || request.reason === ''
+                          ? t('empty')
+                          : request.reason}
                       </div>
                       <div className="dshx:mt-0.5 dshx:text-2xs dshx:leading-4 dshx:text-fg-muted">
                         {t('requestedBy', { session: String(request.sessionId).slice(-8) })}

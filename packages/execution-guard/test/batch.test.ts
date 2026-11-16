@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { currentStepCalls, lastHumanSeq } from '../src/batch.js'
+import type { StepEvent } from '../src/batch.js'
 
 let seq = 0
-function ev(type: string, data: Record<string, unknown>): SessionEvent {
+function ev(type: string, data: Record<string, unknown>): StepEvent {
   seq += 1
-  return { type, seq, time: 0, data } as unknown as SessionEvent
+  return { type, seq, data }
 }
 
-function assistantMessage(blocks: unknown[]): SessionEvent {
+function assistantMessage(blocks: unknown[]): StepEvent {
   return ev('assistant/message', {
     turn: 1,
     step: 1,

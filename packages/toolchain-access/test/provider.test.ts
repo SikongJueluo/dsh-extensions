@@ -88,7 +88,7 @@ const DEFAULT_ENTRIES: Record<string, FakeEntry> = {
 }
 
 /** The binds the seven defaults produce, in derivation (preset) order. */
-const DEFAULT_BINDS: Array<[source: string, destination: string]> = [
+const DEFAULT_BINDS: [source: string, destination: string][] = [
   ['/home/u/.cache/uv', '/home/u/.cache/uv'],
   ['/home/u/.cargo/registry', '/home/u/.cargo/registry'],
   ['/home/u/.cargo/git', '/home/u/.cargo/git'],
@@ -302,7 +302,7 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
         ...WS_POLICY,
         additionalWritableRoots: [join(tmpdir(), 'toolchain-extra-does-not-exist')],
       }),
-    ).rejects.toThrow(/Invalid additional writable directory/)
+    ).rejects.toThrow(/Invalid additional writable directory/u)
   })
 
   it('drops grants already covered by the workspace bind', async () => {
@@ -363,7 +363,7 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
     provider.grantEnv = grantEnvFrom('/home/u', 1000, {})
     provider.grantFs = fakeGrantFs(ENTRIES)
     await expect(provider.confine(COMMAND, WS_POLICY)).rejects.toThrow(
-      /not the pinned stock bwrap layout/,
+      /not the pinned stock bwrap layout/u,
     )
   })
 
@@ -379,7 +379,7 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
     provider.grantEnv = grantEnvFrom('/home/u', 1000, {})
     provider.grantFs = fakeGrantFs(ENTRIES)
     await expect(provider.confine(COMMAND, WS_POLICY)).rejects.toThrow(
-      /not the pinned stock bwrap layout/,
+      /not the pinned stock bwrap layout/u,
     )
   })
 

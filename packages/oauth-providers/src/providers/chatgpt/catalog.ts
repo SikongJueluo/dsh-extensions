@@ -13,6 +13,7 @@
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import { readJson } from '../../transport.js'
 import type { FetchLike } from '../../transport.js'
+import { isRecord } from '../../record.js'
 
 /** Input modality vocabulary shared with the harness model catalog. */
 export type InputModality = 'text' | 'image'
@@ -57,16 +58,6 @@ export const REASONING_EFFORT_NAMES: Record<string, string> = {
   ultra: 'Ultra',
 }
 
-interface RawModel {
-  slug?: string
-  display_name?: string
-  name?: string
-  context_window?: number
-  supported_in_api?: boolean
-  supported_reasoning_levels?: Array<{ effort?: string }>
-  input_modalities?: unknown
-}
-
 /** Keep the modalities the harness understands; unknown lists fall back to the default. */
 function parseInputModalities(value: unknown): readonly InputModality[] {
   if (!Array.isArray(value)) return DEFAULT_INPUT_MODALITIES
@@ -76,18 +67,29 @@ function parseInputModalities(value: unknown): readonly InputModality[] {
 
 /** Parse the ChatGPT `/models` payload into the internal catalog shape. */
 function parseModelsPayload(payload: unknown): ModelEntry[] {
-  const list = (payload as { models?: RawModel[] } | null)?.models ?? []
+  const list = isRecord(payload) && Array.isArray(payload.models) ? payload.models : []
   const out: ModelEntry[] = []
   for (const model of list) {
+    if (!isRecord(model)) continue
     const slug = model.slug
-    if (!slug) continue
+    if (typeof slug !== 'string' || slug === '') continue
     if (model.supported_in_api === false) continue
-    const reasoning = (model.supported_reasoning_levels ?? [])
-      .map((level) => level.effort)
+    const levels = Array.isArray(model.supported_reasoning_levels)
+      ? model.supported_reasoning_levels
+      : []
+    const reasoning = levels
+      .map((level) => (isRecord(level) ? level.effort : undefined))
       .filter((effort): effort is string => typeof effort === 'string')
+    const displayName = model.display_name
+    const modelName = model.name
     out.push({
       id: slug,
-      name: model.display_name || model.name || slug,
+      name:
+        typeof displayName === 'string' && displayName !== ''
+          ? displayName
+          : typeof modelName === 'string' && modelName !== ''
+            ? modelName
+            : slug,
       ...(typeof model.context_window === 'number' ? { contextWindow: model.context_window } : {}),
       reasoning,
       inputModalities: parseInputModalities(model.input_modalities),
@@ -175,8 +177,9 @@ export class ModelCatalog {
           headers: { accept: 'application/json' },
         })
         if (response.ok) {
-          const version = ((await response.json()) as { version?: unknown })?.version
-          if (typeof version === 'string' && /^\d+\.\d+\.\d+/.test(version)) value = version
+          const body: unknown = await response.json()
+          const version = isRecord(body) ? body.version : undefined
+          if (typeof version === 'string' && /^\d+\.\d+\.\d+/u.test(version)) value = version
         }
       } catch {
         // Registry unreachable: keep the last good or the bundled fallback.
@@ -200,7 +203,9 @@ export class ModelCatalog {
       response = await this.fetch(url, { headers: { accept: 'application/json', ...headers } })
     } catch (error) {
       throw new LlmError(
-        `ChatGPT backend unreachable at ${baseURL}: ${(error as Error).message}`,
+        `ChatGPT backend unreachable at ${baseURL}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         'CATALOG_UNREACHABLE',
         { cause: error },
       )
@@ -216,7 +221,11 @@ export class ModelCatalog {
     try {
       payload = await readJson(response, 'ChatGPT /models endpoint')
     } catch (error) {
-      throw new LlmError((error as Error).message, 'CATALOG_INVALID_RESPONSE', { cause: error })
+      throw new LlmError(
+        error instanceof Error ? error.message : String(error),
+        'CATALOG_INVALID_RESPONSE',
+        { cause: error },
+      )
     }
     const parsed = parseModelsPayload(payload)
     if (parsed.length === 0) {

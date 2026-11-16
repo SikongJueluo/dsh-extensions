@@ -21,8 +21,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { open, rename } from 'node:fs/promises'
 import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { UNIT_NAME_RE, storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
+import { Storage, UNIT_NAME_RE, storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import * as domainPlugin from '@deepseek-ai/dsh-storage-domain'
 import * as triggersPlugin from '../src/index.js'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
@@ -161,9 +160,10 @@ async function boot(root: string, options: { queueFails?: boolean } = {}) {
       session: { id: sessionId },
       inheritedEventCount: 0,
       events: [...(logs.get(sessionId) ?? [])].map((event, seq) => ({
-        ...event,
+        type: event.type,
         seq,
         time: Date.now(),
+        data: event.data,
       })),
     }),
   })
@@ -171,7 +171,7 @@ async function boot(root: string, options: { queueFails?: boolean } = {}) {
   await ctx.plugin(fileBackendPlugin as never, { root } as never)
   await ctx.plugin(domainPlugin as never, { backend: 'file' } as never)
   await ctx.plugin(triggersPlugin as never, {} as never)
-  const svc = ctx.get('triggerBindings')!
+  const svc = present(ctx.get('triggerBindings'), 'triggerBindings service')
   return {
     svc,
     prompts,
@@ -214,6 +214,18 @@ function readUnit(dir: string): { tables: Record<string, Record<string, unknown>
   }
 }
 
+/** Narrow a possibly-absent fixture lookup; the test fails loud at the site. */
+function present<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`expected ${what} to exist`)
+  return value
+}
+
+/** Parse the stored run record for `runId` off the unit file (the medium's view). */
+function readRun(dir: string, runId: string): RunRecord {
+  const runs = present(readUnit(dir).tables.runs, 'runs table')
+  return present(runs[runId] as RunRecord | undefined, `run ${runId} in the medium`)
+}
+
 const EXECUTOR = 'sess-exec'
 const PARENT = 'sess-parent'
 
@@ -236,24 +248,27 @@ describe('atomic commit over the real domain + file medium', () => {
     // outbox entry are the same JSON object in the same file write — there is
     // no second write the crash could have split.
     const unit = readUnit(dir)
-    const stored = unit.tables.runs![bound.runId]! as RunRecord
+    const stored = readRun(dir, bound.runId)
     expect(stored.status).toBe('paused-error') // a failed non-nudge send parks
     expect(stored.outbox).toHaveLength(1)
-    expect(stored.outbox![0]!.kind).toBe('start')
-    expect(stored.outbox![0]!.state).toBe('failed')
-    expect(unit.tables.deliveries![stored.outbox![0]!.id]).toBeDefined()
+    const owed = present(stored.outbox, 'the committed outbox')
+    const owedEntry = present(owed[0], 'the owed start entry')
+    expect(owedEntry.kind).toBe('start')
+    expect(owedEntry.state).toBe('failed')
+    expect(present(unit.tables.deliveries, 'deliveries table')[owedEntry.id]).toBeDefined()
 
     // Fresh process over the same directory: state reads back whole, the
     // failed start is NOT auto-re-sent, manual redelivery works and resumes.
     const second = await boot(dir)
     await settle()
     expect(second.prompts).toHaveLength(0)
-    const deliveryId = (readUnit(dir).tables.runs![bound.runId]! as RunRecord).outbox![0]!.id
+    const redeliverEntry = present(readRun(dir, bound.runId).outbox, 'the committed outbox')
+    const deliveryId = present(redeliverEntry[0], 'the owed start entry').id
     await second.svc.controlRun(bound.runId, 'redeliver', { deliveryId })
     expect(second.prompts).toHaveLength(1)
-    expect(second.prompts[0]!.sessionId).toBe(EXECUTOR)
-    expect(second.prompts[0]!.text).toContain(`runId=${bound.runId}`)
-    const after = readUnit(dir).tables.runs![bound.runId]! as RunRecord
+    expect(present(second.prompts[0], 'first prompt').sessionId).toBe(EXECUTOR)
+    expect(present(second.prompts[0], 'first prompt').text).toContain(`runId=${bound.runId}`)
+    const after = readRun(dir, bound.runId)
     expect(after.status).toBe('active')
     expect(after.outbox ?? []).toHaveLength(0)
   })
@@ -280,7 +295,7 @@ describe('atomic commit over the real domain + file medium', () => {
     // is NOT re-sent (no pending outbox row), and the loop continues.
     const second = await boot(dir)
     await settle()
-    const stored = readUnit(dir).tables.runs![bound.runId]! as RunRecord
+    const stored = readRun(dir, bound.runId)
     expect(stored.phase).toBe('awaiting-review')
     expect(stored.outbox ?? []).toHaveLength(0)
     expect(second.prompts).toHaveLength(0)
@@ -289,8 +304,8 @@ describe('atomic commit over the real domain + file medium', () => {
     await second.svc.signal(PARENT, { runId: bound.runId, outcome: 'pass', summary: '通过' })
     second.emit(PARENT, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await settle()
-    const finished = readUnit(dir).tables.runs![bound.runId]! as RunRecord
+    const finished = readRun(dir, bound.runId)
     expect(finished.status).toBe('completed')
-    expect(second.prompts.at(-1)!.sessionId).toBe(EXECUTOR)
+    expect(present(second.prompts.at(-1), 'last prompt').sessionId).toBe(EXECUTOR)
   })
 })

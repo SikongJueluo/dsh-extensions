@@ -15,6 +15,8 @@
  * @module dsh-search-integrator/mcp
  */
 
+import { isRecord } from './types.js'
+
 /** One raw HTTP POST exchange, injectable for tests. */
 export type RawPost = (
   url: string,
@@ -34,11 +36,12 @@ export interface McpToolResult {
   readonly structured: unknown
 }
 
+/** One loosely-typed JSON-RPC message: fields are checked at the use sites. */
 interface JsonRpcResponse {
-  jsonrpc?: string
-  id?: number
-  result?: unknown
-  error?: { code?: number; message?: string }
+  readonly jsonrpc?: unknown
+  readonly id?: unknown
+  readonly result?: unknown
+  readonly error?: { readonly code?: unknown; readonly message?: unknown }
 }
 
 /** Broker-level failure (auth, quota, gateway) surfaced with its own type. */
@@ -54,22 +57,29 @@ const knownTools = new Map<string, string>()
 
 /** Extract the first JSON-RPC message from a JSON or SSE-encoded body. */
 export function parseRpcBody(contentType: string, text: string): JsonRpcResponse {
+  const parse = (payload: string): JsonRpcResponse => {
+    const parsed: unknown = JSON.parse(payload)
+    if (isRecord(parsed)) return parsed
+    throw new McpTransportError(`non-JSON MCP response: ${text.slice(0, 200)}`)
+  }
   if (contentType.includes('text/event-stream')) {
     for (const line of text.split('\n')) {
       if (!line.startsWith('data:')) continue
       const payload = line.slice(5).trim()
       if (payload === '') continue
       try {
-        return JSON.parse(payload) as JsonRpcResponse
-      } catch {
+        return parse(payload)
+      } catch (error) {
+        if (error instanceof McpTransportError) continue
         // Skip malformed SSE frames; a later data line may carry the answer.
       }
     }
     throw new McpTransportError('SSE body carried no parsable JSON-RPC message')
   }
   try {
-    return JSON.parse(text) as JsonRpcResponse
-  } catch {
+    return parse(text)
+  } catch (error) {
+    if (error instanceof McpTransportError) throw error
     throw new McpTransportError(`non-JSON MCP response: ${text.slice(0, 200)}`)
   }
 }
@@ -78,14 +88,33 @@ export function parseRpcBody(contentType: string, text: string): JsonRpcResponse
 function isPlainError(
   parsed: unknown,
 ): parsed is { code?: number; msg?: string; message?: string } {
-  if (typeof parsed !== 'object' || parsed === null) return false
-  const record = parsed as Record<string, unknown>
-  return record.jsonrpc === undefined && (record.code !== undefined || record.msg !== undefined)
+  if (!isRecord(parsed)) return false
+  return parsed.jsonrpc === undefined && (parsed.code !== undefined || parsed.msg !== undefined)
 }
 
 interface Exchange {
   parsed: JsonRpcResponse
   headers: Record<string, string>
+}
+
+/** Describe a JSON-RPC error payload the way the wire presents it. */
+function rpcErrorMessage(error: unknown): string {
+  if (isRecord(error) && typeof error.message === 'string') return error.message
+  if (isRecord(error)) {
+    const label: unknown = error.code ?? '?'
+    return `code ${String(label)}`
+  }
+  return 'code ?'
+}
+
+/** The parsed result of one JSON-RPC exchange, narrowed to a record or undefined. */
+function requireResult(exchange: Exchange, stage: string): Record<string, unknown> | undefined {
+  const error = exchange.parsed.error
+  if (error !== undefined) {
+    throw new McpRpcFailure(stage, rpcErrorMessage(error))
+  }
+  const result: unknown = exchange.parsed.result
+  return isRecord(result) ? result : undefined
 }
 
 /**
@@ -132,14 +161,6 @@ export async function mcpCallTool(
     return { parsed, headers: response.headers }
   }
 
-  const requireResult = (exchange: Exchange, stage: string): unknown => {
-    const error = exchange.parsed.error
-    if (error !== undefined) {
-      throw new McpRpcFailure(stage, error.message ?? `code ${error.code ?? '?'}`)
-    }
-    return exchange.parsed.result
-  }
-
   // 1. initialize — a fresh session per call; brokers may expire sessions.
   const init = await send({
     jsonrpc: '2.0',
@@ -175,13 +196,15 @@ export async function mcpCallTool(
       error !== undefined &&
       (error.code === -32602 ||
         error.code === -32601 ||
-        /unknown.*tool|tool.*not/i.test(error.message ?? ''))
+        /unknown.*tool|tool.*not/iu.test(typeof error.message === 'string' ? error.message : ''))
     if (unknownTool && attempt === 1) {
       // Unknown tool: discover the real name once, then retry.
       const listed = await send({ jsonrpc: '2.0', id: nextId++, method: 'tools/list' }, sessionId)
-      const result = requireResult(listed, 'tools/list') as { tools?: { name?: unknown }[] }
-      const names = (result?.tools ?? [])
-        .map((entry) => entry?.name)
+      const listedResult = requireResult(listed, 'tools/list')
+      const tools: unknown[] =
+        listedResult !== undefined && Array.isArray(listedResult.tools) ? listedResult.tools : []
+      const names = tools
+        .map((entry) => (isRecord(entry) ? entry.name : undefined))
         .filter((name): name is string => typeof name === 'string')
       const found =
         names.find((name) => name === tool) ??
@@ -193,21 +216,21 @@ export async function mcpCallTool(
       toolName = found
       continue
     }
-    requireResult(call, 'tools/call')
-    const result = call.parsed.result as {
-      content?: { type?: unknown; text?: unknown }[]
-      structuredContent?: unknown
-      isError?: boolean
-    }
+    const result = requireResult(call, 'tools/call')
     if (result?.isError === true) {
-      const text = (result.content ?? [])
-        .map((block) => (typeof block.text === 'string' ? block.text : ''))
+      const content: unknown[] = Array.isArray(result.content) ? result.content : []
+      const text = content
+        .map((block) => (isRecord(block) && typeof block.text === 'string' ? block.text : ''))
         .join('\n')
       throw new McpRpcFailure('tools/call', text.slice(0, 300) || 'tool reported an error')
     }
-    const text = (result?.content ?? [])
-      .filter((block) => block.type === 'text' && typeof block.text === 'string')
-      .map((block) => block.text as string)
+    const content: unknown[] = Array.isArray(result?.content) ? result.content : []
+    const text = content
+      .map((block) =>
+        isRecord(block) && block.type === 'text' && typeof block.text === 'string'
+          ? block.text
+          : '',
+      )
       .join('\n')
     return { text, structured: result?.structuredContent }
   }

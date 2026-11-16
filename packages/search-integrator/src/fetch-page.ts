@@ -19,9 +19,9 @@ export type PageFetcher = (
 /** Read at most this many bytes of any page before parsing. */
 const MAX_BYTES = 512 * 1024
 
-const BLOCK_TAGS = /<(script|style|noscript|svg|head|nav|footer|form)\b[^>]*>[\s\S]*?<\/\1>/gi
-const BREAK_OPEN = /<br\s*\/?>/gi
-const BLOCK_CLOSE = /<\/(p|div|li|h[1-6]|tr|section|article|blockquote)>/gi
+const BLOCK_TAGS = /<(script|style|noscript|svg|head|nav|footer|form)\b[^>]*>[\s\S]*?<\/\1>/giu
+const BREAK_OPEN = /<br\s*\/?>/giu
+const BLOCK_CLOSE = /<\/(p|div|li|h[1-6]|tr|section|article|blockquote)>/giu
 
 const BASIC_ENTITIES: Record<string, string> = {
   amp: '&',
@@ -42,16 +42,16 @@ const BASIC_ENTITIES: Record<string, string> = {
 
 function decodeEntities(text: string): string {
   return text
-    .replaceAll(/&#(\d+);/g, (_, code: string) => {
+    .replaceAll(/&#(\d+);/gu, (_, code: string) => {
       const num = Number(code)
       return Number.isFinite(num) ? String.fromCodePoint(num) : ''
     })
-    .replaceAll(/&#x([0-9a-f]+);/gi, (_, hex: string) => {
+    .replaceAll(/&#x([0-9a-f]+);/giu, (_, hex: string) => {
       const num = Number.parseInt(hex, 16)
       return Number.isFinite(num) ? String.fromCodePoint(num) : ''
     })
     .replaceAll(
-      /&([a-z]+);/gi,
+      /&([a-z]+);/giu,
       (match, name: string) => BASIC_ENTITIES[name.toLowerCase()] ?? match,
     )
 }
@@ -64,14 +64,14 @@ function decodeEntities(text: string): string {
 export function htmlToExcerpt(html: string, cap: number): string {
   const text = decodeEntities(
     html
-      .replaceAll(/<!--[\s\S]*?-->/g, ' ')
+      .replaceAll(/<!--[\s\S]*?-->/gu, ' ')
       .replaceAll(BLOCK_TAGS, ' ')
       .replaceAll(BREAK_OPEN, '\n')
       .replaceAll(BLOCK_CLOSE, '\n')
-      .replaceAll(/<[^>]+>/g, ' '),
+      .replaceAll(/<[^>]+>/gu, ' '),
   )
-    .replaceAll(/[ \t\f\v]+/g, ' ')
-    .replaceAll(/\n\s*\n+/g, '\n')
+    .replaceAll(/[ \t\f\v]+/gu, ' ')
+    .replaceAll(/\n\s*\n+/gu, '\n')
     .trim()
   return text.length > cap ? `${text.slice(0, cap)}…` : text
 }
@@ -92,16 +92,16 @@ export function fetchPage(): PageFetcher {
     if (!response.ok) return undefined
     const contentType = response.headers.get('content-type') ?? ''
     if (!contentType.includes('html')) return undefined
-    const reader = response.body?.getReader()
+    const reader: ReadableStreamDefaultReader<Uint8Array> | undefined = response.body?.getReader()
     if (reader === undefined) return undefined
     const decoder = new TextDecoder()
     let received = 0
     let body = ''
     while (received < MAX_BYTES) {
-      const { done, value } = await reader.read()
-      if (done === true) break
-      received += value.byteLength
-      body += decoder.decode(value, { stream: true })
+      const read = await reader.read()
+      if (read.done) break
+      received += read.value.byteLength
+      body += decoder.decode(read.value, { stream: true })
     }
     body += decoder.decode()
     return { contentType, body }

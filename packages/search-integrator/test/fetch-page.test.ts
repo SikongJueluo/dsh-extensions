@@ -91,7 +91,7 @@ describe('evidence dissent protection', () => {
     // lone dissenting domain would be sliced off by cap=3 but is re-admitted.
     const evidence = buildEvidence(hits, ['alpha'], 3)
     expect(evidence).toHaveLength(4)
-    expect(evidence[evidence.length - 1]?.url).toBe('https://lone.example/counter')
+    expect(evidence.at(-1)?.url).toBe('https://lone.example/counter')
   })
 })
 

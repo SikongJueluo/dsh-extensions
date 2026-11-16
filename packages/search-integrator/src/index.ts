@@ -16,7 +16,7 @@
  * @module dsh-search-integrator
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { makeResearchTool, createToolHost } from './tool.js'
+import { createToolHost, makeResearchTool } from './tool.js'
 import type { Config as RowConfig } from './settings.js'
 
 export { Config } from './settings.js'

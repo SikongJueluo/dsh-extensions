@@ -110,11 +110,11 @@ function asText(value: unknown): string {
 }
 
 function template(text: string, vars: Record<string, unknown>) {
-  return String(text).replaceAll(/\{(\w+)\}/g, (_, key: string) => asText(vars[key]))
+  return text.replaceAll(/\{(\w+)\}/gu, (_, key: string) => asText(vars[key]))
 }
 
 function fmtTokens(n: number) {
-  if (typeof n !== 'number' || !isFinite(n)) return '—'
+  if (typeof n !== 'number' || !Number.isFinite(n)) return '—'
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`
@@ -122,15 +122,17 @@ function fmtTokens(n: number) {
 }
 
 function fmtDuration(ms: number) {
-  if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) return '—'
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return '—'
   if (ms >= 60000) return `${(ms / 60000).toFixed(1)}m`
   if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
   return `${Math.round(ms)}ms`
 }
 
+/** Zero-padded two-digit form of a number (5 → "05"). */
+const p = (n: number) => String(n).padStart(2, '0')
+
 function fmtClock(ms: number) {
   const d = new Date(ms)
-  const p = (n: number) => String(n).padStart(2, '0')
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
@@ -158,7 +160,7 @@ interface ToolStat {
   maxDurationMs: number
   unfinished: number
   sessions: number
-  errorCodes?: Array<[string, number]>
+  errorCodes?: [string, number][]
 }
 
 interface SessionStat {
@@ -178,12 +180,10 @@ interface Report {
   sessions: SessionStat[]
 }
 
-interface ReportEnvelope {
-  result?: {
-    ok: boolean
-    value?: Report
-    error?: { message?: string }
-  }
+type ReportEnvelope = {
+  result?:
+    | { ok: true; value: Report; error?: undefined }
+    | { ok: false; value?: undefined; error?: { message?: string } }
 }
 
 let rpcSeq = 0
@@ -207,10 +207,11 @@ function callReport(days: number | undefined): Promise<Report> {
     })
     .then((envelope: ReportEnvelope) => {
       const result = envelope && envelope.result
-      if (!result || result.ok !== true) {
-        throw new Error(result?.error?.message || 'bad response')
+      if (!result || !result.ok) {
+        const message = result?.error?.message
+        throw new Error(message === undefined || message === '' ? 'bad response' : message)
       }
-      return result.value as Report
+      return result.value
     })
 }
 
@@ -321,9 +322,11 @@ function SessionsTable({ t, rows }: { t: Translate; rows: SessionStat[] }) {
         <TableBody>
           {rows.map((s) => (
             <TableRow key={s.id}>
-              <TableCell className={TD_L}>{s.title || s.id.slice(0, 12)}</TableCell>
+              <TableCell className={TD_L}>
+                {s.title === undefined || s.title === '' ? s.id.slice(0, 12) : s.title}
+              </TableCell>
               <TableCell className={TD_L}>{`${fmtClock(s.first)}→${fmtClock(s.last)}`}</TableCell>
-              <TableCell className={TD_L}>{(s.routes || []).slice(0, 2).join(' + ')}</TableCell>
+              <TableCell className={TD_L}>{(s.routes ?? []).slice(0, 2).join(' + ')}</TableCell>
               <TableCell className={TD_R}>{s.requests}</TableCell>
               <TableCell className={TD_R}>{fmtTokens(s.uncachedInput)}</TableCell>
               <TableCell className={TD_R}>{fmtHit(s.cacheRead, s.uncachedInput)}</TableCell>
@@ -348,12 +351,12 @@ function ContextAuditPage({ t }: { t: Translate }) {
     callReport(days)
       .then((value) => {
         setReport(value)
+        setBusy(false)
+        return undefined
       })
       .catch((err: unknown) => {
-        const withMessage = err as { message?: string } | undefined
-        setError(withMessage && withMessage.message ? withMessage.message : String(err))
-      })
-      .finally(() => {
+        const message = err instanceof Error ? err.message : undefined
+        setError(message !== undefined && message !== '' ? message : String(err))
         setBusy(false)
       })
   }, [days])
@@ -399,7 +402,7 @@ function ContextAuditPage({ t }: { t: Translate }) {
                 {withCodes.map((tool) => (
                   <Badge key={tool.name} variant="outline" className="dshx:my-0.5 dshx:mr-1.5">
                     {`${tool.name}: ${(tool.errorCodes ?? [])
-                      .map((pair) => pair[0] + '×' + pair[1])
+                      .map((pair) => `${pair[0]}×${pair[1]}`)
                       .join(', ')}`}
                   </Badge>
                 ))}

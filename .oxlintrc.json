@@ -61,6 +61,9 @@
     // B20 (approved): explicit `undefined` in stubs documents intent; its autofix
     // breaks typed Promise signatures.
     "unicorn/no-useless-undefined": "off",
+    // B19 (approved): a per-file dependency count is a numeric budget, not a
+    // defect; cross-file dependency hygiene is Fallow's job.
+    "import/max-dependencies": "off",
 
     // --- exclusions from `pedantic` (the list awaiting approval in
     // docs/quality-gates.md §6) ---
@@ -96,7 +99,34 @@
 
     // --- rule options, not relaxations ---
     // Stylesheet imports exist only for their side effect on the bundle.
-    "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }]
+    "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }],
+
+    // B21: `import type {} from 'x'` is TypeScript's way to pull a module's
+    // declaration merges (Context.settings, Context.attachments, SlotMap, …)
+    // into the program with no runtime import and no name to bind. Both rules
+    // below test only `specifiers.length === 0` and never look at
+    // `importKind`, so they flag that idiom as leftover empty braces — the one
+    // construct they were written to catch. Verified that the empty braces are
+    // load-bearing (`ctx.settings` stops type-checking without the line), that
+    // a `.d.ts` rewrite is flagged identically, and that a bare `import 'x'`
+    // would become a runtime import. The host SDK itself
+    // (deepseek-ai/deepseek-harness) writes the same lines with the same
+    // comments, so these rules fire only on a shape this project cannot drop.
+    // Cost of excluding: `import {} from` leftovers and `export {}` module
+    // markers go unchecked; this tree has none of the former and no `export {}`
+    // outside the ones these rules already misread.
+    "import/no-empty-named-blocks": "off",
+    "unicorn/require-module-specifiers": "off",
+
+    // B22: TypeScript already rejects duplicate block-scoped declarations
+    // ("Cannot redeclare block-scoped variable"), so this rule adds nothing for
+    // the TS half; for JS a duplicate `const` is a parse error and this tree
+    // uses no `var`. Its only hits here (21) are the `interface Config` +
+    // `const Config = Schema.object(...)` declaration merge that AGENTS.md
+    // mandates (the loader matches the inferred schema against the interface,
+    // and the rule cannot see a type/value merge), so every hit is a false
+    // positive on the host contract.
+    "no-redeclare": "off"
   },
   "overrides": [
     {
@@ -175,6 +205,27 @@
         "typescript/switch-exhaustiveness-check": "off",
         "typescript/unbound-method": "off",
         "typescript/use-unknown-in-catch-callback-variable": "off"
+      }
+    },
+    {
+      // B23 (approved): a test double for a class-based host interface cannot
+      // be made structurally complete — cordis `Context` carries a dozen
+      // services, `SessionEvent` is a branded discriminated union — so
+      // "this object stands in for the host" is the one assertion a fixture
+      // cannot avoid. The hatch stays confined to fixtures: `no-non-null-
+      // assertion` still runs here (a missing element must be proven, not
+      // asserted), every other unsafe-* rule still runs, and
+      // `scripts/check-suppressions.mjs` fails the gate on any inline
+      // suppression that is not on the approved list in docs/quality-gates.md.
+      "files": [
+        "**/test/**",
+        "**/*.test.*",
+        "**/*.spec.*",
+        "**/smoke.mjs",
+        "packages/*/scripts/**"
+      ],
+      "rules": {
+        "typescript/no-unsafe-type-assertion": "off"
       }
     }
   ]

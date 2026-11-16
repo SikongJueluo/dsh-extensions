@@ -15,7 +15,7 @@
  *
  * @module dsh-triggers/replay
  */
-
+import { isRecord } from './record.js'
 /** Live per-session caches the automation consumes at `turn/end`. */
 export interface SessionFold {
   /** Turn currently open in this session, from `turn/start`. */
@@ -39,10 +39,12 @@ export interface ReplayableEvent {
 /** Pull the plain text out of one message content block list (join with newlines). */
 function contentText(content: unknown): string {
   if (!Array.isArray(content)) return ''
+  const blocks: unknown[] = content
   const parts: string[] = []
-  for (const block of content) {
+  for (const block of blocks) {
     if (typeof block !== 'object' || block === null) continue
-    const { type, text } = block as { type?: unknown; text?: unknown }
+    if (!('type' in block) || !('text' in block)) continue
+    const { type, text } = block
     if (type === 'text' && typeof text === 'string' && text.length > 0) parts.push(text)
   }
   return parts.join('\n')
@@ -61,27 +63,30 @@ export function emptyFold(): SessionFold {
  */
 export function foldEvent(fold: SessionFold, event: ReplayableEvent): void {
   if (event.type === 'turn/start') {
-    const turn = (event.data as { turn?: unknown } | undefined)?.turn
+    const data = isRecord(event.data) ? event.data : undefined
+    const turn = data?.turn
     if (typeof turn === 'number') fold.currentTurn = turn
     return
   }
   if (event.type === 'assistant/message') {
-    const data = event.data as { turn?: unknown; message?: { content?: unknown } } | undefined
+    const data = isRecord(event.data) ? event.data : undefined
+    const message = isRecord(data?.message) ? data.message : undefined
     const turn = data?.turn
     if (typeof turn !== 'number') return
     // Track EVERY assistant message of the turn, empty ones included.
-    fold.lastReply = { turn, text: contentText(data?.message?.content) }
+    fold.lastReply = { turn, text: contentText(message?.content) }
     return
   }
   if (event.type === 'goal/change') {
     // GoalChangeMeta: operation 'clear' drops the goal; otherwise phase
     // 'active' means a continuation round may follow this turn.
-    const data = event.data as { operation?: unknown; goal?: { phase?: unknown } } | undefined
-    fold.goalActive = data?.operation !== 'clear' && data?.goal?.phase === 'active'
+    const data = isRecord(event.data) ? event.data : undefined
+    const goal = isRecord(data?.goal) ? data.goal : undefined
+    fold.goalActive = data?.operation !== 'clear' && goal?.phase === 'active'
     return
   }
   if (event.type === 'turn/end') {
-    const data = event.data as { turn?: unknown } | undefined
+    const data = isRecord(event.data) ? event.data : undefined
     const turn = data?.turn
     if (typeof turn === 'number') {
       delete fold.currentTurn
@@ -114,10 +119,11 @@ export function scanTurnEnds(events: readonly ReplayableEvent[]): {
   const facts: TurnEndFact[] = []
   for (const event of events) {
     if (event.type === 'turn/end') {
-      const data = event.data as { turn?: unknown; reason?: { kind?: unknown } } | undefined
+      const data = isRecord(event.data) ? event.data : undefined
+      const reason = isRecord(data?.reason) ? data.reason : undefined
       const turn = data?.turn
-      const reasonKind = data?.reason?.kind
-      const time = (event as { time?: unknown }).time
+      const reasonKind = reason?.kind
+      const time = 'time' in event ? event.time : undefined
       if (typeof turn === 'number' && typeof reasonKind === 'string') {
         const tracked = fold.lastReply
         facts.push({

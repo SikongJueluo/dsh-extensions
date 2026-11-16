@@ -20,7 +20,10 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 
 /** A proxy-aware fetch compatible with the DOM `fetch` shape. */
-export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
+export type FetchLike = (
+  url: string,
+  init?: Parameters<typeof undiciFetch>[1],
+) => ReturnType<typeof undiciFetch>
 
 /** One-shot cache for the detected system proxy (`undefined` = not resolved yet, `null` = none). */
 let detectedProxy: string | null | undefined
@@ -56,7 +59,7 @@ function normalizeAddress(addr: string | null | undefined): string | null {
   if (!addr) return null
   const trimmed = addr.trim()
   if (!trimmed || trimmed === '0.0.0.0' || trimmed === '<local>') return null
-  return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
+  return /^[a-z][a-z0-9+.-]*:\/\//iu.test(trimmed) ? trimmed : `http://${trimmed}`
 }
 
 // --- macOS (scutil) ---------------------------------------------------------
@@ -68,13 +71,13 @@ function normalizeAddress(addr: string | null | undefined): string | null {
 function parseMacosProxy(stdout: string): string | null {
   let host: string | undefined
   let port: string | undefined
-  if (/HTTPSEnable\s*:\s*1/.test(stdout)) {
-    host = /HTTPSProxy\s*:\s*(\S+)/.exec(stdout)?.[1]
-    port = /HTTPSPort\s*:\s*(\d+)/.exec(stdout)?.[1]
+  if (/HTTPSEnable\s*:\s*1/u.test(stdout)) {
+    host = /HTTPSProxy\s*:\s*(\S+)/u.exec(stdout)?.[1]
+    port = /HTTPSPort\s*:\s*(\d+)/u.exec(stdout)?.[1]
   }
-  if ((!host || !port) && /HTTPEnable\s*:\s*1/.test(stdout)) {
-    host = /HTTPProxy\s*:\s*(\S+)/.exec(stdout)?.[1]
-    port = /HTTPPort\s*:\s*(\d+)/.exec(stdout)?.[1]
+  if ((!host || !port) && /HTTPEnable\s*:\s*1/u.test(stdout)) {
+    host = /HTTPProxy\s*:\s*(\S+)/u.exec(stdout)?.[1]
+    port = /HTTPPort\s*:\s*(\d+)/u.exec(stdout)?.[1]
   }
   return buildProxyUrl(host, port)
 }
@@ -92,13 +95,16 @@ const WINDOWS_INTERNET_SETTINGS =
 
 /** Parse a `REG_DWORD` value (e.g. `0x1`) from `reg query` output. */
 function parseRegDword(stdout: string): number | null {
-  const match = /REG_DWORD\s+0x([0-9a-fA-F]+)/.exec(stdout)
-  return match ? parseInt(match[1]!, 16) : null
+  const match = /REG_DWORD\s+0x([0-9a-fA-F]+)/u.exec(stdout)
+  if (match === null) return null
+  const digits = match[1]
+  if (digits === undefined) return null
+  return Number.parseInt(digits, 16)
 }
 
 /** Parse a string (`REG_SZ`/`REG_EXPAND_SZ`) value from `reg query` output. */
 function parseRegString(stdout: string): string | null {
-  const match = /(?:REG_SZ|REG_EXPAND_SZ)\s+(.+?)\s*$/m.exec(stdout)
+  const match = /(?:REG_SZ|REG_EXPAND_SZ)\s+(.+?)\s*$/mu.exec(stdout)
   return match?.[1]?.trim() ?? null
 }
 
@@ -123,10 +129,10 @@ function parseWindowsProxyServer(value: string): string | null {
     const left = part.slice(0, eq).trim().toLowerCase()
     const right = part.slice(eq + 1).trim()
     // Reverse form: "server:port=http,https".
-    if (/^[a-z][a-z0-9]*(\s*,\s*[a-z][a-z0-9]*)*$/i.test(right) && !/^[a-z]+$/.test(left)) {
-      const protos = right.split(',').map((s) => s.trim().toLowerCase())
-      if (https === null && protos.includes('https')) https = left
-      if (http === null && protos.includes('http')) http = left
+    if (/^[a-z][a-z0-9]*(\s*,\s*[a-z][a-z0-9]*)*$/iu.test(right) && !/^[a-z]+$/u.test(left)) {
+      const protos = new Set(right.split(',').map((s) => s.trim().toLowerCase()))
+      if (https === null && protos.has('https')) https = left
+      if (http === null && protos.has('http')) http = left
       continue
     }
     if (left === 'https') https = right
@@ -148,15 +154,16 @@ async function detectWindowsSystemProxy(): Promise<string | null> {
 
 /** Parse a gsettings string value (`'quoted'`) into a plain string. */
 function parseGsettingsString(stdout: string): string | null {
-  const match = /^'((?:[^'\\]|\\.)*)'\s*$/.exec(stdout.trim())
-  if (!match) return null
-  return match[1]!.replaceAll(/\\(.)/g, '$1')
+  const match = /^'((?:[^'\\]|\\.)*)'\s*$/u.exec(stdout.trim())
+  const body = match?.[1]
+  if (body === undefined) return null
+  return body.replaceAll(/\\(.)/gu, '$1')
 }
 
 /** Parse a gsettings integer value into a number. */
 function parseGsettingsInt(stdout: string): number | null {
-  const match = /^-?\d+\s*$/.exec(stdout.trim())
-  return match ? parseInt(match[0], 10) : null
+  const match = /^-?\d+\s*$/u.exec(stdout.trim())
+  return match ? Math.trunc(Number(match[0])) : null
 }
 
 async function detectGnomeSystemProxy(): Promise<string | null> {
@@ -193,7 +200,7 @@ const KDE_KIOSLAVERC_ARGS = ['--file', 'kioslaverc', '--group', 'Proxy Settings'
 async function kdeProxy(cmd: string): Promise<string | null | undefined> {
   const typeOut = await run(cmd, [...KDE_KIOSLAVERC_ARGS, '--key', 'ProxyType'])
   if (typeOut === null) return undefined
-  if (parseInt(typeOut.trim(), 10) !== 1) return null
+  if (Math.trunc(Number(typeOut.trim())) !== 1) return null
   const https = await run(cmd, [...KDE_KIOSLAVERC_ARGS, '--key', 'httpsProxy'])
   if (https && https.trim()) return normalizeAddress(https.trim())
   const http = await run(cmd, [...KDE_KIOSLAVERC_ARGS, '--key', 'httpProxy'])
@@ -239,14 +246,16 @@ async function resolveProxy(
 ): Promise<string | null> {
   if (explicit) return explicit
   if (detectedProxy !== undefined) return detectedProxy
-  const fromEnv =
-    env.HTTPS_PROXY ||
-    env.https_proxy ||
-    env.HTTP_PROXY ||
-    env.http_proxy ||
-    env.ALL_PROXY ||
-    env.all_proxy
-  detectedProxy = fromEnv ? fromEnv : await detectSystemProxy()
+  // `||`-equivalent over the proxy env names: an empty value counts as absent.
+  const fromEnv = [
+    env.HTTPS_PROXY,
+    env.https_proxy,
+    env.HTTP_PROXY,
+    env.http_proxy,
+    env.ALL_PROXY,
+    env.all_proxy,
+  ].find((value) => value !== undefined && value !== '')
+  detectedProxy = fromEnv ?? (await detectSystemProxy())
   return detectedProxy
 }
 
@@ -257,11 +266,10 @@ async function resolveProxy(
  */
 export async function createFetch(proxyUrl?: string): Promise<FetchLike> {
   const proxy = await resolveProxy(proxyUrl)
-  if (!proxy) return undiciFetch as unknown as FetchLike
+  if (!proxy) return undiciFetch
   const dispatcher = new ProxyAgent({ uri: proxy })
-  type UndiciInit = Parameters<typeof undiciFetch>[1]
-  return (url: string, init?: RequestInit) =>
-    undiciFetch(url, { ...init, dispatcher } as UndiciInit)
+  return (url: string, init?: Parameters<typeof undiciFetch>[1]) =>
+    undiciFetch(url, { ...init, dispatcher })
 }
 
 /**
@@ -289,5 +297,5 @@ export async function readJson(response: Response, what: string): Promise<unknow
 }
 
 function snippet(text: string): string {
-  return text.replaceAll(/\s+/g, ' ').slice(0, 200)
+  return text.replaceAll(/\s+/gu, ' ').slice(0, 200)
 }

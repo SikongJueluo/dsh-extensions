@@ -22,9 +22,14 @@ import { InvalidWriteRootError, ProtectedWriteRootError } from './paths.js'
 /** Route prefix owned by this plugin. */
 export const RPC_CHANNEL = '/dsh-session-write-access'
 /** One endpoint segment (same grammar as the connection RPC). */
-const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
 /** Panel payloads are tiny; anything bigger is a misbehaving client. */
 const MAX_BODY_BYTES = 16 * 1024
+
+/** Whether a parsed-JSON value is a plain object record (never an array). */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 type RpcResult =
   | { ok: true; value: unknown }
@@ -67,21 +72,24 @@ export function registerWriteAccessChannel(ctx: Context, policy: SessionWriteAcc
     }
     const chunks: Buffer[] = []
     let received = 0
-    for await (const chunk of req) {
-      received += (chunk as Buffer).byteLength
+    // IncomingMessage is `AsyncIterable<any>` in the node typings; the request
+    // stream yields Buffers unless an encoding was set (never here), so the
+    // annotation records that fact instead of casting every chunk.
+    const body: AsyncIterable<Buffer> = req
+    for await (const chunk of body) {
+      received += chunk.byteLength
       if (received > MAX_BODY_BYTES) {
         res.writeHead(413)
         req.destroy()
         return
       }
-      chunks.push(chunk as Buffer)
+      chunks.push(chunk)
     }
     let payload: Record<string, unknown>
     try {
       const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
-        throw new Error('not an object')
-      payload = parsed as Record<string, unknown>
+      if (!isRecord(parsed)) throw new Error('not an object')
+      payload = parsed
     } catch {
       res.writeHead(400)
       res.end('bad request')

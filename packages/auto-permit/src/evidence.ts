@@ -24,6 +24,7 @@
  */
 import { isAbsolute, sep } from 'node:path'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import { isRecord } from './record.js'
 
 /** Parsed arguments of one bash tool call, as the model produced them. */
 export interface BashCall {
@@ -100,14 +101,10 @@ interface Folded {
 function textOf(content: readonly unknown[]): string {
   const parts: string[] = []
   for (const block of content) {
-    if (
-      typeof block === 'object' &&
-      block !== null &&
-      (block as { type?: unknown }).type === 'text' &&
-      typeof (block as { text?: unknown }).text === 'string'
-    ) {
-      parts.push((block as { text: string }).text)
-    }
+    if (typeof block !== 'object' || block === null) continue
+    const record = block as { type?: unknown; text?: unknown }
+    if (record.type !== 'text' || typeof record.text !== 'string') continue
+    parts.push(record.text)
   }
   return parts.join('\n')
 }
@@ -130,8 +127,8 @@ function parseBashArguments(raw: unknown): BashCall | undefined {
       return undefined
     }
   }
-  if (typeof parsed !== 'object' || parsed === null) return undefined
-  const args = parsed as Record<string, unknown>
+  if (!isRecord(parsed)) return undefined
+  const args = parsed
   if (typeof args.command !== 'string') return undefined
   return {
     command: args.command,
@@ -232,7 +229,8 @@ function fold(events: readonly SessionEvent[]): Folded {
   const prompts: string[] = []
   let cwd: string | undefined
   for (const event of events) {
-    const data = event.data as Record<string, unknown> | undefined
+    const rawData: unknown = event.data
+    const data = isRecord(rawData) ? rawData : undefined
     if (data === undefined) continue
     // The pinned dsh-session types predate `tool/ptc-dispatch-start`; the
     // live host appends it, so dispatch on the widened string and ignore
@@ -279,10 +277,7 @@ function fold(events: readonly SessionEvent[]): Folded {
         break
       }
       case 'user/message': {
-        const message = data as unknown as {
-          source?: { kind?: unknown }
-          content?: unknown
-        }
+        const message = data as { source?: { kind?: unknown }; content?: unknown }
         if (message.source?.kind !== 'user') break
         if (!Array.isArray(message.content)) break
         const text = textOf(message.content).trim()
@@ -313,19 +308,25 @@ interface TaskSection {
  * from being lost when the middle of the prompt is omitted.
  */
 function findTaskSection(text: string): TaskSection | undefined {
-  const pattern = /^(#{1,3})[ \t]+(?:Task|任务)\b.*$/gim
+  const pattern = /^(#{1,3})[ \t]+(?:Task|任务)\b.*$/gimu
   let match: RegExpExecArray | null = null
   let last: RegExpExecArray | null = null
   while ((match = pattern.exec(text)) !== null) last = match
   if (last === null) return undefined
   const level = (last[1] ?? '#').length
   const bodyStart = last.index + last[0].length
-  const nextHeading = new RegExp(`\\n#{1,${level}}[ \\t]+`, 'g')
+  const nextHeading = new RegExp(`\\n#{1,${level}}[ \\t]+`, 'gu')
   nextHeading.lastIndex = bodyStart
   const next = nextHeading.exec(text)
   const end = next === null ? text.length : next.index + 1
   return { start: last.index, text: text.slice(last.index, end) }
 }
+
+/**
+ * One omission marker for `foldPrompt`: the bounded character count with
+ * explicit brackets, identical wherever a middle section is elided.
+ */
+const marker = (count: number): string => `\n…[${Math.max(0, count)} characters omitted]…\n`
 
 /**
  * Bound one human prompt while keeping both ends and an explicit Task section.
@@ -342,7 +343,6 @@ function findTaskSection(text: string): TaskSection | undefined {
 export function foldPrompt(text: string, budget: number): string {
   if (text.length <= budget) return text
   if (budget < 200) return text.slice(0, Math.max(0, budget))
-  const marker = (count: number): string => `\n…[${Math.max(0, count)} characters omitted]…\n`
   const reserve = 160
   const tasks = budget >= 800 ? findTaskSection(text) : undefined
   const baseHead = Math.floor((budget - reserve) * 0.55)
@@ -383,6 +383,7 @@ export function foldPrompt(text: string, budget: number): string {
  *   judge path applies the evidence budget, and it defers over-budget input.
  */
 export function collectEvidence(session: Session, callId: string, effectiveCwd?: string): Evidence {
+  // oxlint-disable-next-line typescript/no-deprecated -- A25: the only synchronous full-log read; the sanctioned `sessionQuery.readSession` is async and an optional service, so switching would change this exported function's synchronous contract and drop hosts that do not mount it.
   const { calls, asked, decided, prompts, cwd } = fold(session.snapshotEvents())
 
   // Prior allowed bash calls, in log order (asked/decided pairs are appended

@@ -15,7 +15,15 @@
  *
  * @module dsh-execution-guard/batch
  */
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+/**
+ * The event fields this module reads. The host's own `SessionEvent` satisfies
+ * it, and a test can fabricate one without pretending to be a full host event.
+ */
+export interface StepEvent {
+  readonly type: string
+  readonly seq: number
+  readonly data: unknown
+}
 
 /** One extracted sibling call (raw model JSON string, unparsed). */
 export interface StepToolCall {
@@ -25,12 +33,12 @@ export interface StepToolCall {
 }
 
 /** Highest seq of a human `user/message` event in the snapshot, or -1. */
-export function lastHumanSeq(events: readonly SessionEvent[]): number {
+export function lastHumanSeq(events: readonly StepEvent[]): number {
   let found = -1
   for (const event of events) {
     if (event.type !== 'user/message') continue
-    const source = (event.data as { source?: { kind?: unknown } }).source
-    if (source?.kind === 'user') found = event.seq
+    const source = isRecord(event.data) ? event.data.source : undefined
+    if (isRecord(source) && source.kind === 'user') found = event.seq
   }
   return found
 }
@@ -43,30 +51,31 @@ export function lastHumanSeq(events: readonly SessionEvent[]): number {
  * @returns the pending batch's calls; empty when no assistant tool-call
  * message exists (caller then checks only the live execution).
  */
-export function currentStepCalls(events: readonly SessionEvent[]): StepToolCall[] {
+/** Narrow an untyped event payload to an indexable record. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function currentStepCalls(events: readonly StepEvent[]): StepToolCall[] {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i]
     if (event === undefined || event.type !== 'assistant/message') continue
-    const content = (event.data as { message?: { content?: unknown } }).message?.content
+    const data: unknown = event.data
+    const message = isRecord(data) ? data.message : undefined
+    const content = isRecord(message) ? message.content : undefined
     if (!Array.isArray(content)) continue
     const calls: StepToolCall[] = []
     for (const block of content) {
-      if (typeof block !== 'object' || block === null) continue
-      const candidate = block as {
-        type?: unknown
-        id?: unknown
-        name?: unknown
-        arguments?: unknown
-      }
-      if (candidate.type !== 'tool-call') continue
+      if (!isRecord(block)) continue
+      if (block.type !== 'tool-call') continue
       if (
-        typeof candidate.id !== 'string' ||
-        typeof candidate.name !== 'string' ||
-        typeof candidate.arguments !== 'string'
+        typeof block.id !== 'string' ||
+        typeof block.name !== 'string' ||
+        typeof block.arguments !== 'string'
       ) {
         continue
       }
-      calls.push({ callId: candidate.id, tool: candidate.name, argsRaw: candidate.arguments })
+      calls.push({ callId: block.id, tool: block.name, argsRaw: block.arguments })
     }
     if (calls.length > 0) return calls
     // An assistant message without tool calls ends the search: nothing later

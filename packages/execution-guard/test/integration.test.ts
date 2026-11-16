@@ -37,38 +37,37 @@ interface Fixture {
 }
 
 function makeFixture(overrides: Partial<Config> = {}): Fixture {
-  const fixture = {} as Fixture
-  fixture.listeners = new Map()
-  fixture.registered = []
-  fixture.events = []
-  fixture.appended = []
-  fixture.injected = []
-  fixture.session = {
+  const listeners: Fixture['listeners'] = new Map()
+  const registered: ToolDefinition[] = []
+  const events: unknown[] = []
+  const appended: Fixture['appended'] = []
+  const injected: unknown[] = []
+  const session = {
     id: 'sess-it',
-    header: { cwd: undefined },
-    events: fixture.events,
-    appended: fixture.appended,
-    snapshotEvents: () => [...fixture.events],
-    append: (type, data, opts) => {
-      fixture.appended.push({ type, data, opts })
+    header: { cwd: undefined as string | undefined },
+    events,
+    appended,
+    snapshotEvents: () => [...events],
+    append: (type: string, data: unknown, opts: unknown) => {
+      appended.push({ type, data, opts })
       return undefined
     },
   }
-  fixture.agent = {
+  const agent = {
     id: 'agent-it',
-    session: fixture.session,
+    session,
     // The host's deferred next-step channel: what a real ReactLoopAgent exposes.
     inject: (message: unknown) => {
-      fixture.injected.push(message)
+      injected.push(message)
     },
   }
   const fakeCtx = {
     logger: { warn: () => {}, info: () => {} },
     get: () => undefined,
     on: (type: string, fn: (...args: unknown[]) => unknown, prepend = false) => {
-      const list = fixture.listeners.get(type) ?? []
+      const list = listeners.get(type) ?? []
       list.push({ fn, prepend })
-      fixture.listeners.set(type, list)
+      listeners.set(type, list)
       return () => {}
     },
     tools: {
@@ -77,13 +76,22 @@ function makeFixture(overrides: Partial<Config> = {}): Fixture {
         { name: 'write', description: '', parameters: writeParameters },
       ],
       register: (def: ToolDefinition) => {
-        fixture.registered.push(def)
+        registered.push(def)
         return () => {}
       },
     },
   }
-  fixture.ctx = fakeCtx as unknown as Context
-  void fixture.ctx
+  const fixture: Fixture = {
+    ctx: fakeCtx as unknown as Context,
+    listeners,
+    registered,
+    session,
+    agent,
+    tempDir: '',
+    events,
+    appended,
+    injected,
+  }
   void overrides
   return fixture
 }
@@ -92,6 +100,51 @@ async function initFixture(fixture: Fixture, overrides: Partial<Config> = {}): P
   fixture.tempDir = await mkdtemp(join(tmpdir(), 'guard-it-'))
   fixture.session.header.cwd = fixture.tempDir
   apply(fixture.ctx, { preflight: true, repeatHints: true, ...overrides })
+}
+
+function pushStep(fixture: Fixture, callId: string, args: string, step: number, seq: number): void {
+  fixture.events.push(
+    { type: 'step/start', seq, time: 0, data: { turn: step, step: 1 } },
+    {
+      type: 'assistant/message',
+      seq: seq + 1,
+      time: 0,
+      data: {
+        turn: step,
+        step: 1,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool-call', id: callId, name: 'write', arguments: args }],
+        },
+        stream: [],
+      },
+    },
+  )
+}
+
+function resultListener(
+  fixture: Fixture,
+): (exec: Record<string, unknown>, result: unknown) => void {
+  const list = fixture.listeners.get('tools/result') ?? []
+  const entry = list[0]
+  if (entry === undefined) throw new Error('no tools/result listener registered')
+  return (exec, result) => {
+    entry.fn(exec, result)
+  }
+}
+
+/** Notices delivered the order-safe way: through `agent.inject()`. */
+function hints(fixture: Fixture): { kind?: string; form?: string }[] {
+  return fixture.injected.map(
+    (message) => (message as { source?: { kind?: string; form?: string } }).source ?? {},
+  )
+}
+
+/** Notices written straight onto the session surface (must stay empty). */
+function surfaceNotices(fixture: Fixture): { kind?: string }[] {
+  return fixture.appended
+    .filter((entry) => entry.type === 'user/message')
+    .map((entry) => (entry.data as { source?: { kind?: string } }).source ?? {})
 }
 
 const tempRoots: string[] = []
@@ -320,57 +373,6 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
     isError: true as const,
     error: { message: 'x', info: { name: 'execution-guard', code: 'INVALID_ARGS' } },
     content: [],
-  }
-
-  function pushStep(
-    fixture: Fixture,
-    callId: string,
-    args: string,
-    step: number,
-    seq: number,
-  ): void {
-    fixture.events.push(
-      { type: 'step/start', seq, time: 0, data: { turn: step, step: 1 } },
-      {
-        type: 'assistant/message',
-        seq: seq + 1,
-        time: 0,
-        data: {
-          turn: step,
-          step: 1,
-          message: {
-            role: 'assistant',
-            content: [{ type: 'tool-call', id: callId, name: 'write', arguments: args }],
-          },
-          stream: [],
-        },
-      },
-    )
-  }
-
-  function resultListener(
-    fixture: Fixture,
-  ): (exec: Record<string, unknown>, result: unknown) => void {
-    const list = fixture.listeners.get('tools/result') ?? []
-    const entry = list[0]
-    if (entry === undefined) throw new Error('no tools/result listener registered')
-    return (exec, result) => {
-      entry.fn(exec, result)
-    }
-  }
-
-  /** Notices delivered the order-safe way: through `agent.inject()`. */
-  function hints(fixture: Fixture): { kind?: string; form?: string }[] {
-    return fixture.injected.map(
-      (message) => (message as { source?: { kind?: string; form?: string } }).source ?? {},
-    )
-  }
-
-  /** Notices written straight onto the session surface (must stay empty). */
-  function surfaceNotices(fixture: Fixture): { kind?: string }[] {
-    return fixture.appended
-      .filter((entry) => entry.type === 'user/message')
-      .map((entry) => (entry.data as { source?: { kind?: string } }).source ?? {})
   }
 
   it('first final invalid counts, second final invalid appends the hint notice; valid siblings never count', async () => {

@@ -120,7 +120,7 @@ describe('brave adapter', () => {
   it('fails when a result misses its url', async () => {
     const { io } = fakeIo({ get: { web: { results: [{ title: 'no url' }] } } })
     const { adapters } = buildAdapters(settings({ braveEnabled: true }), { brave: 'k' }, io)
-    await expect(adapters[0]?.search('q', signal())).rejects.toThrow(/brave web.results/)
+    await expect(adapters[0]?.search('q', signal())).rejects.toThrow(/brave web.results/u)
   })
 })
 
@@ -190,7 +190,7 @@ describe('openai adapter', () => {
       post: { output: [{ type: 'message', content: [{ annotations: [] }] }] },
     })
     const { adapters } = buildAdapters(settings({ openaiEnabled: true }), { openai: 'k' }, io)
-    await expect(adapters[0]?.search('q', signal())).rejects.toThrow(/no consultable source URLs/)
+    await expect(adapters[0]?.search('q', signal())).rejects.toThrow(/no consultable source URLs/u)
   })
 
   it('caps hits at perSourceResults', async () => {
@@ -202,28 +202,28 @@ describe('openai adapter', () => {
   })
 })
 
+const sse = (frames: unknown[]) =>
+  frames.map((frame) => `data: ${JSON.stringify(frame)}`).join('\n\n')
+
+function chatgptIo(sseText: string, token?: { access: string; accountId?: string }) {
+  const posts: { url: string; body: unknown; headers: Record<string, string> }[] = []
+  const io = {
+    async postJson() {
+      throw new Error('postJson not expected')
+    },
+    async getJson() {
+      throw new Error('getJson not expected')
+    },
+    async rawPost(url: string, body: string, headers: Record<string, string>) {
+      posts.push({ url, body: JSON.parse(body), headers })
+      return { status: 200, contentType: 'text/event-stream', text: sseText, headers: {} }
+    },
+    ...(token === undefined ? {} : { chatgptToken: async () => token }),
+  } as unknown as AdapterIo
+  return { io, posts }
+}
+
 describe('chatgpt codex adapter', () => {
-  const sse = (frames: unknown[]) =>
-    frames.map((frame) => `data: ${JSON.stringify(frame)}`).join('\n\n')
-
-  function chatgptIo(sseText: string, token?: { access: string; accountId?: string }) {
-    const posts: { url: string; body: unknown; headers: Record<string, string> }[] = []
-    const io = {
-      async postJson() {
-        throw new Error('postJson not expected')
-      },
-      async getJson() {
-        throw new Error('getJson not expected')
-      },
-      async rawPost(url: string, body: string, headers: Record<string, string>) {
-        posts.push({ url, body: JSON.parse(body), headers })
-        return { status: 200, contentType: 'text/event-stream', text: sseText, headers: {} }
-      },
-      ...(token === undefined ? {} : { chatgptToken: async () => token }),
-    } as unknown as AdapterIo
-    return { io, posts }
-  }
-
   it('extracts open_page urls and url_citation annotations from the SSE stream', async () => {
     const text = sse([
       {
@@ -266,7 +266,7 @@ describe('chatgpt codex adapter', () => {
     const { io, posts } = chatgptIo(text, { access: 'tok-1', accountId: 'acct-9' })
     const { adapters } = buildAdapters(settings({ chatgptEnabled: true }), {}, io)
     const hits = await adapters[0]?.search('q', signal())
-    expect(hits?.map((hit) => hit.url).sort()).toEqual([
+    expect(hits?.map((hit) => hit.url).toSorted()).toEqual([
       'https://c.example/cited',
       'https://c.example/opened',
     ])
@@ -286,7 +286,7 @@ describe('chatgpt codex adapter', () => {
       access: 'tok',
     })
     const { adapters } = buildAdapters(settings({ chatgptEnabled: true }), {}, io)
-    await expect(adapters[0]?.search('q', signal())).rejects.toThrow(/no citable source/)
+    await expect(adapters[0]?.search('q', signal())).rejects.toThrow(/no citable source/u)
   })
 
   it('fails when the oauth token cannot be resolved (signed out)', async () => {
@@ -303,7 +303,7 @@ describe('chatgpt codex adapter', () => {
       chatgptToken: async () => undefined,
     } as unknown as AdapterIo
     const { adapters } = buildAdapters(settings({ chatgptEnabled: true }), {}, io)
-    await expect(adapters[0]?.search('q', signal())).rejects.toThrow(/oauth-providers/)
+    await expect(adapters[0]?.search('q', signal())).rejects.toThrow(/oauth-providers/u)
   })
 
   it('records a config failure when the oauthProviders service is not mounted', () => {

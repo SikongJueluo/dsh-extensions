@@ -14,8 +14,9 @@ import {
   cancellableSleep,
   registerRecovery,
   registerResume,
+  WaitSpool,
+  resumeMessage,
 } from './lib/index.js'
-import { WaitSpool, resumeMessage } from './lib/index.js'
 
 let failures = 0
 function check(label, condition) {
@@ -133,6 +134,16 @@ function makeCtx(services) {
   return { ctx, listeners, effects }
 }
 
+const settle = (ms = 80) =>
+  new Promise((r) => {
+    setTimeout(r, ms)
+  })
+
+const settleFast = (ms = 60) =>
+  new Promise((r) => {
+    setTimeout(r, ms)
+  })
+
 const events = []
 const session = { id: 'sess-1', append: (type, data) => events.push({ type, data }) }
 const deliver = (listener, payload) => listener(payload, async () => 'delegated')
@@ -186,7 +197,6 @@ check('no retry event for non-owned failure', events.length === 0)
 
 // 2b) A cancelled wait is re-armed in-process and resumes at retryAt.
 {
-  const { registerResume } = await import('./lib/index.js')
   const sp = new WaitSpool({ path: join(await mkdtemp(join(tmpdir(), 'ac-cr-')), 'p.json') })
   await sp.load()
   const wired = makeCtx({})
@@ -210,7 +220,7 @@ check('no retry event for non-owned failure', events.length === 0)
   }
   // agents registry absent in rearmCtx (recovery never needs it); the adopter
   // resolves through it — give wired.ctx a live agents registry instead.
-  wired.ctx.get = (name) => (name === 'agents' ? { get: () => fakeAgent } : undefined)
+  wired.ctx.get = (serviceName) => (serviceName === 'agents' ? { get: () => fakeAgent } : undefined)
   const cancelEvents = []
   const cancelSession = {
     id: 'sess-cr',
@@ -229,7 +239,7 @@ check('no retry event for non-owned failure', events.length === 0)
       weekly: { percent: 10, resetAt: Date.now() + 9 * 3600_000 },
     }),
   }
-  rearmCtx.ctx.get = (name) => (name === 'planUsage' ? stubPlan : undefined)
+  rearmCtx.ctx.get = (serviceName) => (serviceName === 'planUsage' ? stubPlan : undefined)
   const ctrl = new AbortController()
   const pending = rearmCtx.listeners.get('agent/request-error')(
     {
@@ -283,8 +293,8 @@ check('no retry event for non-owned failure', events.length === 0)
     signal: new AbortController().signal,
   })
   check('reset-aligned wait returns retry', JSON.stringify(action) === '{"kind":"retry"}')
-  const retry = events.filter((e) => e.type === 'llm/retry').at(-1)
-  const started = events.filter((e) => e.type === 'llm/retry-started').at(-1)
+  const retry = events.findLast((e) => e.type === 'llm/retry')
+  const started = events.findLast((e) => e.type === 'llm/retry-started')
   check(
     'reset-aligned retry event recorded',
     retry?.data.provider === 'zai-coding-cn' &&
@@ -441,11 +451,6 @@ await rm(spoolDir, { recursive: true, force: true })
 
 // ── resume adopter ───────────────────────────────────────────────────────────
 {
-  const settle = (ms = 80) =>
-    new Promise((r) => {
-      setTimeout(r, ms)
-    })
-
   // expired record is pruned at boot
   {
     const sp = new WaitSpool({ path: join(await mkdtemp(join(tmpdir(), 'ac-r1-')), 'p.json') })
@@ -529,8 +534,8 @@ await rm(spoolDir, { recursive: true, force: true })
       followup: (m) => sent.push(m),
     }
     const resumeCtx = makeCtx({})
-    resumeCtx.ctx.get = (name) =>
-      name === 'sessionController'
+    resumeCtx.ctx.get = (serviceName) =>
+      serviceName === 'sessionController'
         ? { agents: { resolveAgent: async () => ({ agent: coldAgent }) } }
         : undefined
     registerResume(resumeCtx.ctx, { maxWaitMs: 6 * 3600_000 }, sp)
@@ -545,10 +550,6 @@ await rm(spoolDir, { recursive: true, force: true })
 
 // ── adoption countdown notice + cancel ───────────────────────────────────────
 {
-  const settle = (ms = 120) =>
-    new Promise((r) => {
-      setTimeout(r, ms)
-    })
   const noticeEvents = []
   const noticeAgent = {
     status: 'idle',
@@ -568,7 +569,7 @@ await rm(spoolDir, { recursive: true, force: true })
   const createdListeners = []
   const noticeCtx = {
     logger: { info() {}, warn() {} },
-    get: (name) => (name === 'agents' ? { get: () => noticeAgent } : undefined),
+    get: (serviceName) => (serviceName === 'agents' ? { get: () => noticeAgent } : undefined),
     on: (e, l) => {
       createdListeners.push([e, l])
       return () => {}
@@ -577,7 +578,7 @@ await rm(spoolDir, { recursive: true, force: true })
     inject: () => {},
   }
   const handle = registerResume(noticeCtx, { maxWaitMs: 6 * 3600_000 }, sp)
-  await settle()
+  await settle(120)
   // llm/retry events carry a turn/step invariant the persistence reader
   // enforces; adoption must NEVER append one outside a live open step. The
   // notice is a user/message row with form:'notice' (auto-permit pattern).
@@ -619,11 +620,11 @@ await rm(spoolDir, { recursive: true, force: true })
   })
   await cancelSpool.load()
   const cancelled = new Set()
-  const events = []
+  const wakeEvents = []
   const cancelSession = {
     id: 'sess-w',
     append: (t, d) => {
-      events.push({ type: t, data: d })
+      wakeEvents.push({ type: t, data: d })
       return { seq: 9 }
     },
   }
@@ -668,25 +669,21 @@ await rm(spoolDir, { recursive: true, force: true })
   check('cancelled recovery returns terminal without retry', action === undefined)
   check(
     'cancelled recovery records no retry-started',
-    !events.some((e) => e.type === 'llm/retry-started'),
+    !wakeEvents.some((e) => e.type === 'llm/retry-started'),
   )
 }
 
 // ── restart-resume: mirror + boot adoption ──────────────────────────────────
 {
   const { registerRestartResume, defaultMirrorPath } = await import('./lib/index.js')
-  const settleFast = (ms = 60) =>
-    new Promise((r) => {
-      setTimeout(r, ms)
-    })
   const mirrorPath = join(await mkdtemp(join(tmpdir(), 'ac-rr-')), 'running.json')
   const statusListeners = []
   const sent = []
 
   const mkCtx = () => ({
     logger: { info() {}, warn() {} },
-    get: (name) =>
-      name === 'sessionController'
+    get: (serviceName) =>
+      serviceName === 'sessionController'
         ? { agents: { resolveAgent: async () => ({ agent: fakeAgent }) } }
         : undefined,
     on: (e, l) => {
@@ -735,7 +732,7 @@ await rm(spoolDir, { recursive: true, force: true })
 
   // 2) boot adoption: interrupted turn → followup; completed turn → skip; stale → skip
   const ctxB = mkCtx()
-  const now = Date.now()
+  const bootNow = Date.now()
   const doneAgent = {
     ...fakeAgent,
     session: {
@@ -748,16 +745,16 @@ await rm(spoolDir, { recursive: true, force: true })
     JSON.stringify({
       version: 1,
       entries: [
-        { sessionId: 'sess-rr', at: now - 1000 },
-        { sessionId: 'sess-done', at: now - 1000 },
-        { sessionId: 'sess-old', at: now - 13 * 3600_000 },
+        { sessionId: 'sess-rr', at: bootNow - 1000 },
+        { sessionId: 'sess-done', at: bootNow - 1000 },
+        { sessionId: 'sess-old', at: bootNow - 13 * 3600_000 },
       ],
     }),
     'utf8',
   )
-  let which = 'sess-rr'
-  ctxB.get = (name) =>
-    name === 'sessionController'
+  const which = 'sess-rr'
+  ctxB.get = (serviceName) =>
+    serviceName === 'sessionController'
       ? {
           agents: {
             resolveAgent: async (id) => ({

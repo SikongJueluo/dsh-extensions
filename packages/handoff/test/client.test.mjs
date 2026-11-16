@@ -16,7 +16,7 @@ window.matchMedia = () => ({ matches: false })
 
 const React = (await import('react')).default
 const act = React.act
-const { __test: T, apply, inject } = await import('../src/client/index.tsx')
+const { testHandles: T, apply, inject } = await import('../src/client/index.tsx')
 
 const CATALOG = {
   groups: [
@@ -94,7 +94,7 @@ async function renderPicker(ops, req) {
 beforeEach(() => {
   vi.clearAllMocks()
   container = document.createElement('div')
-  document.body.appendChild(container)
+  document.body.append(container)
 })
 
 afterEach(() => {

@@ -148,7 +148,7 @@ export class PlanUsageService extends Service {
     const live = this.liveRoutes
     const routes =
       live === undefined ? [...known] : [...known].filter((route) => live.includes(route))
-    return routes.sort()
+    return routes.toSorted()
   }
 
   /** The id of the source serving one route (for error copy), when any. */

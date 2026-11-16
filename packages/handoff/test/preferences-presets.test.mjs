@@ -334,7 +334,7 @@ async function completeBrief(host, originId) {
     3000,
     'briefing followup',
   )
-  const briefPath = briefMsg.content[0].text.match(/\S+handoff\.md/)?.[0]
+  const briefPath = briefMsg.content[0].text.match(/\S+handoff\.md/u)?.[0]
   if (briefPath === undefined) throw new Error('brief instruction names no file')
   const before = host.state.createdAgents.length
   await writeFile(briefPath, `# Goal\nintegration\n${COMPLETE}\n`, 'utf8')
@@ -396,7 +396,7 @@ const waitPref = (host, predicate, what) =>
     what,
   )
 const metaFor = async (briefPath) =>
-  JSON.parse(await readFile(briefPath.replace(/\.md$/, '.meta.json'), 'utf8'))
+  JSON.parse(await readFile(briefPath.replace(/\.md$/u, '.meta.json'), 'utf8'))
 
 async function handoff(host, agent, rawInput) {
   const command = host.state.commandDefs.get('handoff')
@@ -545,7 +545,7 @@ test('a stale remembered route is reported and cannot be spawned silently', asyn
       3000,
       'pending pick',
     )
-    assert.match(pick.defaultChoiceIssue ?? '', /retired/)
+    assert.match(pick.defaultChoiceIssue ?? '', /retired/u)
     // The picker offers a reselect; answering the stale route anyway must not spawn.
     const chosen = await channel(host, 'choose', {
       requestId: pick.id,
@@ -560,7 +560,7 @@ test('a stale remembered route is reported and cannot be spawned silently', asyn
     assert.equal(chosen.ok, true)
     const answer = await pending
     assert.equal(answer.kind, 'error', JSON.stringify(answer))
-    assert.match(answer.text, /不可用/)
+    assert.match(answer.text, /不可用/u)
     assert.equal(host.state.followups.get('origin-stale').length, 0, 'no briefing turn was queued')
   }
 
@@ -615,7 +615,7 @@ test('a stale remembered route is reported and cannot be spawned silently', asyn
       3000,
       'pending pick',
     )
-    assert.match(pick.defaultChoiceIssue ?? '', /思考强度/)
+    assert.match(pick.defaultChoiceIssue ?? '', /思考强度/u)
     await answerPick(host, { kind: 'inherit', preset: { kind: 'inherit' } })
     const answer = await pending
     assert.equal(answer.kind, 'success', JSON.stringify(answer))
@@ -699,7 +699,7 @@ test('a broken preset fails visibly instead of composing a preset-less session',
     await answerPick(host, { kind: 'inherit', preset: { kind: 'preset', id: 'preset-broken' } })
     const answer = await pending
     assert.equal(answer.kind, 'error', JSON.stringify(answer))
-    assert.match(answer.text, /不可用/)
+    assert.match(answer.text, /不可用/u)
     assert.equal(host.state.createdAgents.length, 0, 'no session was created')
     assert.equal(host.state.followups.get('origin-broken-explicit').length, 0)
   }
@@ -715,7 +715,7 @@ test('a broken preset fails visibly instead of composing a preset-less session',
       3000,
       'pending pick',
     )
-    assert.match(pick.preset?.defaultIssue ?? '', /不可用/)
+    assert.match(pick.preset?.defaultIssue ?? '', /不可用/u)
     assert.equal(pick.preset?.inherited, 'preset-broken')
     await answerPick(host, { kind: 'inherit', preset: { kind: 'preset', id: 'preset-b' } })
     const answer = await pending
@@ -729,7 +729,7 @@ test('a broken preset fails visibly instead of composing a preset-less session',
     const origin = await originFixture(host, 'broken-confirm-false', 'preset-broken')
     const answer = await handoff(host, origin.agent, 'no dialog task')
     assert.equal(answer.kind, 'error', JSON.stringify(answer))
-    assert.match(answer.text, /不可用/)
+    assert.match(answer.text, /不可用/u)
     assert.equal(host.state.followups.get('origin-broken-confirm-false').length, 0)
   }
   await rm(new URL('./.smoke-prefs', import.meta.url), { recursive: true, force: true })
@@ -864,7 +864,7 @@ test('the question-card fallback starts from the remembered model and asks for a
     const pending = handoff(host, origin.agent, 'card stale task')
     assert.equal((await pending).kind, 'success')
     const card = questions.seen[0].questions[0]
-    assert.match(card.detail ?? '', /reasoner/)
+    assert.match(card.detail ?? '', /reasoner/u)
     assert.ok(!card.options.some((option) => option.label === '上次使用的模型'))
     await completeBrief(host, 'origin-card-stale')
   }
@@ -874,12 +874,14 @@ test('the question-card fallback starts from the remembered model and asks for a
     const questions = makeQuestions()
     const { host } = await boot({ domains, presets, withChannel: false, userQuestions: questions })
     const origin = await originFixture(host, 'card-preset', 'preset-broken')
-    questions.answers.push({ answers: [{ id: 'model', selected: ['上次使用的模型'] }] })
-    questions.answers.push({ answers: [{ id: 'preset', selected: ['Preset B'] }] })
+    questions.answers.push(
+      { answers: [{ id: 'model', selected: ['上次使用的模型'] }] },
+      { answers: [{ id: 'preset', selected: ['Preset B'] }] },
+    )
     const pending = handoff(host, origin.agent, 'card preset task')
     const answer = await pending
     assert.equal(answer.kind, 'success', JSON.stringify(answer))
-    assert.match(questions.seen[1].questions[0].detail ?? '', /不可用/)
+    assert.match(questions.seen[1].questions[0].detail ?? '', /不可用/u)
     const { created } = await completeBrief(host, 'origin-card-preset')
     assert.equal(created.meta.agentPreset, 'preset-b')
   }
@@ -1026,8 +1028,8 @@ test('an explicit sidecar preset fails visibly when the registry is missing or u
     })
     const answer = await handoff(host, origin.agent, '')
     assert.equal(answer.kind, 'error', JSON.stringify(answer))
-    assert.match(answer.text, /preset-b/)
-    assert.match(answer.text, /预设注册表/)
+    assert.match(answer.text, /preset-b/u)
+    assert.match(answer.text, /预设注册表/u)
     assert.equal(host.state.createdAgents.length, 0, 'no preset-less session was created')
     assert.equal(
       host.state.followups.get(`origin-no-registry-${label}`).length,

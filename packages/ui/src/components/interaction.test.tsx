@@ -28,12 +28,18 @@ window.matchMedia = (() => ({
 })) as unknown as typeof window.matchMedia
 Element.prototype.scrollIntoView = () => {}
 
+/** Narrow a lookup the way a failing assertion would, without a test-body branch. */
+function requireFound<T>(value: T | null | undefined, what: string): T {
+  if (value === null || value === undefined) throw new Error(`missing ${what}`)
+  return value
+}
+
 let container!: HTMLDivElement
 let root!: ReturnType<typeof createRoot>
 
 function setup() {
   container = document.createElement('div')
-  document.body.appendChild(container)
+  document.body.append(container)
   root = createRoot(container)
 }
 
@@ -121,7 +127,11 @@ describe('Dialog', () => {
       })
     })
 
-    const trigger = container.querySelector<HTMLButtonElement>('#open-scope')!
+    const trigger = requireFound(
+      container.querySelector<HTMLButtonElement>('#open-scope'),
+      '#open-scope',
+    )
+    expect(trigger).toBeInstanceOf(HTMLButtonElement)
     trigger.focus()
     await act(async () => {
       trigger.click()
@@ -152,7 +162,11 @@ describe('Select', () => {
         setTimeout(resolve, 0)
       })
     })
-    const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!
+    const trigger = requireFound(
+      container.querySelector<HTMLButtonElement>('[role="combobox"]'),
+      '[role="combobox"]',
+    )
+    expect(trigger).toBeInstanceOf(HTMLButtonElement)
     expect(trigger.className).toContain('dshx:bg-transparent')
     expect(trigger.className).toContain('dshx:border-0')
     expect(trigger.className).not.toContain('dshx:bg-surface-2')
@@ -167,7 +181,11 @@ describe('Select', () => {
       })
     })
 
-    const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!
+    const trigger = requireFound(
+      container.querySelector<HTMLButtonElement>('[role="combobox"]'),
+      '[role="combobox"]',
+    )
+    expect(trigger).toBeInstanceOf(HTMLButtonElement)
     expect(trigger).not.toBeNull()
     await act(async () => {
       trigger.click()
@@ -181,7 +199,9 @@ describe('Select', () => {
     const options = [...container.querySelectorAll<HTMLElement>('[role="option"]')]
     expect(options.map((option) => option.textContent)).toEqual(['Model A', 'Model B'])
     await act(async () => {
-      options[1]!.click()
+      const second = requireFound(options[1], 'second option')
+      expect(second).toBeDefined()
+      second.click()
       await new Promise((resolve) => {
         setTimeout(resolve, 0)
       })

@@ -86,9 +86,10 @@ export function registerChatGptSignIn(
             .then((input) => {
               manual = { input }
               server.cancelWait()
+              return undefined
             })
-            .catch((error: Error) => {
-              manual = { error }
+            .catch((error: unknown) => {
+              manual = { error: error instanceof Error ? error : new Error(String(error)) }
               server.cancelWait()
             })
 

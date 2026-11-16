@@ -24,6 +24,11 @@ const STEP_TIMEOUT_MS = 15 * 60_000
 const STEPS = [
   { name: 'format', script: 'format:check', why: 'layout drift, no build needed' },
   { name: 'lint', script: 'lint', why: 'single-file rules + typed rules' },
+  {
+    name: 'suppressions',
+    script: 'check:suppressions',
+    why: 'every inline lint suppression is on the approved list',
+  },
   { name: 'dead-code', script: 'fallow', why: 'cross-file graph and dependency hygiene' },
   { name: 'types', script: 'typecheck', why: 'per-package tsc, host and client configs' },
   { name: 'build', script: 'build', why: 'lib/ output that every later step consumes' },

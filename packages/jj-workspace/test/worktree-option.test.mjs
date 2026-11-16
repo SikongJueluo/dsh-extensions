@@ -21,14 +21,14 @@ Object.assign(globalThis, { ResizeObserver: ResizeObserverStub })
 Object.assign(window, { ResizeObserver: ResizeObserverStub })
 window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
 
-let container
+let host
 let root
 
 afterEach(async () => {
   if (root) await act(async () => root.unmount())
-  container?.remove()
+  host?.remove()
   root = undefined
-  container = undefined
+  host = undefined
 })
 
 function props(overrides = {}) {
@@ -56,9 +56,9 @@ function props(overrides = {}) {
 async function render(overrides = {}) {
   const picked = []
   const checked = []
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
+  host = document.createElement('div')
+  document.body.append(host)
+  root = createRoot(host)
   await act(async () => {
     root.render(
       React.createElement(WorktreeOption, {
@@ -68,7 +68,7 @@ async function render(overrides = {}) {
       }),
     )
   })
-  return { container, picked, checked }
+  return { container: host, picked, checked }
 }
 
 function trigger(scope) {

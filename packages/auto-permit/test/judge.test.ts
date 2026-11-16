@@ -26,6 +26,13 @@ import { join } from 'node:path'
 
 const prompt = SYSTEM_PROMPT
 
+/** A route factory for one scripted investigation (`file` is only a param). */
+const make = (file: string) =>
+  route([
+    () => toolChunks('read_file', { path: file }),
+    () => textChunks(`VERDICT: allow\nREASON: inspected ${file}\nEVIDENCE: ${file}:1`),
+  ])
+
 describe('judge prompt v5', () => {
   it('carries the v5 version marker into every judge message', () => {
     expect(PROMPT_VERSION).toBe('dsh-auto-permit-v5')
@@ -44,12 +51,12 @@ describe('judge prompt v5', () => {
   it('states the cache ceiling: cache-only out-of-workspace writes defer, never allow', () => {
     expect(prompt).toContain('Cache ceiling')
     expect(prompt).toContain("the sandbox layer's business, never the approver's")
-    expect(prompt).toMatch(/return DEFER/i)
+    expect(prompt).toMatch(/return DEFER/iu)
   })
 
   it('keeps rule (1) explicit intent and rule (2) family equivalence as ALLOW bases', () => {
-    expect(prompt).toMatch(/\(1\) the human's explicit intent/)
-    expect(prompt).toMatch(/\(2\) the input is substantially equivalent/)
+    expect(prompt).toMatch(/\(1\) the human's explicit intent/u)
+    expect(prompt).toMatch(/\(2\) the input is substantially equivalent/u)
   })
 
   it('makes wrapper operations evidence-dependent instead of an absolute exclusion', () => {
@@ -365,7 +372,7 @@ describe('judge investigation loop', () => {
     expect(result.verdict).toBe('allow')
     expect(result.steps).toBe(2)
     expect(result.evidence).toHaveLength(1)
-    expect(result.evidence?.[0]).toMatch(/^scripts\/build\.sh:/)
+    expect(result.evidence?.[0]).toMatch(/^scripts\/build\.sh:/u)
     expect(requests[1]?.messages.at(-1)?.role).toBe('tool')
     const toolText =
       requests[1]?.messages
@@ -508,11 +515,6 @@ describe('judge investigation loop', () => {
   })
 
   it('keeps concurrent approvals in separate evidence scopes', async () => {
-    const make = (file: string) =>
-      route([
-        () => toolChunks('read_file', { path: file }),
-        () => textChunks(`VERDICT: allow\nREASON: inspected ${file}\nEVIDENCE: ${file}:1`),
-      ])
     const [a, b] = await Promise.all([
       judgeWith(make('scripts/build.sh'), evidenceFor(root)),
       judgeWith(make('other.sh'), evidenceFor(otherRoot)),
@@ -533,7 +535,7 @@ describe('audit evidence honesty', () => {
     const result = await judgeWith(llm, evidenceFor(root))
     expect(result.verdict).toBe('allow')
     expect(result.evidence).toHaveLength(1)
-    expect(result.evidence?.[0]).toMatch(/^scripts\/build\.sh:/)
+    expect(result.evidence?.[0]).toMatch(/^scripts\/build\.sh:/u)
   })
 })
 

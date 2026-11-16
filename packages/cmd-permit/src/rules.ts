@@ -24,6 +24,11 @@
 /** Sandbox modes, ordered by width; escalation targets are compared by rank. */
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
 
+/** True when `mode` is one of the three sandbox widths (guard, no assertion). */
+export function isSandboxMode(mode: string): mode is SandboxMode {
+  return mode === 'read-only' || mode === 'workspace-write' || mode === 'danger-full-access'
+}
+
 /** Rank comparison table for the mode-cap rule. */
 export const MODE_RANK: Readonly<Record<SandboxMode, number>> = {
   'read-only': 0,
@@ -56,7 +61,7 @@ export type Compiled = CompiledRules & { issues: CompileIssues }
 function tryRegExp(source: string): RegExp | undefined {
   if (source === '') return undefined
   try {
-    return new RegExp(source)
+    return new RegExp(source, 'u')
   } catch {
     return undefined
   }
@@ -100,7 +105,7 @@ export function containsSubstitution(command: string): boolean {
  */
 export function splitSegments(command: string): string[] {
   return command
-    .split(/\|\||&&|;|\||\n/)
+    .split(/\|\||&&|;|\||\n/u)
     .map((segment) => segment.trim())
     .filter((segment) => segment !== '')
 }
@@ -116,7 +121,7 @@ const WRAPPERS = new Set(['command', 'exec', 'env', 'nohup', 'time', 'nice', 'st
 export function segmentHead(segment: string): string | undefined {
   let tokens = segment
     .trim()
-    .split(/\s+/)
+    .split(/\s+/u)
     .filter((token) => token !== '')
   while (tokens.length > 0 && (tokens[0] === '(' || tokens[0] === '!' || tokens[0] === '{')) {
     tokens = tokens.slice(1)
@@ -124,7 +129,7 @@ export function segmentHead(segment: string): string | undefined {
   for (;;) {
     const head = tokens[0]
     if (head === undefined) return undefined
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(head) || (tokens.length > 1 && WRAPPERS.has(head))) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(head) || (tokens.length > 1 && WRAPPERS.has(head))) {
       tokens = tokens.slice(1)
       continue
     }

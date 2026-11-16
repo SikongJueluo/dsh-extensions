@@ -40,6 +40,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { SubprocessOutputReader } from '@deepseek-ai/dsh-subprocess'
+// Type-only: pulls the `ctx.spillStore` declaration merge into the program, so
+// `ctx.get('spillStore')` is typed instead of `any`.
+import type {} from '@deepseek-ai/dsh-spill'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import {
   DEFAULT_CONTAINER_SHELL,
@@ -279,20 +282,6 @@ export interface RemoteSpill {
  * compile-time dependency on the spill package; the shapes mirror its
  * SaveTextSpill/SpillRef contract.
  */
-interface SpillStoreLike {
-  saveText(input: {
-    readonly owner: { readonly sessionId: string }
-    readonly source: {
-      readonly kind: 'tool'
-      readonly toolName: string
-      readonly callId: string
-      readonly label: string
-    }
-    readonly suggestedName: string
-    readonly content: string
-  }): Promise<{ readonly locator: string; readonly bytes: number; readonly retrievalHint: string }>
-}
-
 /** The canonical value every remote_exec call resolves to. */
 export interface RemoteRunResult {
   readonly target: string
@@ -531,7 +520,7 @@ export class RemoteRunner {
     lossy: boolean,
     options: RemoteRunOptions,
   ): Promise<RemoteSpill> {
-    const store = this.#ctx.get('spillStore') as SpillStoreLike | undefined
+    const store = this.#ctx.get('spillStore')
     if (store === undefined) throw new Error('the spill store service is not mounted')
     if (options.owner === undefined) throw new Error('no owning session is available')
     if (options.callId === undefined) throw new Error('no tool call id is available')
@@ -550,11 +539,15 @@ export class RemoteRunner {
   }
 }
 
-/** Parse the host-recorded command exit code, falling back to the ssh exit code. */
+/**
+ * Parse the host-recorded command exit code, falling back to the ssh exit code.
+ * `detail` is the shell's own `$?` (always a decimal 0-255), so `Number` and
+ * `Number.parseInt` agree on every reachable value.
+ */
 function parseExitCode(detail: string, fallback: number | null): number | undefined {
-  const parsed = Number.parseInt(detail, 10)
+  const parsed = Number(detail)
   if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 255) return parsed
-  return fallback === null ? undefined : fallback
+  return fallback ?? undefined
 }
 
 /** Render one classified result for the model (and the transcript). */
@@ -688,13 +681,11 @@ export function apply(ctx: Context, config: Config): void {
   const resolvedTargets = resolveTargets(config.targets)
   const runner = new RemoteRunner(ctx, config)
   const grants = new GrantStore()
-  const targetEntries = [...resolvedTargets.entries()].sort(([a], [b]) => a.localeCompare(b))
-  const targetNames = targetEntries.map(([name]) => name)
+  const targetEntries = [...resolvedTargets.entries()].toSorted(([a], [b]) => a.localeCompare(b))
+  const targetNames = targetEntries.map(([id]) => id)
   const listing =
     targetEntries.length > 0
-      ? targetEntries
-          .map(([name, target]) => `${name} (default cwd: ${target.defaultCwd})`)
-          .join(' | ')
+      ? targetEntries.map(([id, target]) => `${id} (default cwd: ${target.defaultCwd})`).join(' | ')
       : 'NONE (the operator must add targets in the plugin config first)'
   logger.info(
     `mounted with ${targetNames.length} target(s)${targetNames.length > 0 ? `: ${targetNames.join(', ')}` : ''}`,
@@ -703,17 +694,17 @@ export function apply(ctx: Context, config: Config): void {
   /** Ask for (or recall) this session's grant for one target. Fail-closed. */
   async function authorize(
     exec: ToolRunContext,
-    name: string,
+    targetName: string,
     target: RemoteTarget,
   ): Promise<void> {
     if (config.approvalMode === 'never') return
     const agent = exec.agent
     if (agent === undefined) {
       throw new Error(
-        `remote_exec needs an owning agent to ask for target approval; refusing to run "${name}" (approvalMode is not "never")`,
+        `remote_exec needs an owning agent to ask for target approval; refusing to run "${targetName}" (approvalMode is not "never")`,
       )
     }
-    if (config.approvalMode === 'session' && grants.has(agent.id, name)) return
+    if (config.approvalMode === 'session' && grants.has(agent.id, targetName)) return
     const approval = ctx.get('approval')
     if (approval === undefined) {
       throw new Error(
@@ -724,22 +715,19 @@ export function apply(ctx: Context, config: Config): void {
       agent,
       toolName: TOOL_NAME,
       callId: exec.callId,
-      reason:
-        `run container commands on target "${name}" (${target.container} @ ${target.sshHost}` +
-        `${target.autoStart ? ', may docker-start the stopped container' : ''})` +
-        `${target.description === undefined ? '' : ` — ${target.description}`}`,
+      reason: `run container commands on target "${targetName}" (${target.container} @ ${target.sshHost}${target.autoStart ? ', may docker-start the stopped container' : ''})${target.description === undefined ? '' : ` — ${target.description}`}`,
       displayReason: {
-        en: `Allow remote_exec on target "${name}" (container "${target.container}" on ${target.sshHost}) for this session?`,
-        zh: `允许本会话使用远端目标「${name}」(${target.sshHost} 上的容器「${target.container}」)吗?`,
+        en: `Allow remote_exec on target "${targetName}" (container "${target.container}" on ${target.sshHost}) for this session?`,
+        zh: `允许本会话使用远端目标「${targetName}」(${target.sshHost} 上的容器「${target.container}」)吗?`,
       },
       signal: exec.signal,
     })
     if (outcome === 'allowed-once') {
-      if (config.approvalMode === 'session') grants.add(agent.id, name)
+      if (config.approvalMode === 'session') grants.add(agent.id, targetName)
       return
     }
     throw new Error(
-      `remote target "${name}" was not authorized (approval outcome: ${outcome}); stop and tell the user instead of retrying`,
+      `remote target "${targetName}" was not authorized (approval outcome: ${outcome}); stop and tell the user instead of retrying`,
     )
   }
 

@@ -16,6 +16,7 @@
  * @module dsh-plan-usage/sources/minimax
  */
 import type { QuotaSnapshot } from '../types.js'
+import { isRecord } from './contracts.js'
 import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
 /** Region endpoints keyed by provider route id. */
@@ -44,9 +45,7 @@ function finite(value: unknown): number | undefined {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
+  return isRecord(value) ? value : null
 }
 
 /** Consumed percent from MiniMax's remaining percent, clamped into 0-100. */
@@ -256,7 +255,9 @@ export class MiniMaxSource implements QuotaSource {
         signal: AbortSignal.timeout(this.timeoutMs),
       })
     } catch (error) {
-      return { error: `minimax: fetch failed (${(error as Error).message})` }
+      return {
+        error: `minimax: fetch failed (${error instanceof Error ? error.message : String(error)})`,
+      }
     }
     if (!response.ok) {
       return { error: `minimax: HTTP ${response.status}` }
@@ -264,7 +265,9 @@ export class MiniMaxSource implements QuotaSource {
     try {
       return parseMiniMaxRemains(await response.json())
     } catch (error) {
-      return { error: `minimax: invalid JSON (${(error as Error).message})` }
+      return {
+        error: `minimax: invalid JSON (${error instanceof Error ? error.message : String(error)})`,
+      }
     }
   }
 }

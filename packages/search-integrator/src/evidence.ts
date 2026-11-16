@@ -129,7 +129,7 @@ function mergeRawHits(hits: readonly RawHit[]): Working[] {
   // syndication) collapses into the earliest entry. Everything else stays.
   const bySyndication = new Map<string, Working>()
   const merged: Working[] = []
-  for (const entry of [...byUrl.values()].sort((a, b) => a.order - b.order)) {
+  for (const entry of [...byUrl.values()].toSorted((a, b) => a.order - b.order)) {
     const key = syndicationKey({
       provider: '',
       query: '',
@@ -170,6 +170,15 @@ function score(entry: Working, terms: ReadonlySet<string>): number {
   return entry.providers.size * 3 + Math.min(4, overlap)
 }
 
+/** Lowercased hostname, or the raw string when the URL does not parse. */
+function domainOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase()
+  } catch {
+    return url
+  }
+}
+
 /**
  * Deduplicate, rank, cap, and number the evidence pool.
  *
@@ -193,32 +202,31 @@ export function buildEvidence(
   )
   const ranked = mergeRawHits(hits)
     .map((entry) => ({ entry, score: score(entry, termSet) }))
-    .sort((a, b) => b.score - a.score || a.entry.order - b.entry.order)
+    .toSorted((a, b) => b.score - a.score || a.entry.order - b.entry.order)
   const limit = Math.max(1, cap)
   const kept = ranked.slice(0, limit)
-  const domainOf = (url: string): string => {
-    try {
-      return new URL(url).hostname.toLowerCase()
-    } catch {
-      return url
-    }
-  }
   const keptDomains = new Set(kept.map(({ entry }) => domainOf(entry.url)))
   const dissent = ranked
     .slice(limit)
-    .find(({ entry, score }) => score > 0 && !keptDomains.has(domainOf(entry.url)))
+    .find(({ entry, score: entryScore }) => entryScore > 0 && !keptDomains.has(domainOf(entry.url)))
   if (dissent !== undefined) kept.push(dissent)
-  return kept.map(({ entry, score }, index) => ({
-    id: index + 1,
-    url: entry.url,
-    ...(entry.title === undefined ? {} : { title: entry.title }),
-    snippet: entry.snippet,
-    ...(entry.content === undefined || entry.content === '' ? {} : { content: entry.content }),
-    ...(entry.publishedAt === undefined ? {} : { publishedAt: entry.publishedAt }),
-    providers: [...entry.providers],
-    queries: [...entry.queries],
-    score,
-  }))
+  return kept.map(({ entry, score: entryScore }, index) => {
+    // Field-by-field instead of the previous conditional spreads; the optional
+    // title/content/publishedAt keys land after the required ones, which only
+    // reorders keys inside the audit artifact's JSON (values unchanged).
+    const value: { -readonly [K in keyof EvidenceSource]: EvidenceSource[K] } = {
+      id: index + 1,
+      url: entry.url,
+      snippet: entry.snippet,
+      providers: [...entry.providers],
+      queries: [...entry.queries],
+      score: entryScore,
+    }
+    if (entry.title !== undefined) value.title = entry.title
+    if (entry.content !== undefined && entry.content !== '') value.content = entry.content
+    if (entry.publishedAt !== undefined) value.publishedAt = entry.publishedAt
+    return value
+  })
 }
 
 /** The excerpt one source contributes to the digest: content first, snippet fallback. */

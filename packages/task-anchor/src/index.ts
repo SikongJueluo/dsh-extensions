@@ -23,10 +23,12 @@
  */
 import Schema from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
+import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { AnchorStore, compareAnchor, resolveRoot, type TaskAnchor } from './checkpoint.js'
-import { foldGoalEvents, mergeGoal } from './goal-evidence.js'
+import { foldGoalEvents, isRecord, mergeGoal } from './goal-evidence.js'
 import { defaultExecFile, readJjFacts, type ExecFile } from './jj.js'
 import { buildResumeNotice } from './notice.js'
 
@@ -98,27 +100,37 @@ export interface ApplyDeps {
   readonly jjPath?: string
 }
 
-interface AgentLike {
+/**
+ * The session surface the anchor reads and appends to — the same shape the
+ * host's `Session` exposes (declared locally so this module never has to
+ * call the SDK's deprecated synchronous event reads by name).
+ */
+interface SessionLike {
   readonly id: string
-  readonly session?: {
-    readonly id: string
-    readonly header: { readonly cwd?: string }
-    snapshotEvents(): readonly import('@deepseek-ai/dsh-session').SessionEvent[]
-    append(
-      type: 'user/message',
-      data: import('@deepseek-ai/dsh-llm').UserMessage,
-      opts: { surfaceOp: 'append' },
-    ): unknown
-  }
+  readonly header: { readonly cwd?: string }
+  snapshotEvents(): readonly SessionEvent[]
+  append(type: 'user/message', data: UserMessage, opts: { surfaceOp: 'append' }): unknown
 }
 
-function sessionOf(ctx: Context, agent: AgentLike | undefined) {
+interface AgentLike {
+  readonly id: string
+  readonly session?: SessionLike
+}
+
+/** Duck-typed sessions registry fallback: only the `get` accessor is needed. */
+interface SessionRegistryLike {
+  get(id: string): SessionLike | undefined
+}
+
+function isSessionRegistry(value: unknown): value is SessionRegistryLike {
+  return isRecord(value) && typeof value.get === 'function'
+}
+
+function sessionOf(ctx: Context, agent: AgentLike | undefined): SessionLike | undefined {
   if (agent?.session !== undefined) return agent.session
-  return (
-    ctx.get('sessions') as unknown as
-      | { get(id: string): AgentLike['session'] | undefined }
-      | undefined
-  )?.get((agent as { id?: string } | undefined)?.id ?? '')
+  const sessions: unknown = ctx.get('sessions')
+  if (isSessionRegistry(sessions)) return sessions.get(agent?.id ?? '')
+  return undefined
 }
 
 /**
@@ -191,12 +203,14 @@ export function apply(ctx: Context, config: Config, deps: ApplyDeps = {}): void 
             note: { type: 'string' },
           },
         },
-        render: (_args, value) => [
-          { type: 'text', text: formatCheckpointResult(value as Record<string, unknown>) },
-        ],
+        render: (_args, value) => {
+          const record =
+            typeof value === 'object' && value !== null && !Array.isArray(value) ? value : {}
+          return [{ type: 'text', text: formatCheckpointResult(record) }]
+        },
       },
       async execute(args, exec) {
-        const agent = exec.agent as unknown as AgentLike | undefined
+        const agent = exec.agent
         const session = sessionOf(ctx, agent)
         if (session === undefined) throw new Error('checkpoint_task: no session for this execution')
         const cwd = await resolveRoot(session.header.cwd)
@@ -284,9 +298,9 @@ export function apply(ctx: Context, config: Config, deps: ApplyDeps = {}): void 
   const noticed = new Set<string>()
   ctx.on(
     'agent/created',
-    async (payload: { agent: unknown; source: string; signal?: AbortSignal }) => {
+    async (payload: { agent: AgentLike; source: string; signal?: AbortSignal }) => {
       if (!config.resumeNotice) return
-      const agent = payload.agent as AgentLike & object
+      const agent = payload.agent
       const session = agent.session
       if (session === undefined || noticed.has(session.id)) return
       noticed.add(session.id)

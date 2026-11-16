@@ -11,12 +11,12 @@ const config: StorybookConfig = {
     name: '@storybook/react-vite',
     options: {},
   },
-  async viteFinal(config) {
-    config.plugins = [...(config.plugins ?? []), tailwindcss()]
+  async viteFinal(finalConfig) {
+    finalConfig.plugins = [...(finalConfig.plugins ?? []), tailwindcss()]
     // Storybook's Vite builder otherwise leaves esbuild on classic JSX; the
     // source uses the automatic runtime and does not import React by hand.
-    config.esbuild = { ...config.esbuild, jsx: 'automatic', jsxImportSource: 'react' }
-    return config
+    finalConfig.esbuild = { ...finalConfig.esbuild, jsx: 'automatic', jsxImportSource: 'react' }
+    return finalConfig
   },
 }
 

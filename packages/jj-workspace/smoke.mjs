@@ -28,6 +28,11 @@ function check(label, condition) {
   }
 }
 
+/** The bounded captured bytes of one stubbed stream. */
+function read(chunks) {
+  return () => ({ text: Buffer.concat(chunks).toString('utf8'), lossy: false })
+}
+
 const root = await mkdtemp(join(tmpdir(), 'jj-workspace-smoke-'))
 const home = join(root, 'home')
 const xdg = join(root, 'xdg')
@@ -73,7 +78,6 @@ const subprocess = {
       child.on('error', reject)
       child.on('close', (code, signal) => resolveDone({ exitCode: code, signal }))
     })
-    const read = (chunks) => () => ({ text: Buffer.concat(chunks).toString('utf8'), lossy: false })
     return {
       done,
       collected: { stdout: { readFrom: read(out) }, stderr: { readFrom: read(err) } },
@@ -98,7 +102,7 @@ const fsStub = {
   },
   contains(parent, child) {
     const rel = relative(resolvePath(parent.key), resolvePath(child.key))
-    return rel === '' || (rel !== '..' && !rel.startsWith('..' + '/') && !isAbsolute(rel))
+    return rel === '' || (rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel))
   },
   async lstat(path) {
     try {
@@ -260,20 +264,18 @@ check(
 )
 
 // restore is refused for a recorded jj workspace.
-await checkAsync(
-  'jj restore is refused',
-  service
-    .restore(agent, {
-      path: created.path,
-      branch: created.branch,
-      baseCommit: created.baseCommit,
-      repositoryRoot: created.repositoryRoot,
-    })
-    .then(
-      () => false,
-      (error) => /not supported/.test(String(error)),
-    ),
-)
+let jjRestoreRefused = false
+try {
+  await service.restore(agent, {
+    path: created.path,
+    branch: created.branch,
+    baseCommit: created.baseCommit,
+    repositoryRoot: created.repositoryRoot,
+  })
+} catch (error) {
+  jjRestoreRefused = /not supported/u.test(String(error))
+}
+check('jj restore is refused', jjRestoreRefused)
 
 // ── tool plugin: registration, schema, and execution through the service ─────
 let toolDefinition
@@ -294,7 +296,7 @@ check(
 )
 check(
   'tool parameters stay name/from',
-  Object.keys(toolDefinition.parameters.properties).sort().join(',') === 'from,name',
+  Object.keys(toolDefinition.parameters.properties).toSorted().join(',') === 'from,name',
 )
 cwd = jjRepo
 const toolResult = await toolDefinition.execute(
@@ -444,7 +446,3 @@ check('status classifies a Git checkout', gitStatus.kind === 'git')
 
 process.exitCode = failures === 0 ? 0 : 1
 await rm(root, { recursive: true, force: true })
-
-async function checkAsync(label, promise) {
-  check(label, await promise)
-}

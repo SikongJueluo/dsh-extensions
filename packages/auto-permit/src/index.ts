@@ -40,7 +40,8 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
-import type { Session } from '@deepseek-ai/dsh-session'
+import { SessionStore } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { collectEvidence } from './evidence.js'
 import { containerRisk, isMutableFileDependent } from './container.js'
@@ -62,22 +63,29 @@ export { buildNoticeMessage } from './notice.js'
 
 export const inject = ['llm']
 
+/** Key of the per-session approval-source memory sets. */
+const keyOf = (sessionId: string, callId: string): string => `${sessionId}:${callId}`
+
 /** Live session lookup: `agent.session` when materialized, else the store. */
-function sessionOf(ctx: Context, agent: { id: string }): Session | undefined {
-  const direct = (agent as { session?: unknown }).session
-  if (direct !== undefined && direct !== null) return direct as Session
-  return ctx.get('sessions')?.get(agent.id as never)
+function sessionOf(ctx: Context, agent: { id: SessionId; session?: Session }): Session | undefined {
+  const direct = agent.session
+  if (direct !== undefined && direct !== null) return direct
+  const sessions: unknown = ctx.get('sessions')
+  if (sessions instanceof SessionStore) return sessions.get(agent.id)
+  return undefined
 }
 
 /**
  * The approval request's agent, narrowed to what the notice path needs: the
  * durable session (audit + fallback) and the host's deferred inbox channel.
- * `inject` is duck-typed because it reached `Agent` after the oldest hosts
- * this plugin still loads on.
+ * The members stay optional and the host's `Agent` stays assignable without an
+ * assertion: `inject` is duck-typed because it reached `Agent` after the
+ * oldest hosts this plugin still loads on, and older hosts may not expose a
+ * materialized `session` either.
  */
 export interface NoticeAgent {
   id: string
-  session: Session
+  session?: Session | undefined
   inject?(message: UserMessage): void
 }
 
@@ -110,8 +118,10 @@ export function deliverNotice(agent: NoticeAgent, message: UserMessage): void {
       return
     }
     // Hosts without the deferred channel: keep the notice, accept the
-    // ordering hazard rather than dropping the audit row.
-    agent.session.append('user/message', message, { surfaceOp: 'append' })
+    // ordering hazard rather than dropping the audit row. An agent without a
+    // materialized session has no surface to append to; skipping is the same
+    // visible outcome the previous duck call's catch produced.
+    agent.session?.append('user/message', message, { surfaceOp: 'append' })
   } catch {
     // A notice is best-effort observability; the approval outcome itself must
     // not fail because the log rejected the row.
@@ -128,6 +138,28 @@ interface CmdPermitLike {
   claim(command: string, mode: string): { via: string } | undefined
 }
 
+/** Structural guard for the duck-typed service lookup (no assertion). */
+function isCmdPermitLike(value: unknown): value is CmdPermitLike {
+  if (typeof value !== 'object' || value === null) return false
+  return (
+    typeof (value as { isHighRisk?: unknown }).isHighRisk === 'function' &&
+    typeof (value as { claim?: unknown }).claim === 'function'
+  )
+}
+
+/**
+ * The mounted cmd-permit service, or undefined when absent. A mounted-but-
+ * malformed service still throws, so the answerer's catch keeps the old
+ * fail-closed defer path instead of silently skipping the oracle.
+ */
+function cmdPermitOf(value: unknown): CmdPermitLike | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!isCmdPermitLike(value)) {
+    throw new TypeError('cmdPermit.isHighRisk/claim are not functions')
+  }
+  return value
+}
+
 /**
  * The optional dsh-working-directory service: the host's committed current
  * directory for a session (updated by `working-directory/change`, and the
@@ -135,6 +167,25 @@ interface CmdPermitLike {
  */
 interface WorkingDirectoryLike {
   get(session: Session): string
+}
+
+/** Structural guard for the duck-typed service lookup (no assertion). */
+function isWorkingDirectoryLike(value: unknown): value is WorkingDirectoryLike {
+  if (typeof value !== 'object' || value === null) return false
+  return typeof (value as { get?: unknown }).get === 'function'
+}
+
+/**
+ * The effective cwd through the optional service. A missing service yields
+ * undefined (the fallback chain takes over); a mounted-but-malformed service
+ * still throws, so the answerer's catch keeps the old fail-closed defer path.
+ */
+function workingDirectoryOf(value: unknown, session: Session): string | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!isWorkingDirectoryLike(value)) {
+    throw new TypeError('workingDirectory.get is not a function')
+  }
+  return value.get(session)
 }
 
 /**
@@ -178,19 +229,18 @@ export function apply(ctx: Context, config: RowConfig): void {
   // never to silent replay.
   const selfAllowed = new Set<string>()
   const chainApproved = new Set<string>()
-  const keyOf = (sessionId: string, callId: string): string => `${sessionId}:${callId}`
 
   ctx.on(
     'approval/request',
     async (req: ApprovalRequest, next: () => Promise<ApprovalOutcome>) => {
       try {
         const settings = readSettings()
-        if (!routeConfigured(settings)) return next()
-        if (req.toolName !== 'bash' || req.callId === undefined) return next()
+        if (!routeConfigured(settings)) return await next()
+        if (req.toolName !== 'bash' || req.callId === undefined) return await next()
 
         const session = sessionOf(ctx, req.agent)
-        if (session === undefined) return next()
-        const agent = req.agent as unknown as NoticeAgent
+        if (session === undefined) return await next()
+        const agent: NoticeAgent = req.agent
         const recordChain = (outcome: ApprovalOutcome): ApprovalOutcome => {
           if (outcome === 'allowed-once' && req.callId !== undefined) {
             chainApproved.add(keyOf(session.id, req.callId))
@@ -205,9 +255,9 @@ export function apply(ctx: Context, config: RowConfig): void {
         const evidence = collectEvidence(
           session,
           req.callId,
-          (ctx.get('workingDirectory') as WorkingDirectoryLike | undefined)?.get(session),
+          workingDirectoryOf(ctx.get('workingDirectory'), session),
         )
-        if (evidence.call === undefined) return rest()
+        if (evidence.call === undefined) return await rest()
 
         const command = evidence.call.command.slice(0, 160)
 
@@ -216,7 +266,7 @@ export function apply(ctx: Context, config: RowConfig): void {
         // so the judge and the allowlist defer on exactly the same shapes.
         // The union is deliberate: this plugin's own boundary must hold even
         // when the peer's table is older than this build.
-        const cmdPermit = ctx.get('cmdPermit') as CmdPermitLike | undefined
+        const cmdPermit = cmdPermitOf(ctx.get('cmdPermit'))
         const container = containerRisk(evidence.call.command)
         const highRisk =
           isHighRisk(evidence.call.command) ||
@@ -233,7 +283,7 @@ export function apply(ctx: Context, config: RowConfig): void {
             command,
             container,
           )
-          return rest()
+          return await rest()
         }
 
         // Shared allowlist decision, BEFORE memory and judge: the allowlist
@@ -305,7 +355,7 @@ export function apply(ctx: Context, config: RowConfig): void {
           category: result.category,
           evidence: result.evidence,
         })
-        return rest()
+        return await rest()
       } catch (error) {
         // Any surprise (log read failure, agent shape drift, …) goes to the
         // human dialog; never reject on the judge's behalf.

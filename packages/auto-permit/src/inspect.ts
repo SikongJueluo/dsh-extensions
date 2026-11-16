@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto'
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import { isRecord } from './record.js'
 
 /** Bounds for one judge investigation. */
 export const INSPECT_LIMITS = {
@@ -167,7 +168,7 @@ const SEARCH_SKIP_DIRS = new Set(['dist', 'build', 'target', 'coverage'])
 
 /** Files that may carry credentials or private keys. */
 const DENIED_FILE =
-  /^(?:\.env(?:\.(?!example$|sample$|template$)[^/]*)?$|\.netrc|\.git-credentials|id_(?:rsa|dsa|ecdsa|ed25519)|[^/]*\.(?:pem|key|p12|pfx))$/i
+  /^(?:\.env(?:\.(?!example$|sample$|template$)[^/]*)?$|\.netrc|\.git-credentials|id_(?:rsa|dsa|ecdsa|ed25519)|[^/]*\.(?:pem|key|p12|pfx))$/iu
 
 function bytesOf(text: string): number {
   return Buffer.byteLength(text, 'utf8')
@@ -194,8 +195,8 @@ function clipLine(line: string): string {
 function argumentObject(raw: string): Record<string, unknown> | undefined {
   try {
     const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
-    return parsed as Record<string, unknown>
+    if (!isRecord(parsed)) return undefined
+    return parsed
   } catch {
     return undefined
   }
@@ -453,7 +454,7 @@ export async function createInspector(
     // only entries the tool would have listed but for the count cap are.
     const eligible = entries
       .filter((entry) => !isDeniedComponent(entry.name))
-      .sort(
+      .toSorted(
         (a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name),
       )
     const visible = eligible.slice(0, INSPECT_LIMITS.maxListEntries)

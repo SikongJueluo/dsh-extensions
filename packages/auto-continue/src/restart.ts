@@ -16,12 +16,14 @@
  * @module dsh-auto-continue/restart
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentRegistry } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import type { SessionControllerShim } from './shims.js'
+import { isRecord } from './guards.js'
 
 /** The continuation message sent into a restarted-mid-flight session. */
 export const RESTART_RESUME_MESSAGE =
@@ -53,8 +55,8 @@ const CONTROLLER_WAIT_MS = 30_000
 const CONTROLLER_POLL_MS = 1_000
 
 function isEntry(value: unknown): value is RunningEntry {
-  if (typeof value !== 'object' || value === null) return false
-  const v = value as Record<string, unknown>
+  if (!isRecord(value)) return false
+  const v = value
   return (
     typeof v.sessionId === 'string' &&
     v.sessionId.length > 0 &&
@@ -65,11 +67,12 @@ function isEntry(value: unknown): value is RunningEntry {
 
 /** Whether the session's last completed turn actually finished (race guard). */
 function lastTurnCompleted(agent: Agent): boolean {
+  // oxlint-disable-next-line typescript/no-deprecated -- A25: the deprecated synchronous session-log readers have no sync replacement; the sanctioned ones are async and optional, so migrating changes exported contracts and control flow.
   const events = agent.session.ownEvents()
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i]
     if (event === undefined || event.type !== 'turn/end') continue
-    const reason = (event.data as { reason?: { kind?: unknown } } | null)?.reason
+    const reason = event.data.reason
     return reason?.kind === 'completed'
   }
   return false
@@ -105,6 +108,7 @@ export function registerRestartResume(
         const tmp = `${path}.tmp`
         await writeFile(tmp, `${JSON.stringify(snapshot, null, 1)}\n`, 'utf8')
         await rename(tmp, path)
+        return undefined
       })
       .catch(() => {
         // A failed mirror write only narrows restart coverage; waiting goes on.
@@ -143,10 +147,8 @@ export function registerRestartResume(
   /** One resume attempt; resolves false when the composition could not serve
    *  it (controller absent) and the whole pass should leave the mirror alone. */
   const resumeOne = async (entry: RunningEntry): Promise<boolean> => {
-    const registry = ctx.get('agents')
-    let agent: Agent | undefined = registry?.get(
-      entry.sessionId as Parameters<typeof registry.get>[0],
-    )
+    const registry: AgentRegistry | undefined = ctx.get('agents')
+    let agent: Agent | undefined = registry?.get(SessionId(entry.sessionId))
     if (agent === undefined) {
       const controller = await awaitController()
       if (controller === undefined) {
@@ -156,9 +158,7 @@ export function registerRestartResume(
         )
         return false
       }
-      const result = await controller.agents.resolveAgent(
-        entry.sessionId as Parameters<SessionControllerShim['agents']['resolveAgent']>[0],
-      )
+      const result = await controller.agents.resolveAgent(SessionId(entry.sessionId))
       if ('error' in result) {
         ctx.logger.warn(
           'auto-continue: cannot reopen "%s" after restart (%o)',
@@ -184,13 +184,15 @@ export function registerRestartResume(
 
   const adoptAtBoot = async (): Promise<void> => {
     if (!config.resumeOnRestart || lifetime.signal.aborted) return
-    let doc: MirrorFile | undefined
+    let parsed: unknown
     try {
-      doc = JSON.parse(await readFile(path, 'utf8')) as MirrorFile
+      parsed = JSON.parse(await readFile(path, 'utf8'))
     } catch {
       return
     }
-    const entries = Array.isArray(doc?.entries) ? doc.entries.filter(isEntry) : []
+    const record = isRecord(parsed) ? parsed : undefined
+    const rawEntries = record?.entries
+    const entries = Array.isArray(rawEntries) ? rawEntries.filter((entry) => isEntry(entry)) : []
     // Consume only after the pass finishes, so a not-yet-ready composition
     // (or a mid-pass crash) leaves the mirror for the next boot to retry.
     const now = Date.now()

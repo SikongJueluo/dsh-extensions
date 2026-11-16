@@ -116,11 +116,11 @@ export function insertGrantBinds(
     )
   }
   const expected = expectedStockProfileArgs(policy)
-  for (let index = 0; index < expected.length; index += 1) {
+  for (const [index, want] of expected.entries()) {
     const got = confined[1 + index]
-    if (got !== expected[index]) {
+    if (got !== want) {
       throw new GrantArgvError(
-        `profile argument ${index} is ${describe(got ?? '<missing>')}, expected ${describe(expected[index]!)}`,
+        `profile argument ${index} is ${describe(got ?? '<missing>')}, expected ${describe(want)}`,
       )
     }
   }

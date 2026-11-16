@@ -5,6 +5,15 @@
  * @module dsh-search-integrator/types
  */
 
+/**
+ * Narrow an unchecked JSON payload to a plain record without changing the
+ * downstream path: the guard is the evidence, the fields stay `unknown` and
+ * are read with the `typeof` checks the callers already have.
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 /** One raw search hit as an adapter normalized it (no cross-source identity). */
 export interface RawHit {
   /** Provider id that produced the hit (`tavily`, `exa`, `zhipu`, …). */
@@ -33,9 +42,9 @@ export interface EvidenceSource {
   readonly content?: string
   readonly publishedAt?: string
   /** Provider ids that returned this URL (cross-source agreement). */
-  readonly providers: readonly string[]
+  providers: string[]
   /** Queries that surfaced this URL. */
-  readonly queries: readonly string[]
+  queries: string[]
   /** Deterministic rank score; higher is better. */
   readonly score: number
 }
@@ -46,7 +55,7 @@ export type PointStatus = 'supported' | 'conflict' | 'insufficient'
 /** One attributed position inside a conflict point (validated citations). */
 export interface ConflictSide {
   readonly text: string
-  readonly sources: readonly number[]
+  sources: number[]
 }
 
 /** One integrated claim with its validated citations. */
@@ -54,9 +63,9 @@ export interface ResearchPoint {
   readonly text: string
   readonly status: PointStatus
   /** Valid evidence ids (already checked against the evidence numbering). */
-  readonly sources: readonly number[]
+  sources: number[]
   /** Present on conflict points that arrived as attributed sides. */
-  readonly sides?: readonly ConflictSide[]
+  sides?: ConflictSide[]
   /** Short verbatim support excerpt (audit-only; never rendered to the model). */
   readonly quote?: string
   /** Set when the model cited ids that do not exist and none survived. */
@@ -71,7 +80,7 @@ export interface ResultSource {
   /** Compact snippet (capped), so a degraded/unintegrated render stays useful. */
   readonly snippet?: string
   readonly publishedAt?: string
-  readonly providers: readonly string[]
+  providers: string[]
 }
 
 /** Why one configured source did not contribute. */
@@ -83,11 +92,11 @@ export interface SourceFailure {
 /** Retrieval coverage facts for the coverage note and the audit. */
 export interface Coverage {
   readonly rounds: number
-  readonly queries: readonly string[]
+  queries: string[]
   /** Provider ids that returned at least one usable hit. */
-  readonly searched: readonly string[]
+  searched: string[]
   /** Configured-but-failed or unconfigured provider ids with reasons. */
-  readonly failed: readonly SourceFailure[]
+  failed: SourceFailure[]
   /** Raw hits before dedup. */
   readonly resultsFound: number
   /** Deduplicated evidence entries after the cap. */
@@ -111,14 +120,19 @@ export interface AuditRef {
  */
 export type ResearchStatus = 'ok' | 'degraded' | 'failed'
 
-/** Canonical tool value; also the shape the output schema declares. */
+/**
+ * Canonical tool value; also the shape the output schema declares. Array
+ * fields are deliberately mutable so the value satisfies the type
+ * `defineTool` infers from the declared output schema (the executor's
+ * contract); the pipeline never mutates them.
+ */
 export interface ResearchResult {
   readonly status: ResearchStatus
   readonly question: string
   readonly summary: string
-  readonly points: readonly ResearchPoint[]
-  readonly unknowns: readonly string[]
-  readonly sources: readonly ResultSource[]
+  points: ResearchPoint[]
+  unknowns: string[]
+  sources: ResultSource[]
   readonly coverage: Coverage
   readonly audit?: AuditRef
   /** Present on `degraded`/`failed`: the concrete reason. */

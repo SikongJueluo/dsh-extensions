@@ -29,8 +29,8 @@ describe('write-root admission', () => {
     expect(() => physicalDirectory('relative/path')).toThrow(InvalidWriteRootError)
     const file = join(root, 'file')
     writeFileSync(file, 'x')
-    expect(() => physicalDirectory(file)).toThrow(/not a directory/)
-    expect(() => physicalDirectory(join(root, 'missing'))).toThrow(/cannot be read/)
+    expect(() => physicalDirectory(file)).toThrow(/not a directory/u)
+    expect(() => physicalDirectory(join(root, 'missing'))).toThrow(/cannot be read/u)
   })
 
   it('refuses a path containing NUL bytes', () => {
@@ -112,7 +112,7 @@ describe('configuration', () => {
       assertDeploymentRootsSafe(Config({ workspaceRoot: '/', additionalWritableRoots: [] }), [
         '/home/u/.dsh',
       ]),
-    ).toThrow(/overlaps protected/)
+    ).toThrow(/overlaps protected/u)
   })
 
   it('refuses a deployment root overlapping protected data at load', () => {
@@ -123,7 +123,7 @@ describe('configuration', () => {
       assertDeploymentRootsSafe(Config({ workspaceRoot: root, additionalWritableRoots: [] }), [
         protectedDir,
       ]),
-    ).toThrow(/overlaps protected/)
+    ).toThrow(/overlaps protected/u)
     const workspace = join(root, 'workspace')
     mkdirSync(workspace)
     expect(() =>
@@ -143,6 +143,6 @@ describe('configuration', () => {
     // A stated root is still checked.
     expect(() =>
       assertDeploymentRootsSafe(Config({ workspaceRoot: process.cwd() }), [process.cwd()]),
-    ).toThrow(/overlaps protected/)
+    ).toThrow(/overlaps protected/u)
   })
 })

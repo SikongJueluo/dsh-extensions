@@ -8,7 +8,25 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { CreatedWorkspace, CreateWorkspaceRequest } from './service.js'
+import type { CreatedWorktree } from '@deepseek-ai/dsh-experimental-worktree'
+import type { CreateWorkspaceRequest, JjCreatedFields } from './service.js'
+
+/**
+ * Whether one creation result carries the jj arm's fields. The worktrees
+ * service is declared by the stock Git SDK, so the jj fields are visible only
+ * through runtime evidence; the jj fields are always written together.
+ */
+function isJjCreation(
+  value: CreatedWorktree & Partial<JjCreatedFields>,
+): value is CreatedWorktree & JjCreatedFields {
+  return (
+    value.vcs === 'jj' &&
+    typeof value.workspace === 'string' &&
+    typeof value.bookmark === 'string' &&
+    typeof value.baseChange === 'string' &&
+    typeof value.changeId === 'string'
+  )
+}
 
 /** Cordis plugin name. */
 export const name = 'jj-tool-worktree'
@@ -59,7 +77,14 @@ export function apply(ctx: Context): void {
       async execute(args, exec) {
         if (exec.agent === undefined) throw new Error('create_worktree requires a calling agent')
         const request: CreateWorkspaceRequest = { ...args, origin: 'tool' }
-        return (await ctx.worktrees.create(exec.agent, request, exec.signal)) as CreatedWorkspace
+        const created = await ctx.worktrees.create(exec.agent, request, exec.signal)
+        // The jj arm already reports `vcs: 'jj'`; a plain Git result (only
+        // possible when the stock provider is mounted instead of this bundle's)
+        // gets the Git label the output schema requires.
+        const result: CreatedWorktree & { vcs: 'git' | 'jj' } = isJjCreation(created)
+          ? created
+          : { ...created, vcs: 'git' }
+        return result
       },
       presentCall: (args) => ({
         card: 'generic',

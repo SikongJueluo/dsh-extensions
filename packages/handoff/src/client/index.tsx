@@ -11,6 +11,7 @@
 // cancel. The catalog comes from the same Client Remote the /model popup
 // reads, so provider groups, model display names, and efforts match.
 import { useEffect, useState } from 'react'
+import { isRecord } from '../choice.js'
 import {
   Alert,
   Badge,
@@ -157,15 +158,23 @@ interface CatalogEnvelope {
 }
 
 interface Operations {
-  pending(): Promise<PendingResult>
-  choose(requestId: string, choice: Record<string, unknown>): Promise<RpcResult>
-  cancel(requestId: string): Promise<RpcResult>
-  modelCatalog(): Promise<CatalogEnvelope>
+  pending(): Promise<PendingResult | RpcFailure>
+  choose(requestId: string, choice: Record<string, unknown>): Promise<RpcResult | RpcFailure>
+  cancel(requestId: string): Promise<RpcResult | RpcFailure>
+  modelCatalog(): Promise<unknown>
 }
 
 let rpcSeq = 0
 
-function callRpc<T>(endpoint: string, payload: Record<string, unknown>): Promise<T> {
+/** The error envelope callRpc synthesizes when the channel response is unusable. */
+interface RpcFailure {
+  ok: false
+  message: string
+}
+
+const RPC_FAILURE: RpcFailure = { ok: false, message: 'unexpected channel response' }
+
+function callRpc<T>(endpoint: string, payload: Record<string, unknown>): Promise<T | RpcFailure> {
   rpcSeq += 1
   return fetch(`${RPC_BASE}/${endpoint}`, {
     method: 'POST',
@@ -177,19 +186,24 @@ function callRpc<T>(endpoint: string, payload: Record<string, unknown>): Promise
       payload: payload || {},
     }),
   })
-    .then((response) => response.json() as Promise<{ result?: T }>)
-    .then((body) => {
+    .then((response) => response.json())
+    .then((body: { result?: T } | null | undefined) => {
       if (body && body.result) return body.result
-      return { ok: false, message: 'unexpected channel response' } as T
+      return RPC_FAILURE
     })
 }
 
 function errorMessage(err: unknown): string {
   if (err && typeof err === 'object' && 'message' in err) {
-    const message = (err as { message?: unknown }).message
+    const message = isRecord(err) ? err.message : undefined
     if (typeof message === 'string' && message.length > 0) return message
   }
   return String(err)
+}
+
+/** The `{ok, value} | {ok, error}` envelope the client remote answers with. */
+function isCatalogEnvelope(value: unknown): value is CatalogEnvelope {
+  return isRecord(value) && typeof value.ok === 'boolean'
 }
 
 // --- shared row classes (theme tokens only; no style tables) ---
@@ -291,6 +305,22 @@ function FieldRow({ label, value, badge, changeable, busy, onOpen }: FieldRowPro
 
 type Section = 'model' | 'effort' | 'preset' | 'workspace'
 
+/** Whether the effective choice already IS the described route (the "当前" badge). */
+function isCurrentModel(
+  effectiveChoice: ModelChoice,
+  kind: 'inherit' | 'default' | 'model',
+  provider?: string,
+  model?: string,
+): boolean {
+  if (effectiveChoice.kind !== kind) return false
+  return (
+    kind !== 'model' ||
+    (effectiveChoice.kind === 'model' &&
+      effectiveChoice.provider === provider &&
+      effectiveChoice.model === model)
+  )
+}
+
 interface PickerProps {
   request: ChoiceRequestWire
   operations: Operations
@@ -358,14 +388,19 @@ function Picker({ request, operations, onSettled }: PickerProps) {
     // ({ok:true, value} | {ok:false, error}); the catalog is inside `value`.
     operations
       .modelCatalog()
-      .then((result) => {
-        if (!alive) return
-        if (result && result.ok === true) {
+      .then((result: unknown) => {
+        if (!alive) return undefined
+        if (isCatalogEnvelope(result) && result.ok) {
           setCatalog(result.value ?? null)
-          return
+          return undefined
         }
-        const failure = result && result.error ? result.error : null
-        setError(failure && failure.message ? failure.message : '模型目录加载失败')
+        const failure = isCatalogEnvelope(result) && result.error ? result.error : null
+        setError(
+          failure !== null && failure.message !== undefined && failure.message !== ''
+            ? failure.message
+            : '模型目录加载失败',
+        )
+        return undefined
       })
       .catch((err: unknown) => {
         if (alive) setError(errorMessage(err))
@@ -373,7 +408,9 @@ function Picker({ request, operations, onSettled }: PickerProps) {
     return () => {
       alive = false
     }
-  }, [request.id, operations])
+    // The Picker remounts per request (`key={request.id}`), so the catalog is
+    // fetched once per mount; `operations` is the only value read here.
+  }, [operations])
 
   function needsWorkspace(): boolean {
     return request.pickWorkspace === true && (request.workspaces?.length ?? 0) > 0
@@ -445,7 +482,8 @@ function Picker({ request, operations, onSettled }: PickerProps) {
 
   function presetName(id: string): string {
     const row = presetOption(id)
-    return row?.name ? row.name : id
+    const name = row?.name
+    return name !== undefined && name !== '' ? name : id
   }
 
   /** The route the effort section edits, when its model advertises efforts. */
@@ -501,12 +539,15 @@ function Picker({ request, operations, onSettled }: PickerProps) {
     operations
       .choose(request.id, payload)
       .then((result) => {
-        if (result && result.ok) {
+        if (result.ok) {
           onSettled()
-          return
+          return undefined
         }
         setBusy(false)
-        setError(result && result.message ? result.message : '选择提交失败')
+        setError(
+          result.message !== undefined && result.message !== '' ? result.message : '选择提交失败',
+        )
+        return undefined
       })
       .catch((err: unknown) => {
         setBusy(false)
@@ -514,16 +555,25 @@ function Picker({ request, operations, onSettled }: PickerProps) {
       })
   }
 
-  function cancel() {
-    if (busy) return
+  /** Best-effort cancel: settle the card whatever the channel answers. */
+  function cancel(): Promise<void> {
+    if (busy) return Promise.resolve()
     setBusy(true)
-    operations.cancel(request.id).then(onSettled, () => {
-      onSettled()
-    })
+    return operations.cancel(request.id).then(
+      () => {
+        onSettled()
+        return undefined
+      },
+      () => {
+        onSettled()
+        return undefined
+      },
+    )
   }
 
-  function handleDialogClose() {
-    cancel()
+  function handleDialogClose(): void {
+    // Cancellation is best effort; the overlay stays whatever the channel answered.
+    void cancel()
   }
 
   // ── summary card values ─────────────────────────────────────────────────
@@ -694,27 +744,13 @@ function Picker({ request, operations, onSettled }: PickerProps) {
       return `${failure.name} ${failure.id} ${failure.message}`.toLowerCase().includes(needle)
     })
 
-    const isCurrentModel = (
-      kind: 'inherit' | 'default' | 'model',
-      provider?: string,
-      model?: string,
-    ): boolean => {
-      if (effectiveChoice.kind !== kind) return false
-      return (
-        kind !== 'model' ||
-        (effectiveChoice.kind === 'model' &&
-          effectiveChoice.provider === provider &&
-          effectiveChoice.model === model)
-      )
-    }
-
     return (
       <div className="dshx:flex dshx:flex-col">
         {searchBox('搜索模型 / 厂商…')}
         <Entry
           label={INHERIT_LABEL}
           description={routeText(request.inherited, '沿用本会话的模型与强度')}
-          badge={isCurrentModel('inherit') ? CURRENT_BADGE : undefined}
+          badge={isCurrentModel(effectiveChoice, 'inherit') ? CURRENT_BADGE : undefined}
           busy={busy}
           onPick={() => {
             setChoice({ kind: 'inherit' })
@@ -724,7 +760,7 @@ function Picker({ request, operations, onSettled }: PickerProps) {
         <Entry
           label={DEFAULT_LABEL}
           description={routeText(request.fallback, '部署默认模型')}
-          badge={isCurrentModel('default') ? CURRENT_BADGE : undefined}
+          badge={isCurrentModel(effectiveChoice, 'default') ? CURRENT_BADGE : undefined}
           busy={busy}
           onPick={() => {
             setChoice({ kind: 'default' })
@@ -763,7 +799,9 @@ function Picker({ request, operations, onSettled }: PickerProps) {
                       label={model.name}
                       description={description.join(' · ') || undefined}
                       badge={
-                        isCurrentModel('model', group.id, model.id) ? CURRENT_BADGE : undefined
+                        isCurrentModel(effectiveChoice, 'model', group.id, model.id)
+                          ? CURRENT_BADGE
+                          : undefined
                       }
                       busy={busy}
                       onPick={() => {
@@ -786,7 +824,7 @@ function Picker({ request, operations, onSettled }: PickerProps) {
                     className="dshx:flex dshx:flex-col dshx:gap-0.5 dshx:px-2.5 dshx:py-2"
                   >
                     <span className="dshx:text-sm dshx:font-medium dshx:leading-[22px]">
-                      {failure.name || failure.id}
+                      {failure.name !== '' ? failure.name : failure.id}
                     </span>
                     <span className="dshx:truncate dshx:text-xs dshx:leading-[18px] dshx:text-fg-muted">
                       {failure.message}
@@ -819,7 +857,11 @@ function Picker({ request, operations, onSettled }: PickerProps) {
             <Entry
               key={`e:${effort.id}`}
               label={effort.name}
-              description={effort.description || undefined}
+              description={
+                effort.description !== undefined && effort.description !== ''
+                  ? effort.description
+                  : undefined
+              }
               badge={marker}
               busy={busy}
               onPick={() => pickEffort(effort.id)}
@@ -842,7 +884,9 @@ function Picker({ request, operations, onSettled }: PickerProps) {
           description={
             inherited
               ? inheritedRow
-                ? (inheritedRow.name ? inheritedRow.name : inherited) +
+                ? (inheritedRow.name !== undefined && inheritedRow.name !== ''
+                    ? inheritedRow.name
+                    : inherited) +
                   (inheritedRow.broken ? ` · 不可用：${inheritedRow.broken}` : ' · 原会话当前预设')
                 : `${inherited} · 已不在注册表中`
               : '原会话没有挂载预设'
@@ -862,9 +906,13 @@ function Picker({ request, operations, onSettled }: PickerProps) {
           options.map((option) => (
             <Entry
               key={`p:${option.id}`}
-              label={option.name || option.id}
+              label={option.name !== undefined && option.name !== '' ? option.name : option.id}
               description={
-                option.broken ? `不可用：${option.broken}` : option.description || option.id
+                option.broken !== undefined && option.broken !== ''
+                  ? `不可用：${option.broken}`
+                  : option.description !== undefined && option.description !== ''
+                    ? option.description
+                    : option.id
               }
               badge={
                 effectivePreset.kind === 'preset' && effectivePreset.id === option.id
@@ -970,7 +1018,13 @@ function Picker({ request, operations, onSettled }: PickerProps) {
       ) : null}
       {section === null ? (
         <>
-          <Button variant="secondary" disabled={busy} onClick={cancel}>
+          <Button
+            variant="secondary"
+            disabled={busy}
+            onClick={() => {
+              void cancel()
+            }}
+          >
             取消
           </Button>
           <Button disabled={busy || issueText !== null} onClick={finalize}>
@@ -1011,9 +1065,10 @@ function Overlay({ operations }: { operations: Operations }) {
       operations
         .pending()
         .then((result) => {
-          if (!alive) return
-          const list = result && result.requests ? result.requests : []
+          if (!alive) return undefined
+          const list = 'requests' in result && result.requests !== undefined ? result.requests : []
           setRequest(list.length > 0 ? (list[0] ?? null) : null)
+          return undefined
         })
         .catch(() => {
           /* offline or channel absent: keep the previous state */
@@ -1055,7 +1110,10 @@ function apply(ctx: DshClientContext) {
       return callRpc<RpcResult>('cancel', { requestId })
     },
     modelCatalog() {
-      return ctx.remote.session.modelCatalog() as Promise<CatalogEnvelope>
+      const session = ctx.remote.session
+      if (session === undefined || session.modelCatalog === undefined)
+        throw new Error('the host exposes no session remote')
+      return session.modelCatalog()
     },
   }
   ctx.slots.inject('shell.overlay', () => {
@@ -1075,4 +1133,4 @@ export { apply }
 export const inject = ['slots', 'remote', 'remote.session']
 
 /** Component handle for the browser-half test harness. */
-export const __test = { Picker }
+export const testHandles = { Picker }

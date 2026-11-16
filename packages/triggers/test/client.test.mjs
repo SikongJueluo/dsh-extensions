@@ -10,7 +10,7 @@
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { __test as T, apply, inject } from '../src/client/index.tsx'
+import { apply, inject, testHandles as T } from '../src/client/index.tsx'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -31,7 +31,7 @@ const SESSIONS = {
 const t = (key, vars) => {
   let text = T.zh[key] ?? key
   if (vars !== undefined)
-    text = text.replaceAll(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ''))
+    text = text.replaceAll(/\{(\w+)\}/gu, (_, name) => String(vars[name] ?? ''))
   return text
 }
 
@@ -89,7 +89,7 @@ function dataWith({ bindings = [], runs = [], deliveries = [] } = {}) {
 function textOf(node) {
   if (node === null || node === undefined) return ''
   if (typeof node === 'string' || typeof node === 'number') return String(node)
-  return (node.children ?? []).map(textOf).join('')
+  return (node.children ?? []).map((child) => textOf(child)).join('')
 }
 
 function buttons(renderer) {

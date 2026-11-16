@@ -150,12 +150,13 @@ async function readOne(
     signal,
   )
   const values = output.split('\n').filter((line) => line.length > 0)
-  if (values.length !== 1) {
+  const [value] = values.length === 1 ? values : []
+  if (value === undefined) {
     throw new Error(
       `jj revision ${JSON.stringify(revision)} must name exactly one change, not ${values.length}`,
     )
   }
-  return values[0]!
+  return value
 }
 
 /** Resolve an explicit base revision to its pinned change id. */
@@ -172,12 +173,13 @@ async function resolveFrom(
     signal,
   )
   const values = output.split('\n').filter((line) => line.length > 0)
-  if (values.length !== 1) {
+  const [value] = values.length === 1 ? values : []
+  if (value === undefined) {
     throw new Error(
       `jj base ${JSON.stringify(from)} must name exactly one change, not ${values.length}`,
     )
   }
-  return values[0]!
+  return value
 }
 
 /**
@@ -207,8 +209,13 @@ export async function projectRootOf(
   ]
     .map((root) => resolve(root))
     .filter((root) => isWithin(root, current))
-    .sort((left, right) => left.length - right.length)
+    .toSorted((left, right) => left.length - right.length)
   return roots[0] ?? current
+}
+
+/** Whether a decoded JSON value is a plain object. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /** Reject a workspace, bookmark, and directory name before any command runs. */
@@ -226,7 +233,7 @@ export function validateWorkspaceName(name: string): string | undefined {
     if (segment.includes('..') || segment.endsWith('.') || segment.endsWith('.lock')) {
       return 'workspace name segments must not contain "..", end with ".", or end with ".lock"'
     }
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(segment)) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(segment)) {
       return 'workspace name segments must start with a letter or digit and contain only letters, digits, ".", "_", or "-"'
     }
   }
@@ -326,7 +333,33 @@ export function parseTaskRecords(text: string): JjTaskRecord[] {
   return text
     .split('\n')
     .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as JjTaskRecord)
+    .map((line) => {
+      const parsed: unknown = JSON.parse(line)
+      // The record file is written only by `serializeTaskRecord`; a line that
+      // is not one of its records means the file was corrupted externally.
+      if (!isTaskRecord(parsed)) {
+        throw new Error('jj task record line is not a serialized task record')
+      }
+      return parsed
+    })
+}
+
+/** Whether a parsed line carries every field `jjTaskRecord` writes. */
+function isTaskRecord(value: unknown): value is JjTaskRecord {
+  if (!isPlainObject(value)) return false
+  return (
+    value.version === 1 &&
+    typeof value.sessionId === 'string' &&
+    typeof value.projectRoot === 'string' &&
+    typeof value.workspace === 'string' &&
+    typeof value.path === 'string' &&
+    typeof value.bookmark === 'string' &&
+    typeof value.changeId === 'string' &&
+    typeof value.baseChange === 'string' &&
+    typeof value.baseCommit === 'string' &&
+    typeof value.createdAt === 'string' &&
+    (value.origin === 'tool' || value.origin === 'ui')
+  )
 }
 
 /** The text of a failure. */

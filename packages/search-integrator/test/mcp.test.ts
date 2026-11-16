@@ -130,7 +130,7 @@ describe('mcpCallTool', () => {
         {},
         new AbortController().signal,
       ),
-    ).rejects.toThrow(/401/)
+    ).rejects.toThrow(/401/u)
   })
 
   it('surfaces JSON-RPC errors from the tool call', async () => {
@@ -141,7 +141,7 @@ describe('mcpCallTool', () => {
     ])
     await expect(
       mcpCallTool(post, 'https://mcp.test/x', 'k', 'web_search', {}, new AbortController().signal),
-    ).rejects.toThrow(/quota exceeded/)
+    ).rejects.toThrow(/quota exceeded/u)
   })
 
   it('accepts SSE-encoded tool results', async () => {
@@ -296,6 +296,6 @@ describe('zhipu adapter over MCP', () => {
         rawPost: post,
       },
     )
-    await expect(adapters[0]?.search('q', new AbortController().signal)).rejects.toThrow(/401/)
+    await expect(adapters[0]?.search('q', new AbortController().signal)).rejects.toThrow(/401/u)
   })
 })

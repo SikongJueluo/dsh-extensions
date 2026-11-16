@@ -36,8 +36,8 @@ const ctx = {
     disposers.push(fn())
     return () => {}
   },
-  get(name) {
-    if (name === 'agentDefaultModel') {
+  get(key) {
+    if (key === 'agentDefaultModel') {
       return {
         currentSelection: () => ({
           provider: 'global-provider',
@@ -46,7 +46,7 @@ const ctx = {
         }),
       }
     }
-    if (name === 'llm') return { listProviders: async () => [], listModels: async () => [] }
+    if (key === 'llm') return { listProviders: async () => [], listModels: async () => [] }
     return undefined
   },
   // Optional-service acquisitions (connection/webServer, presets, …) simply
@@ -119,8 +119,8 @@ if (flagNoTask.kind !== 'error' || !flagNoTask.text.includes('Usage'))
 // A full stub context: channel route captured, agents.create recorded, and a
 // writable workspace for the brief — plus a two-entry workspace registry so
 // the cross-workspace paths (picker payload, --workspace, target copy) run.
-const cwd = fileURLToPath(new URL('./.smoke-workspace', import.meta.url)).replace(/\/+$/, '')
-const targetCwd = fileURLToPath(new URL('./.smoke-target', import.meta.url)).replace(/\/+$/, '')
+const cwd = fileURLToPath(new URL('./.smoke-workspace', import.meta.url)).replace(/\/+$/u, '')
+const targetCwd = fileURLToPath(new URL('./.smoke-target', import.meta.url)).replace(/\/+$/u, '')
 await rm(cwd, { recursive: true, force: true })
 await mkdir(cwd, { recursive: true })
 await rm(targetCwd, { recursive: true, force: true })
@@ -174,7 +174,30 @@ const flowCtx = {
   commands: ctx.commands,
   logger: ctx.logger,
   effect: ctx.effect,
-  get: ctx.get,
+  get(key) {
+    if (key === 'sessionTitle')
+      return {
+        rename: (_session, title) => {
+          renamed = title
+        },
+      }
+    if (key === 'workspaceRegistry') return registry
+    // The origin session's durable selection: what it is actually on, including
+    // the effort — deliberately different from the agent's creation options.
+    if (key === 'sessionProjections') {
+      return {
+        stateOf: () => ({
+          lastUsed: { provider: 'origin-provider', model: 'origin-model', reasoningEffort: 'low' },
+          pending: {
+            provider: 'origin-provider',
+            model: 'origin-model',
+            reasoningEffort: 'medium',
+          },
+        }),
+      }
+    }
+    return ctx.get(key)
+  },
   inject(_services, cb) {
     cb(svcCtx)
   },
@@ -192,26 +215,6 @@ const flowCtx = {
       }
     },
   },
-}
-flowCtx.get = (key) => {
-  if (key === 'sessionTitle')
-    return {
-      rename: (_session, title) => {
-        renamed = title
-      },
-    }
-  if (key === 'workspaceRegistry') return registry
-  // The origin session's durable selection: what it is actually on, including
-  // the effort — deliberately different from the agent's creation options.
-  if (key === 'sessionProjections') {
-    return {
-      stateOf: () => ({
-        lastUsed: { provider: 'origin-provider', model: 'origin-model', reasoningEffort: 'low' },
-        pending: { provider: 'origin-provider', model: 'origin-model', reasoningEffort: 'medium' },
-      }),
-    }
-  }
-  return ctx.get(key)
 }
 
 apply(flowCtx, { ...config, pollMs: 25, timeoutMs: 3000 })
@@ -253,7 +256,7 @@ async function channel(endpoint, payload) {
 // A browser polls once, which is also the liveness signal that makes the
 // command wait for a real picker.
 const before = await channel('pending', {})
-if (before.requests.length !== 0) throw new Error('expected no pending picks before the command')
+if (before.requests.length > 0) throw new Error('expected no pending picks before the command')
 
 const agent = {
   id: 'origin-session',
@@ -275,19 +278,30 @@ const agent = {
 }
 
 /**
+ * Poll until the watcher spawns the fresh session (or gives up after ~2s);
+ * the spawn lands via the `agents.create` stub when the watcher's timer
+ * fires, so `created` is only ever observed here, never written.
+ */
+async function waitForSpawn() {
+  for (let i = 0; i < 200; i += 1) {
+    if (created !== null) return
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
+  }
+}
+
+/**
  * Write the completion-marked brief the instruction asked for and wait for
  * the watcher to spawn the fresh session.
  */
 async function completeBrief() {
   const briefText = followups[0].content[0].text
-  const briefPath = briefText.match(/\S+handoff\.md/)?.[0]
+  const briefPath = briefText.match(/\S+handoff\.md/u)?.[0]
   if (briefPath === undefined) throw new Error('brief instruction names no target file')
   await mkdir(dirname(briefPath), { recursive: true })
   await writeFile(briefPath, `# Goal\nsmoke\n<!-- handoff:complete -->\n`, 'utf8')
-  for (let i = 0; i < 200 && created === null; i += 1)
-    await new Promise((resolve) => {
-      setTimeout(resolve, 10)
-    })
+  await waitForSpawn()
   if (created === null) throw new Error('the watcher never spawned the fresh session')
   return { briefPath, briefText }
 }
@@ -417,17 +431,14 @@ if (followups.length !== 1)
 
 // Simulate the origin agent writing the brief it was asked for.
 const briefText = followups[0].content[0].text
-const briefPath = briefText.match(/\S+handoff\.md/)?.[0]
+const briefPath = briefText.match(/\S+handoff\.md/u)?.[0]
 if (briefPath === undefined) throw new Error('brief instruction names no target file')
 if (!briefText.includes('另一个工作区'))
   throw new Error('cross-workspace brief instruction lacks the inline hint')
 await mkdir(dirname(briefPath), { recursive: true })
 await writeFile(briefPath, `# Goal\nsmoke\n<!-- handoff:complete -->\n`, 'utf8')
 
-for (let i = 0; i < 200 && created === null; i += 1)
-  await new Promise((resolve) => {
-    setTimeout(resolve, 10)
-  })
+await waitForSpawn()
 if (created === null) throw new Error('the watcher never spawned the fresh session')
 if (
   created.agentOptions.provider !== 'picked-provider' ||
@@ -567,7 +578,7 @@ if (bareIdle.kind !== 'error' || !bareIdle.text.includes('没有可重试')) {
 
 // The flagged cycle must have left a spawn-marked meta next to its brief.
 const orderedMeta = JSON.parse(
-  await readFile(ordered.briefPath.replace(/\.md$/, '.meta.json'), 'utf8'),
+  await readFile(ordered.briefPath.replace(/\.md$/u, '.meta.json'), 'utf8'),
 )
 if (
   orderedMeta.task !== 'ordered cycle' ||
@@ -602,11 +613,11 @@ await channel('choose', {
 const slowAnswer = await slowHandled
 if (slowAnswer.kind !== 'success')
   throw new Error(`slow cycle failed: ${JSON.stringify(slowAnswer)}`)
-const slowBriefPath = followups[0].content[0].text.match(/\S+handoff\.md/)?.[0]
+const slowBriefPath = followups[0].content[0].text.match(/\S+handoff\.md/u)?.[0]
 if (slowBriefPath === undefined) throw new Error('slow cycle instruction names no file')
 await mkdir(dirname(slowBriefPath), { recursive: true })
 await writeFile(slowBriefPath, '# Goal\nslow\n', 'utf8')
-const slowMetaPath = slowBriefPath.replace(/\.md$/, '.meta.json')
+const slowMetaPath = slowBriefPath.replace(/\.md$/u, '.meta.json')
 let slowMeta = JSON.parse(await readFile(slowMetaPath, 'utf8'))
 if (slowMeta.task !== 'slow cycle' || slowMeta.spawnedAt !== undefined) {
   throw new Error(`timed-out handoff must leave an unspawned meta: ${JSON.stringify(slowMeta)}`)
@@ -677,10 +688,7 @@ await writeFile(
   '# Goal\nslow\n\n## Task\nslow cycle\n<!-- handoff:complete -->\n',
   'utf8',
 )
-for (let i = 0; i < 200 && created === null; i += 1)
-  await new Promise((resolve) => {
-    setTimeout(resolve, 10)
-  })
+await waitForSpawn()
 if (created === null) throw new Error('the retried watcher never spawned')
 if (renamed !== 'Handoff: slow cycle') throw new Error(`retry spawn title wrong: ${renamed}`)
 slowMeta = JSON.parse(await readFile(slowMetaPath, 'utf8'))
@@ -717,7 +725,7 @@ await channel('choose', {
 const lostAnswer = await lostHandled
 if (lostAnswer.kind !== 'success')
   throw new Error(`lost-watch cycle failed: ${JSON.stringify(lostAnswer)}`)
-const lostBriefPath = followups[0].content[0].text.match(/\S+handoff\.md/)?.[0]
+const lostBriefPath = followups[0].content[0].text.match(/\S+handoff\.md/u)?.[0]
 await mkdir(dirname(lostBriefPath), { recursive: true })
 await writeFile(lostBriefPath, '# Goal\nlost\n', 'utf8')
 for (let i = 0; i < 450 && followups.length < 2; i += 1) {
@@ -741,10 +749,10 @@ const directHandled = await registered.handler({
 if (directHandled.kind !== 'success' || !directHandled.text.includes('already complete')) {
   throw new Error(`complete-file retry must spawn directly: ${JSON.stringify(directHandled)}`)
 }
-if (followups.length !== 0) throw new Error('complete-file retry must not queue a briefing turn')
+if (followups.length > 0) throw new Error('complete-file retry must not queue a briefing turn')
 if (created === null) throw new Error('complete-file retry did not spawn')
 if (renamed !== 'Handoff: lost watch cycle') throw new Error(`direct retry title wrong: ${renamed}`)
-const lostMeta = JSON.parse(await readFile(lostBriefPath.replace(/\.md$/, '.meta.json'), 'utf8'))
+const lostMeta = JSON.parse(await readFile(lostBriefPath.replace(/\.md$/u, '.meta.json'), 'utf8'))
 if (lostMeta.spawnedAt === undefined) throw new Error('direct retry must mark the meta spawned')
 console.log('retry (direct spawn from complete file) OK')
 

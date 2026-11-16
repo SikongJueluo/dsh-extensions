@@ -304,12 +304,20 @@ export function buildSshArgv(sshPath: string, target: RemoteTarget): string[] {
   if (target.sshPort !== undefined) argv.push('-p', String(target.sshPort))
   // BatchMode is an invariant — the tool never answers interactive prompts —
   // and comes FIRST because ssh keeps the first obtained value per option.
-  argv.push('-o', 'BatchMode=yes')
-  argv.push(...(target.sshOptions ?? []))
-  // TOFU default for host keys; an operator option above may tighten ('yes')
-  // or widen ('no') it, but a *changed* host key always fails.
-  argv.push('-o', 'StrictHostKeyChecking=accept-new')
-  argv.push(target.sshHost, 'bash', '-s', '--')
+  // The operator's options follow it, then the TOFU host-key default: an
+  // operator option may tighten ('yes') or widen ('no') it, but a *changed*
+  // host key always fails.
+  argv.push(
+    '-o',
+    'BatchMode=yes',
+    ...(target.sshOptions ?? []),
+    '-o',
+    'StrictHostKeyChecking=accept-new',
+    target.sshHost,
+    'bash',
+    '-s',
+    '--',
+  )
   return argv
 }
 
@@ -332,7 +340,7 @@ export function parseControl(stderr: string, nonce: string): RemoteControl | und
   const kind = colon < 0 ? rest : rest.slice(0, colon)
   if (!isControlKind(kind)) return undefined
   const detail = colon < 0 ? '' : rest.slice(colon + 1)
-  const beforeEnd = at < 0 ? 0 : at
+  const beforeEnd = Math.max(at, 0)
   return { kind, detail, before: stderr.slice(0, beforeEnd) }
 }
 
@@ -359,6 +367,9 @@ export function classifyOutcome(
   if (timedOut) return 'timeout-unknown'
   if (cancelled) return 'cancelled-unknown'
   switch (control?.kind) {
+    case undefined:
+      // No nonce-framed control line arrived: classify by the ssh exit code.
+      break
     case 'cwd-error':
       return 'cwd-error'
     case 'env-error':

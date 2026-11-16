@@ -19,7 +19,6 @@
  *
  * @module dsh-execution-guard/goal-evidence
  */
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 /** Durable goal lifecycle phases (host `GoalPhase`; activation is separate). */
 export type GoalPhase = 'active' | 'paused' | 'blocked' | 'complete'
@@ -42,10 +41,14 @@ export type GoalFold =
   | { kind: 'snapshot'; snapshot: GoalSnapshot }
   | { kind: 'unreadable' }
 
-const PHASES: readonly GoalPhase[] = ['active', 'paused', 'blocked', 'complete']
+const PHASES: ReadonlySet<string> = new Set(['active', 'paused', 'blocked', 'complete'])
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function isGoalPhase(value: string): value is GoalPhase {
+  return PHASES.has(value)
 }
 
 /**
@@ -73,8 +76,8 @@ export function decodeGoalChangeV1(
   if (typeof goalId !== 'string' || goalId === '') return 'unreadable'
   if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 1)
     return 'unreadable'
-  if (typeof phase !== 'string' || !PHASES.includes(phase as GoalPhase)) return 'unreadable'
-  return { op: 'snapshot', snapshot: { goalId, revision, phase: phase as GoalPhase } }
+  if (typeof phase !== 'string' || !isGoalPhase(phase)) return 'unreadable'
+  return { op: 'snapshot', snapshot: { goalId, revision, phase } }
 }
 
 /**
@@ -83,13 +86,20 @@ export function decodeGoalChangeV1(
  * `unreadable` (later valid events may recover it — the fold keeps going,
  * matching how a strict decoder replays the newest state).
  *
+ * The parameter is the structural minimum the fold reads (`type` / `data`),
+ * so any durable event stream — including the host's typed `SessionEvent`
+ * snapshot and the duck-typed `goal/change` records that are not part of
+ * `SessionEventMap` — folds without a cast.
+ *
  * @param events - full session snapshot.
  */
-export function foldGoalEvents(events: readonly SessionEvent[]): GoalFold {
+export function foldGoalEvents(
+  events: readonly { readonly type: unknown; readonly data: unknown }[],
+): GoalFold {
   let fold: GoalFold = { kind: 'none' }
   let sawGoalEvent = false
   for (const event of events) {
-    if ((event.type as string) !== 'goal/change') continue
+    if (event.type !== 'goal/change') continue
     sawGoalEvent = true
     const decoded = decodeGoalChangeV1(event.data)
     if (decoded === undefined) continue

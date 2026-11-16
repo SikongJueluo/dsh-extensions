@@ -9,6 +9,7 @@ import {
   type DshClientContext,
   type SelectGroup,
 } from '@dsh-extensions/ui'
+import { isRecord, isUnknownArray } from '../record.js'
 import './styles.css'
 
 const NS = 'auto-permit'
@@ -55,23 +56,6 @@ interface Operations {
   modelCatalog(): Promise<CatalogResult>
 }
 
-interface SettingsNamespaceView {
-  ns?: string
-  value?: Record<string, unknown>
-  revision?: number
-}
-
-interface DescribeEnvelope {
-  ok?: boolean
-  value?: { namespaces?: SettingsNamespaceView[] }
-}
-
-interface MutateEnvelope {
-  ok?: boolean
-  value?: SettingsNamespaceView
-  error?: { message?: string }
-}
-
 /** The catalog entry of one model, or null when absent/not loaded. */
 function catalogModel(
   catalog: Catalog | null,
@@ -85,15 +69,37 @@ function catalogModel(
   return null
 }
 
+/** One method of a host remote service: JSON-safe args, an envelope result. */
+type RemoteMethod = (...args: unknown[]) => unknown
+
+/** True when the value is a callable remote method (predicate, no assertion). */
+function isRemoteMethod(value: unknown): value is RemoteMethod {
+  return typeof value === 'function'
+}
+
+/**
+ * Resolve `ctx.remote[service][name]` when it is a callable method. The
+ * generated remote wire is typed `Record<string, any>` on the client half, so
+ * the lookup is guarded field by field; an absent or malformed service yields
+ * undefined and the caller fails toward its own error row.
+ */
+function remoteMethod(source: unknown, service: string, name: string): RemoteMethod | undefined {
+  const remote = isRecord(source) ? source : undefined
+  const object = remote === undefined ? undefined : remote[service]
+  const method = isRecord(object) ? object[name] : undefined
+  return isRemoteMethod(method) ? method : undefined
+}
+
 /** Project one settings namespace view into the editor's entry shape. */
-function entryOf(view: { value?: Record<string, unknown>; revision?: number } | undefined): Entry {
-  const value = view?.value ?? {}
+function entryOf(view: unknown): Entry {
+  const record = isRecord(view) ? view : undefined
+  const value = record !== undefined && isRecord(record.value) ? record.value : {}
   return {
     enabled: value.enabled !== false,
     provider: typeof value.provider === 'string' ? value.provider : '',
     model: typeof value.model === 'string' ? value.model : '',
     reasoningEffort: typeof value.reasoningEffort === 'string' ? value.reasoningEffort : undefined,
-    revision: view?.revision,
+    revision: typeof record?.revision === 'number' ? record.revision : undefined,
   }
 }
 
@@ -109,9 +115,10 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
     operations
       .read()
       .then((result) => {
-        if (!alive) return
+        if (!alive) return undefined
         if (result.ok) setEntry(result.value)
         else setError(result.message || 'Failed to read the configuration.')
+        return undefined
       })
       .catch(() => {
         if (alive) setError('Failed to read the configuration.')
@@ -119,9 +126,10 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
     operations
       .modelCatalog()
       .then((result) => {
-        if (!alive) return
-        if (result.ok === true && result.value) setCatalog(result.value)
+        if (!alive) return undefined
+        if (result.ok && result.value) setCatalog(result.value)
         else setError('Failed to load the model catalog.')
+        return undefined
       })
       .catch(() => {
         if (alive) setError('Failed to load the model catalog.')
@@ -141,10 +149,11 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
         setBusy(false)
         if (result.ok) {
           setEntry(result.value)
-          return
+          return undefined
         }
         if (result.message.includes('overridden by a home patch')) setManaged(true)
         else setError(result.message)
+        return undefined
       })
       .catch(() => {
         setBusy(false)
@@ -171,10 +180,12 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
 
   const modelGroups: SelectGroup[] = [
     {
+      id: 'status',
       label: 'Status',
       options: [{ value: '__none__', label: 'Not configured — auto-permit stays inactive' }],
     },
     ...(catalog?.groups ?? []).map((group) => ({
+      id: group.id,
       label: group.name,
       options: group.models.map((model) => ({
         value: `${group.id}/${model.id}`,
@@ -207,19 +218,19 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
     <Root className="dshx:flex dshx:max-w-[720px] dshx:flex-col dshx:gap-4 dshx:p-4">
       <p className="dshx:text-xs dshx:leading-[20px] dshx:text-fg-muted">
         Before a bash sandbox escalation reaches the approval dialog, a judge model checks it
-        against this session's user prompts and previously approved commands; anything it cannot
-        ground falls back to the human dialog. Irreversible shapes (rm -rf ~, git clean -xfd, reset
-        --hard, push --force, sudo, curl|sh…) always go to the human. The judge model must be picked
-        explicitly — it never follows the session model.
+        against this session&apos;s user prompts and previously approved commands; anything it
+        cannot ground falls back to the human dialog. Irreversible shapes (rm -rf ~, git clean -xfd,
+        reset --hard, push --force, sudo, curl|sh…) always go to the human. The judge model must be
+        picked explicitly — it never follows the session model.
       </p>
 
       <div className="dshx:flex dshx:items-center dshx:justify-between dshx:gap-3">
         <span className="dshx:text-xs dshx:font-medium dshx:text-fg">Enabled</span>
         <Switch
-          checked={entry.enabled === true}
+          checked={entry.enabled}
           disabled={busy}
           aria-label="Enabled"
-          onCheckedChange={() => write({ enabled: !(entry.enabled === true) })}
+          onCheckedChange={() => write({ enabled: !entry.enabled })}
         />
       </div>
 
@@ -278,14 +289,20 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
 
 function apply(ctx: DshClientContext) {
   const operations: Operations = {
-    read() {
-      return ctx.remote.settings.describe().then((envelope: DescribeEnvelope) => {
-        if (!envelope || envelope.ok !== true) {
+    read(): Promise<ReadResult> {
+      const describe = remoteMethod(ctx.remote, 'settings', 'describe')
+      if (describe === undefined) {
+        return Promise.resolve({ ok: false as const, message: 'settings describe failed' })
+      }
+      return Promise.resolve(describe()).then((envelope: unknown) => {
+        if (!isRecord(envelope) || envelope.ok !== true) {
           return { ok: false as const, message: 'settings describe failed' }
         }
-        const namespaces = envelope.value?.namespaces ?? []
-        const namespace = namespaces.find((candidate) => candidate.ns === NS)
-        if (!namespace) {
+        const value = isRecord(envelope.value) ? envelope.value : undefined
+        const namespaces =
+          value !== undefined && isUnknownArray(value.namespaces) ? value.namespaces : []
+        const namespace = namespaces.find((candidate) => isRecord(candidate) && candidate.ns === NS)
+        if (namespace === undefined) {
           return { ok: false as const, message: 'auto-permit row is not mounted' }
         }
         return { ok: true as const, value: entryOf(namespace) }
@@ -298,18 +315,37 @@ function apply(ctx: DshClientContext) {
           ? { op: 'unset' as const, path: [key] }
           : { op: 'set' as const, path: [key], value: patch[key] }
       })
-      return ctx.remote.settings.mutate(NS, ops, revision).then((envelope: MutateEnvelope) => {
-        if (!envelope || envelope.ok !== true) {
+      const mutate = remoteMethod(ctx.remote, 'settings', 'mutate')
+      if (mutate === undefined) {
+        return Promise.resolve({ ok: false as const, message: 'Save failed.' })
+      }
+      return Promise.resolve(mutate(NS, ops, revision)).then((envelope: unknown) => {
+        if (!isRecord(envelope) || envelope.ok !== true) {
           return {
             ok: false as const,
-            message: envelope?.error?.message ?? 'Save failed.',
+            message:
+              isRecord(envelope) &&
+              isRecord(envelope.error) &&
+              typeof envelope.error.message === 'string'
+                ? envelope.error.message
+                : 'Save failed.',
           }
         }
         return { ok: true as const, value: entryOf(envelope.value) }
       })
     },
-    modelCatalog() {
-      return ctx.remote.session.modelCatalog()
+    modelCatalog(): Promise<CatalogResult> {
+      const modelCatalog = remoteMethod(ctx.remote, 'session', 'modelCatalog')
+      if (modelCatalog === undefined) {
+        return Promise.resolve({ ok: false, value: undefined })
+      }
+      return Promise.resolve(modelCatalog()).then((envelope: unknown) => {
+        if (!isRecord(envelope)) return { ok: false, value: undefined }
+        return {
+          ok: envelope.ok === true,
+          value: isRecord(envelope.value) ? envelope.value : undefined,
+        }
+      })
     },
   }
 

@@ -112,12 +112,12 @@ describe('expectedStockProfileArgs with policy extra roots', () => {
 
   it('a missing extra root is refused by the SDK derivation, not silently dropped', () => {
     const policy = { ...POLICY, additionalWritableRoots: [join(scratch, 'gone')] } as const
-    expect(() => expectedStockProfileArgs(policy)).toThrow(/Invalid additional writable directory/)
+    expect(() => expectedStockProfileArgs(policy)).toThrow(/Invalid additional writable directory/u)
   })
 
   it('a symlinked extra root is refused (the physical path must be named)', () => {
     const policy = { ...POLICY, additionalWritableRoots: [linkedRoot] } as const
-    expect(() => expectedStockProfileArgs(policy)).toThrow(/symlinked grants are not supported/)
+    expect(() => expectedStockProfileArgs(policy)).toThrow(/symlinked grants are not supported/u)
   })
 })
 
@@ -217,24 +217,24 @@ describe('fail-closed on non-stock layouts', () => {
     const wrapped = ['/opt/bwrap-shim', ...expectedStockProfileArgs(POLICY), '--', ...command]
     expect(() => insertGrantBinds(wrapped, command, POLICY, [BIND])).toThrow(GrantArgvError)
     expect(() => insertGrantBinds(wrapped, command, POLICY, [BIND])).toThrow(
-      /runner is "\/opt\/bwrap-shim"/,
+      /runner is "\/opt\/bwrap-shim"/u,
     )
   })
 
   it('a mutated profile element is refused with its index', () => {
     const mutated = stockConfined(POLICY, command)
     mutated[3] = '/dev/null'
-    expect(() => insertGrantBinds(mutated, command, POLICY, [BIND])).toThrow(/profile argument 2/)
+    expect(() => insertGrantBinds(mutated, command, POLICY, [BIND])).toThrow(/profile argument 2/u)
   })
 
   it('an extra profile argument shifts the separator and is refused', () => {
     const extra = ['bwrap', ...expectedStockProfileArgs(POLICY), '--new-flag', '--', ...command]
-    expect(() => insertGrantBinds(extra, command, POLICY, [BIND])).toThrow(/"--" separator/)
+    expect(() => insertGrantBinds(extra, command, POLICY, [BIND])).toThrow(/"--" separator/u)
   })
 
   it('a missing separator is refused', () => {
     const noSep = ['bwrap', ...expectedStockProfileArgs(POLICY), ...command]
-    expect(() => insertGrantBinds(noSep, command, POLICY, [BIND])).toThrow(/separator/)
+    expect(() => insertGrantBinds(noSep, command, POLICY, [BIND])).toThrow(/separator/u)
   })
 
   it('a tail that differs from the caller argv is refused', () => {
@@ -246,7 +246,7 @@ describe('fail-closed on non-stock layouts', () => {
       'build',
       '--release',
     ]
-    expect(() => insertGrantBinds(swapped, command, POLICY, [BIND])).toThrow(/caller argv/)
+    expect(() => insertGrantBinds(swapped, command, POLICY, [BIND])).toThrow(/caller argv/u)
   })
 
   it('the Landlock launcher is not the stock runner and is refused', () => {

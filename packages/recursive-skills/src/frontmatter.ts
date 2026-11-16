@@ -77,19 +77,24 @@ export function parseSkillDocument(raw: string): SkillParse {
   }
 }
 
+/** Narrow a parsed YAML/JSON value to an indexable record. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 /** Split the leading `---` block and the body; undefined means no frontmatter. */
 function splitFrontmatter(raw: string): Frontmatter | undefined {
   const firstLineEnd = raw.indexOf('\n')
   if (firstLineEnd < 0) return undefined
-  if (raw.slice(0, firstLineEnd).replace(/\r$/, '') !== '---') return undefined
+  if (raw.slice(0, firstLineEnd).replace(/\r$/u, '') !== '---') return undefined
 
   const start = firstLineEnd + 1
   const closing = findClosingFence(raw, start)
   if (closing === undefined) return undefined
 
   const parsed: unknown = parse(raw.slice(start, closing.start))
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
-  return { data: parsed as Record<string, unknown>, body: raw.slice(closing.bodyStart) }
+  if (!isRecord(parsed)) return undefined
+  return { data: parsed, body: raw.slice(closing.bodyStart) }
 }
 
 /** Locate a `---` fence line at or after `start`. */
@@ -101,7 +106,7 @@ function findClosingFence(
   while (lineStart <= raw.length) {
     const nextNewline = raw.indexOf('\n', lineStart)
     const lineEnd = nextNewline < 0 ? raw.length : nextNewline
-    if (raw.slice(lineStart, lineEnd).replace(/\r$/, '') === '---') {
+    if (raw.slice(lineStart, lineEnd).replace(/\r$/u, '') === '---') {
       return { start: lineStart, bodyStart: nextNewline < 0 ? raw.length : nextNewline + 1 }
     }
     if (nextNewline < 0) return undefined
@@ -119,10 +124,7 @@ function optionalMetadata(
   data: Record<string, unknown>,
 ): Readonly<Record<string, unknown>> | undefined {
   const value = data.metadata
-  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-    return value as Readonly<Record<string, unknown>>
-  }
-  return undefined
+  return isRecord(value) ? value : undefined
 }
 
 function parseInvocationPolicy(data: Record<string, unknown>): SkillInvocationPolicy {

@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import type { Volatile, VolatileSnapshot } from '@deepseek-ai/cordis'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { CmdPermit } from '../src/index.js'
-import type { Config, MaxMode } from '../src/index.js'
+import type { Config } from '../src/index.js'
 
 const vol = <T>(value: T): Volatile<T> => ({ get: () => value as VolatileSnapshot<T> })
 
@@ -157,26 +157,28 @@ describe('cmd-permit answerer over PTC evidence', () => {
 
   it('defers when a non-bash record disputes the sub-call id', async () => {
     const fixture = makeFixture()
-    fixture.events.push({
-      type: 'tool/ptc-dispatch-start',
-      data: {
-        rootCallId: 'root',
-        parentCallId: 'root',
-        subCallId: 'root:ptc:1',
-        name: 'bash',
-        arguments: { command: 'rtk sync', sandbox_permissions: 'workspace-write' },
+    fixture.events.push(
+      {
+        type: 'tool/ptc-dispatch-start',
+        data: {
+          rootCallId: 'root',
+          parentCallId: 'root',
+          subCallId: 'root:ptc:1',
+          name: 'bash',
+          arguments: { command: 'rtk sync', sandbox_permissions: 'workspace-write' },
+        },
       },
-    })
-    fixture.events.push({
-      type: 'tool/ptc-dispatch-start',
-      data: {
-        rootCallId: 'root',
-        parentCallId: 'root',
-        subCallId: 'root:ptc:1',
-        name: 'read',
-        arguments: { file_path: 'a.txt' },
+      {
+        type: 'tool/ptc-dispatch-start',
+        data: {
+          rootCallId: 'root',
+          parentCallId: 'root',
+          subCallId: 'root:ptc:1',
+          name: 'read',
+          arguments: { file_path: 'a.txt' },
+        },
       },
-    })
+    )
     const { outcome, fellThrough } = await fixture.answer('root:ptc:1')
     expect(fellThrough).toBe(true)
     expect(outcome).toBe('rejected') // the next() sentinel

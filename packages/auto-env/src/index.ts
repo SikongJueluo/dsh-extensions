@@ -176,6 +176,7 @@ const EMPTY_OVERLAY: EnvOverlay = Object.freeze({})
 export function mergeOverlay(spec: ShellExecSpec, overlay: EnvOverlay): ShellExecSpec {
   if (Object.keys(overlay).length === 0) return spec
   const env: Record<string, string | undefined> = { ...overlay, ...spec.env }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- A23: the SDK's `ShellExecSpec.env` cannot spell "unset"; the subprocess seam reads an `undefined` value as a tombstone, so this assertion is the only way to hand it one.
   return { ...spec, env: env as Record<string, string> }
 }
 

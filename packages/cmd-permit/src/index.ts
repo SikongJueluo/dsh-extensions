@@ -35,11 +35,12 @@
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
-import type { Session } from '@deepseek-ai/dsh-session'
+import { SessionStore } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { collectEvidence, deliverNotice, isHighRisk as builtinHighRisk } from 'dsh-auto-permit'
 import type { NoticeAgent } from 'dsh-auto-permit'
 import { buildNoticeMessage } from './notice.js'
-import { compileRules, decideAllow, MODE_RANK, type SandboxMode } from './rules.js'
+import { compileRules, decideAllow, isSandboxMode, MODE_RANK } from './rules.js'
 import { Config, registerSettings, type CmdPermitSettings } from './settings.js'
 
 export { Config } from './settings.js'
@@ -64,10 +65,12 @@ declare module '@deepseek-ai/cordis' {
 }
 
 /** Live session lookup: `agent.session` when materialized, else the store. */
-function sessionOf(ctx: Context, agent: { id: string }): Session | undefined {
-  const direct = (agent as { session?: unknown }).session
-  if (direct !== undefined && direct !== null) return direct as Session
-  return ctx.get('sessions')?.get(agent.id as never)
+function sessionOf(ctx: Context, agent: { id: SessionId; session?: Session }): Session | undefined {
+  const direct = agent.session
+  if (direct !== undefined && direct !== null) return direct
+  const sessions: unknown = ctx.get('sessions')
+  if (sessions instanceof SessionStore) return sessions.get(agent.id)
+  return undefined
 }
 
 /**
@@ -110,9 +113,9 @@ export class CmdPermit extends Service {
     try {
       const settings = this.readSettings()
       if (!settings.enabled) return undefined
-      if (MODE_RANK[mode as SandboxMode] === undefined) return undefined
+      if (!isSandboxMode(mode)) return undefined
       if (this.isHighRisk(command)) return undefined
-      if (MODE_RANK[mode as SandboxMode] > MODE_RANK[settings.maxMode]) return undefined
+      if (MODE_RANK[mode] > MODE_RANK[settings.maxMode]) return undefined
       const rules = compileRules(settings)
       const decision = decideAllow(command, rules)
       if (decision.kind === 'allow') return { via: decision.via }
@@ -151,19 +154,19 @@ export class CmdPermit extends Service {
       'approval/request',
       async (req: ApprovalRequest, next: () => Promise<ApprovalOutcome>) => {
         try {
-          if (req.toolName !== 'bash' || req.callId === undefined) return next()
+          if (req.toolName !== 'bash' || req.callId === undefined) return await next()
 
           const session = sessionOf(ctx, req.agent)
-          if (session === undefined) return next()
-          const agent = req.agent as unknown as NoticeAgent
+          if (session === undefined) return await next()
+          const agent: NoticeAgent = req.agent
 
           const evidence = collectEvidence(session, req.callId)
-          if (evidence.call === undefined) return next()
+          if (evidence.call === undefined) return await next()
 
           // Only sandbox-escalation retries carry a target mode; plain bash
           // approvals belong to the rest of the chain.
-          const mode = evidence.call.sandboxPermissions as SandboxMode | undefined
-          if (mode === undefined) return next()
+          const mode = evidence.call.sandboxPermissions
+          if (mode === undefined) return await next()
 
           const command = evidence.call.command.slice(0, 160)
           const rules = compileRules(this.readSettings())
@@ -171,7 +174,7 @@ export class CmdPermit extends Service {
 
           if (this.isHighRisk(evidence.call.command)) {
             ctx.logger.info('cmd-permit: high-risk shape, deferring: %s', command)
-            return next()
+            return await next()
           }
 
           const decision = this.claim(evidence.call.command, mode)
@@ -180,7 +183,7 @@ export class CmdPermit extends Service {
             notify(agent, evidence.call.command, mode, decision.via)
             return 'allowed-once'
           }
-          return next()
+          return await next()
         } catch (error) {
           // Any surprise (log read failure, evidence drift, …) goes to the
           // rest of the chain; never claim or reject on our own failure.

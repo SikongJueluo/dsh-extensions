@@ -16,12 +16,26 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { JjTaskState } from './jj.js'
 
 /** One endpoint segment of the channel (same grammar as connection RPC). */
-const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
 /** Status requests are tiny; anything bigger is a misbehaving client. */
 const MAX_CHANNEL_BODY_BYTES = 8 * 1024
 
 /** The channel prefix the browser posts the connection envelope to. */
 const RPC_CHANNEL = '/dsh-jj-workspace'
+
+/**
+ * Whether a decoded JSON value is an object read field by field. The stock
+ * connection grammar treats any non-null object (arrays included) as a
+ * candidate envelope/payload, so the guard deliberately keeps arrays.
+ */
+function isEnvelopeObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+/** The bytes of one request chunk; `IncomingMessage` yields Buffers while no encoding is set. */
+function toBuffer(chunk: unknown): Buffer {
+  return Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))
+}
 
 /** Why the jj option cannot create a workspace under the Session's current policy. */
 export type JjBlocker = 'read-only' | 'outside-writable-root' | 'jj-unavailable'
@@ -86,18 +100,24 @@ export function registerChannel(ctx: Context, source: JjStatusSource): void {
     const chunks: Buffer[] = []
     let received = 0
     for await (const chunk of req) {
-      received += (chunk as Buffer).byteLength
+      const data = toBuffer(chunk)
+      received += data.byteLength
       if (received > MAX_CHANNEL_BODY_BYTES) {
         respond(413, '{}')
         req.destroy()
         return
       }
-      chunks.push(chunk as Buffer)
+      chunks.push(data)
     }
-    let envelope: { type?: unknown; rpcId?: unknown; method?: unknown; payload?: unknown }
+    let envelope: Record<string, unknown> | undefined
     try {
-      envelope = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof envelope
+      const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      if (isEnvelopeObject(parsed)) envelope = parsed
     } catch {
+      respond(400, '{}')
+      return
+    }
+    if (envelope === undefined) {
       respond(400, '{}')
       return
     }
@@ -106,14 +126,12 @@ export function registerChannel(ctx: Context, source: JjStatusSource): void {
       typeof envelope.rpcId !== 'string' ||
       envelope.rpcId.length === 0 ||
       envelope.method !== endpoint ||
-      typeof envelope.payload !== 'object' ||
-      envelope.payload === null
+      !isEnvelopeObject(envelope.payload)
     ) {
       respond(400, '{}')
       return
     }
-    const payload = envelope.payload as { sessionId?: unknown }
-    const sessionId = payload.sessionId
+    const sessionId = envelope.payload.sessionId
     let result:
       | { ok: true; value: JjStatus | { tasks: JjTaskState[] } }
       | { ok: false; error: { code: string; message: string; details: object } }

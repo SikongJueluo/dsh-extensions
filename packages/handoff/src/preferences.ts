@@ -72,7 +72,7 @@ const HANDOFF_DOMAIN = defineDomain({
 function preferenceKey(environment: NodeJS.ProcessEnv = process.env): string {
   const raw = environment.DSH_PROFILE?.trim() ?? ''
   const base = raw.length > 0 ? raw : DEFAULT_PROFILE_KEY
-  return base.replaceAll(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || DEFAULT_PROFILE_KEY
+  return base.replaceAll(/[^A-Za-z0-9_-]/gu, '_').slice(0, 64) || DEFAULT_PROFILE_KEY
 }
 
 /** The small surface the command and spawn paths consume. */
@@ -113,6 +113,7 @@ export function createPreferenceStore(ctx: Context): PreferenceStore {
     if (existing !== undefined) {
       // `get()` types the raw implementation; only the table/close surface is
       // used here, and a domain opened by another instance has the same spec.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- A24: DomainFacility.get is the SDK's untyped diagnostic surface by design (only open is typed, and it rejects an already-open domain on hot reload), so the reuse path has no typed handle.
       return { domain: existing as unknown as Domain<typeof HANDOFF_DOMAIN>, owned: false }
     }
     return { domain: await facility.open(HANDOFF_DOMAIN), owned: true }

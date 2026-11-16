@@ -74,21 +74,22 @@ Fallow 的入口来自 `package.json` 脚本与框架插件，不解析 `check-s
 
 ## 5. 统一入口（已实现）
 
-`pnpm check:quality`（[scripts/check-quality.mjs](../scripts/check-quality.mjs)）按顺序跑 10 步，
+`pnpm check:quality`（[scripts/check-quality.mjs](../scripts/check-quality.mjs)）按顺序跑 11 步，
 默认**跑完全部再汇总**（`--fail-fast` 可改为首个失败即停，`--only=<step>` 只跑单步）：
 
 | # | step | 命令 | 当前状态 |
 | --- | --- | --- | --- |
-| 1 | format | `format:check` | ✓ 228 个文件已排版 |
-| 2 | lint | `lint` | ✗ 1810 条待修 |
-| 3 | dead-code | `fallow` | ✗ 3 条 error 级 |
-| 4 | types | `typecheck` | ✓ |
-| 5 | build | `build` | ✓ |
-| 6 | tests | `test` | ✓ |
-| 7 | smoke | `check:smoke` | ✓ |
-| 8 | client | `check:client` | ✓ |
-| 9 | pack | `check:pack` | ✓ |
-| 10 | storybook | `build:storybook` | ✓ |
+| 1 | format | `format:check` | ✓ 全仓已排版 |
+| 2 | lint | `lint` | ✓ 0 条（起点 2173；见 quality-gates.md §8） |
+| 3 | suppressions | `check:suppressions` | ✓ 21 条内联抑制全部在 §6 批准清单内 |
+| 4 | dead-code | `fallow` | ✓ 0 条 error 级 |
+| 5 | types | `typecheck` | ✓ |
+| 6 | build | `build` | ✓ |
+| 7 | tests | `test` | ✓ |
+| 8 | smoke | `check:smoke` | ✓ |
+| 9 | client | `check:client` | ✓ |
+| 10 | pack | `check:pack` | ✓ |
+| 11 | storybook | `build:storybook` | ✓ |
 
 顺序的理由：前三步不需要构建、最快失败；`build` 之后所有 `lib/` 消费者（测试、smoke、
 client 检查）才有意义。`fallow health` / `fallow dupes` 不进这个入口，它们是报告，不是门禁。

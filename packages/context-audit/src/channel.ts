@@ -17,13 +17,13 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { collectAudit } from './audit.js'
+import { collectAudit, isRecord } from './audit.js'
 
 /** Route prefix this channel serves on the host web server. */
 export const RPC_CHANNEL = '/dsh-context-audit'
 
 /** One endpoint segment of the channel (same grammar as connection RPC). */
-const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
 /** Report requests are tiny; anything bigger is a misbehaving client. */
 const MAX_CHANNEL_BODY_BYTES = 16 * 1024
 
@@ -58,7 +58,7 @@ export function registerChannel(ctx: Context, deps: ChannelDeps): void {
         error: { code: 'UNKNOWN_ENDPOINT', message: `Unknown endpoint "${endpoint}"`, details: {} },
       }
     }
-    const rawDays = (payload as { days?: unknown } | null | undefined)?.days
+    const rawDays = isRecord(payload) ? payload.days : undefined
     let days: number | undefined
     if (rawDays === undefined || rawDays === null || rawDays === 'all') {
       days = undefined
@@ -117,18 +117,27 @@ export function registerChannel(ctx: Context, deps: ChannelDeps): void {
     }
     const chunks: Buffer[] = []
     let received = 0
-    for await (const chunk of req) {
-      received += (chunk as Buffer).byteLength
+    // IncomingMessage is `AsyncIterable<any>` in the node typings; the request
+    // stream yields Buffers unless an encoding was set (never here), so the
+    // annotation records that fact instead of casting every chunk.
+    const body: AsyncIterable<Buffer> = req
+    for await (const chunk of body) {
+      received += chunk.byteLength
       if (received > MAX_CHANNEL_BODY_BYTES) {
         respond(413, '{}')
         req.destroy()
         return
       }
-      chunks.push(chunk as Buffer)
+      chunks.push(chunk)
     }
-    let envelope: { type?: unknown; rpcId?: unknown; method?: unknown; payload?: unknown }
+    let envelope: Record<string, unknown>
     try {
-      envelope = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof envelope
+      const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      if (!isRecord(parsed)) {
+        respond(400, '{}')
+        return
+      }
+      envelope = parsed
     } catch {
       respond(400, '{}')
       return

@@ -28,7 +28,7 @@ export const PROBE_SCHEDULE_MS = [
   30 * 60_000,
   30 * 60_000,
   30 * 60_000,
-]
+] as const
 /** Once this much time has elapsed since the first failure, tighten probing. */
 export const PROBE_TIGHTEN_AFTER_MS = 4 * 60 * 60 * 1000
 export const PROBE_TIGHT_DELAY_MS = 5 * 60_000
@@ -67,11 +67,11 @@ export function planResetWait(
       kind: 'give-up',
       reason: `auto-continue wait budget of ${Math.round(options.maxWaitMs / 60000)} min is exhausted`,
     }
-  const candidates: Array<{
+  const candidates: {
     window: 'fiveHour' | 'weekly' | 'monthlyMcp'
     percent: number | undefined
     resetAt: number | undefined
-  }> = [
+  }[] = [
     {
       window: 'fiveHour',
       percent: snapshot?.fiveHour?.percent,
@@ -88,13 +88,13 @@ export function planResetWait(
     (c): c is typeof c & { resetAt: number } => c.resetAt !== undefined,
   )
   if (withReset.length === 0)
-    return { kind: 'wait', delayMs: Math.min(PROBE_SCHEDULE_MS[0]!, budget), window: 'probe' }
+    return { kind: 'wait', delayMs: Math.min(PROBE_SCHEDULE_MS[0], budget), window: 'probe' }
   // Only a window that actually looks exhausted may drive the wait: a fresh
   // snapshot disagreeing with the failure (all windows below threshold) means
   // stale or misattributed data, and the caller should probe instead.
   const exhausted = withReset.filter((c) => (c.percent ?? 0) >= 95)
   if (exhausted.length === 0)
-    return { kind: 'wait', delayMs: Math.min(PROBE_SCHEDULE_MS[0]!, budget), window: 'probe' }
+    return { kind: 'wait', delayMs: Math.min(PROBE_SCHEDULE_MS[0], budget), window: 'probe' }
   // When several windows are exhausted, the latest reset binds: an earlier
   // reset (e.g. 5h rolling over) does not help while the weekly one blocks.
   const binding = exhausted.reduce((a, b) => (a.resetAt >= b.resetAt ? a : b))
@@ -139,7 +139,10 @@ export function planProbeWait(
   if (elapsedMs >= PROBE_TIGHTEN_AFTER_MS) {
     delayMs = PROBE_TIGHT_DELAY_MS
   } else {
-    delayMs = PROBE_SCHEDULE_MS[Math.min(probeIndex, PROBE_SCHEDULE_MS.length - 1)]!
+    // A negative probeIndex read past the start before (indexed access yields
+    // `undefined`, then `Math.min(undefined, budget)` folded to NaN); keep
+    // that exact outcome instead of inventing a staged delay for it.
+    delayMs = PROBE_SCHEDULE_MS[Math.min(probeIndex, PROBE_SCHEDULE_MS.length - 1)] ?? Number.NaN
   }
   const clipped = Math.min(delayMs, budget)
   return { kind: 'wait', delayMs: clipped, window: 'probe', retryAt: now + clipped }

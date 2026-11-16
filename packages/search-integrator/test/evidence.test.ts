@@ -62,7 +62,7 @@ describe('buildEvidence', () => {
     expect(top).toBeDefined()
     if (top === undefined) throw new Error('unreachable')
     expect(top.url).toBe('https://a.example/1')
-    expect([...top.providers].sort()).toEqual(['exa', 'tavily'])
+    expect(top.providers.toSorted()).toEqual(['exa', 'tavily'])
     expect(top.id).toBe(1)
   })
 

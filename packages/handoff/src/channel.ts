@@ -20,12 +20,13 @@ import { PACKAGE_NAME, RPC_CHANNEL } from './identity.js'
 import {
   coerceModelChoice,
   coercePresetChoice,
+  isRecord,
   type ModelChoice,
   type PresetChoice,
 } from './choice.js'
 
 /** One endpoint segment of the channel (same grammar as connection RPC). */
-const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
 /** Picks are tiny; anything bigger is a misbehaving client. */
 const MAX_BODY_BYTES = 64 * 1024
 /** A browser that polled this recently counts as attached to this command surface. */
@@ -122,8 +123,11 @@ export interface ChoiceRequestWire {
   }
 }
 
-/** The workspace verdict riding a choice: `'origin'` or a registry id. */
-export type WorkspacePick = 'origin' | (string & {})
+/**
+ * The workspace verdict riding a choice: `'origin'` (the literal the callers
+ * compare against) or a registry id.
+ */
+export type WorkspacePick = string
 
 /** The auto-review verdict riding a choice. */
 export interface ReviewPick {
@@ -189,8 +193,8 @@ function parsePresetChoice(
  * "not offered / left off".
  */
 function parseReview(value: unknown, defaultRounds: number): ReviewPick | undefined {
-  if (typeof value !== 'object' || value === null) return undefined
-  const record = value as Record<string, unknown>
+  if (!isRecord(value)) return undefined
+  const record = value
   if (typeof record.enabled !== 'boolean') return undefined
   const rounds = record.rounds === undefined ? defaultRounds : record.rounds
   if (typeof rounds !== 'number' || !Number.isInteger(rounds) || rounds < 1 || rounds > 50)
@@ -210,8 +214,8 @@ function parseChoice(
 ):
   | { choice: ModelChoice; workspace: WorkspacePick; preset?: PresetChoice; review?: ReviewPick }
   | undefined {
-  if (typeof value !== 'object' || value === null) return undefined
-  const record = value as Record<string, unknown>
+  if (!isRecord(value)) return undefined
+  const record = value
   const choice = parseModelChoice(record)
   if (choice === undefined) return undefined
   // An absent field is NO opinion: the caller keeps the host's resolved
@@ -232,7 +236,7 @@ function parseChoice(
     return undefined
   return {
     choice,
-    workspace: raw === undefined ? 'origin' : raw,
+    workspace: raw ?? 'origin',
     ...(preset === undefined ? {} : { preset }),
     ...(review === undefined ? {} : { review }),
   }
@@ -262,26 +266,29 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
     lastPollAt = Date.now()
     switch (endpoint) {
       case 'pending': {
-        const requests: ChoiceRequestWire[] = [...pending.values()].map((entry) => ({
-          id: entry.id,
-          sessionId: entry.sessionId,
-          task: entry.task,
-          ...(entry.inherited === undefined ? {} : { inherited: entry.inherited }),
-          ...(entry.fallback === undefined ? {} : { fallback: entry.fallback }),
-          ...(entry.defaultChoice === undefined ? {} : { defaultChoice: entry.defaultChoice }),
-          ...(entry.defaultChoiceIssue === undefined
-            ? {}
-            : { defaultChoiceIssue: entry.defaultChoiceIssue }),
-          ...(entry.preset === undefined ? {} : { preset: entry.preset }),
-          ...(entry.origin === undefined ? {} : { origin: entry.origin }),
-          ...(entry.workspaces === undefined ? {} : { workspaces: entry.workspaces }),
-          ...(entry.pickWorkspace === undefined ? {} : { pickWorkspace: entry.pickWorkspace }),
-          ...(entry.modelFixed === undefined ? {} : { modelFixed: entry.modelFixed }),
-          ...(entry.fixedModel === undefined ? {} : { fixedModel: entry.fixedModel }),
-          ...(entry.fixedWorkspace === undefined ? {} : { fixedWorkspace: entry.fixedWorkspace }),
-          ...(entry.previous === undefined ? {} : { previous: entry.previous }),
-          ...(entry.review === undefined ? {} : { review: entry.review }),
-        }))
+        const requests: ChoiceRequestWire[] = []
+        for (const entry of pending.values()) {
+          requests.push({
+            id: entry.id,
+            sessionId: entry.sessionId,
+            task: entry.task,
+            ...(entry.inherited === undefined ? {} : { inherited: entry.inherited }),
+            ...(entry.fallback === undefined ? {} : { fallback: entry.fallback }),
+            ...(entry.defaultChoice === undefined ? {} : { defaultChoice: entry.defaultChoice }),
+            ...(entry.defaultChoiceIssue === undefined
+              ? {}
+              : { defaultChoiceIssue: entry.defaultChoiceIssue }),
+            ...(entry.preset === undefined ? {} : { preset: entry.preset }),
+            ...(entry.origin === undefined ? {} : { origin: entry.origin }),
+            ...(entry.workspaces === undefined ? {} : { workspaces: entry.workspaces }),
+            ...(entry.pickWorkspace === undefined ? {} : { pickWorkspace: entry.pickWorkspace }),
+            ...(entry.modelFixed === undefined ? {} : { modelFixed: entry.modelFixed }),
+            ...(entry.fixedModel === undefined ? {} : { fixedModel: entry.fixedModel }),
+            ...(entry.fixedWorkspace === undefined ? {} : { fixedWorkspace: entry.fixedWorkspace }),
+            ...(entry.previous === undefined ? {} : { previous: entry.previous }),
+            ...(entry.review === undefined ? {} : { review: entry.review }),
+          })
+        }
         return { requests }
       }
       case 'choose': {
@@ -346,34 +353,42 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
     const chunks: Buffer[] = []
     let received = 0
     for await (const chunk of req) {
-      received += (chunk as Buffer).byteLength
+      // HTTP request chunks are always Buffers; a non-Buffer would have made
+      // the old arithmetic produce NaN and crash at Buffer.concat — respond
+      // 400 instead of crashing the handler.
+      if (!Buffer.isBuffer(chunk)) {
+        respond(400, '{}')
+        req.destroy()
+        return
+      }
+      received += chunk.byteLength
       if (received > MAX_BODY_BYTES) {
         respond(413, '{}')
         req.destroy()
         return
       }
-      chunks.push(chunk as Buffer)
+      chunks.push(chunk)
     }
-    let envelope: { type?: unknown; rpcId?: unknown; method?: unknown; payload?: unknown }
+    let parsed: unknown
     try {
-      envelope = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof envelope
+      parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'))
     } catch {
       respond(400, '{}')
       return
     }
     if (
-      envelope.type !== 'client-request' ||
-      typeof envelope.rpcId !== 'string' ||
-      envelope.rpcId.length === 0 ||
-      envelope.method !== endpoint ||
-      typeof envelope.payload !== 'object' ||
-      envelope.payload === null
+      !isRecord(parsed) ||
+      parsed.type !== 'client-request' ||
+      typeof parsed.rpcId !== 'string' ||
+      parsed.rpcId.length === 0 ||
+      parsed.method !== endpoint ||
+      !isRecord(parsed.payload)
     ) {
       respond(400, '{}')
       return
     }
-    const result = await handler(svcCtx, endpoint, envelope.payload as Record<string, unknown>)
-    respond(200, JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId, result }))
+    const result = await handler(svcCtx, endpoint, parsed.payload)
+    respond(200, JSON.stringify({ type: 'server-response', rpcId: parsed.rpcId, result }))
   }
 
   ctx.inject(['connection', 'webServer'], (svcCtx) => {

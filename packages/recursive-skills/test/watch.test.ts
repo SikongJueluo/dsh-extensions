@@ -1,7 +1,7 @@
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { FsTarget } from '@deepseek-ai/dsh-fs'
-import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
+import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import { describe, expect, it } from 'vitest'
 import { catalogNames, createHarness, eventually, skillDocument, writeSkill } from './helpers.js'
 
@@ -196,11 +196,11 @@ describe('hot refresh', () => {
       ])
       fs.missedRoot = harness.skillsRoot
       const first = await catalogNames(harness.ctx)
-      expect(first.sort()).toEqual(['first', 'missed'])
+      expect(first.toSorted()).toEqual(['first', 'missed'])
       await new Promise((resolve) => {
         setTimeout(resolve, 500)
       })
-      expect((await catalogNames(harness.ctx)).sort()).toEqual(['first', 'missed'])
+      expect((await catalogNames(harness.ctx)).toSorted()).toEqual(['first', 'missed'])
     } finally {
       await harness.dispose()
     }
@@ -221,6 +221,7 @@ describe('hot refresh', () => {
 
       const disposal = harness.ctx.fiber.dispose().then(() => {
         disposalResolved = true
+        return undefined
       })
       await new Promise((resolve) => {
         setTimeout(resolve, 50)
@@ -287,7 +288,7 @@ class FirstWatchWritesFileSystem extends LocalFileSystem {
         'description: Created during watcher setup',
       ])
     }
-    return await super.watch(target, changed, signal)
+    return super.watch(target, changed, signal)
   }
 }
 
@@ -295,7 +296,7 @@ class FirstWatchWritesFileSystem extends LocalFileSystem {
 class DeferredCloseFileSystem extends LocalFileSystem {
   opened = 0
   closed = 0
-  readonly callbacks: Array<(error?: Error) => void> = []
+  readonly callbacks: ((error?: Error) => void)[] = []
   private release: () => void = () => undefined
   private readonly gate = new Promise<void>((resolve) => {
     this.release = resolve

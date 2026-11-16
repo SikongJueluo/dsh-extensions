@@ -59,19 +59,20 @@ export async function snapshotPresets(
   if (presets === undefined) return undefined
   try {
     const inherited = presets.composedPreset(agent.ctx)
-    const rows = (await presets.list())
-      .slice()
-      .sort(
-        (left, right) =>
-          (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER) ||
-          left.id.localeCompare(right.id),
-      )
-    const options = rows.map((row): PresetOption => ({
-      id: row.id,
-      ...(row.name === undefined ? {} : { name: row.name }),
-      ...(row.description === undefined ? {} : { description: row.description }),
-      ...(row.broken === undefined ? {} : { broken: row.broken }),
-    }))
+    const rows = (await presets.list()).toSorted(
+      (left, right) =>
+        (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER) ||
+        left.id.localeCompare(right.id),
+    )
+    const options: PresetOption[] = []
+    for (const row of rows) {
+      options.push({
+        id: row.id,
+        ...(row.name === undefined ? {} : { name: row.name }),
+        ...(row.description === undefined ? {} : { description: row.description }),
+        ...(row.broken === undefined ? {} : { broken: row.broken }),
+      })
+    }
     return {
       ...(inherited === undefined ? {} : { inherited }),
       options,
@@ -132,9 +133,10 @@ export async function mountedPreset(
   let resolved: { id: string; name?: string; broken?: string }
   try {
     resolved = await presets.resolve(target)
-  } catch (error) {
+  } catch (cause) {
     throw new Error(
-      `无法解析预设 ${target}：${error instanceof Error ? error.message : String(error)}`,
+      `无法解析预设 ${target}：${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
     )
   }
   if (resolved.broken !== undefined) {

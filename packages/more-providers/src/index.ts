@@ -12,7 +12,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { ConfigError, loadConfig, resolveConfigPath } from './config.js'
+import type { KeySource } from './keys.js'
 import { ProviderKeys } from './keys.js'
+import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import { buildAdapter, buildProviders } from './providers.js'
 import { PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
 
@@ -55,8 +57,8 @@ export const inject = ['llm']
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const log = ctx.logger(PACKAGE_NAME)
   const path = resolveConfigPath(config.configFile)
-  let profiles = new Map()
-  let keys = new Map()
+  let profiles = new Map<string, ResolvedPiAiProviderProfile>()
+  let keys = new Map<string, KeySource>()
   try {
     const resolved = await loadConfig(path)
     const built = await buildProviders(resolved, log)

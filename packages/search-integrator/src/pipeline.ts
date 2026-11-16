@@ -24,6 +24,7 @@ import type { SearchIntegratorSettings } from './settings.js'
 import type {
   AuditRef,
   Coverage,
+  EvidenceSource,
   RawHit,
   ResearchResult,
   ResultSource,
@@ -95,7 +96,9 @@ async function searchRound(
   const errorsByAdapter = new Map<string, unknown[]>()
   const succeeded = new Set<string>()
   settled.forEach((outcome, index) => {
-    const { adapter } = tasks[index] as { adapter: SearchAdapter; query: string }
+    const task = tasks[index]
+    if (task === undefined) return
+    const { adapter } = task
     if (outcome.status === 'fulfilled') {
       succeeded.add(adapter.id)
       for (const hit of outcome.value) hits.push(hit)
@@ -121,7 +124,7 @@ function toResultSources(
     title?: string
     snippet: string
     publishedAt?: string
-    providers: readonly string[]
+    providers: string[]
   }[],
 ): ResultSource[] {
   return evidence.map((source) => ({
@@ -408,10 +411,10 @@ const THIN_CONTENT_CHARS = 600
  * thin, in parallel and best-effort: any failure keeps the provider snippet.
  */
 async function enrichThinSources(
-  evidence: readonly import('./types.js').EvidenceSource[],
+  evidence: readonly EvidenceSource[],
   deps: PipelineDeps,
   signal: AbortSignal,
-): Promise<import('./types.js').EvidenceSource[]> {
+): Promise<EvidenceSource[]> {
   const fetcher = deps.fetchPage
   if (fetcher === undefined || deps.settings.fetchTopN <= 0) return [...evidence]
   const targets = new Set(
@@ -425,7 +428,7 @@ async function enrichThinSources(
   )
   if (targets.size === 0) return [...evidence]
   const cap = deps.settings.excerptChars
-  const settled = await Promise.allSettled(
+  const settled = await Promise.all(
     evidence.map(async (source) => {
       if (!targets.has(source.id)) return source
       // Each page fetch gets its own deadline: a slow site must not eat the
@@ -446,9 +449,7 @@ async function enrichThinSources(
       }
     }),
   )
-  return settled.map((entry) =>
-    entry.status === 'fulfilled' ? entry.value : (entry.reason as never),
-  )
+  return settled
 }
 
 function failureList(failures: readonly SourceFailure[]): string {

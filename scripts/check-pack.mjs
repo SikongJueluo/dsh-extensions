@@ -33,7 +33,7 @@ for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })
     } else {
       const listing = execFileSync('tar', ['-tzf', join(out, tarball)], { encoding: 'utf8' })
         .split('\n')
-        .map((line) => line.replace(/^package\//, ''))
+        .map((line) => line.replace(/^package\//u, ''))
         .filter(Boolean)
       const required = ['package.json', 'lib/index.js', 'cordis.patch.yml']
       if (manifest.dsh.client) required.push('lib/client.js')

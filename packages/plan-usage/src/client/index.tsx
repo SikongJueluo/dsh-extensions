@@ -81,7 +81,7 @@ const zh = {
 }
 
 function relTime(t: Translate, at?: number) {
-  const diff = Date.now() - (at || 0)
+  const diff = Date.now() - (at ?? 0)
   const s = Math.floor(diff / 1000)
   if (s < 5) return t('checkedJustNow')
   if (s < 60) return t('secondsAgo', { n: s })
@@ -90,8 +90,8 @@ function relTime(t: Translate, at?: number) {
   return t('hoursAgo', { n: Math.floor(m / 60) })
 }
 
-function fmtDuration(ms: number) {
-  if (ms < 0) ms = 0
+function fmtDuration(rawMs: number) {
+  const ms = Math.max(0, rawMs)
   let s = Math.floor(ms / 1000)
   const d = Math.floor(s / 86400)
   s -= d * 86400
@@ -106,7 +106,7 @@ function fmtDuration(ms: number) {
 }
 
 function fmtCount(n: number) {
-  if (typeof n !== 'number' || !isFinite(n)) return '—'
+  if (typeof n !== 'number' || !Number.isFinite(n)) return '—'
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`
@@ -114,7 +114,7 @@ function fmtCount(n: number) {
 }
 
 function fmtUsd(n: number) {
-  if (typeof n !== 'number' || !isFinite(n)) return '—'
+  if (typeof n !== 'number' || !Number.isFinite(n)) return '—'
   return `$${n.toFixed(2)}`
 }
 
@@ -143,11 +143,11 @@ interface ProviderView {
   error?: string
 }
 
-interface QuotaResult {
-  ok: boolean
-  value?: { providers?: ProviderView[] }
-  error?: { message?: string }
-}
+// Discriminated so `value` is present exactly when `ok` is — the channel's
+// server half answers `{ ok: true, value } | { ok: false, error }`.
+type QuotaResult =
+  | { ok: true; value: { providers?: ProviderView[] } }
+  | { ok: false; error?: { message?: string } }
 
 interface Operations {
   quota(refresh: boolean): Promise<QuotaResult>
@@ -163,7 +163,7 @@ function callQuota(refresh: boolean): Promise<QuotaResult> {
       type: 'client-request',
       rpcId: `plan-usage-${String(rpcSeq)}`,
       method: 'quota',
-      payload: { refresh: !!refresh },
+      payload: { refresh },
     }),
   })
     .then((r) => r.json())
@@ -299,7 +299,9 @@ function ProviderCard({ t, view, nowTick }: { t: Translate; view: ProviderView; 
           ) : null}
         </>
       ) : (
-        <Alert variant="warn">{view.error ? view.error : t('fetchFailed')}</Alert>
+        <Alert variant="warn">
+          {view.error === undefined || view.error === '' ? t('fetchFailed') : view.error}
+        </Alert>
       )}
     </Card>
   )
@@ -318,7 +320,7 @@ function Section({ operations, t }: { operations: Operations; t: Translate }) {
       .then((result) => {
         // Same throw-on-missing-envelope semantics as the old code: a missing
         // `value` rejects into the catch below and keeps the previous views.
-        if (result.ok && aliveRef.current) setViews(result.value!.providers || [])
+        if (result.ok && aliveRef.current) setViews(result.value.providers ?? [])
         return result
       })
       .catch(() => null)

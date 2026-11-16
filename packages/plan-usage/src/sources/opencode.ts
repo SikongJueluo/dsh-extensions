@@ -17,6 +17,7 @@
  * @module dsh-plan-usage/sources/opencode
  */
 import type { QuotaSnapshot } from '../types.js'
+import { isRecord } from './contracts.js'
 import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
 /** The OpenCode Go usage endpoint. */
@@ -39,9 +40,7 @@ function finite(value: unknown): number | undefined {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
+  return isRecord(value) ? value : null
 }
 
 /** Epoch-ms reset from an ISO-8601 string; unparseable or absurd instants are dropped. */

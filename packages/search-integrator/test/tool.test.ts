@@ -48,22 +48,23 @@ function settings(overrides: Partial<SearchIntegratorSettings> = {}): SearchInte
   }
 }
 
+const fakePostJson: ToolHost['postJson'] = async () => ({
+  results: [
+    {
+      title: 'A',
+      url: 'https://a.example/1',
+      content: 'evidence one',
+      published_date: '2026-01-02',
+    },
+  ],
+})
+
 function fakeHost(overrides: Partial<ToolHost> = {}): ToolHost {
   const integration = JSON.stringify({
     summary: 'Tool-level answer.',
     points: [{ text: 'fact', status: 'supported', sources: [1] }],
     unknowns: [],
     followup: { needed: false, queries: [] },
-  })
-  const fakePostJson: ToolHost['postJson'] = async () => ({
-    results: [
-      {
-        title: 'A',
-        url: 'https://a.example/1',
-        content: 'evidence one',
-        published_date: '2026-01-02',
-      },
-    ],
   })
   return {
     readSettings: () => settings(),

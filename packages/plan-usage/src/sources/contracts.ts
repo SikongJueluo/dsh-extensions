@@ -8,6 +8,15 @@
  */
 import type { QuotaSnapshot } from '../types.js'
 
+/**
+ * True when `value` is a plain object record (non-null, non-array). The
+ * per-source parsers share this guard instead of repeating a
+ * `value as Record<string, unknown>` assertion five times.
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 /** Minimal logger surface a source uses. */
 export interface SourceLogger {
   warn(message: string, ...args: unknown[]): void

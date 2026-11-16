@@ -73,7 +73,7 @@ export class SkillWatcher {
       () => undefined,
       () => undefined,
     )
-    return await run
+    return run
   }
 
   /** Abort initialization, close every watcher, and ignore later callbacks. */
@@ -90,8 +90,8 @@ export class SkillWatcher {
   }
 
   private async apply(desired: ReadonlyMap<string, FsTarget>): Promise<boolean> {
-    let opened = false
     const pending: Promise<void>[] = []
+    const openings: Promise<boolean>[] = []
     for (const [key, target] of desired) {
       if (this.closed) break
       const existing = this.states.get(key)
@@ -108,9 +108,9 @@ export class SkillWatcher {
       }
       const state: WatchState = { target, controller: new AbortController(), version: undefined }
       this.states.set(key, state)
-      state.opening = this.open(key, state).then((didOpen) => {
-        if (didOpen) opened = true
-      })
+      const opening = this.open(key, state)
+      state.opening = opening.then(() => undefined)
+      openings.push(opening)
       pending.push(state.opening)
     }
     for (const [key, state] of this.states) {
@@ -119,7 +119,7 @@ export class SkillWatcher {
       pending.push(this.closeState(state))
     }
     await Promise.all(pending)
-    return opened
+    return (await Promise.all(openings)).some(Boolean)
   }
 
   private async open(key: string, state: WatchState): Promise<boolean> {

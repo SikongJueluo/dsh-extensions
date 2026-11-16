@@ -111,6 +111,20 @@ export interface AuditOptions {
   now: number
 }
 
+/** Whether a parsed-JSON value is a plain object record (never an array). */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Field readers over parsed-JSON records: exact `typeof` evidence, no casts. */
+function fieldString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+function fieldNumber(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined
+}
+
 /** A minimal `{ provider, model }` pair key. */
 function routeKey(provider: string, model: string): string {
   return `${provider}/${model}`
@@ -141,60 +155,45 @@ function parseLog(text: string): ParsedLog {
   let cwd: string | undefined
   for (const line of text.split('\n')) {
     if (line.length === 0) continue
-    let event: {
-      type?: string
-      time?: number
-      cwd?: string
-      data?: {
-        usage?: {
-          inputTokens?: number
-          cacheReadTokens?: number
-          cacheWriteTokens?: number
-          outputTokens?: number
-          reasoningTokens?: number
-        }
-        message?: {
-          source?: { provider?: string; model?: string }
-          toolCallId?: string
-          isError?: boolean
-        }
-        error?: { code?: unknown; name?: unknown } | undefined
-        callId?: string
-        name?: string
-      }
-    }
+    let event: Record<string, unknown>
     try {
-      event = JSON.parse(line) as typeof event
+      const parsed: unknown = JSON.parse(line)
+      if (!isRecord(parsed)) continue
+      event = parsed
     } catch {
       continue
     }
+    const data = isRecord(event.data) ? event.data : undefined
+    const message =
+      data === undefined ? undefined : isRecord(data.message) ? data.message : undefined
     if (event.type === 'session' && typeof event.cwd === 'string') {
       cwd = event.cwd
       continue
     }
     if (typeof event.time !== 'number') continue
-    const data = event.data
     if (event.type === 'assistant/message') {
-      const usage = data?.usage
-      const source = data?.message?.source
-      if (usage === undefined || source?.provider === undefined || source.model === undefined)
-        continue
+      const usage = data === undefined ? undefined : isRecord(data.usage) ? data.usage : undefined
+      const source =
+        message === undefined ? undefined : isRecord(message.source) ? message.source : undefined
+      const provider = source === undefined ? undefined : fieldString(source.provider)
+      const model = source === undefined ? undefined : fieldString(source.model)
+      if (usage === undefined || provider === undefined || model === undefined) continue
       samples.push({
         time: event.time,
-        provider: source.provider,
-        model: source.model,
-        inputTokens: usage.inputTokens ?? 0,
-        cacheReadTokens: usage.cacheReadTokens ?? 0,
-        cacheWriteTokens: usage.cacheWriteTokens ?? 0,
-        outputTokens: usage.outputTokens ?? 0,
-        reasoningTokens: usage.reasoningTokens ?? 0,
+        provider,
+        model,
+        inputTokens: fieldNumber(usage.inputTokens) ?? 0,
+        cacheReadTokens: fieldNumber(usage.cacheReadTokens) ?? 0,
+        cacheWriteTokens: fieldNumber(usage.cacheWriteTokens) ?? 0,
+        outputTokens: fieldNumber(usage.outputTokens) ?? 0,
+        reasoningTokens: fieldNumber(usage.reasoningTokens) ?? 0,
       })
       continue
     }
     if (event.type === 'tool/call') {
-      const name = data?.name
-      const callId = data?.callId
-      if (typeof name !== 'string' || typeof callId !== 'string') continue
+      const name = fieldString(data?.name)
+      const callId = fieldString(data?.callId)
+      if (name === undefined || callId === undefined) continue
       const sample: ToolSample = {
         name,
         callTime: event.time,
@@ -207,14 +206,15 @@ function parseLog(text: string): ParsedLog {
       continue
     }
     if (event.type === 'tool/result') {
-      const callId = data?.message?.toolCallId
-      if (typeof callId !== 'string') continue
+      const callId = fieldString(message?.toolCallId)
+      if (callId === undefined) continue
       const sample = openCalls.get(callId)
       if (sample === undefined) continue
       openCalls.delete(callId)
       sample.resultTime = event.time
-      sample.error = data?.message?.isError === true || data?.error !== undefined
-      const code = data?.error?.code ?? data?.error?.name
+      sample.error = message?.isError === true || data?.error !== undefined
+      const error = data === undefined ? undefined : isRecord(data.error) ? data.error : undefined
+      const code = error?.code ?? error?.name
       sample.errorCode = sample.error ? (typeof code === 'string' ? code : 'ERROR') : undefined
     }
   }
@@ -225,8 +225,11 @@ function parseLog(text: string): ParsedLog {
 async function readTitle(projcacheDir: string, sessionId: string): Promise<string | undefined> {
   try {
     const text = await readFile(join(projcacheDir, `${sessionId}.json`), 'utf8')
-    const title = (JSON.parse(text) as { record?: { rows?: { title?: { val?: unknown } } } })
-      ?.record?.rows?.title?.val
+    const parsed: unknown = JSON.parse(text)
+    if (!isRecord(parsed)) return undefined
+    const record = isRecord(parsed.record) ? parsed.record : undefined
+    const rows = record === undefined ? undefined : isRecord(record.rows) ? record.rows : undefined
+    const title = rows === undefined ? undefined : isRecord(rows.title) ? rows.title.val : undefined
     return typeof title === 'string' && title.length > 0 ? title : undefined
   } catch {
     return undefined
@@ -248,7 +251,7 @@ function finishTool(tool: MutableTool): ToolAggregate {
   return {
     ...rest,
     sessions: sessionIds.size,
-    errorCodes: [...errorCodeCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5),
+    errorCodes: [...errorCodeCounts.entries()].toSorted((a, b) => b[1] - a[1]).slice(0, 5),
   }
 }
 
@@ -294,7 +297,7 @@ export async function collectAudit(
       let files: string[] = []
       try {
         files = (await readdir(sessionDir)).filter((name) =>
-          /^session\.v\d+\.jsonl\.zstd$/.test(name),
+          /^session\.v\d+\.jsonl\.zstd$/u.test(name),
         )
       } catch {
         continue
@@ -339,7 +342,8 @@ export async function collectAudit(
           model.last = Math.max(model.last, sample.time)
 
           let session = sessions.get(sessionId)
-          if (session === undefined) {
+          let perModel = sessionModels.get(sessionId)
+          if (session === undefined || perModel === undefined) {
             session = {
               id: sessionId,
               title: undefined,
@@ -352,8 +356,9 @@ export async function collectAudit(
               output: 0,
               routes: [],
             }
+            perModel = new Map()
             sessions.set(sessionId, session)
-            sessionModels.set(sessionId, new Map())
+            sessionModels.set(sessionId, perModel)
           }
           session.requests++
           session.uncachedInput += sample.inputTokens
@@ -361,7 +366,6 @@ export async function collectAudit(
           session.output += sample.outputTokens
           session.first = Math.min(session.first, sample.time)
           session.last = Math.max(session.last, sample.time)
-          const perModel = sessionModels.get(sessionId)!
           perModel.set(key, (perModel.get(key) ?? 0) + 1)
         }
         for (const sample of toolSamples) {
@@ -407,7 +411,7 @@ export async function collectAudit(
   for (const session of sessionList) {
     const perModel = sessionModels.get(session.id)
     session.routes = [...(perModel?.entries() ?? [])]
-      .sort((a, b) => b[1] - a[1])
+      .toSorted((a, b) => b[1] - a[1])
       .map(([key, count]) => (count === 1 ? key : `${key}×${count}`))
   }
   // Distinct-session count per route, derived after the scan.
@@ -428,10 +432,12 @@ export async function collectAudit(
     windowDays: options.days,
     scannedSessionFiles,
     sessionsWithUsage: sessionList.length,
-    models: [...models.values()].sort((a, b) => b.uncachedInput - a.uncachedInput),
-    tools: [...tools.values()].sort((a, b) => b.calls - a.calls).map(finishTool),
+    models: [...models.values()].toSorted((a, b) => b.uncachedInput - a.uncachedInput),
+    tools: [...tools.values()]
+      .toSorted((a, b) => b.calls - a.calls)
+      .map((tool) => finishTool(tool)),
     sessions: sessionList
-      .sort((a, b) => b.uncachedInput - a.uncachedInput)
+      .toSorted((a, b) => b.uncachedInput - a.uncachedInput)
       .slice(0, options.sessionLimit),
   }
 }
@@ -443,9 +449,11 @@ function formatTokens(value: number): string {
   return String(value)
 }
 
+/** Zero-padded two-digit form of a number (5 → "05"). */
+const pad = (n: number) => String(n).padStart(2, '0')
+
 function formatClock(ms: number): string {
   const date = new Date(ms)
-  const pad = (n: number) => String(n).padStart(2, '0')
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
@@ -463,17 +471,18 @@ function formatDuration(ms: number): string {
 /** Render the report as the command's reply text. */
 export function formatReport(report: AuditReport): string {
   const window = report.windowDays === undefined ? '全部历史' : `近 ${report.windowDays} 天`
-  const lines: string[] = []
-  lines.push(
+  const lines: string[] = [
     `context-audit：扫描 ${report.scannedSessionFiles} 个会话日志（${window}），${report.sessionsWithUsage} 个会话有用量。`,
-  )
-  lines.push('')
+    '',
+  ]
 
   if (report.models.length > 0) {
-    lines.push('**按 provider/model 汇总**（命中率 = cacheRead / (cacheRead + uncached输入)）')
-    lines.push('')
-    lines.push('| 路由 | 请求 | prompt总量 | 缓存命中 | 命中率 | 输出 | 会话数 |')
-    lines.push('|---|---:|---:|---:|---:|---:|---:|')
+    lines.push(
+      '**按 provider/model 汇总**（命中率 = cacheRead / (cacheRead + uncached输入)）',
+      '',
+      '| 路由 | 请求 | prompt总量 | 缓存命中 | 命中率 | 输出 | 会话数 |',
+      '|---|---:|---:|---:|---:|---:|---:|',
+    )
     for (const model of report.models) {
       const promptTotal = model.uncachedInput + model.cacheRead
       lines.push(
@@ -484,10 +493,12 @@ export function formatReport(report: AuditReport): string {
   }
 
   if (report.tools.length > 0) {
-    lines.push('**按工具汇总**（失败率 = isError 结果 / 已完成结果）')
-    lines.push('')
-    lines.push('| 工具 | 调用 | 失败 | 失败率 | 平均耗时 | 最长 | 会话数 |')
-    lines.push('|---|---:|---:|---:|---:|---:|---:|')
+    lines.push(
+      '**按工具汇总**（失败率 = isError 结果 / 已完成结果）',
+      '',
+      '| 工具 | 调用 | 失败 | 失败率 | 平均耗时 | 最长 | 会话数 |',
+      '|---|---:|---:|---:|---:|---:|---:|',
+    )
     for (const tool of report.tools) {
       const fail =
         tool.completed === 0 ? '—' : `${((tool.errors / tool.completed) * 100).toFixed(1)}%`
@@ -498,8 +509,7 @@ export function formatReport(report: AuditReport): string {
     }
     const withCodes = report.tools.filter((tool) => tool.errorCodes.length > 0)
     if (withCodes.length > 0) {
-      lines.push('')
-      lines.push('错误码分布：')
+      lines.push('', '错误码分布：')
       for (const tool of withCodes.slice(0, 8)) {
         lines.push(
           `- ${tool.name}: ${tool.errorCodes.map(([code, n]) => `${code}×${n}`).join('、')}`,
@@ -510,10 +520,12 @@ export function formatReport(report: AuditReport): string {
   }
 
   if (report.sessions.length > 0) {
-    lines.push(`**按会话**（uncached输入最多的前 ${report.sessions.length} 个）`)
-    lines.push('')
-    lines.push('| 会话 | 时间范围 | 路由 | 请求 | uncached | 命中率 |')
-    lines.push('|---|---|---|---:|---:|---:|')
+    lines.push(
+      `**按会话**（uncached输入最多的前 ${report.sessions.length} 个）`,
+      '',
+      '| 会话 | 时间范围 | 路由 | 请求 | uncached | 命中率 |',
+      '|---|---|---|---:|---:|---:|',
+    )
     for (const session of report.sessions) {
       const title =
         session.title === undefined ? session.id.slice(0, 12) : session.title.replaceAll('|', '丨')

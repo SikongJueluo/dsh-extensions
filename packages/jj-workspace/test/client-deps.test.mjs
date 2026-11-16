@@ -155,7 +155,7 @@ async function mount({ withForge }) {
       await tick()
     },
     async cleanup() {
-      for (const handle of handles.reverse()) await handle.dispose()
+      for (const handle of handles.toReversed()) await handle.dispose()
     },
   }
 }

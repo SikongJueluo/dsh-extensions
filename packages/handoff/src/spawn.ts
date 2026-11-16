@@ -14,8 +14,8 @@ import { basename } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session-title'
-import type {} from '@deepseek-ai/dsh-workspace'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
 import { bootstrapPrompt } from './prompt.js'
@@ -31,7 +31,7 @@ const TITLE_TASK_LIMIT = 40
 
 /** Mint a fresh session identity (the brand is compile-time only). */
 function mintSessionId(): SessionId {
-  return crypto.randomUUID() as SessionId
+  return SessionId(crypto.randomUUID())
 }
 
 /** Copy the origin agent's model route into creation options (defined fields only). */
@@ -121,7 +121,7 @@ async function attachToWorkspace(
   try {
     let workspace: Awaited<ReturnType<typeof registry.resolveByPath>> = undefined
     if (pending.target.workspaceId !== undefined) {
-      workspace = registry.get(pending.target.workspaceId as Parameters<typeof registry.get>[0])
+      workspace = registry.get(WorkspaceId(pending.target.workspaceId))
     } else {
       workspace = await registry.resolveByPath(pending.target.path)
     }
@@ -143,7 +143,7 @@ async function preflightTarget(rt: HandoffRuntime, pending: PendingHandoff): Pro
   if (pending.target.workspaceId === undefined) return
   const registry = rt.ctx.get('workspaceRegistry')
   if (registry === undefined) return
-  const workspace = registry.get(pending.target.workspaceId as Parameters<typeof registry.get>[0])
+  const workspace = registry.get(WorkspaceId(pending.target.workspaceId))
   if (workspace === undefined) {
     throw new Error(`目标工作区已不在注册表中：${pending.target.title} (${pending.target.path})`)
   }
@@ -210,7 +210,7 @@ async function bindReview(
   try {
     const bound = await triggers.bindReviewLoop({
       task: pending.task,
-      executorSession: String(sessionId),
+      executorSession: sessionId,
       parentSession: String(pending.agent.id),
       maxRounds,
       // A handoff executor is single-purpose: its normally-ended turn IS the
@@ -225,7 +225,7 @@ async function bindReview(
     rt.ctx.logger(PACKAGE_NAME).info('auto-review loop bound', {
       bindingId: bound.bindingId,
       runId: bound.runId,
-      executor: String(sessionId),
+      executor: sessionId,
       parent: String(pending.agent.id),
       maxRounds,
     })

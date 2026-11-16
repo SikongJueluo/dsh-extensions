@@ -9,9 +9,8 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const packageDir = dirname(dirname(fileURLToPath(import.meta.url)))
+const packageDir = dirname(import.meta.dirname)
 
 interface EscalationDefaults {
   allow: string[]
@@ -24,15 +23,17 @@ function escalationDefaults(file: string): EscalationDefaults {
   // Both files pin flow-style lists under the cmd-permit row's config.
   const allow = /\ballow:\s*\[([^\]]*)\]/u.exec(text)
   const maxMode = /\bmaxMode:\s*['"]?([\w-]+)/u.exec(text)
-  if (allow === null || maxMode === null) {
+  const allowBody = allow?.[1]
+  const modeSource = maxMode?.[1]
+  if (allowBody === undefined || modeSource === undefined) {
     throw new Error(`cannot read escalation defaults from ${file}`)
   }
   return {
-    allow: allow[1]!
+    allow: allowBody
       .split(',')
       .map((entry) => entry.trim().replaceAll(/^['"]|['"]$/gu, ''))
       .filter((entry) => entry !== ''),
-    maxMode: maxMode[1]!,
+    maxMode: modeSource,
   }
 }
 

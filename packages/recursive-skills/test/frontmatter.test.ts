@@ -62,11 +62,13 @@ describe('parseSkillDocument', () => {
     for (const field of ['disableModelInvocation', 'modelInvocable', 'userInvocable']) {
       const result = parse(`name: a\ndescription: A\n${field}: true`)
       expect(result.ok).toBe(false)
-      expect(result).toMatchObject({ reason: expect.stringContaining('unsupported') })
+      const unsupported: unknown = expect.stringContaining('unsupported')
+      expect(result).toMatchObject({ reason: unsupported })
     }
   })
 
   it('rejects invalid names, missing fields, bad YAML, and absent frontmatter', () => {
+    const invalidYaml: unknown = expect.stringContaining('invalid YAML frontmatter')
     expect(parse('name: Bad_Name\ndescription: A')).toMatchObject({
       ok: false,
       reason: 'invalid skill name "Bad_Name"',
@@ -77,7 +79,7 @@ describe('parseSkillDocument', () => {
     })
     expect(parse('name: [unclosed')).toMatchObject({
       ok: false,
-      reason: expect.stringContaining('invalid YAML frontmatter'),
+      reason: invalidYaml,
     })
     expect(parseSkillDocument('# no frontmatter')).toMatchObject({
       ok: false,

@@ -65,7 +65,7 @@ import { dirname } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
-import LocalSandboxProvider from '@deepseek-ai/dsh-sandbox-local'
+import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { Config as LocalSandboxConfig } from '@deepseek-ai/dsh-sandbox-local'
 import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { workspaceWritableRoots } from '@deepseek-ai/dsh-sandbox'
@@ -211,6 +211,11 @@ export const configFields = {
 // the spread keeps every sibling bundle's schema-extension pattern intact.
 export const Config = Schema.object({ ...configFields })
 
+/** Keep an absolute directory value; drop empty or relative ones. */
+function absolute(value: string | undefined): string | undefined {
+  return value !== undefined && value !== '' && value.startsWith('/') ? value : undefined
+}
+
 /**
  * Collect the ambient host facts grants derive from. The dsh host process
  * inherits the operator's session environment — this is deliberately NOT
@@ -222,8 +227,6 @@ export function grantEnvFrom(
   uid: number,
   env: Record<string, string | undefined>,
 ): GrantEnv {
-  const absolute = (value: string | undefined): string | undefined =>
-    value !== undefined && value !== '' && value.startsWith('/') ? value : undefined
   return {
     home,
     uid,

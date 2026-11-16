@@ -1,7 +1,7 @@
 import { mkdir, rm, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { FsDirEntry, FsTarget } from '@deepseek-ai/dsh-fs'
-import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
+import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import { describe, expect, it } from 'vitest'
 import { RecursiveSkillProvider } from '../src/provider.js'
 import {
@@ -68,8 +68,8 @@ describe('recursive discovery', () => {
     try {
       await seed(harness.skillsRoot)
       const names = await catalogNames(harness.ctx)
-      expect(names.sort()).toEqual(
-        ['deep-two', 'disabled-skill', 'docx', 'dup', 'pdf', 'sibling'].sort(),
+      expect(names.toSorted()).toEqual(
+        ['deep-two', 'disabled-skill', 'docx', 'dup', 'pdf', 'sibling'].toSorted(),
       )
     } finally {
       await harness.dispose()
@@ -153,7 +153,7 @@ describe('recursive discovery', () => {
       await symlink(harness.skillsRoot, join(harness.skillsRoot, 'category', 'loop'), 'dir')
 
       const names = await catalogNames(harness.ctx)
-      expect(names.sort()).toEqual(['linked-skill', 'real-skill'])
+      expect(names.toSorted()).toEqual(['linked-skill', 'real-skill'])
       expect(await harness.ctx.skills.get('linked-skill')).toMatchObject({
         content: '# Skill',
       })
@@ -269,6 +269,6 @@ class FlakyFileSystem extends LocalFileSystem {
     if (this.failList.has(target.displayPath)) {
       throw Object.assign(new Error('simulated list failure'), { code: 'FS_IO_ERROR' })
     }
-    return await super.listDir(target, signal)
+    return super.listDir(target, signal)
   }
 }

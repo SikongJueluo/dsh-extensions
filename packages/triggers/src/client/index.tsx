@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Alert, Badge, Button, Input, Root, cn, type DshClientContext } from '@dsh-extensions/ui'
+import { isRecord } from '../record.js'
 import './styles.css'
 
 const RPC_BASE = '/dsh-triggers'
@@ -120,7 +121,7 @@ type ActionFn = (endpoint: string, payload: Record<string, unknown>) => Promise<
 
 interface RpcResult<T> {
   ok?: boolean
-  value?: T
+  value: T
   error?: { message?: string }
 }
 
@@ -141,10 +142,10 @@ function callRpc<T>(endpoint: string, payload?: Record<string, unknown>): Promis
       payload: payload ?? {},
     }),
   })
-    .then((response) => response.json() as Promise<RpcEnvelope<T>>)
-    .then((body) => {
+    .then((response) => response.json())
+    .then((body: RpcEnvelope<T> | undefined) => {
       const result = body?.result
-      if (result && result.ok) return result.value as T
+      if (result && result.ok) return result.value
       const message = result && result.error ? result.error.message : 'channel error'
       throw new Error(message)
     })
@@ -359,20 +360,24 @@ function asText(value: unknown): string {
 }
 
 function template(text: string, vars: Record<string, unknown>): string {
-  return String(text).replaceAll(/\{(\w+)\}/g, (_, key: string) => asText(vars[key]))
+  return text.replaceAll(/\{(\w+)\}/gu, (_, key: string) => asText(vars[key]))
 }
 
 function messageOf(error: unknown): string {
   if (typeof error === 'string') return error
-  const candidate = error as { message?: unknown } | undefined | null
+  const candidate = isRecord(error) ? error : undefined
   if (typeof candidate?.message === 'string') return candidate.message
   return asText(error)
+}
+
+/** Two-digit zero pad for clock parts. */
+function pad(value: number): string {
+  return String(value).padStart(2, '0')
 }
 
 function fmtTime(ms: number): string {
   if (typeof ms !== 'number' || !Number.isFinite(ms)) return '—'
   const date = new Date(ms)
-  const pad = (value: number): string => String(value).padStart(2, '0')
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
     date.getMinutes(),
   )}`
@@ -383,20 +388,21 @@ function fmtTime(ms: number): string {
 // abbreviate the tail instead. Titles are the primary label and this is
 // the fallback for a session missing from the client catalog.
 function shortId(id: string): string {
-  const raw = String(id).replace(/^session-/, '')
+  const raw = id.replace(/^session-/u, '')
   if (raw.length <= 10) return raw
   return `${raw.slice(0, 4)}…${raw.slice(-4)}`
 }
 
 function safeId(value: string): string {
-  return String(value).replaceAll(/[^A-Za-z0-9_-]/g, '-')
+  return value.replaceAll(/[^A-Za-z0-9_-]/gu, '-')
 }
 
 function sessionLabel(t: Translate, sessionsById: SessionsById, id: string | undefined): string {
   if (typeof id !== 'string' || id.length === 0) return t('unknownSession')
   const row = sessionsById[id]
   if (row) {
-    const title = row.displayTitle || row.title
+    const title =
+      row.displayTitle === undefined || row.displayTitle === '' ? row.title : row.displayTitle
     if (typeof title === 'string' && title.length > 0) return title
     return shortId(id)
   }
@@ -515,11 +521,18 @@ const RUN_RANK: Record<string, number> = {
 }
 
 function pickCurrentRun(runs: TriggerRun[]): TriggerRun | undefined {
-  return runs.slice().sort((left, right) => {
-    const leftRank = RUN_RANK[left.status] ?? 9
-    const rightRank = RUN_RANK[right.status] ?? 9
-    return leftRank - rightRank || right.startedAt - left.startedAt
-  })[0]
+  // First run in `runSnapshotRank` order (stable: ties keep input order).
+  let current: TriggerRun | undefined
+  for (const run of runs) {
+    if (current === undefined) {
+      current = run
+      continue
+    }
+    const leftRank = RUN_RANK[run.status] ?? 9
+    const rightRank = RUN_RANK[current.status] ?? 9
+    if (leftRank - rightRank || current.startedAt - run.startedAt < 0) current = run
+  }
+  return current
 }
 
 const GROUP_RANK: Record<string, number> = {
@@ -539,7 +552,7 @@ function groupRank(group: RunGroup): number {
 function groupActivity(group: RunGroup): number {
   let latest = 0
   for (const run of group.runs) {
-    latest = Math.max(latest, run.startedAt || 0, run.endedAt || 0)
+    latest = Math.max(latest, run.startedAt ?? 0, run.endedAt ?? 0)
   }
   return latest
 }
@@ -575,7 +588,10 @@ function buildGroups(data: ScopedSnapshot, sessionId: string): RunGroup[] {
   for (const run of data.runs) {
     let group = run.bindingId ? byBinding.get(run.bindingId) : undefined
     if (group === undefined) {
-      group = { id: run.bindingId || `run-${run.id}`, runs: [] }
+      group = {
+        id: run.bindingId === undefined || run.bindingId === '' ? `run-${run.id}` : run.bindingId,
+        runs: [],
+      }
       byBinding.set(group.id, group)
       groups.push(group)
     }
@@ -729,7 +745,7 @@ function ConfigFacts(props: {
   function templateName(id?: string): string {
     const record = id ? templatesById.get(id) : undefined
     if (record && typeof record.name === 'string' && record.name.length > 0) return record.name
-    return id || '—'
+    return id !== undefined && id !== '' ? id : '—'
   }
   const refs = binding.templates ?? {}
   const templatesLine = `${t('tplStart')} ${templateName(refs.start)} · ${t(
@@ -768,9 +784,9 @@ function HistoryList({ t, run }: { t: Translate; run: TriggerRun }) {
             ? ` · ${t('historyTruncated', { shown: shown.length, total: history.length })}`
             : '')}
       </div>
-      {shown.map((entry, index) => (
+      {shown.map((entry) => (
         <div
-          key={index}
+          key={`${entry.at}-${entry.kind}`}
           className="dshx:grid dshx:grid-cols-[70px_minmax(0,1fr)] dshx:gap-2.5 dshx:border-b dshx:border-border dshx:py-[7px] dshx:text-xs dshx:leading-[1.5] dshx:text-fg-secondary dshx:max-[600px]:grid-cols-[58px_minmax(0,1fr)] dshx:max-[600px]:gap-2"
         >
           <span className="dshx:whitespace-nowrap dshx:tabular-nums dshx:text-fg-muted">
@@ -818,7 +834,9 @@ function DeliveryList(props: {
 
   return (
     <div className="dshx:mt-3.5">
-      <div className={SUBLABEL_CLASS}>{props.title || t('deliveriesTitle')}</div>
+      <div className={SUBLABEL_CLASS}>
+        {props.title === undefined || props.title === '' ? t('deliveriesTitle') : props.title}
+      </div>
       {shown.map((delivery) => (
         <div
           key={delivery.id}
@@ -879,6 +897,7 @@ function RunActions(props: { t: Translate; run: TriggerRun; onAction: ActionFn }
     void Promise.resolve(onAction('run.control', { runId: run.id, action, ...extra }))
       .then((ok) => {
         if (ok) setNote('')
+        return undefined
       })
       .finally(() => {
         setBusy(false)
@@ -920,6 +939,7 @@ function RunActions(props: { t: Translate; run: TriggerRun; onAction: ActionFn }
         disabled={busy}
         className="dshx:max-[600px]:flex-1"
         onClick={() => {
+          // oxlint-disable-next-line eslint/no-alert -- A26: the blocking confirmation IS the cancel gate; replacing it with an in-app dialog would change the visible cancel flow (A19 class).
           if (window.confirm(t('confirmCancel'))) control('cancel')
         }}
       >
@@ -1067,7 +1087,7 @@ function RunBody(props: {
         deliveries={runDeliveries}
         onAction={onAction}
         templates={templates}
-        binding={props.showConfig === true ? props.binding : undefined}
+        binding={props.showConfig ? props.binding : undefined}
       />
     </div>
   )
@@ -1288,7 +1308,7 @@ function TriggerListView(props: {
   onDismissActionError: () => void
 }) {
   const { t, sessionId, data, error, actionError } = props
-  const loading = props.loading === true
+  const loading = props.loading
   const sessionsById = props.sessionsById || {}
   const scoped = data === null ? null : scopeSnapshot(data, sessionId)
   const groups = scoped === null ? [] : buildGroups(scoped, sessionId)
@@ -1348,7 +1368,7 @@ function TriggerListView(props: {
     body = (
       <div className={EMPTY_CLASS}>
         <p className="dshx:text-sm dshx:leading-[1.6] dshx:text-fg">
-          {t('loadFailed', { message: error === undefined ? '' : error })}
+          {t('loadFailed', { message: error ?? '' })}
         </p>
         <Button variant="secondary" size="sm" className="dshx:mt-3.5" onClick={props.onRefresh}>
           {t('retry')}
@@ -1427,9 +1447,10 @@ interface TriggersViewProps {
 
 // --- the fetch/poll wrapper; TriggerListView stays pure for tests ---------
 function TriggersView(props: TriggersViewProps) {
-  const { t } = props
+  const { t, useSessions } = props
   const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
-  const sessionsById = props.useSessions((state) => state.byId)
+  // oxlint-disable-next-line react/hooks -- A27: the host slot supplies this store hook as a prop; it is module-level in the host store, so its identity is stable across renders (client.test.mjs passes the same prop shape).
+  const sessionsById = useSessions((state) => state.byId)
   const [state, setState] = useState<{
     sessionId: string
     data: StatePayload | null
@@ -1444,8 +1465,9 @@ function TriggersView(props: TriggersViewProps) {
     const current = ++generation.current
     return callRpc<StatePayload>('state', { sessionId })
       .then((data) => {
-        if (current !== generation.current) return
+        if (current !== generation.current) return undefined
         setState({ sessionId, data, loading: false, error: undefined })
+        return undefined
       })
       .catch((cause: unknown) => {
         if (current !== generation.current) return
@@ -1540,7 +1562,7 @@ export { apply }
 export const inject = ['slots', 'locale']
 
 /** Component/logic handles for the browser-half test harness. */
-export const __test = {
+export const testHandles = {
   shortId,
   TriggerListView,
   TriggersView,

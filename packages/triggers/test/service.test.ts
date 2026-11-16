@@ -23,6 +23,20 @@ interface FakePromptCall {
   text: string
 }
 
+/** Narrow a possibly-absent fixture lookup; the test fails loud at the site. */
+function present<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`expected ${what} to exist`)
+  return value
+}
+
+/** Settle queued promise chains (bounded), so a commit's send can land. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i++)
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5)
+    })
+}
+
 /** A minimal host surface satisfying everything TriggerService touches. */
 function createFakeHost() {
   const tables = {
@@ -31,7 +45,7 @@ function createFakeHost() {
     runs: new Map<string, unknown>(),
     deliveries: new Map<string, unknown>(),
   }
-  const listeners = new Map<string, Array<(session: { id: string }, event: unknown) => void>>()
+  const listeners = new Map<string, ((session: { id: string }, event: unknown) => void)[]>()
   const prompts: FakePromptCall[] = []
   /** Flip to true to make the queue refuse every send (failure drills). */
   const queue = { fail: false }
@@ -96,12 +110,6 @@ function createFakeHost() {
   const emit = (sessionId: string, event: { type: string; data: unknown }): void => {
     for (const listener of listeners.get('session/event') ?? []) listener({ id: sessionId }, event)
   }
-  const flush = async (): Promise<void> => {
-    for (let i = 0; i < 5; i++)
-      await new Promise((resolve) => {
-        setTimeout(resolve, 5)
-      })
-  }
   const service = (): TriggerService => new TriggerService(ctx as never, {})
   return { tables, prompts, queue, emit, flush, service }
 }
@@ -124,7 +132,7 @@ describe('loop end to end', () => {
       parentSession: PARENT,
       maxRounds: 5,
     })
-    expect(bound.runId).toMatch(/^run-/)
+    expect(bound.runId).toMatch(/^run-/u)
     // handoff-style bind sends no start prompt of its own
     expect(host.prompts).toHaveLength(0)
     const run = host.tables.runs.get(bound.runId) as RunRecord
@@ -144,10 +152,10 @@ describe('loop end to end', () => {
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 3, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(1)
-    expect(host.prompts[0]!.sessionId).toBe(PARENT)
-    expect(host.prompts[0]!.mode).toBe('queue')
-    expect(host.prompts[0]!.text).toContain(bound.runId)
-    expect(host.prompts[0]!.text).toContain('实现完成，测试 12/12')
+    expect(present(host.prompts[0], 'first prompt').sessionId).toBe(PARENT)
+    expect(present(host.prompts[0], 'first prompt').mode).toBe('queue')
+    expect(present(host.prompts[0], 'first prompt').text).toContain(bound.runId)
+    expect(present(host.prompts[0], 'first prompt').text).toContain('实现完成，测试 12/12')
     expect((host.tables.runs.get(bound.runId) as RunRecord).phase).toBe('awaiting-review')
   })
 
@@ -171,7 +179,7 @@ describe('loop end to end', () => {
     const afterRework = host.tables.runs.get(bound.runId) as RunRecord
     expect(afterRework.phase).toBe('awaiting-delivery')
     expect(afterRework.round).toBe(2)
-    const reworkPrompt = host.prompts.at(-1)!
+    const reworkPrompt = present(host.prompts.at(-1), 'last prompt')
     expect(reworkPrompt.sessionId).toBe(EXECUTOR)
     expect(reworkPrompt.text).toContain('修 e2e')
 
@@ -185,8 +193,8 @@ describe('loop end to end', () => {
     await host.flush()
 
     expect((host.tables.runs.get(bound.runId) as RunRecord).status).toBe('completed')
-    expect(host.prompts.at(-1)!.sessionId).toBe(EXECUTOR)
-    expect(host.prompts.at(-1)!.text).toContain('审核通过')
+    expect(present(host.prompts.at(-1), 'last prompt').sessionId).toBe(EXECUTOR)
+    expect(present(host.prompts.at(-1), 'last prompt').text).toContain('审核通过')
   })
 })
 
@@ -255,8 +263,8 @@ describe('abuse and stop paths through the service', () => {
     expect(paused.status).toBe('paused-user')
     const resumed = await svc.controlRun(bound.runId, 'resume', { message: '继续' })
     expect(resumed.status).toBe('active')
-    expect(host.prompts.at(-1)!.sessionId).toBe(EXECUTOR)
-    expect(host.prompts.at(-1)!.text).toContain('继续')
+    expect(present(host.prompts.at(-1), 'last prompt').sessionId).toBe(EXECUTOR)
+    expect(present(host.prompts.at(-1), 'last prompt').text).toContain('继续')
 
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 4 } })
     await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 's' })
@@ -285,8 +293,8 @@ describe('abuse and stop paths through the service', () => {
     const run = host.tables.runs.get(bound.runId) as RunRecord
     expect(run.status).toBe('paused-user')
     expect(run.pausedBy).toBe('executor')
-    expect(host.prompts.at(-1)!.sessionId).toBe(PARENT)
-    expect(host.prompts.at(-1)!.text).toContain('选哪个方案？')
+    expect(present(host.prompts.at(-1), 'last prompt').sessionId).toBe(PARENT)
+    expect(present(host.prompts.at(-1), 'last prompt').text).toContain('选哪个方案？')
   })
 })
 
@@ -319,7 +327,7 @@ describe('delivery failures', () => {
     // The queue heals; redelivering reuses the SAME requestId.
     host.queue.fail = false
     await svc.controlRun(bound.runId, 'redeliver', { deliveryId: delivery.id })
-    const resent = host.prompts.at(-1)!
+    const resent = present(host.prompts.at(-1), 'last prompt')
     expect(resent.requestId).toBe(delivery.requestId)
   })
 })
@@ -405,8 +413,8 @@ describe('turn-end auto-delivery', () => {
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(1)
-    expect(host.prompts[0]!.sessionId).toBe(PARENT)
-    expect(host.prompts[0]!.text).toContain('实现完成；54/54 通过')
+    expect(present(host.prompts[0], 'first prompt').sessionId).toBe(PARENT)
+    expect(present(host.prompts[0], 'first prompt').text).toContain('实现完成；54/54 通过')
     expect((host.tables.runs.get(bound.runId) as RunRecord).phase).toBe('awaiting-review')
   })
 
@@ -437,8 +445,8 @@ describe('turn-end auto-delivery', () => {
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(1)
-    expect(host.prompts[0]!.text).toContain('最终交付说明')
-    expect(host.prompts[0]!.text).not.toContain('中间步骤输出')
+    expect(present(host.prompts[0], 'first prompt').text).toContain('最终交付说明')
+    expect(present(host.prompts[0], 'first prompt').text).not.toContain('中间步骤输出')
     void bound
   })
 
@@ -498,7 +506,7 @@ describe('turn-end auto-delivery', () => {
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(1)
-    expect(host.prompts[0]!.text).toContain('最终交付')
+    expect(present(host.prompts[0], 'first prompt').text).toContain('最终交付')
     expect((host.tables.runs.get(bound.runId) as RunRecord).phase).toBe('awaiting-review')
   })
 
@@ -532,7 +540,7 @@ describe('turn-end auto-delivery', () => {
     expect((host.tables.runs.get(first.runId) as RunRecord).phase).toBe('awaiting-review')
     expect((host.tables.runs.get(second.runId) as RunRecord).phase).toBe('awaiting-delivery')
     expect(host.prompts).toHaveLength(1)
-    expect(host.prompts[0]!.text).toContain('显式交付')
+    expect(present(host.prompts[0], 'first prompt').text).toContain('显式交付')
   })
 
   it('a completed turn with no final reply nudges once, then stays quiet', async () => {
@@ -546,8 +554,8 @@ describe('turn-end auto-delivery', () => {
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(1)
-    expect(host.prompts[0]!.sessionId).toBe(EXECUTOR)
-    expect(host.prompts[0]!.text).toContain('没有可作为交付说明的最终回复')
+    expect(present(host.prompts[0], 'first prompt').sessionId).toBe(EXECUTOR)
+    expect(present(host.prompts[0], 'first prompt').text).toContain('没有可作为交付说明的最终回复')
 
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
     await host.flush()
@@ -569,8 +577,8 @@ describe('missing-conclusion nudges', () => {
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(startPrompts + 1)
-    expect(host.prompts.at(-1)!.sessionId).toBe(EXECUTOR)
-    expect(host.prompts.at(-1)!.text).toContain('未收到交付信号')
+    expect(present(host.prompts.at(-1), 'last prompt').sessionId).toBe(EXECUTOR)
+    expect(present(host.prompts.at(-1), 'last prompt').text).toContain('未收到交付信号')
 
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
     await host.flush()
@@ -596,8 +604,8 @@ describe('missing-conclusion nudges', () => {
     host.emit(PARENT, { type: 'turn/end', data: { turn: 4, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(2)
-    expect(host.prompts[1]!.sessionId).toBe(PARENT)
-    expect(host.prompts[1]!.text).toContain('仍在等待审核结论')
+    expect(present(host.prompts[1], 'second prompt').sessionId).toBe(PARENT)
+    expect(present(host.prompts[1], 'second prompt').text).toContain('仍在等待审核结论')
 
     host.emit(PARENT, { type: 'turn/end', data: { turn: 5, reason: { kind: 'completed' } } })
     await host.flush()
@@ -675,8 +683,14 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
       (p) => p.sessionId === EXECUTOR && p.text.includes('必须调用 trigger_signal'),
     )
     expect(nudges).toHaveLength(2)
-    const nudgeForFirst = nudges.find((p) => p.text.includes(`runId=${first.runId}`))!
-    const nudgeForSecond = nudges.find((p) => p.text.includes(`runId=${second.runId}`))!
+    const nudgeForFirst = present(
+      nudges.find((p) => p.text.includes(`runId=${first.runId}`)),
+      'nudge for the first run',
+    )
+    const nudgeForSecond = present(
+      nudges.find((p) => p.text.includes(`runId=${second.runId}`)),
+      'nudge for the second run',
+    )
     expect(nudgeForFirst).toBeDefined()
     expect(nudgeForSecond).toBeDefined()
     // …and must NOT carry the standing auto rules, whose "a normal turn end
@@ -698,7 +712,7 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
     expect((host.tables.runs.get(second.runId) as RunRecord).phase).toBe('awaiting-delivery')
     const reviews = host.prompts.filter((p) => p.sessionId === PARENT)
     expect(reviews).toHaveLength(1)
-    expect(reviews[0]!.text).toContain('显式交付 A')
+    expect(present(reviews[0], 'the review prompt').text).toContain('显式交付 A')
   })
 
   it('an empty final assistant message never falls back to an earlier intermediate text', async () => {
@@ -896,6 +910,6 @@ describe('session-scoped snapshot', () => {
     // The unscoped snapshot still prefers the unfinished run and caps the rest.
     const global = await svc.snapshot()
     expect(global.runs).toHaveLength(50)
-    expect(global.runs[0]!.id).toBe(bound.runId)
+    expect(present(global.runs[0], 'the first global run').id).toBe(bound.runId)
   })
 })

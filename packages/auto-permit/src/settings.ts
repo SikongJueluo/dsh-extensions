@@ -12,8 +12,7 @@
  * The judge model is deliberately REQUIRED and has no "follow the session
  * model" fallback: a judge must not be the model it audits.
  */
-import type { Context } from '@deepseek-ai/cordis'
-import type { Volatile } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 
 /** Resolved judge configuration (live row config). */

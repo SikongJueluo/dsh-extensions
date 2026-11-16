@@ -87,9 +87,13 @@ async function runCommand(
   const timeout = deadline(signal, config.timeoutMs, 'JJ_WORKSPACE_TIMEOUT')
   try {
     timeout.signal.throwIfAborted()
+    const [executable, ...rest] = argv
+    if (executable === undefined) {
+      throw new Error('workspace command argv must start with an executable')
+    }
     const command = [
-      await ctx.subprocess.resolveExecutable(argv[0]!, undefined, timeout.signal),
-      ...argv.slice(1),
+      await ctx.subprocess.resolveExecutable(executable, undefined, timeout.signal),
+      ...rest,
     ]
     const wrapped =
       policy.mode === 'danger-full-access'
@@ -143,7 +147,7 @@ export async function runJj(
   args: readonly string[],
   signal: AbortSignal | undefined,
 ): Promise<string> {
-  return await runCommand(
+  return runCommand(
     ctx,
     config,
     policy,

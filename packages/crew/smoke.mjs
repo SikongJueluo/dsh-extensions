@@ -475,7 +475,7 @@ function pendingActivation({ log } = {}) {
   )
   check(
     'the abort disposes rather than waiting for the child to finish',
-    outcome.ok === false && /cancelled/.test(String(outcome.error)),
+    outcome.ok === false && /cancelled/u.test(String(outcome.error)),
   )
   check('the tool call ends only after teardown settled', log.join(',') === 'abort,dispose,stopped')
   check('an aborted foreground child is not reported as output', outcome.ok === false)

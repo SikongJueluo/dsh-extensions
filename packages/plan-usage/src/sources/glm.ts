@@ -17,6 +17,7 @@
  */
 
 import type { QuotaSnapshot, QuotaWindow } from '../types.js'
+import { isRecord } from './contracts.js'
 import type { FetchLike, SourceLogger } from './contracts.js'
 
 /** Window facts parsed from one GLM monitor response (no provider/fetch time). */
@@ -99,7 +100,7 @@ export function resolveMonitor(
 export function monitoredProviders(
   settings: Record<string, ProviderMonitorSettings> = {},
 ): string[] {
-  return [...new Set([...Object.keys(BUILTIN_MONITORS), ...Object.keys(settings)])].sort()
+  return [...new Set([...Object.keys(BUILTIN_MONITORS), ...Object.keys(settings)])].toSorted()
 }
 
 function finiteNumber(value: unknown): number | undefined {
@@ -123,9 +124,7 @@ function normalizeResetAt(value: unknown): number | undefined {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
+  return isRecord(value) ? value : null
 }
 
 /** Read one `limits`-array row into a QuotaWindow. */
@@ -333,7 +332,7 @@ export class QuotaMonitor {
     monitor: MonitorConfig,
     apiKey: string,
   ): Promise<GlmWindows | undefined> {
-    const url = `${monitor.monitorBaseUrl.replace(/\/$/, '')}/api/monitor/usage/quota/limit`
+    const url = `${monitor.monitorBaseUrl.replace(/\/$/u, '')}/api/monitor/usage/quota/limit`
     let response: Response
     try {
       response = await this.fetchImpl(url, {

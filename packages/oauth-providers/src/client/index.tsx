@@ -9,7 +9,7 @@
 // fails" login.
 //
 // Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Badge,
   Button,
@@ -21,6 +21,7 @@ import {
   type DshClientContext,
 } from '@dsh-extensions/ui'
 import './styles.css'
+import { isRecord } from '../record.js'
 
 const LOCALE_NS = 'oauth-providers'
 const RPC_BASE = '/dsh-oauth-providers'
@@ -161,6 +162,11 @@ interface RpcResult<T> {
   error?: { message?: string }
 }
 
+/** Runtime check for the channel envelope's `{ ok, ... }` shape. */
+function isRpcResult<T>(value: unknown): value is RpcResult<T> {
+  return isRecord(value) && typeof value.ok === 'boolean'
+}
+
 /** Render an unknown error payload as text, never as `[object Object]`. */
 function asText(value: unknown): string {
   if (typeof value === 'string') return value
@@ -171,13 +177,13 @@ function asText(value: unknown): string {
 
 function classify(message: unknown): Classification {
   const m = asText(message)
-  if (/no sign-in stored|not signed in|AUTH_MISSING|AUTH_INVALID/i.test(m))
+  if (/no sign-in stored|not signed in|AUTH_MISSING|AUTH_INVALID/iu.test(m))
     return { key: 'statusNotSignedIn' }
-  if (/refresh failed|invalid_refresh_token|re-authenticate|sign in again/i.test(m))
+  if (/refresh failed|invalid_refresh_token|re-authenticate|sign in again/iu.test(m))
     return { key: 'statusRefreshFailed', params: { detail: shorten(m) } }
-  if (/unreachable|ECONNREFUSED|timeout|fetch failed|non-JSON/i.test(m))
+  if (/unreachable|ECONNREFUSED|timeout|fetch failed|non-JSON/iu.test(m))
     return { key: 'statusUnreachable', params: { detail: shorten(m) } }
-  if (/HTTP \d{3}/.test(m)) return { key: 'statusHttpError', params: { detail: m } }
+  if (/HTTP \d{3}/u.test(m)) return { key: 'statusHttpError', params: { detail: m } }
   return { raw: m }
 }
 
@@ -207,10 +213,6 @@ function statusText(t: Translate, status: Status): string {
 
 let rpcSeq = 0
 
-interface RpcBody<T> {
-  result?: RpcResult<T>
-}
-
 function callRpc<T>(endpoint: string, payload?: Record<string, unknown>): Promise<RpcResult<T>> {
   rpcSeq += 1
   return fetch(`${RPC_BASE}/${endpoint}`, {
@@ -223,9 +225,11 @@ function callRpc<T>(endpoint: string, payload?: Record<string, unknown>): Promis
       payload: payload ?? {},
     }),
   })
-    .then((response) => response.json() as Promise<RpcBody<T>>)
-    .then((body) => {
-      if (body && body.result) return body.result
+    .then((response) => response.json())
+    .then((body: unknown) => {
+      const rpcBody = isRecord(body) ? body : undefined
+      const result = rpcBody?.result
+      if (result !== undefined && isRpcResult<T>(result)) return result
       return { ok: false, error: { message: 'unexpected channel response' } }
     })
 }
@@ -244,14 +248,18 @@ function Section({ operations, t }: SectionProps) {
   const [providers, setProviders] = useState<Provider[]>([])
   const aliveRef = useRef(true)
 
-  function refreshChannelProviders() {
-    return callRpc<{ providers?: Provider[] }>('providers')
-      .then((result) => {
-        if (result.ok && aliveRef.current) setProviders(result.value?.providers ?? [])
-        return result
-      })
-      .catch(() => null)
-  }
+  // Stable identity: the mount effect below must not re-run per render, and
+  // cards receive it as `refreshProviders`.
+  const refreshChannelProviders = useCallback(
+    () =>
+      callRpc<{ providers?: Provider[] }>('providers')
+        .then((result) => {
+          if (result.ok && aliveRef.current) setProviders(result.value?.providers ?? [])
+          return result
+        })
+        .catch(() => null),
+    [],
+  )
 
   useEffect(() => {
     aliveRef.current = true
@@ -259,7 +267,7 @@ function Section({ operations, t }: SectionProps) {
     return () => {
       aliveRef.current = false
     }
-  }, [])
+  }, [refreshChannelProviders])
 
   return (
     <Root className="dshx:flex dshx:max-w-[720px] dshx:flex-col dshx:px-6 dshx:pb-6 dshx:pt-1">
@@ -303,7 +311,7 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
             key: 'statusModelsError',
             params: { detail: result.error ? result.error.message : '' },
           })
-          return
+          return undefined
         }
         const groups = result.value?.groups ?? []
         const failures = result.value?.failures ?? []
@@ -320,6 +328,7 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
           setModels([])
           setStatus({ kind: 'yellow', key: 'statusUnknown' })
         }
+        return undefined
       })
       .catch((err: unknown) => {
         setStatus({
@@ -346,6 +355,7 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
           const c = classify(msg)
           setStatus({ kind: 'red', key: c.key, params: c.params, raw: c.raw })
         }
+        return undefined
       })
       .catch((err: unknown) => {
         const c = classify(err instanceof Error && err.message ? err.message : String(err))
@@ -361,19 +371,20 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
   function pollSignIn() {
     return callRpc<SignInState>('poll', { provider: id })
       .then((result) => {
-        if (!aliveRef.current) return
+        if (!aliveRef.current) return undefined
         if (result.ok) {
           setAuth(result.value ?? null)
           const v = result.value ?? {}
           if (v.running) {
             setTimeout(pollSignIn, 1200)
-            return
+            return undefined
           }
           if (v.done && v.done.status === 'authorized') {
             void discover()
             void refreshProviders()
           }
         }
+        return undefined
       })
       .catch(() => {
         if (aliveRef.current) setTimeout(pollSignIn, 2500)
@@ -392,6 +403,7 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
           const c = classify(msg)
           setStatus({ kind: 'red', key: c.key, params: c.params, raw: c.raw })
         }
+        return undefined
       })
       .catch((err: unknown) => {
         setStatus({
@@ -407,6 +419,7 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
     callRpc('submit', { provider: id, input })
       .then(() => {
         setPaste('')
+        return undefined
       })
       .catch((err: unknown) => {
         setStatus({
@@ -421,6 +434,7 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
     callRpc('cancel', { provider: id })
       .then(() => {
         /* poll picks up the settlement */
+        return undefined
       })
       .catch((err: unknown) => {
         setStatus({
@@ -437,6 +451,7 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
         setModels([])
         setStatus({ kind: 'yellow', key: 'statusNotSignedIn' })
         void refreshProviders()
+        return undefined
       })
       .catch((err: unknown) => {
         setStatus({
@@ -498,7 +513,9 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
 
   return (
     <Card className="dshx:px-3.5 dshx:py-3">
-      <CardTitle className="dshx:mb-2.5">{provider.label || id}</CardTitle>
+      <CardTitle className="dshx:mb-2.5">
+        {provider.label === '' ? id : (provider.label ?? id)}
+      </CardTitle>
 
       <div className="dshx:mb-3 dshx:flex dshx:items-center dshx:gap-2">
         <span className={cn('dshx:size-2.5 dshx:shrink-0 dshx:rounded-full', dotClass)} />
@@ -583,6 +600,28 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
   )
 }
 
+/** The host remote surface this client half calls (annotated view of `ctx.remote`). */
+interface RemoteLike {
+  session: { modelCatalog: () => Promise<CatalogResult> }
+  llm: {
+    discoverModels: (
+      ns: string | undefined,
+      options: { provider: string },
+    ) => Promise<DiscoverResult>
+  }
+}
+
+/** Runtime check for the generated remote proxy: the injected services exist. */
+function isRemoteLike(value: unknown): value is RemoteLike {
+  return (
+    isRecord(value) &&
+    isRecord(value.session) &&
+    typeof value.session.modelCatalog === 'function' &&
+    isRecord(value.llm) &&
+    typeof value.llm.discoverModels === 'function'
+  )
+}
+
 function apply(ctx: DshClientContext) {
   ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'dsh-oauth-providers: locale')
   const t = ctx.locale.bind(LOCALE_NS)
@@ -590,10 +629,16 @@ function apply(ctx: DshClientContext) {
   // receive these bound callbacks plus the localized string binder.
   const operations: Operations = {
     modelCatalog() {
-      return ctx.remote.session.modelCatalog()
+      const remote: unknown = ctx.remote
+      if (!isRemoteLike(remote))
+        throw new TypeError('oauth-providers: remote session service unavailable')
+      return remote.session.modelCatalog()
     },
     discoverModels(ns, provider) {
-      return ctx.remote.llm.discoverModels(ns, { provider })
+      const remote: unknown = ctx.remote
+      if (!isRemoteLike(remote))
+        throw new TypeError('oauth-providers: remote llm service unavailable')
+      return remote.llm.discoverModels(ns, { provider })
     },
   }
   ctx.slots.inject('settings.section', () => {

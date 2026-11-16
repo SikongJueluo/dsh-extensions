@@ -11,6 +11,14 @@ import {
 import { apply, type Config } from '../src/index.js'
 import type { ExecFile } from '../src/jj.js'
 
+/** Mirror of the host `JsonValue` object branch, kept local (type-only use). */
+type JsonRecord = { [key: string]: null | boolean | number | string | JsonRecord[] | JsonRecord }
+
+/** The tool's canonical value is lossless JSON by `ToolDefinition.execute` contract. */
+function isJsonRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 interface Fixture {
   ctx: Context
   listeners: Map<string, { fn: (...args: unknown[]) => unknown; prepend: boolean }[]>
@@ -19,9 +27,17 @@ interface Fixture {
     id: string
     header: { cwd?: string }
     events: unknown[]
-    appended: { type: string; data: unknown; opts: unknown }[]
+    appended: {
+      type: string
+      data: { content?: { type?: string; text?: string }[] }
+      opts: unknown
+    }[]
     snapshotEvents(): unknown[]
-    append(type: string, data: unknown, opts: unknown): unknown
+    append(
+      type: string,
+      data: { content?: { type?: string; text?: string }[] },
+      opts: unknown,
+    ): unknown
   }
   agent: { id: string; session: unknown }
   storageDir: string
@@ -35,28 +51,27 @@ interface Fixture {
   }
   execCalls: { file: string; args: readonly string[]; cwd: string }[]
   events: unknown[]
-  appended: { type: string; data: unknown; opts: unknown }[]
+  appended: {
+    type: string
+    data: { content?: { type?: string; text?: string }[] }
+    opts: unknown
+  }[]
 }
 
 function makeFixture(): Fixture {
-  const fixture = {} as Fixture
-  fixture.listeners = new Map()
-  fixture.registered = []
-  fixture.execCalls = []
-  fixture.events = []
-  fixture.appended = []
-  fixture.session = {
+  const events: unknown[] = []
+  const appended: Fixture['appended'] = []
+  const session: Fixture['session'] = {
     id: 'sess-it',
     header: { cwd: undefined },
-    events: fixture.events,
-    appended: fixture.appended,
-    snapshotEvents: () => [...fixture.events],
+    events,
+    appended,
+    snapshotEvents: () => [...events],
     append: (type, data, opts) => {
-      fixture.appended.push({ type, data, opts })
+      appended.push({ type, data, opts })
       return undefined
     },
   }
-  fixture.agent = { id: 'agent-it', session: fixture.session }
   const fakeCtx = {
     logger: { warn: () => {}, info: () => {} },
     get: () => undefined,
@@ -74,12 +89,23 @@ function makeFixture(): Fixture {
       },
     },
   }
-  fixture.ctx = fakeCtx as unknown as Context
-  fixture.jj = {
-    changeId: 'change-AAA',
-    parentChangeIds: ['change-PPP'],
-    workspaceRoot: '',
-    recheckChangeId: undefined,
+  const fixture: Fixture = {
+    ctx: fakeCtx as unknown as Context,
+    listeners: new Map(),
+    registered: [],
+    session,
+    agent: { id: 'agent-it', session },
+    storageDir: '',
+    tempDir: '',
+    jj: {
+      changeId: 'change-AAA',
+      parentChangeIds: ['change-PPP'],
+      workspaceRoot: '',
+      recheckChangeId: undefined,
+    },
+    execCalls: [],
+    events,
+    appended,
   }
   return fixture
 }
@@ -164,9 +190,9 @@ describe('adapter: checkpoint_task through the real defineTool', () => {
     const fixture = makeFixture()
     await initFixture(fixture)
     tempRoots.push(fixture.tempDir)
-    fixture.events.push(goalEvent('g1', 4))
     const tool = toolOf(fixture)
-    const result = (await tool.execute(
+    fixture.events.push(goalEvent('g1', 4))
+    const raw: unknown = await tool.execute(
       {
         phase: 'implement',
         ownedFiles: ['src/a.ts'],
@@ -175,7 +201,9 @@ describe('adapter: checkpoint_task through the real defineTool', () => {
         goalRevision: 4,
       },
       execContext(fixture),
-    )) as Record<string, unknown>
+    )
+    if (!isJsonRecord(raw)) throw new Error('checkpoint_task returned a non-record result')
+    const result = raw
     expect(validateJsonSchemaValue(tool.output.schema, result, 'value')).toEqual([])
     expect(result).toMatchObject({
       saved: true,
@@ -192,7 +220,7 @@ describe('adapter: checkpoint_task through the real defineTool', () => {
       vcs: { changeId: 'change-AAA', parentChangeIds: ['change-PPP'] },
       goal: { goalId: 'g1', revision: 4, phase: 'active', proof: 'fold-agrees' },
     })
-    const blocks = tool.output.render({ phase: 'implement' }, result as never)
+    const blocks = tool.output.render({ phase: 'implement' }, result)
     expect(blocks[0]).toMatchObject({ type: 'text' })
     for (const call of fixture.execCalls) {
       expect(call.args).toContain('--ignore-working-copy')
@@ -205,10 +233,12 @@ describe('adapter: checkpoint_task through the real defineTool', () => {
     await initFixture(fixture)
     tempRoots.push(fixture.tempDir)
     const tool = toolOf(fixture)
-    const result = (await tool.execute(
+    const raw: unknown = await tool.execute(
       { phase: 'p', goalId: 'g9', goalRevision: 1 },
       execContext(fixture),
-    )) as Record<string, unknown>
+    )
+    if (!isJsonRecord(raw)) throw new Error('checkpoint_task returned a non-record result')
+    const result = raw
     expect(validateJsonSchemaValue(tool.output.schema, result, 'value')).toEqual([])
     expect(result).toMatchObject({ goalProof: 'args-only-unverified' })
     expect(typeof result.note).toBe('string')
@@ -256,8 +286,8 @@ describe('adapter: checkpoint_task through the real defineTool', () => {
     await created.fn({ agent: fixture.agent, source: 'resume' })
     const notice = fixture.appended.find((entry) => entry.type === 'user/message')
     expect(notice).toBeDefined()
-    const data = notice?.data as { content?: { type?: string; text?: string }[] }
-    const text = data.content?.[0]?.text ?? ''
+    const data = notice?.data
+    const text = data?.content?.[0]?.text ?? ''
     expect(text).toContain('MISMATCH')
     expect(text).toContain('phase "implement"')
   })

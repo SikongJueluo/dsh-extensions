@@ -27,6 +27,7 @@ import {
 } from './commandcode.js'
 import type { KeySource } from './keys.js'
 import { readKey } from './keys.js'
+import { isRecord } from './record.js'
 
 const FALLBACK_CONTEXT_WINDOW = 131_072
 const FALLBACK_MAX_TOKENS = 32_768
@@ -130,22 +131,28 @@ function apiStreams(api: Api) {
       return openAIResponsesApi()
     case 'openai-completions':
       return openAICompletionsApi()
-    default:
+    // The remaining pi-ai catalogs are not supported on custom endpoints.
+    case 'azure-openai-responses':
+    case 'bedrock-converse-stream':
+    case 'google-generative-ai':
+    case 'google-vertex':
+    case 'mistral-conversations':
+    case 'openai-codex-responses':
+    case 'pi-messages':
       throw new ConfigError(`unsupported custom api "${api}"`)
   }
+  throw new ConfigError(`unsupported custom api "${String(api)}"`)
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined
+  return isRecord(value) ? value : undefined
 }
 
 function positiveInteger(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
 }
 
-function inputModalities(value: unknown): Array<'text' | 'image'> | undefined {
+function inputModalities(value: unknown): ('text' | 'image')[] | undefined {
   if (!Array.isArray(value)) return undefined
   const input = value.filter(
     (entry): entry is 'text' | 'image' => entry === 'text' || entry === 'image',
@@ -336,6 +343,8 @@ async function buildOne(
       return customProvider(resolved, key, log)
     case 'command-code':
       return commandCodeProvider(resolved)
+    default:
+      throw new ConfigError(`more-providers: unsupported provider kind "${String(resolved.kind)}"`)
   }
 }
 

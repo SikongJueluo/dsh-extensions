@@ -103,8 +103,10 @@ function userContent(
       }
       const version = requestVersion(block, images)
       // Label the occurrence the way Codex does, so the model can name it.
-      content.push({ type: 'input_text', text: requestImageHandleText(block.attachment, version) })
-      content.push(imagePart(version))
+      content.push(
+        { type: 'input_text', text: requestImageHandleText(block.attachment, version) },
+        imagePart(version),
+      )
     }
   }
   return content.length > 0 ? content : [{ type: 'input_text', text: '' }]

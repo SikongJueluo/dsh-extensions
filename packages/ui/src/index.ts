@@ -19,4 +19,11 @@ export { Switch, type SwitchProps } from './components/switch'
 export { Select, type SelectOption, type SelectGroup, type SelectProps } from './components/select'
 export { Dialog, type DialogProps } from './components/dialog'
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from './components/table'
-export type { DshClientContext, SlotsService, SlotRegistration, LocaleService } from './types'
+export type {
+  DshClientContext,
+  DshClientServices,
+  SlotsService,
+  SlotRegistration,
+  LocaleService,
+  WorkspaceClientLike,
+} from './types'

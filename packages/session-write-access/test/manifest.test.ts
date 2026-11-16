@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { isRecord } from '../src/channel.js'
 
-const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
+const packageRoot = dirname(import.meta.dirname)
 const read = (name: string): string => readFileSync(join(packageRoot, name), 'utf8')
 
 describe('bundle manifest', () => {
@@ -26,16 +26,16 @@ describe('bundle manifest', () => {
   })
 
   it('exports the client half and ships every file the patch names', () => {
-    const pkg = JSON.parse(read('package.json')) as {
-      main: string
-      exports: Record<string, string | { default: string }>
-      files: string[]
-      dsh: { bundle: { patch: string }; client: { platform: string } }
-    }
+    const pkg: unknown = JSON.parse(read('package.json'))
+    if (!isRecord(pkg)) throw new Error('package.json is not an object')
+    const exportsMap = isRecord(pkg.exports) ? pkg.exports : undefined
+    const dsh = isRecord(pkg.dsh) ? pkg.dsh : undefined
+    const bundle = dsh !== undefined && isRecord(dsh.bundle) ? dsh.bundle : undefined
+    const client = dsh !== undefined && isRecord(dsh.client) ? dsh.client : undefined
     expect(pkg.main).toBe('./lib/index.js')
-    expect(pkg.exports['./client']).toBe('./lib/client.js')
-    expect(pkg.dsh.bundle.patch).toBe('./cordis.patch.yml')
-    expect(pkg.dsh.client.platform).toBe('web')
+    expect(exportsMap?.['./client']).toBe('./lib/client.js')
+    expect(bundle?.patch).toBe('./cordis.patch.yml')
+    expect(client?.platform).toBe('web')
     expect(pkg.files).toEqual(
       expect.arrayContaining(['lib', 'cordis.patch.yml', 'dev.patch.yml', 'README.md']),
     )

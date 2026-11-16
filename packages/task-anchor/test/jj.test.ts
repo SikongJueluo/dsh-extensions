@@ -37,7 +37,7 @@ describe('argv discipline', () => {
     // own language uses `|` and quotes; execFile passes argv verbatim).
     const templateIndex = argv.indexOf('-T')
     const nonTemplate = argv.filter((_, i) => i !== templateIndex && i !== templateIndex + 1)
-    expect(nonTemplate.join(' ')).not.toMatch(/[;&|`$><]/)
+    expect(nonTemplate.join(' ')).not.toMatch(/[;&|`$><]/u)
     expect(argv).toContain('-r')
     expect(argv).toContain('@')
     const template = argv[templateIndex + 1] ?? ''
@@ -46,6 +46,23 @@ describe('argv discipline', () => {
     expect(workspaceRootArgv()).toContain('workspace')
   })
 })
+
+/** Classifies a non-jj root as not-jj (no git fallback). */
+const execNotJj: ExecFile = async () => {
+  throw Object.assign(new Error('Error: Not a jj repo'), {
+    stderr: 'Error: Not a jj repo (no .jj directory)',
+  })
+}
+
+/** Classifies a killed child as timeout. */
+const execTimeout: ExecFile = async () => {
+  throw Object.assign(new Error('spawn timed out'), { killed: true })
+}
+
+/** Classifies other failures as failed, never throwing. */
+const execFailed: ExecFile = async () => {
+  throw new Error('ENOENT: no such file jj')
+}
 
 describe('readJjFacts', () => {
   it('reads layer + workspace root + stability recheck (three invocations)', async () => {
@@ -144,28 +161,17 @@ describe('readJjFacts', () => {
   })
 
   it('classifies a non-jj root as not-jj (no git fallback)', async () => {
-    const exec: ExecFile = async () => {
-      throw Object.assign(new Error('Error: Not a jj repo'), {
-        stderr: 'Error: Not a jj repo (no .jj directory)',
-      })
-    }
-    const read = await readJjFacts('/repo', exec, 'jj', 5000)
+    const read = await readJjFacts('/repo', execNotJj, 'jj', 5000)
     expect(read).toMatchObject({ ok: false, reason: 'not-jj' })
   })
 
   it('classifies a killed child as timeout', async () => {
-    const exec: ExecFile = async () => {
-      throw Object.assign(new Error('spawn timed out'), { killed: true })
-    }
-    const read = await readJjFacts('/repo', exec, 'jj', 100)
+    const read = await readJjFacts('/repo', execTimeout, 'jj', 100)
     expect(read).toMatchObject({ ok: false, reason: 'timeout' })
   })
 
   it('classifies other failures as failed, never throwing', async () => {
-    const exec: ExecFile = async () => {
-      throw new Error('ENOENT: no such file jj')
-    }
-    const read = await readJjFacts('/repo', exec, 'jj', 5000)
+    const read = await readJjFacts('/repo', execFailed, 'jj', 5000)
     expect(read).toMatchObject({ ok: false, reason: 'failed' })
   })
 

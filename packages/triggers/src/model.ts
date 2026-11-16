@@ -29,14 +29,10 @@ import {
 } from './identity.js'
 
 /**
- * Bridge over a zod-version skew: the host runs zod 4.6, whose `ZodObject`
- * carries a wider internals type parameter than the `ZodType<V>` that
- * dsh-storage-domain's declaration (authored against zod 4.4) accepts. The
- * runtime objects are one and the same — only the generic positions moved —
- * so this adapter narrows the schema to the expected parameterisation without
- * touching validation behavior.
+ * One place where the table schemas cross into dsh-storage-domain's
+ * `ZodType<V>` parameterisation; validation behavior is untouched.
  */
-function triggerTable<K extends string, V>(schema: z.ZodType<V, any, any>): DomainTableSpec<K, V> {
+function triggerTable<K extends string, V>(schema: z.ZodType<V>): DomainTableSpec<K, V> {
   return domainTable<K, V>(schema)
 }
 

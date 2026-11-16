@@ -13,14 +13,15 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { AuditRef } from './types.js'
+import { isRecord } from './types.js'
 
 /** Identity the audit artifact is filed under. */
 export interface AuditOwner {
   readonly toolName: string
   readonly callId: ToolCallId
-  readonly sessionId?: SessionId
+  /** Session-scoped spill ownership; the raw id as the tool context reports it. */
+  readonly sessionId?: string
 }
 
 /** The port the pipeline consumes. */
@@ -28,13 +29,18 @@ export interface AuditPort {
   save(payload: string, suggestedName: string): Promise<AuditRef | undefined>
 }
 
-interface SpillStoreLike {
+/** The `saveText` shape the pipeline needs from the spill store service. */
+interface SpillStorePort {
   saveText(input: {
-    owner: { sessionId: SessionId }
+    owner: { sessionId: string }
     source: { kind: 'tool'; toolName: string; callId: ToolCallId; label: string }
     suggestedName: string
     content: string
   }): Promise<{ locator: { toString(): string }; bytes: number; retrievalHint: string }>
+}
+
+function isSpillStore(value: unknown): value is SpillStorePort {
+  return isRecord(value) && typeof value.saveText === 'function'
 }
 
 /**
@@ -46,7 +52,8 @@ interface SpillStoreLike {
 export function createAuditPort(ctx: Context, owner: AuditOwner): AuditPort {
   return {
     async save(payload, suggestedName) {
-      const store = ctx.get('spillStore') as SpillStoreLike | undefined
+      const service: unknown = ctx.get('spillStore')
+      const store = isSpillStore(service) ? service : undefined
       if (store === undefined) return undefined
       if (owner.sessionId === undefined) return undefined
       try {

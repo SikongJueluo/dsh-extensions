@@ -41,6 +41,7 @@ import type {
   RequestImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
 import type { FetchLike } from '../../transport.js'
+import { isRecord } from '../../record.js'
 import type { ModelCatalog } from './catalog.js'
 import { oauthHeaders } from './auth.js'
 import type { TokenStore } from './auth.js'
@@ -71,10 +72,11 @@ const REQUEST_IMAGE_MAX_BYTES = 2 ** 30
 /** Map the Responses API SSE byte stream into data payload strings. */
 async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const decoder = new TextDecoder()
-  const stream = Readable.fromWeb(body as Parameters<typeof Readable.fromWeb>[0])
+  const stream: AsyncIterable<Uint8Array> = Readable.fromWeb(
+    body as Parameters<typeof Readable.fromWeb>[0],
+  )
   let buffer = ''
-  for await (const value of stream) {
-    const chunk = value as Uint8Array
+  for await (const chunk of stream) {
     buffer += decoder.decode(chunk, { stream: true })
     let idx: number
     while ((idx = buffer.indexOf('\n\n')) >= 0) {
@@ -93,28 +95,28 @@ async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerator<strin
 function frameData(frame: string): string | null {
   const lines: string[] = []
   for (const line of frame.split('\n')) {
-    if (line.startsWith('data:')) lines.push(line.slice(5).replace(/^ /, ''))
+    if (line.startsWith('data:')) lines.push(line.slice(5).replace(/^ /u, ''))
   }
   const data = lines.join('\n')
   return data === '' || data === '[DONE]' ? null : data
 }
 
 /** Map Responses API usage into the harness disjoint TokenUsage. */
-function mapUsage(usage: {
-  input_tokens?: number
-  output_tokens?: number
-  input_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number }
-  output_tokens_details?: { reasoning_tokens?: number }
-}): TokenUsage {
-  const cacheRead = usage.input_tokens_details?.cached_tokens
-  const cacheWrite = usage.input_tokens_details?.cache_write_tokens
-  const reasoning = usage.output_tokens_details?.reasoning_tokens
+function mapUsage(usage: unknown): TokenUsage {
+  const record = isRecord(usage) ? usage : {}
+  const inputDetails = isRecord(record.input_tokens_details) ? record.input_tokens_details : {}
+  const outputDetails = isRecord(record.output_tokens_details) ? record.output_tokens_details : {}
+  const cacheRead = inputDetails.cached_tokens
+  const cacheWrite = inputDetails.cache_write_tokens
+  const reasoning = outputDetails.reasoning_tokens
   return {
-    inputTokens: (usage.input_tokens ?? 0) - (cacheRead ?? 0),
-    outputTokens: usage.output_tokens ?? 0,
-    ...(cacheRead !== undefined ? { cacheReadTokens: cacheRead } : {}),
-    ...(cacheWrite !== undefined ? { cacheWriteTokens: cacheWrite } : {}),
-    ...(reasoning !== undefined ? { reasoningTokens: reasoning } : {}),
+    inputTokens:
+      (typeof record.input_tokens === 'number' ? record.input_tokens : 0) -
+      (typeof cacheRead === 'number' ? cacheRead : 0),
+    outputTokens: typeof record.output_tokens === 'number' ? record.output_tokens : 0,
+    ...(typeof cacheRead === 'number' ? { cacheReadTokens: cacheRead } : {}),
+    ...(typeof cacheWrite === 'number' ? { cacheWriteTokens: cacheWrite } : {}),
+    ...(typeof reasoning === 'number' ? { reasoningTokens: reasoning } : {}),
   }
 }
 
@@ -229,9 +231,11 @@ async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<Strea
   }
 
   for await (const payload of payloads) {
-    let ev: { type?: string; [key: string]: unknown }
+    let ev: Record<string, unknown>
     try {
-      ev = JSON.parse(payload) as { type?: string; [key: string]: unknown }
+      const parsed: unknown = JSON.parse(payload)
+      if (!isRecord(parsed)) throw new Error('not an object')
+      ev = parsed
     } catch {
       throw new LlmError('malformed SSE payload', 'MALFORMED_RESPONSE')
     }
@@ -242,7 +246,7 @@ async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<Strea
     const contentIndex = typeof ev.content_index === 'number' ? ev.content_index : -1
 
     if (type === 'response.output_item.added') {
-      const item = (ev.item ?? {}) as { type?: string; call_id?: string; name?: string }
+      const item = isRecord(ev.item) ? ev.item : {}
       if (item.type === 'function_call') {
         const block = open(`f:${outputIndex}`, 'tool-call')
         if (typeof item.call_id === 'string') block.callId = item.call_id
@@ -289,7 +293,7 @@ async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<Strea
       const ended = end(block)
       if (ended) yield ended
     } else if (type === 'response.output_item.done') {
-      const item = (ev.item ?? {}) as { type?: string }
+      const item = isRecord(ev.item) ? ev.item : {}
       if (item.type === 'function_call') {
         const block = blocks.get(`f:${outputIndex}`)
         if (block) {
@@ -298,22 +302,21 @@ async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<Strea
         }
       }
     } else if (type === 'response.completed') {
-      const resp = (ev.response ?? {}) as {
-        status?: string
-        incomplete_details?: { reason?: string }
-        usage?: Parameters<typeof mapUsage>[0]
-      }
-      if (resp.status === 'incomplete' && resp.incomplete_details?.reason) {
-        state.incompleteReason = resp.incomplete_details.reason
+      const resp = isRecord(ev.response) ? ev.response : {}
+      if (resp.status === 'incomplete' && isRecord(resp.incomplete_details)) {
+        const reason = resp.incomplete_details.reason
+        if (typeof reason === 'string' && reason !== '') state.incompleteReason = reason
       }
       if (resp.usage) pendingUsage = mapUsage(resp.usage)
     } else if (type === 'response.failed' || type === 'error') {
-      const err =
-        (ev.response as { error?: { message?: string; code?: string } } | undefined)?.error ??
-        (ev.error as { message?: string; code?: string } | undefined)
+      const response = isRecord(ev.response) ? ev.response : undefined
+      const fromResponse = isRecord(response) ? response.error : undefined
+      const err = isRecord(fromResponse) ? fromResponse : isRecord(ev.error) ? ev.error : undefined
+      const message = isRecord(err) && typeof err.message === 'string' ? err.message : undefined
+      const code = isRecord(err) && typeof err.code === 'string' ? err.code : undefined
       state.errorFailure = {
-        message: err?.message ?? 'model request failed',
-        code: typeof err?.code === 'string' ? err.code : 'PROVIDER_ERROR',
+        message: message ?? 'model request failed',
+        code: code ?? 'PROVIDER_ERROR',
       }
     }
   }
@@ -527,13 +530,12 @@ export class OpenAiOauthAdapter extends LlmAdapter {
       let message = `OpenAI OAuth API error (HTTP ${response.status})`
       let providerError: Record<string, unknown> | undefined
       try {
-        const parsed = (await response.json()) as {
-          error?: Record<string, unknown>
-          detail?: unknown
-        }
-        providerError = parsed?.error ?? parsed
-        if (typeof parsed?.detail === 'string') message = parsed.detail
-        else if (providerError?.message)
+        const parsed: unknown = await response.json()
+        const record = isRecord(parsed) ? parsed : undefined
+        const fromError = isRecord(record) ? record.error : undefined
+        providerError = isRecord(fromError) ? fromError : record
+        if (record !== undefined && typeof record.detail === 'string') message = record.detail
+        else if (isRecord(providerError) && providerError.message)
           message =
             typeof providerError.message === 'string'
               ? providerError.message

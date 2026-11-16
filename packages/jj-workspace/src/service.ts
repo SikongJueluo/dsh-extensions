@@ -25,7 +25,7 @@ import {
 } from '@deepseek-ai/dsh-experimental-worktree'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import { workspaceWritableRoots, type SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-working-directory'
 import z from '@deepseek-ai/schemastery'
@@ -208,12 +208,12 @@ export default class JjWorktreeService extends Service {
         `jj workspace restore is not supported: ${request.path}. The workspace directory and its task bookmark are retained; recreate or delete them with jj.`,
       )
     }
-    return await this.git.restore(agent, request, signal, onPhase)
+    return this.git.restore(agent, request, signal, onPhase)
   }
 
   /** Classify the Session's effective directory for the new-session option. */
   async status(sessionId: string): Promise<JjStatus> {
-    const session = this.ctx.sessions.get(sessionId as SessionId)
+    const session = this.ctx.sessions.get(SessionId(sessionId))
     if (session === undefined) return { kind: 'none' }
     const directory = this.ctx.workingDirectory.get(session)
     const root = await findVcsRoot(
@@ -234,7 +234,7 @@ export default class JjWorktreeService extends Service {
         root: root.root,
         hasGit: git !== undefined,
         blocker: jjBlocker(policy, projectRoot),
-        bookmarks: [...bookmarks.keys()].sort(),
+        bookmarks: [...bookmarks.keys()].toSorted(),
       }
     } catch {
       return {
@@ -249,7 +249,7 @@ export default class JjWorktreeService extends Service {
 
   /** Read the durable task associations of one project pool, without live jj state. */
   async tasks(projectRoot: string): Promise<JjTaskRecord[]> {
-    return await this.readRecords(projectRoot)
+    return this.readRecords(projectRoot)
   }
 
   /**
@@ -259,7 +259,7 @@ export default class JjWorktreeService extends Service {
    * reported, never restored.
    */
   async taskStates(sessionId: string): Promise<JjTaskState[]> {
-    const session = this.ctx.sessions.get(sessionId as SessionId)
+    const session = this.ctx.sessions.get(SessionId(sessionId))
     if (session === undefined) return []
     const directory = this.ctx.workingDirectory.get(session)
     const root = await findVcsRoot(
@@ -433,12 +433,11 @@ export default class JjWorktreeService extends Service {
 
   private hostFor(policy: SandboxExecutionPolicy): JjWorkspaceHost {
     return {
-      run: async (cwd, args, signal) =>
-        await runJj(this.ctx, this.config, policy, cwd, args, signal),
+      run: async (cwd, args, signal) => runJj(this.ctx, this.config, policy, cwd, args, signal),
       exists: async (path, signal) =>
         (await this.ctx.fs.lstat(path, undefined, signal)) !== undefined,
       prepare: async (projectRoot, poolPath, destination, signal) =>
-        await prepareJjDirectory(
+        prepareJjDirectory(
           this.ctx,
           this.config,
           policy,

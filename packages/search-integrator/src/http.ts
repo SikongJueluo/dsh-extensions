@@ -7,6 +7,8 @@
  * @module dsh-search-integrator/http
  */
 
+import { isRecord } from './types.js'
+
 /** A non-2xx HTTP response, carrying the status for retry classification. */
 export class HttpError extends Error {
   readonly status: number
@@ -53,14 +55,13 @@ export async function getJson(
 
 /** Un-hide the OS-level cause of a fetch failure (ETIMEDOUT, ECONNRESET, …). */
 function attachCause(error: unknown): never {
-  if (error instanceof TypeError && error.cause !== undefined && error.cause !== null) {
-    const cause = error.cause as { code?: string; message?: string }
-    const note = cause.code ?? cause.message ?? 'unknown'
-    const wrapped = new TypeError(`${error.message} (${note})`)
+  if (error instanceof TypeError && isRecord(error.cause)) {
+    const note: unknown = error.cause.code ?? error.cause.message ?? 'unknown'
+    const wrapped = new TypeError(`${error.message} (${String(note)})`)
     wrapped.cause = error.cause
     throw wrapped
   }
-  throw error as never
+  throw error
 }
 
 /** Sleep that rejects promptly when the signal aborts. */
@@ -72,7 +73,8 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
     }, ms)
     function onAbort(): void {
       clearTimeout(timer)
-      reject(signal.reason ?? new Error('aborted'))
+      const reason: unknown = signal.reason
+      reject(reason instanceof Error ? reason : new Error('aborted'))
     }
     if (signal.aborted) {
       onAbort()
@@ -98,20 +100,20 @@ function retryableStatus(status: number): boolean {
  */
 export async function withRetry<T>(
   fn: (attempt: number) => Promise<T>,
-  options: { retries?: number; signal: AbortSignal } = { signal: new AbortController().signal },
+  options?: { retries?: number; signal: AbortSignal },
 ): Promise<T> {
-  const retries = options.retries ?? 1
+  const { retries = 1, signal = new AbortController().signal } = options ?? {}
   let lastError: unknown
   for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
     try {
       return await fn(attempt)
     } catch (error) {
-      if (options.signal.aborted) throw error
+      if (signal.aborted) throw error
       const retryable =
         error instanceof HttpError ? retryableStatus(error.status) : error instanceof TypeError // fetch() network failure
       if (!retryable || attempt > retries) throw error
       lastError = error
-      await sleep(400 * attempt + Math.floor(Math.random() * 200), options.signal)
+      await sleep(400 * attempt + Math.floor(Math.random() * 200), signal)
     }
   }
   throw lastError

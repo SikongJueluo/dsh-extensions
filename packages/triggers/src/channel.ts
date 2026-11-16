@@ -14,12 +14,22 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { PACKAGE_NAME, RPC_CHANNEL } from './identity.js'
+import { isRecord } from './record.js'
 import type { TriggerService } from './service.js'
 
 /** One endpoint segment of the channel (same grammar as connection RPC). */
-const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
 /** Template bodies ride the channel; keep a generous but finite ceiling. */
 const MAX_CHANNEL_BODY_BYTES = 256 * 1024
+
+/** Control actions `run.control` accepts (same vocabulary as the service). */
+const RUN_ACTIONS = ['pause', 'resume', 'cancel', 'extend', 'redeliver'] as const
+type RunAction = (typeof RUN_ACTIONS)[number]
+
+/** Narrow an untrusted RPC `action` into a control verdict. */
+function isRunAction(value: unknown): value is RunAction {
+  return typeof value === 'string' && RUN_ACTIONS.some((action) => action === value)
+}
 
 type ChannelResult =
   | { ok: true; value: unknown }
@@ -42,7 +52,14 @@ async function handle(
       case 'template.save':
         return {
           ok: true,
-          value: await service.saveTemplate(payload as Parameters<typeof service.saveTemplate>[0]),
+          // saveTemplate validates every field at runtime (`unknown`-typed
+          // input), so passing the record through unchanged is the same
+          // contract the cast used to express.
+          value: await service.saveTemplate({
+            id: payload.id,
+            name: payload.name,
+            body: payload.body,
+          }),
         }
       case 'template.delete': {
         if (typeof payload.id !== 'string') return bad(endpoint, 'id must be a string')
@@ -52,7 +69,19 @@ async function handle(
       case 'binding.save':
         return {
           ok: true,
-          value: await service.saveBinding(payload as Parameters<typeof service.saveBinding>[0]),
+          // saveBinding validates every field at runtime (`unknown`-typed
+          // input), so passing the record through unchanged is the same
+          // contract the cast used to express.
+          value: await service.saveBinding({
+            id: payload.id,
+            name: payload.name,
+            executor: payload.executor,
+            parent: payload.parent,
+            maxRounds: payload.maxRounds,
+            enabled: payload.enabled,
+            autoDeliver: payload.autoDeliver,
+            templates: payload.templates,
+          }),
         }
       case 'binding.delete': {
         if (typeof payload.id !== 'string') return bad(endpoint, 'id must be a string')
@@ -67,22 +96,18 @@ async function handle(
       }
       case 'run.control': {
         const action = payload.action
-        if (
-          typeof payload.runId !== 'string' ||
-          typeof action !== 'string' ||
-          !['pause', 'resume', 'cancel', 'extend', 'redeliver'].includes(action)
-        ) {
+        if (typeof payload.runId !== 'string' || !isRunAction(action)) {
           return bad(endpoint, 'runId and a known action are required')
         }
         const message = typeof payload.message === 'string' ? payload.message : undefined
         const newMaxRounds =
           typeof payload.newMaxRounds === 'number' ? payload.newMaxRounds : undefined
         const deliveryId = typeof payload.deliveryId === 'string' ? payload.deliveryId : undefined
-        const run = await service.controlRun(
-          payload.runId,
-          action as 'pause' | 'resume' | 'cancel' | 'extend' | 'redeliver',
-          { message, newMaxRounds, deliveryId },
-        )
+        const run = await service.controlRun(payload.runId, action, {
+          message,
+          newMaxRounds,
+          deliveryId,
+        })
         return { ok: true, value: run }
       }
       default:
@@ -141,18 +166,27 @@ export function registerTriggerChannel(ctx: Context, service: TriggerService): v
     }
     const chunks: Buffer[] = []
     let received = 0
-    for await (const chunk of req) {
-      received += (chunk as Buffer).byteLength
+    for await (const raw of req) {
+      const chunk: unknown = raw
+      // The request is read without `setEncoding`, so the iterator yields
+      // Buffers; anything else carries no byte length to meter.
+      if (!(chunk instanceof Buffer)) continue
+      received += chunk.byteLength
       if (received > MAX_CHANNEL_BODY_BYTES) {
         respond(413, '{}')
         req.destroy()
         return
       }
-      chunks.push(chunk as Buffer)
+      chunks.push(chunk)
     }
-    let envelope: { type?: unknown; rpcId?: unknown; method?: unknown; payload?: unknown }
+    let envelope: Record<string, unknown>
     try {
-      envelope = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof envelope
+      const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      if (!isRecord(parsed)) {
+        respond(400, '{}')
+        return
+      }
+      envelope = parsed
     } catch {
       respond(400, '{}')
       return
@@ -162,13 +196,12 @@ export function registerTriggerChannel(ctx: Context, service: TriggerService): v
       typeof envelope.rpcId !== 'string' ||
       envelope.rpcId.length === 0 ||
       envelope.method !== endpoint ||
-      typeof envelope.payload !== 'object' ||
-      envelope.payload === null
+      !isRecord(envelope.payload)
     ) {
       respond(400, '{}')
       return
     }
-    const result = await handle(service, endpoint, envelope.payload as Record<string, unknown>)
+    const result = await handle(service, endpoint, envelope.payload)
     respond(200, JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId, result }))
   }
 

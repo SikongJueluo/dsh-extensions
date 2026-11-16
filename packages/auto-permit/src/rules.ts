@@ -20,17 +20,17 @@ import { containerRisk } from './container.js'
 /** One anchored shape: matches the whole command string case-insensitively. */
 const SHAPES: RegExp[] = [
   // Discarding uncommitted work / untracked files.
-  /\bgit\s+clean\b[^;|&]*-[a-zA-Z]*x/,
-  /\bgit\s+reset\s+--hard\b/,
-  /\bgit\s+checkout\s+(?:--\s+)?\./,
-  /\bgit\s+restore\b[^;|&]*\.\s*$/,
-  /\bgit\s+stash\s+(?:drop|clear)\b/,
+  /\bgit\s+clean\b[^;|&]*-[a-zA-Z]*x/u,
+  /\bgit\s+reset\s+--hard\b/u,
+  /\bgit\s+checkout\s+(?:--\s+)?\./u,
+  /\bgit\s+restore\b[^;|&]*\.\s*$/u,
+  /\bgit\s+stash\s+(?:drop|clear)\b/u,
   // Rewriting published history.
-  /\bgit\s+push\b[^;|&]*(--force\b|--force-with-lease\b|\s-f\b)/,
+  /\bgit\s+push\b[^;|&]*(--force\b|--force-with-lease\b|\s-f\b)/u,
   // Privilege escalation.
-  /(^|[;&|\s])sudo\b/,
+  /(^|[;&|\s])sudo\b/u,
   // Remote-execution pipelines.
-  /\b(curl|wget)\b[^;|&]*\|\s*(ba)?sh\b/,
+  /\b(curl|wget)\b[^;|&]*\|\s*(ba)?sh\b/u,
 ]
 
 /**
@@ -39,7 +39,7 @@ const SHAPES: RegExp[] = [
  * which is not a command boundary, so a container's disposable flag (or an
  * image name such as `localhost/app-official`) can never open a match.
  */
-const RM_COMMAND = /(?:^|[\s;&|("'`])rm(?=\s)/g
+const RM_COMMAND = /(?:^|[\s;&|("'`])rm(?=\s)/gu
 
 /**
  * Split one command segment into shell words, dropping quote characters.
@@ -70,7 +70,7 @@ function wordsOf(text: string): string[] {
       i += 1
       continue
     }
-    if (/\s/.test(ch)) {
+    if (/\s/u.test(ch)) {
       if (word !== '') words.push(word)
       word = ''
       continue
@@ -106,7 +106,7 @@ function segmentAfter(command: string, start: number): string {
 function dangerousRemovalTarget(target: string): boolean {
   if (target === '' || target === '-') return false
   if (target.startsWith('~')) return true
-  if (/^\$(?:\{HOME\b|HOME(?:\/|$))/.test(target)) return true
+  if (/^\$(?:\{HOME\b|HOME(?:\/|$))/u.test(target)) return true
   if (target.startsWith('/')) return true
   return (
     target === '..' || target.startsWith('../') || target.includes('/../') || target.endsWith('/..')
@@ -144,7 +144,7 @@ function destructiveRemoval(command: string): boolean {
       }
       targets.push(word)
     }
-    if (force && targets.some(dangerousRemovalTarget)) return true
+    if (force && targets.some((target) => dangerousRemovalTarget(target))) return true
   }
   return false
 }

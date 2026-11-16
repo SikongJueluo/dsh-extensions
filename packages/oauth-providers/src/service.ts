@@ -52,7 +52,11 @@ export class OAuthProvidersService extends Service {
     } catch (error) {
       this.ctx
         .logger(PACKAGE_NAME)
-        .warn?.('token for "%s" unavailable: %s', provider, (error as Error).message)
+        .warn?.(
+          'token for "%s" unavailable: %s',
+          provider,
+          error instanceof Error ? error.message : String(error),
+        )
       return undefined
     }
   }

@@ -10,9 +10,13 @@ import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
 import type { HandoffRuntime, PendingHandoff } from './pending.js'
 import { spawnHandoff } from './spawn.js'
 
+/** Two-digit zero-padded form of one timestamp field. */
+function pad(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
 /** `20260928-153012` style slug for brief file names. */
 export function timestampSlug(date: Date): string {
-  const pad = (n: number): string => String(n).padStart(2, '0')
   return (
     `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
     `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`

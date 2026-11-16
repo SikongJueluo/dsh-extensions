@@ -88,7 +88,10 @@ function contextAuditDefinition(config: Config): CommandDefinition {
         )
         return { kind: 'success', text: formatReport(report) }
       } catch (error) {
-        return { kind: 'error', text: `context-audit 扫描失败：${(error as Error).message}` }
+        return {
+          kind: 'error',
+          text: `context-audit 扫描失败：${error instanceof Error ? error.message : String(error)}`,
+        }
       }
     },
   }

@@ -10,17 +10,39 @@ import type { ComponentType, ReactNode } from 'react'
  * object (left open because its shape comes from the host package the plugin
  * declares in `dsh.client.inject`).
  */
+/**
+ * Host client services read through `ctx.get`. A plugin that reads another
+ * host service registers it here (module augmentation) so the accessor stays
+ * typed instead of falling back to `unknown`.
+ */
+export interface DshClientServices {
+  /** Host workspace UI client (`dsh-client-ui-workspace`), when mounted. */
+  readonly uiWorkspace?: WorkspaceClientLike
+}
+
+/** The host workspace UI client surface this repo calls. */
+export interface WorkspaceClientLike {
+  openSession?(sessionId: string): unknown
+  pickDirectory?(): unknown
+}
+
 export interface DshClientContext {
-  effect(effect: () => void | (() => void), label?: string): void
-  get<T = unknown>(name: string): T
+  effect(effect: () => unknown, label?: string): void
+  get<K extends keyof DshClientServices>(name: K): DshClientServices[K]
   slots: SlotsService
   locale: LocaleService
-  remote: Record<string, any>
+  /**
+   * The host's generated typed-remote object. Its shape comes from the host
+   * package a plugin declares in `dsh.client.inject`, so this declaration can
+   * only promise "callable services resolving to unknown"; each call site
+   * still annotates the envelope it expects.
+   */
+  remote: Record<string, Record<string, (...args: unknown[]) => Promise<unknown>>>
 }
 
 export interface SlotsService {
   inject(name: string, register: () => void): void
-  register(options: SlotRegistration, component: ComponentType<any>): void
+  register(options: SlotRegistration, component: ComponentType<never>): void
 }
 
 export interface SlotRegistration {
@@ -34,7 +56,7 @@ export interface SlotRegistration {
   priority?: number
   label?: string | (() => ReactNode)
   /** Slot-owner context (for example the current session id) may be passed in. */
-  inject?: (...args: any[]) => Record<string, unknown>
+  inject?: (...args: never[]) => Record<string, unknown>
   locale?: string
 }
 

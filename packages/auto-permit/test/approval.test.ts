@@ -14,7 +14,6 @@ import { join } from 'node:path'
 import type { Context, Volatile, VolatileSnapshot } from '@deepseek-ai/cordis'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { apply } from '../src/index.js'
-import type { Config } from '../src/index.js'
 import { MAX_COMMAND_CHARS } from '../src/evidence.js'
 
 const vol = <T>(value: T): Volatile<T> => ({ get: () => value as VolatileSnapshot<T> })
@@ -147,6 +146,17 @@ function priorDirectAllowed(
     { type: 'tool/call', data: { callId, name: 'bash', arguments: JSON.stringify(args) } },
     { type: 'approval/asked', data: { id, toolName: 'bash', callId } },
     { type: 'approval/decided', data: { id, outcome: 'allowed-once' } },
+  )
+}
+
+/** First ask: judge defers (no queued verdict), the chain allows once. */
+async function chainApprove(fixture: Fixture, callId: string, command: string): Promise<void> {
+  ptcBash(fixture, callId, { command, sandbox_permissions: 'danger-full-access' })
+  const first = await fixture.answer(callId, 'bash', 'allowed-once')
+  expect(first.fellThrough).toBe(true)
+  fixture.events.push(
+    { type: 'approval/asked', data: { id: `ask-${callId}`, toolName: 'bash', callId } },
+    { type: 'approval/decided', data: { id: `ask-${callId}`, outcome: 'allowed-once' } },
   )
 }
 
@@ -366,17 +376,6 @@ describe('auto-permit answerer over PTC evidence', () => {
 })
 
 describe('container boundary', () => {
-  /** First ask: judge defers (no queued verdict), the chain allows once. */
-  async function chainApprove(fixture: Fixture, callId: string, command: string): Promise<void> {
-    ptcBash(fixture, callId, { command, sandbox_permissions: 'danger-full-access' })
-    const first = await fixture.answer(callId, 'bash', 'allowed-once')
-    expect(first.fellThrough).toBe(true)
-    fixture.events.push(
-      { type: 'approval/asked', data: { id: `ask-${callId}`, toolName: 'bash', callId } },
-      { type: 'approval/decided', data: { id: `ask-${callId}`, outcome: 'allowed-once' } },
-    )
-  }
-
   it('never replays a chain-approved container command: the identical string is re-judged', async () => {
     const fixture = makeFixture(undefined, { workspace: WORKSPACE, workingDirectory: WORKSPACE })
     await chainApprove(fixture, 'root:ptc:1', 'podman build -t local/app:test .')

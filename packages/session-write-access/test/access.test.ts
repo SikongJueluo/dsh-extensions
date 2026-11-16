@@ -139,7 +139,7 @@ describe('AccessStore attribution', () => {
   it('refuses the filesystem root as a workspace or grant', async () => {
     const { store } = makeStore()
     await expect(store.ensureRootSession({ sessionId: 'root', cwd: '/' })).rejects.toThrow(
-      /overlaps/,
+      /overlaps/u,
     )
     // A group created from a normal workspace still cannot grant '/'.
     const workspace = mkdtempSync(join(tmpdir(), 'dsh-swa-root-'))
@@ -149,7 +149,7 @@ describe('AccessStore attribution', () => {
       lookup: async () => undefined,
     })
     await other.ensureRootSession({ sessionId: 'root', cwd: workspace })
-    await expect(other.addGrant('root', '/')).rejects.toThrow(/overlaps/)
+    await expect(other.addGrant('root', '/')).rejects.toThrow(/overlaps/u)
     expect(other.status('root').grants).toEqual([])
   })
 
@@ -164,17 +164,17 @@ describe('AccessStore attribution', () => {
       createdAt: 1,
       updatedAt: 1,
     })
-    expect(() => store.auditProtectedState()).toThrow(/overlaps protected/)
+    expect(() => store.auditProtectedState()).toThrow(/overlaps protected/u)
   })
 
   it('refuses a workspace that overlaps protected data', async () => {
     const { root, protectedRoot, store } = makeStore()
     await expect(store.ensureRootSession({ sessionId: 'root', cwd: root })).rejects.toThrow(
-      /overlaps protected/,
+      /overlaps protected/u,
     )
     await expect(
       store.ensureRootSession({ sessionId: 'other', cwd: protectedRoot }),
-    ).rejects.toThrow(/overlaps protected/)
+    ).rejects.toThrow(/overlaps protected/u)
   })
 
   it('refuses a session without a cwd when the deployment states no fallback', async () => {
@@ -183,8 +183,9 @@ describe('AccessStore attribution', () => {
       .ensureRootSession({ sessionId: 'root' })
       .catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(AccessError)
-    expect((failure as AccessError).code).toBe('NO_WORKSPACE')
-    expect((failure as AccessError).message).toMatch(/no workspaceRoot/)
+    if (!(failure instanceof AccessError)) throw new TypeError('expected an AccessError')
+    expect(failure.code).toBe('NO_WORKSPACE')
+    expect(failure.message).toMatch(/no workspaceRoot/u)
     // A stated cwd still works: only the derived fallback is gone.
     await expect(
       store.ensureRootSession({ sessionId: 'with-cwd', cwd: join(root, 'workspace') }),
@@ -251,7 +252,7 @@ describe('AccessStore grants', () => {
     await store.ensureRootSession({ sessionId: 'linked', cwd: link })
     expect(store.status('linked').workspaceRoot).toBe(real)
     await expect(store.addGrant('linked', link)).rejects.toThrow(
-      /symlinked grants are not supported/,
+      /symlinked grants are not supported/u,
     )
   })
 })
@@ -276,7 +277,7 @@ describe('AccessStore requests', () => {
     const wanted = join(root, 'wanted')
     mkdirSync(wanted)
     await store.ensureRootSession({ sessionId: 'root', cwd: workspace })
-    await expect(store.request('root', wanted, '   ')).rejects.toThrow(/short reason/)
+    await expect(store.request('root', wanted, '   ')).rejects.toThrow(/short reason/u)
   })
 
   it('does not create a request for an already granted directory', async () => {
@@ -504,7 +505,7 @@ describe('AccessStore loaded-state audit', () => {
       createdAt: 1,
       updatedAt: 1,
     })
-    expect(() => store.auditProtectedState()).toThrow(/overlaps protected/)
+    expect(() => store.auditProtectedState()).toThrow(/overlaps protected/u)
     expect(protectedRoot.length).toBeGreaterThan(0)
   })
 })

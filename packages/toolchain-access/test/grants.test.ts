@@ -70,7 +70,7 @@ function plan(
   } = {},
 ) {
   const table: Record<string, Entry> = { '/': { dir: true }, ...entries }
-  const ensured: Array<{ path: string; kind: string }> = []
+  const ensured: { path: string; kind: string }[] = []
   const fs: GrantFs = fakeFs(table)
   fs.ensure = (path, kind) => {
     ensured.push({ path, kind })

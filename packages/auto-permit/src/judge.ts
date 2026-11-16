@@ -144,8 +144,8 @@ export function buildJudgeMessage(
   if (evidence.call === undefined) {
     lines.push('complete_bash_input: unavailable')
   } else {
-    lines.push(`complete_bash_input: ${quote(evidence.call.command)}`)
     lines.push(
+      `complete_bash_input: ${quote(evidence.call.command)}`,
       evidence.call.workdir === undefined
         ? 'call_workdir: unspecified'
         : `call_workdir: ${quote(evidence.call.workdir)}`,
@@ -170,18 +170,12 @@ export function buildJudgeMessage(
     evidence.effectiveCwd === undefined
       ? 'effective_cwd (recorded current working directory): unavailable'
       : `effective_cwd (recorded current working directory): ${quote(evidence.effectiveCwd)}`,
-  )
-  lines.push(
     evidence.resolvedWorkdir === undefined
       ? 'resolved_working_directory: unavailable'
       : `resolved_working_directory (host resolution): ${quote(evidence.resolvedWorkdir)}`,
-  )
-  lines.push(
     evidence.workspace === undefined
       ? 'session_workspace (immutable original project): unavailable'
       : `session_workspace (immutable original project): ${quote(evidence.workspace)}`,
-  )
-  lines.push(
     toolsAvailable
       ? "evidence_tools: available (read-only project files; use only when the input's effective operations are not visible)"
       : 'evidence_tools: unavailable (no readable project workspace for this request); decide only from the facts above and DEFER when project files are needed',
@@ -221,9 +215,9 @@ declare module '@deepseek-ai/dsh-llm' {
   }
 }
 
-const VERDICT_PATTERN = /^\s*VERDICT:\s*(allow|defer)\b/im
-const REASON_PATTERN = /^\s*REASON:\s*(.+)$/im
-const EVIDENCE_PATTERN = /^\s*EVIDENCE:\s*(.+)$/im
+const VERDICT_PATTERN = /^\s*VERDICT:\s*(allow|defer)\b/imu
+const REASON_PATTERN = /^\s*REASON:\s*(.+)$/imu
+const EVIDENCE_PATTERN = /^\s*EVIDENCE:\s*(.+)$/imu
 
 function textOf(blocks: readonly ContentBlock[]): string {
   return blocks
@@ -242,6 +236,10 @@ function defer(category: JudgeCategory, detail?: string, steps?: number): JudgeR
   }
 }
 
+/** The settled `canceled` result; module-scope because it captures nothing. */
+const cancelledResult = (step?: number): JudgeResult =>
+  defer('canceled', 'the approval was cancelled', step)
+
 function evidenceRefs(text: string, inspector: Inspector | undefined): readonly string[] {
   const recorded = inspector?.references() ?? []
   const listed = EVIDENCE_PATTERN.exec(text)?.[1]
@@ -251,7 +249,7 @@ function evidenceRefs(text: string, inspector: Inspector | undefined): readonly 
       : listed
           .split(',')
           .map((ref) => ref.trim())
-          .filter((ref) => ref !== '' && !/^(?:none|n\/a)$/i.test(ref))
+          .filter((ref) => ref !== '' && !/^(?:none|n\/a)$/iu.test(ref))
   if (recorded.length === 0) return claimed.slice(0, 12)
   // The model's citation is only a selection; a file it names must actually
   // have been read or searched. A fabricated citation never reaches the audit.
@@ -287,16 +285,25 @@ function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
       reject(new Error('aborted'))
     }
     signal.addEventListener('abort', onAbort, { once: true })
-    work.then(
-      (value) => {
-        signal.removeEventListener('abort', onAbort)
-        resolvePromise(value)
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', onAbort)
-        reject(error)
-      },
-    )
+    // Both handlers settle the wrapper and never reject, so the trailing catch
+    // is unreachable; it only satisfies the promise-chain gate. The rejection
+    // reason is preserved: an Error re-rejects as-is, anything else keeps the
+    // same visible message through the caller's `error instanceof Error ?
+    // error.message : String(error)` handling.
+    void work
+      .then(
+        (value) => {
+          signal.removeEventListener('abort', onAbort)
+          resolvePromise(value)
+          return undefined
+        },
+        (error: unknown) => {
+          signal.removeEventListener('abort', onAbort)
+          reject(error instanceof Error ? error : new Error(String(error)))
+          return undefined
+        },
+      )
+      .catch(() => undefined)
   })
 }
 
@@ -377,8 +384,6 @@ export async function judge(
 
   const timeoutResult = (step?: number): JudgeResult =>
     defer('timeout', `no verdict within ${timeoutMs} ms`, step)
-  const cancelledResult = (step?: number): JudgeResult =>
-    defer('canceled', 'the approval was cancelled', step)
   const stopRequested = (step?: number): JudgeResult | undefined => {
     if (timedOut) return timeoutResult(step)
     if (parentAborted || aborted() || controller.signal.aborted) return cancelledResult(step)

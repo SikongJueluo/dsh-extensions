@@ -13,6 +13,7 @@
  * @module dsh-plan-usage/sources/commandcode
  */
 import type { QuotaSnapshot, QuotaWindow } from '../types.js'
+import { isRecord } from './contracts.js'
 import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
 /** Canonical Command Code API origin (billing routes live here, not under /provider). */
@@ -69,9 +70,7 @@ export interface CommandCodeError {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined
+  return isRecord(value) ? value : undefined
 }
 
 function finite(value: unknown): number | undefined {
@@ -254,8 +253,9 @@ export class CommandCodeSource implements QuotaSource {
     this.timeoutMs = options.timeoutMs ?? 10_000
     this.whoamiTimeoutMs = options.whoamiTimeoutMs ?? 5_000
     this.env = options.env ?? process.env
-    this.baseURL = (options.baseURL ?? COMMAND_CODE_API_BASE).replace(/\/+$/, '')
-    this.apiKeyEnv = options.apiKeyEnv?.trim() || undefined
+    this.baseURL = (options.baseURL ?? COMMAND_CODE_API_BASE).replace(/\/+$/u, '')
+    const apiKeyEnv = options.apiKeyEnv?.trim()
+    this.apiKeyEnv = apiKeyEnv === undefined || apiKeyEnv === '' ? undefined : apiKeyEnv
     this.getKey = options.getKey
   }
 

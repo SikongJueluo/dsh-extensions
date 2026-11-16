@@ -39,8 +39,13 @@ export class ProtectedWriteRootError extends Error {
  * @returns the expanded path (still possibly relative).
  */
 export function expandPath(path: string, environment: NodeJS.ProcessEnv = process.env): string {
-  const home = environment.HOME?.trim() || homedir()
-  const dshHome = environment.DSH_HOME?.trim() || join(home, '.dsh')
+  // An empty trimmed value means "unset" — the same fall-through `||` had,
+  // written out because `??` alone would keep the empty string.
+  const homeValue = environment.HOME?.trim()
+  const home = homeValue === undefined || homeValue === '' ? homedir() : homeValue
+  const dshHomeValue = environment.DSH_HOME?.trim()
+  const dshHome =
+    dshHomeValue === undefined || dshHomeValue === '' ? join(home, '.dsh') : dshHomeValue
   let expanded = path
   if (expanded === '~') expanded = home
   else if (expanded.startsWith(`~${sep}`)) expanded = join(home, expanded.slice(2))

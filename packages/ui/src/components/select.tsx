@@ -10,9 +10,14 @@ export interface SelectOption {
 }
 
 export interface SelectGroup {
+  /** Stable identity: the popup renders one list per group, so React needs a key. */
+  id: string
   label: React.ReactNode
   options: SelectOption[]
 }
+
+/** Stable empty default: a fresh `[]` per render would churn list identity. */
+const EMPTY_OPTIONS: SelectOption[] = []
 
 export interface SelectProps {
   value: string
@@ -31,6 +36,25 @@ export interface SelectProps {
   align?: 'start' | 'end' | 'center'
 }
 
+const renderItem = (option: SelectOption) => (
+  <BaseSelect.Item
+    key={option.value}
+    value={option.value}
+    disabled={option.disabled}
+    className={cn(
+      'dshx:grid dshx:cursor-default dshx:grid-cols-[1rem_1fr] dshx:items-center dshx:gap-1.5',
+      'dshx:min-h-[34px] dshx:rounded-[6px] dshx:px-2 dshx:py-1.5 dshx:text-sm dshx:text-fg dshx:select-none',
+      'dshx:hover:bg-brand/10 dshx:data-[highlighted]:bg-brand/10 dshx:data-[disabled]:opacity-50',
+      'dshx:pointer-coarse:min-h-11',
+    )}
+  >
+    <BaseSelect.ItemIndicator className="dshx:col-start-1 dshx:flex">
+      <Check className="dshx:size-3.5" />
+    </BaseSelect.ItemIndicator>
+    <BaseSelect.ItemText className="dshx:col-start-2">{option.label}</BaseSelect.ItemText>
+  </BaseSelect.Item>
+)
+
 /**
  * Base UI select styled as the shadcn trigger/popup pair. The popup portals
  * into a container inside this component's own subtree, not into `document.body`,
@@ -39,7 +63,7 @@ export interface SelectProps {
 export function Select({
   value,
   onValueChange,
-  options = [],
+  options = EMPTY_OPTIONS,
   groups,
   placeholder,
   disabled,
@@ -53,25 +77,6 @@ export function Select({
   const [container, setContainer] = React.useState<HTMLDivElement | null>(null)
   const flat = groups ? groups.flatMap((group) => group.options) : options
 
-  const renderItem = (option: SelectOption) => (
-    <BaseSelect.Item
-      key={option.value}
-      value={option.value}
-      disabled={option.disabled}
-      className={cn(
-        'dshx:grid dshx:cursor-default dshx:grid-cols-[1rem_1fr] dshx:items-center dshx:gap-1.5',
-        'dshx:min-h-[34px] dshx:rounded-[6px] dshx:px-2 dshx:py-1.5 dshx:text-sm dshx:text-fg dshx:select-none',
-        'dshx:hover:bg-brand/10 dshx:data-[highlighted]:bg-brand/10 dshx:data-[disabled]:opacity-50',
-        'dshx:pointer-coarse:min-h-11',
-      )}
-    >
-      <BaseSelect.ItemIndicator className="dshx:col-start-1 dshx:flex">
-        <Check className="dshx:size-3.5" />
-      </BaseSelect.ItemIndicator>
-      <BaseSelect.ItemText className="dshx:col-start-2">{option.label}</BaseSelect.ItemText>
-    </BaseSelect.Item>
-  )
-
   return (
     <div className={cn('dshx:relative', variant === 'ghost' && 'dshx:inline-flex', className)}>
       {/* A fixed, zero-size portal host keeps the popup out of the slot's
@@ -80,7 +85,7 @@ export function Select({
       <div ref={setContainer} className="dshx:fixed dshx:left-0 dshx:top-0 dshx:h-0 dshx:w-0" />
       <BaseSelect.Root
         value={value === '' ? null : value}
-        onValueChange={(next) => onValueChange(next === null ? '' : String(next))}
+        onValueChange={(next) => onValueChange(next ?? '')}
         items={flat.map((option) => ({ label: option.label, value: option.value }))}
         disabled={disabled}
         name={name}
@@ -122,15 +127,15 @@ export function Select({
                 )}
               >
                 {groups
-                  ? groups.map((group, index) => (
-                      <BaseSelect.Group key={index}>
+                  ? groups.map((group) => (
+                      <BaseSelect.Group key={group.id}>
                         <BaseSelect.GroupLabel className="dshx:px-2 dshx:py-1 dshx:text-2xs dshx:text-fg-muted">
                           {group.label}
                         </BaseSelect.GroupLabel>
-                        {group.options.map(renderItem)}
+                        {group.options.map((option) => renderItem(option))}
                       </BaseSelect.Group>
                     ))
-                  : options.map(renderItem)}
+                  : options.map((option) => renderItem(option))}
               </BaseSelect.Popup>
             </BaseSelect.Positioner>
           </BaseSelect.Portal>

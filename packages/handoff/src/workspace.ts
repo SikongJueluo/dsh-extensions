@@ -11,7 +11,7 @@
 import { realpath } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: pulls the `Context.workspaceRegistry` augmentation in.
-import type {} from '@deepseek-ai/dsh-workspace'
+import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { DEFAULT_BRIEF_DIR } from './identity.js'
 
 /** The registry service face this module consumes (absent in minimal compositions). */
@@ -50,7 +50,7 @@ export interface WorkspaceRoster {
 /** Final path segment, for titling an unregistered origin cwd. */
 function lastSegment(path: string): string {
   const parts = path.split('/').filter((segment) => segment.length > 0)
-  return parts.length > 0 ? (parts[parts.length - 1] as string) : path
+  return parts.at(-1) ?? path
 }
 
 /** One entity row with a live directory check. */
@@ -82,7 +82,7 @@ export async function snapshotRoster(ctx: Context, cwd: string): Promise<Workspa
       ? { id: '', title: lastSegment(cwd), path: cwd, missing: false }
       : await summarize(originEntity)
   const entities = registry.list().filter((entity) => String(entity.id) !== origin.id)
-  const others = await Promise.all(entities.map(summarize))
+  const others = await Promise.all(entities.map((entity) => summarize(entity)))
   return { origin, others }
 }
 
@@ -105,7 +105,7 @@ export async function resolveTargetById(
 ): Promise<HandoffTarget | undefined> {
   const registry = ctx.get('workspaceRegistry')
   if (registry === undefined) return undefined
-  const entity = registry.get(id as Parameters<Registry['get']>[0])
+  const entity = registry.get(WorkspaceId(id))
   if (entity === undefined) return undefined
   return { workspaceId: id, path: entity.path, title: entity.title }
 }
@@ -152,10 +152,11 @@ export async function resolveFlagTarget(ctx: Context, spec: string): Promise<Fla
   if (trimmed.length === 0) return { error: 'empty --workspace spec' }
   const entities = registry.list()
   const byTitle = entities.filter((entity) => entity.title === trimmed)
-  if (byTitle.length === 1) return check(registry, byTitle[0] as WorkspaceEntity)
   if (byTitle.length > 1) {
     return { error: `多个工作区同名 "${trimmed}"，请改用路径：${spell(byTitle)}` }
   }
+  const byTitleEntity = byTitle[0]
+  if (byTitleEntity !== undefined) return check(registry, byTitleEntity)
   let canonical: string
   try {
     canonical = await realpath(trimmed)
@@ -164,8 +165,10 @@ export async function resolveFlagTarget(ctx: Context, spec: string): Promise<Fla
       error: `无法解析工作区 "${trimmed}"（按 title 或 workspace 根路径写；候选：${spell(entities)}）`,
     }
   }
-  const byPath = entities.filter((entity) => entity.path === canonical)
-  if (byPath.length === 1) return check(registry, byPath[0] as WorkspaceEntity)
+  // Registry canonical paths are unique by construction (`create` reuses the
+  // entity for an existing canonical path), so one match is the only live case.
+  const byPathEntity = entities.find((entity) => entity.path === canonical)
+  if (byPathEntity !== undefined) return check(registry, byPathEntity)
   return { error: `"${trimmed}" 不是已注册的工作区根路径（候选：${spell(entities)}）` }
 }
 
@@ -188,6 +191,6 @@ function spell(entities: readonly WorkspaceEntity[]): string {
 
 /** Build the cross-workspace brief-copy directory for a target. */
 export function targetBriefDir(dir: string | undefined, target: HandoffTarget): string {
-  if (dir !== undefined && dir.startsWith('/')) return dir.replace(/\/+$/, '')
-  return `${target.path.replace(/\/+$/, '')}/${dir ?? DEFAULT_BRIEF_DIR}`
+  if (dir !== undefined && dir.startsWith('/')) return dir.replace(/\/+$/u, '')
+  return `${target.path.replace(/\/+$/u, '')}/${dir ?? DEFAULT_BRIEF_DIR}`
 }

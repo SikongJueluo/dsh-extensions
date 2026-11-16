@@ -226,72 +226,68 @@ export function commitTurnEnd(
       ),
     }
   }
-  switch (pending.outcome) {
-    case 'deliver': {
+  if (pending.outcome === 'deliver') {
+    const advanced: RunRecord = withHistory(
+      { ...base, phase: 'awaiting-review' },
+      { at: now, kind: 'advance', detail: `round ${run.round} → review` },
+    )
+    return {
+      kind: 'advance',
+      run: advanced,
+      intents: [{ runId: run.id, round: run.round, to: run.parent, kind: 'review' }],
+    }
+  }
+  if (pending.outcome === 'rework') {
+    if (run.round < run.maxRounds) {
+      const next = run.round + 1
       const advanced: RunRecord = withHistory(
-        { ...base, phase: 'awaiting-review' },
-        { at: now, kind: 'advance', detail: `round ${run.round} → review` },
+        { ...base, phase: 'awaiting-delivery', round: next },
+        { at: now, kind: 'advance', detail: `round ${next} rework` },
       )
       return {
         kind: 'advance',
         run: advanced,
-        intents: [{ runId: run.id, round: run.round, to: run.parent, kind: 'review' }],
+        intents: [{ runId: run.id, round: next, to: run.executor, kind: 'rework' }],
       }
     }
-    case 'rework': {
-      if (run.round < run.maxRounds) {
-        const next = run.round + 1
-        const advanced: RunRecord = withHistory(
-          { ...base, phase: 'awaiting-delivery', round: next },
-          { at: now, kind: 'advance', detail: `round ${next} rework` },
-        )
-        return {
-          kind: 'advance',
-          run: advanced,
-          intents: [{ runId: run.id, round: next, to: run.executor, kind: 'rework' }],
-        }
-      }
-      return {
-        kind: 'advance',
-        run: withHistory(
-          {
-            ...base,
-            status: 'paused-budget',
-            pendingRework: { summary: pending.summary, round: run.round },
-          },
-          { at: now, kind: 'pause', detail: 'rework at round budget' },
-        ),
-        intents: [],
-      }
+    return {
+      kind: 'advance',
+      run: withHistory(
+        {
+          ...base,
+          status: 'paused-budget',
+          pendingRework: { summary: pending.summary, round: run.round },
+        },
+        { at: now, kind: 'pause', detail: 'rework at round budget' },
+      ),
+      intents: [],
     }
-    case 'pass': {
-      return {
-        kind: 'advance',
-        run: withHistory(
-          { ...base, status: 'completed', endedAt: now, endNote: '审核通过' },
-          { at: now, kind: 'end', detail: 'pass' },
-        ),
-        intents: [{ runId: run.id, round: run.round, to: run.executor, kind: 'notice' }],
-      }
+  }
+  if (pending.outcome === 'pass') {
+    return {
+      kind: 'advance',
+      run: withHistory(
+        { ...base, status: 'completed', endedAt: now, endNote: '审核通过' },
+        { at: now, kind: 'end', detail: 'pass' },
+      ),
+      intents: [{ runId: run.id, round: run.round, to: run.executor, kind: 'notice' }],
     }
-    case 'needs_user': {
-      const pausedBy = run.phase === 'awaiting-delivery' ? 'executor' : 'parent'
-      return {
-        kind: 'advance',
-        run: withHistory(
-          { ...base, status: 'paused-user', pausedBy },
-          { at: now, kind: 'pause', detail: `needs_user by ${pausedBy}` },
-        ),
-        intents: [
-          {
-            runId: run.id,
-            round: run.round,
-            to: pausedBy === 'executor' ? run.parent : run.executor,
-            kind: 'notice',
-          },
-        ],
-      }
-    }
+  }
+  const pausedBy = run.phase === 'awaiting-delivery' ? 'executor' : 'parent'
+  return {
+    kind: 'advance',
+    run: withHistory(
+      { ...base, status: 'paused-user', pausedBy },
+      { at: now, kind: 'pause', detail: `needs_user by ${pausedBy}` },
+    ),
+    intents: [
+      {
+        runId: run.id,
+        round: run.round,
+        to: pausedBy === 'executor' ? run.parent : run.executor,
+        kind: 'notice',
+      },
+    ],
   }
 }
 
@@ -500,27 +496,24 @@ export function extendBudget(run: RunRecord, newMaxRounds: number, now: number):
 
 /** Replace `{{key}}` slots in a template body; unknown keys stay visible. */
 export function renderTemplate(body: string, vars: Readonly<Record<string, string>>): string {
-  return body.replaceAll(/\{\{(\w+)\}\}/g, (whole, key: string) =>
-    Object.hasOwn(vars, key) ? vars[key]! : whole,
+  return body.replaceAll(/\{\{(\w+)\}\}/gu, (whole, key: string) =>
+    Object.hasOwn(vars, key) ? (vars[key] ?? whole) : whole,
   )
 }
 
 /** Human labels (UI copy shares them). */
+const STATUS_LABELS: Record<RunStatus, string> = {
+  active: '进行中',
+  'paused-user': '等待用户',
+  'paused-budget': '轮次用尽待续',
+  'paused-error': '异常暂停',
+  completed: '已完成',
+  cancelled: '已取消',
+}
+
+/** Human label of a status. */
 export function statusLabel(status: RunStatus): string {
-  switch (status) {
-    case 'active':
-      return '进行中'
-    case 'paused-user':
-      return '等待用户'
-    case 'paused-budget':
-      return '轮次用尽待续'
-    case 'paused-error':
-      return '异常暂停'
-    case 'completed':
-      return '已完成'
-    case 'cancelled':
-      return '已取消'
-  }
+  return STATUS_LABELS[status]
 }
 
 /** Human label of a phase. */

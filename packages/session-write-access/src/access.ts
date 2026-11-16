@@ -442,7 +442,7 @@ export class AccessStore {
     const requests = [...this.tables.requests.entries()]
       .map(([, request]) => request)
       .filter((request) => request.groupId === group.groupId)
-      .sort((left, right) => right.createdAt - left.createdAt)
+      .toSorted((left, right) => right.createdAt - left.createdAt)
     return {
       sessionId,
       groupId: group.groupId,

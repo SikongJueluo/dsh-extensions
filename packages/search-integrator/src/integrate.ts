@@ -12,11 +12,12 @@
  *
  * @module dsh-search-integrator/integrate
  */
+import { isRecord } from './types.js'
+import { MAX_QUERIES } from './settings.js'
 import type { LlmPort, LlmUsage } from './llm.js'
 import type { ConflictSide, PointStatus, ResearchPoint } from './types.js'
 
-/** Maximum seed queries the tool accepts / the planner may emit. */
-export const MAX_QUERIES = 4
+export { MAX_QUERIES }
 
 export const PROMPT_VERSION = 'dsh-search-integrator-v3'
 
@@ -53,15 +54,15 @@ const INTEGRATOR_SYSTEM = [
 /** The integrator's raw contract, before citation validation. */
 export interface RawIntegration {
   readonly summary: string
-  readonly points: readonly ResearchPoint[]
-  readonly unknowns: readonly string[]
+  points: ResearchPoint[]
+  unknowns: string[]
   readonly followupNeeded: boolean
-  readonly followupQueries: readonly string[]
+  followupQueries: string[]
 }
 
 /** Remove `[n]` markers from text when n is not a valid evidence number. */
 function scrubInvalidCitations(text: string, sourceCount: number): string {
-  return text.replaceAll(/\s*\[(\d+)\]/g, (match, digits: string) => {
+  return text.replaceAll(/\s*\[(\d+)\]/gu, (match, digits: string) => {
     const id = Number(digits)
     return id >= 1 && id <= sourceCount ? match : ''
   })
@@ -105,7 +106,7 @@ function addUsage(total: LlmUsage, more: LlmUsage | undefined): LlmUsage {
  */
 export function extractJsonObject(text: string): string | undefined {
   let body = text.trim()
-  const fence = /^```[a-zA-Z]*\s*([\s\S]*?)\s*```$/.exec(body)
+  const fence = /^```[a-zA-Z]*\s*([\s\S]*?)\s*```$/u.exec(body)
   if (fence !== null) body = fence[1]?.trim() ?? ''
   const start = body.indexOf('{')
   if (start === -1) return undefined
@@ -156,8 +157,8 @@ export function parseIntegration(
   sourceCount: number,
   options: { maxPoints?: number; maxUnknowns?: number } = {},
 ): RawIntegration | undefined {
-  if (typeof parsed !== 'object' || parsed === null) return undefined
-  const root = parsed as Record<string, unknown>
+  if (!isRecord(parsed)) return undefined
+  const root = parsed
   const summary = typeof root.summary === 'string' ? root.summary.trim() : ''
   if (summary === '') return undefined
   if (!Array.isArray(root.points)) return undefined
@@ -165,42 +166,37 @@ export function parseIntegration(
   const points: ResearchPoint[] = []
   const unknowns = cleanStrings(root.unknowns, options.maxUnknowns ?? 12)
   for (const entry of root.points.slice(0, maxPoints)) {
-    if (typeof entry !== 'object' || entry === null) continue
-    const point = entry as Record<string, unknown>
+    if (!isRecord(entry)) continue
+    const point = entry
     const rawText = typeof point.text === 'string' ? point.text.trim() : ''
     if (rawText === '' || !isPointStatus(point.status)) continue
     // Citation validation: an id is valid only if the numbered source exists.
     const validIds = new Set(Array.from({ length: sourceCount }, (_, i) => i + 1))
-    const cited = Array.isArray(point.sources)
-      ? point.sources.filter(
-          (id): id is number => Number.isInteger(id) && id >= 1 && id <= sourceCount,
-        )
-      : []
+    const rawSources: unknown[] = Array.isArray(point.sources) ? point.sources : []
+    const cited = rawSources.filter(
+      (id): id is number =>
+        typeof id === 'number' && Number.isInteger(id) && id >= 1 && id <= sourceCount,
+    )
     const unique = [...new Set(cited)]
-    const rawCount = Array.isArray(point.sources) ? point.sources.length : 0
+    const rawCount = rawSources.length
     // Conflict sides: validated like the flat list, each attributed on its own.
     const sides: ConflictSide[] = []
-    if (Array.isArray(point.sides)) {
-      for (const side of point.sides) {
-        if (typeof side !== 'object' || side === null) continue
-        const sideText =
-          typeof (side as Record<string, unknown>).text === 'string'
-            ? ((side as Record<string, unknown>).text as string).trim()
-            : ''
-        if (sideText === '') continue
-        const sideSources = Array.isArray((side as Record<string, unknown>).sources)
-          ? [
-              ...new Set(
-                ((side as Record<string, unknown>).sources as unknown[]).filter(
-                  (id): id is number =>
-                    typeof id === 'number' && Number.isInteger(id) && validIds.has(id),
-                ),
-              ),
-            ]
-          : []
-        if (sideSources.length === 0) continue
-        sides.push({ text: scrubInvalidCitations(sideText, sourceCount), sources: sideSources })
-      }
+    const rawSides: unknown[] = Array.isArray(point.sides) ? point.sides : []
+    for (const side of rawSides) {
+      if (!isRecord(side)) continue
+      const sideText = typeof side.text === 'string' ? side.text.trim() : ''
+      if (sideText === '') continue
+      const rawSideSources: unknown[] = Array.isArray(side.sources) ? side.sources : []
+      const sideSources = [
+        ...new Set(
+          rawSideSources.filter(
+            (id): id is number =>
+              typeof id === 'number' && Number.isInteger(id) && validIds.has(id),
+          ),
+        ),
+      ]
+      if (sideSources.length === 0) continue
+      sides.push({ text: scrubInvalidCitations(sideText, sourceCount), sources: sideSources })
     }
     // A point with no valid citation is not kept as a claim: it moves to the
     // unknowns so the loss is visible instead of silently trusted.
@@ -230,10 +226,7 @@ export function parseIntegration(
     })
   }
   if (points.length === 0) return undefined
-  const followup =
-    typeof root.followup === 'object' && root.followup !== null
-      ? (root.followup as Record<string, unknown>)
-      : {}
+  const followup = isRecord(root.followup) ? root.followup : {}
   const followupQueries = cleanStrings(followup.queries, MAX_QUERIES)
   return {
     summary: scrubInvalidCitations(summary, sourceCount),
@@ -264,7 +257,8 @@ export async function planQueries(
   const json = extractJsonObject(outcome.text)
   if (json === undefined) return undefined
   try {
-    const queries = cleanStrings((JSON.parse(json) as { queries?: unknown }).queries, MAX_QUERIES)
+    const plan: unknown = JSON.parse(json)
+    const queries = cleanStrings(isRecord(plan) ? plan.queries : undefined, MAX_QUERIES)
     return queries.length === 0 ? undefined : queries
   } catch {
     return undefined

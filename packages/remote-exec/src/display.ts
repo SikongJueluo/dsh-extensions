@@ -16,8 +16,9 @@ export interface DisplayView {
 }
 
 /** CSI, OSC and two-character ANSI escapes; applied only to the bounded excerpt. */
-// oxlint-disable-next-line eslint/no-control-regex -- the pattern exists to match ANSI escapes
-const ANSI_PATTERN = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-_])/g
+const ANSI_PATTERN =
+  // oxlint-disable-next-line eslint/no-control-regex -- the pattern exists to match ANSI escapes
+  /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)|[@-_])/gu
 
 /** Bytes reserved inside the budget for the omission/cap marker. */
 const MARKER_RESERVE = 64
@@ -67,7 +68,7 @@ function cutTail(text: string): string {
 
 function clean(text: string): string {
   const withoutAnsi = text.replaceAll(ANSI_PATTERN, '')
-  const lines = withoutAnsi.split('\n').map(collapseCarriage)
+  const lines = withoutAnsi.split('\n').map((line) => collapseCarriage(line))
   return dedupe(lines).join('\n')
 }
 

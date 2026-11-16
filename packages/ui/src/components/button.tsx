@@ -30,15 +30,22 @@ export const buttonVariants = cva(
 )
 
 export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {}
+  extends
+    Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'type'>,
+    VariantProps<typeof buttonVariants> {}
 
+/**
+ * Always renders `type="button"`: a slot button must never submit an
+ * enclosing host form, and no caller in this repo asks for submit/reset.
+ * The spread comes first so even a JS caller cannot override the literal.
+ */
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, type = 'button', ...props }, ref) => (
+  ({ className, variant, size, ...props }, ref) => (
     <button
-      ref={ref}
-      type={type}
-      className={cn(buttonVariants({ variant, size }), className)}
       {...props}
+      ref={ref}
+      type="button"
+      className={cn(buttonVariants({ variant, size }), className)}
     />
   ),
 )

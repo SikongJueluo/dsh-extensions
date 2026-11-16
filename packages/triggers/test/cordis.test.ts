@@ -13,113 +13,146 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-session'
-import type { Domain } from '@deepseek-ai/dsh-storage-domain'
+import type { TableValueOf } from '@deepseek-ai/dsh-storage-domain'
 import * as triggersPlugin from '../src/index.js'
-import { TRIGGER_DOMAIN, type DeliveryRecord, type RunRecord } from '../src/model.js'
+import {
+  type TRIGGER_DOMAIN,
+  type BindingRecord,
+  type DeliveryRecord,
+  type RunRecord,
+  type TemplateRecord,
+} from '../src/model.js'
+
+type TableNames = keyof (typeof TRIGGER_DOMAIN)['tables']
+type TableRecord<N extends TableNames> = TableValueOf<typeof TRIGGER_DOMAIN, N>
+
+/** Per-table record maps backing the fake domain (same names as the spec). */
+type TableMaps = { [N in TableNames]: Map<string, TableRecord<N>> }
+
+/**
+ * One table handle over the fake maps, enforcing the spec's zod boundary on
+ * `put` exactly as the real domain layer does at its durable boundary.
+ */
+interface FakeTableHandle<N extends TableNames> {
+  get(key: string): TableRecord<N> | undefined
+  entries(): IterableIterator<[string, TableRecord<N>]>
+  keys(): IterableIterator<string>
+  readonly size: number
+  put(key: string, value: TableRecord<N>): Promise<void>
+  delete(key: string): Promise<boolean>
+}
+
+/** The prompts the fake session controller queued. */
+interface FakePromptCall {
+  requestId: string
+  sessionId: string
+  mode: string
+  text: string
+}
+
+/** The tool surface the fake `tools` service stores; execute reads only these. */
+interface RegisteredTool {
+  name: string
+  execute(
+    args: unknown,
+    exec: { agent?: { id: string }; concludeTurn: () => void },
+  ): Promise<unknown>
+}
+
+/** Narrow a possibly-absent fixture lookup; the test fails loud at the site. */
+function present<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`expected ${what} to exist`)
+  return value
+}
+
+/**
+ * One typed table handle over the fake maps, enforcing the spec's zod boundary
+ * on `put` exactly as the real domain layer does at its durable boundary.
+ */
+function fakeTable<N extends TableNames>(
+  tables: TableMaps,
+  spec: typeof TRIGGER_DOMAIN,
+  name: N,
+): FakeTableHandle<N> {
+  const map = tables[name]
+  const valueSchema = spec.tables[name].valueSchema
+  return {
+    get: (key: string) => map.get(key),
+    entries: () => map.entries(),
+    keys: () => map.keys(),
+    get size() {
+      return map.size
+    },
+    put: async (key: string, value: TableRecord<N>) => {
+      const parsed = valueSchema.safeParse(value)
+      if (!parsed.success) {
+        const issues = parsed.error.issues
+          .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+          .join('; ')
+        throw new Error(`zod boundary rejected ${name}[${key}]: ${issues}`)
+      }
+      map.set(key, structuredClone(value))
+    },
+    delete: async (key: string) => map.delete(key),
+  }
+}
 
 /** Minimal host surface; every value TriggerService touches. */
 function createHost({ queueFails = false } = {}) {
-  const prompts: { requestId: string; sessionId: string; mode: string; text: string }[] = []
-  const toolDefs = new Map<
-    string,
-    { execute: (args: unknown, exec: unknown) => Promise<unknown> }
-  >()
-  const domains = new Map<
-    string,
-    { spec: typeof TRIGGER_DOMAIN; tables: Map<string, Map<string, unknown>> }
-  >()
-
-  const table = (
-    spec: typeof TRIGGER_DOMAIN,
-    store: Map<string, Map<string, unknown>>,
-    name: string,
-  ) => {
-    const map = store.get(name)!
-    const valueSchema = (
-      spec.tables as Record<
-        string,
-        {
-          valueSchema?: {
-            safeParse: (v: unknown) => {
-              success: boolean
-              error?: { issues: { path: (string | number)[]; message: string }[] }
-            }
-          }
-        }
-      >
-    )[name]?.valueSchema
-    return {
-      get: (key: string) => map.get(key),
-      entries: () => map.entries() as IterableIterator<[string, never]>,
-      keys: () => map.keys() as IterableIterator<string>,
-      get size() {
-        return map.size
-      },
-      put: async (key: string, value: unknown) => {
-        if (valueSchema !== undefined) {
-          const parsed = valueSchema.safeParse(value)
-          if (!parsed.success) {
-            const issues = parsed
-              .error!.issues.map((i) => `${i.path.join('.')}: ${i.message}`)
-              .join('; ')
-            throw new Error(`zod boundary rejected ${name}[${key}]: ${issues}`)
-          }
-        }
-        map.set(key, structuredClone(value))
-      },
-      delete: async (key: string) => map.delete(key),
-    }
+  const prompts: FakePromptCall[] = []
+  const toolDefs = new Map<string, RegisteredTool>()
+  const tables: TableMaps = {
+    templates: new Map<string, TemplateRecord>(),
+    bindings: new Map<string, BindingRecord>(),
+    runs: new Map<string, RunRecord>(),
+    deliveries: new Map<string, DeliveryRecord>(),
   }
 
-  const ctx = {
-    logger: () => ({ info: () => {}, warn: () => {} }),
-    tools: {
-      register(def: { name: string }) {
-        toolDefs.set(def.name, def as never)
-        return () => toolDefs.delete(def.name)
-      },
-    },
-    sessionController: {
-      prompt: async (request: {
-        requestId: string
-        sessionId: string
-        mode: string
-        content: { text: string }[]
-      }) => {
-        if (queueFails) throw new Error('queue refused (drill)')
-        prompts.push({
-          requestId: request.requestId,
-          sessionId: request.sessionId,
-          mode: request.mode,
-          text: request.content[0]?.text ?? '',
-        })
-        return { accepted: true as const }
-      },
-      list: async () => ({ items: [] }),
-    },
-    // The host's log reader: this composition keeps no durable history.
-    sessionQuery: {
-      readSession: async (sessionId: string) => ({
-        session: { id: sessionId },
-        inheritedEventCount: 0,
-        events: [],
-      }),
-    },
-    storageDomain: {
-      open: async (spec: typeof TRIGGER_DOMAIN) => {
-        const store = { spec, tables: new Map<string, Map<string, unknown>>() }
-        for (const name of Object.keys(spec.tables)) store.tables.set(name, new Map())
-        domains.set(spec.name, store)
-        const domain: Domain<typeof TRIGGER_DOMAIN> = {
-          table: (name: string) => table(spec, store.tables, name) as never,
-          close: async () => {},
-        } as never
-        return domain
-      },
+  const tools = {
+    register: (definition: RegisteredTool) => {
+      toolDefs.set(definition.name, definition)
+      return () => toolDefs.delete(definition.name)
     },
   }
+  const sessionController = {
+    prompt: async (request: {
+      requestId: string
+      sessionId: string
+      mode: string
+      content: { text: string }[]
+    }) => {
+      if (queueFails) throw new Error('queue refused (drill)')
+      prompts.push({
+        requestId: request.requestId,
+        sessionId: request.sessionId,
+        mode: request.mode,
+        text: request.content[0]?.text ?? '',
+      })
+      return { accepted: true as const }
+    },
+    list: async () => ({ items: [] }),
+  }
+  // The host's log reader: this composition keeps no durable history.
+  const sessionQuery = {
+    readSession: async (sessionId: string) => ({
+      session: { id: sessionId },
+      inheritedEventCount: 0,
+      events: [],
+    }),
+  }
+  const storageDomain = {
+    open: async (spec: typeof TRIGGER_DOMAIN) => ({
+      name: spec.name,
+      global: (): never => {
+        throw new Error('the trigger domain declares no global slot')
+      },
+      table: (name: TableNames) => fakeTable(tables, spec, name),
+      close: async () => {},
+    }),
+  }
+
   return {
-    ctx,
+    ctx: { tools, sessionController, sessionQuery, storageDomain },
     prompts,
     toolDefs,
     queue: {
@@ -127,10 +160,7 @@ function createHost({ queueFails = false } = {}) {
         return queueFails
       },
     },
-    rows: (name: string) => {
-      const store = [...domains.values()].at(-1)
-      return store === undefined ? [] : [...store.tables.get(name)!.values()]
-    },
+    rows: <N extends TableNames>(name: N) => [...tables[name].values()],
   }
 }
 
@@ -138,17 +168,17 @@ function createHost({ queueFails = false } = {}) {
 async function boot(options: { queueFails?: boolean } = {}) {
   const host = createHost(options)
   const root = new Context()
-  root.provide('tools', host.ctx.tools as never)
-  root.provide('sessionController', host.ctx.sessionController as never)
-  root.provide('sessionQuery', host.ctx.sessionQuery as never)
-  root.provide('storageDomain', host.ctx.storageDomain as never)
+  root.reflect.provide('tools', host.ctx.tools)
+  root.reflect.provide('sessionController', host.ctx.sessionController)
+  root.reflect.provide('sessionQuery', host.ctx.sessionQuery)
+  root.reflect.provide('storageDomain', host.ctx.storageDomain)
   await root.plugin(triggersPlugin, {})
   return { root, host }
 }
 
 /** Emit one durable session event exactly as the host feed would. */
 function emit(root: Context, sessionId: string, event: { type: string; data: unknown }): void {
-  root.emit('session/event', { id: sessionId } as never, event as never)
+  root.events.emit('session/event', { id: sessionId }, event)
 }
 
 /** Await a condition (bounded), so promise chains can settle. */
@@ -172,18 +202,19 @@ describe('cross-plugin service through the Cordis proxy', () => {
     // ctx.get(), which returns the trace proxy, not the raw instance.
     const svc = root.get('triggerBindings')
     expect(svc).toBeDefined()
-    const bound = await svc!.bindReviewLoop({
+    if (svc === undefined) throw new Error('missing triggerBindings service')
+    const bound = await svc.bindReviewLoop({
       task: '修复构建',
       executorSession: EXECUTOR,
       parentSession: PARENT,
       maxRounds: 5,
     })
-    expect(bound.runId).toMatch(/^run-/)
-    expect(bound.bindingId).toMatch(/^bnd-/)
-    const runs = host.rows('runs') as RunRecord[]
+    expect(bound.runId).toMatch(/^run-/u)
+    expect(bound.bindingId).toMatch(/^bnd-/u)
+    const runs = host.rows('runs')
     expect(runs).toHaveLength(1)
-    expect(runs[0]!.status).toBe('active')
-    expect(runs[0]!.phase).toBe('awaiting-delivery')
+    expect(present(runs[0], 'first run').status).toBe('active')
+    expect(present(runs[0], 'first run').phase).toBe('awaiting-delivery')
     // handoff binds without delivering its own start prompt
     expect(host.prompts).toHaveLength(0)
     // (no root.dispose in cordis 4.0.4; fibers clean up with the context)
@@ -191,7 +222,7 @@ describe('cross-plugin service through the Cordis proxy', () => {
 
   it('the loop advances end to end through the proxy and the signal tool', async () => {
     const { root, host } = await boot()
-    const svc = root.get('triggerBindings')!
+    const svc = present(root.get('triggerBindings'), 'triggerBindings service')
     const bound = await svc.bindReviewLoop({
       task: '任务',
       executorSession: EXECUTOR,
@@ -200,7 +231,7 @@ describe('cross-plugin service through the Cordis proxy', () => {
 
     // Executor round: signal through the real tool surface, then the turn ends.
     emit(root, EXECUTOR, { type: 'turn/start', data: { turn: 3 } })
-    const tool = host.toolDefs.get('trigger_signal')!
+    const tool = present(host.toolDefs.get('trigger_signal'), 'trigger_signal tool')
     const result = await tool.execute(
       { runId: bound.runId, outcome: 'deliver', summary: '实现完成，测试 31/31' },
       { agent: { id: EXECUTOR }, concludeTurn: () => {} },
@@ -210,10 +241,10 @@ describe('cross-plugin service through the Cordis proxy', () => {
 
     emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 3, reason: { kind: 'completed' } } })
     await until(() => host.prompts.length === 1, 'review delivery')
-    expect(host.prompts[0]!.sessionId).toBe(PARENT)
-    expect(host.prompts[0]!.text).toContain(`runId=${bound.runId}`)
-    expect(host.prompts[0]!.text).toContain('你是审核者')
-    expect((host.rows('runs') as RunRecord[])[0]!.phase).toBe('awaiting-review')
+    expect(present(host.prompts[0], 'first prompt').sessionId).toBe(PARENT)
+    expect(present(host.prompts[0], 'first prompt').text).toContain(`runId=${bound.runId}`)
+    expect(present(host.prompts[0], 'first prompt').text).toContain('你是审核者')
+    expect(present(host.rows('runs')[0], 'first run').phase).toBe('awaiting-review')
 
     // Reviewer round: pass through the proxied service surface.
     emit(root, PARENT, { type: 'turn/start', data: { turn: 1 } })
@@ -225,24 +256,24 @@ describe('cross-plugin service through the Cordis proxy', () => {
     expect(verdict).toMatchObject({ ok: true })
     emit(root, PARENT, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await until(
-      () => (host.rows('runs') as RunRecord[])[0]!.status === 'completed',
+      () => present(host.rows('runs')[0], 'first run').status === 'completed',
       'run completion',
     )
-    expect(host.prompts.at(-1)!.sessionId).toBe(EXECUTOR)
-    expect(host.prompts.at(-1)!.text).toContain('审核通过')
+    expect(present(host.prompts.at(-1), 'last prompt').sessionId).toBe(EXECUTOR)
+    expect(present(host.prompts.at(-1), 'last prompt').text).toContain('审核通过')
     // (no root.dispose in cordis 4.0.4; fibers clean up with the context)
   })
 
   it('an autoDeliver run submits the executor final reply through the proxy without any tool call', async () => {
     const { root, host } = await boot()
-    const svc = root.get('triggerBindings')!
+    const svc = present(root.get('triggerBindings'), 'triggerBindings service')
     await svc.bindReviewLoop({
       task: '任务',
       executorSession: EXECUTOR,
       parentSession: PARENT,
       autoDeliver: true,
     })
-    const runBefore = (host.rows('runs') as RunRecord[])[0]!
+    const runBefore = present(host.rows('runs')[0], 'first run')
     expect(runBefore.autoDeliver).toBe(true)
 
     // The executor streams its work and simply ends the turn: no tool call.
@@ -256,10 +287,10 @@ describe('cross-plugin service through the Cordis proxy', () => {
     })
     emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
     await until(() => host.prompts.length === 1, 'auto review delivery')
-    expect(host.prompts[0]!.sessionId).toBe(PARENT)
-    expect(host.prompts[0]!.text).toContain('完成；测试 20/20')
-    expect(host.prompts[0]!.text).toContain('你是审核者')
-    expect((host.rows('runs') as RunRecord[])[0]!.phase).toBe('awaiting-review')
+    expect(present(host.prompts[0], 'first prompt').sessionId).toBe(PARENT)
+    expect(present(host.prompts[0], 'first prompt').text).toContain('完成；测试 20/20')
+    expect(present(host.prompts[0], 'first prompt').text).toContain('你是审核者')
+    expect(present(host.rows('runs')[0], 'first run').phase).toBe('awaiting-review')
 
     // A replayed turn/end (restart replay) must not re-deliver: the reply
     // text was consumed with the first event.
@@ -273,7 +304,7 @@ describe('cross-plugin service through the Cordis proxy', () => {
 
   it('an active goal holds the auto-delivery until the goal settles', async () => {
     const { root, host } = await boot()
-    const svc = root.get('triggerBindings')!
+    const svc = present(root.get('triggerBindings'), 'triggerBindings service')
     await svc.bindReviewLoop({
       task: '任务',
       executorSession: EXECUTOR,
@@ -327,14 +358,14 @@ describe('cross-plugin service through the Cordis proxy', () => {
     })
     emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
     await until(() => host.prompts.length === 1, 'auto review delivery after goal settled')
-    expect(host.prompts[0]!.text).toContain('目标完成交付')
-    expect((host.rows('runs') as RunRecord[])[0]!.phase).toBe('awaiting-review')
+    expect(present(host.prompts[0], 'first prompt').text).toContain('目标完成交付')
+    expect(present(host.rows('runs')[0], 'first run').phase).toBe('awaiting-review')
     // (no root.dispose in cordis 4.0.4; fibers clean up with the context)
   })
 
   it('a foreign same-numbered turn never commits the pending signal', async () => {
     const { root, host } = await boot()
-    const svc = root.get('triggerBindings')!
+    const svc = present(root.get('triggerBindings'), 'triggerBindings service')
     const bound = await svc.bindReviewLoop({
       task: 't',
       executorSession: EXECUTOR,
@@ -350,18 +381,18 @@ describe('cross-plugin service through the Cordis proxy', () => {
       setTimeout(resolve, 30)
     })
     expect(host.prompts).toHaveLength(0)
-    expect((host.rows('runs') as RunRecord[])[0]!.phase).toBe('awaiting-delivery')
+    expect(present(host.rows('runs')[0], 'first run').phase).toBe('awaiting-delivery')
 
     // The real owner's turn end commits exactly once.
     emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await until(() => host.prompts.length === 1, 'review delivery')
-    expect((host.rows('runs') as RunRecord[])[0]!.phase).toBe('awaiting-review')
+    expect(present(host.rows('runs')[0], 'first run').phase).toBe('awaiting-review')
     // (no root.dispose in cordis 4.0.4; fibers clean up with the context)
   })
 
   it('one session cannot pend the same turn for two runs', async () => {
     const { root } = await boot()
-    const svc = root.get('triggerBindings')!
+    const svc = present(root.get('triggerBindings'), 'triggerBindings service')
     const first = await svc.bindReviewLoop({
       task: 't1',
       executorSession: EXECUTOR,
@@ -386,7 +417,7 @@ describe('cross-plugin service through the Cordis proxy', () => {
 
   it("a stale round's failed delivery is refused, not re-sent", async () => {
     const { root, host } = await boot({ queueFails: true })
-    const svc = root.get('triggerBindings')!
+    const svc = present(root.get('triggerBindings'), 'triggerBindings service')
     const bound = await svc.bindReviewLoop({
       task: 't',
       executorSession: EXECUTOR,
@@ -398,10 +429,13 @@ describe('cross-plugin service through the Cordis proxy', () => {
     await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 'r1' })
     emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await until(
-      () => (host.rows('runs') as RunRecord[])[0]!.status === 'paused-error',
+      () => present(host.rows('runs')[0], 'first run').status === 'paused-error',
       'parked run',
     )
-    const stale = (host.rows('deliveries') as DeliveryRecord[]).find((d) => d.state === 'failed')!
+    const stale = present(
+      host.rows('deliveries').find((d) => d.state === 'failed'),
+      'failed round-1 delivery',
+    )
 
     // The user resumes with a note and the loop moves on to round 2.
     host.ctx.sessionController.prompt = async (request: {
@@ -422,7 +456,7 @@ describe('cross-plugin service through the Cordis proxy', () => {
     emit(root, PARENT, { type: 'turn/start', data: { turn: 5 } })
     await svc.signal(PARENT, { runId: bound.runId, outcome: 'rework', summary: '改一版' })
     emit(root, PARENT, { type: 'turn/end', data: { turn: 5, reason: { kind: 'completed' } } })
-    await until(() => (host.rows('runs') as RunRecord[])[0]!.round === 2, 'round 2')
+    await until(() => present(host.rows('runs')[0], 'first run').round === 2, 'round 2')
     const promptsBefore = host.prompts.length
 
     // The round-1 review delivery is now stale: re-sending it would wake the
@@ -436,7 +470,7 @@ describe('cross-plugin service through the Cordis proxy', () => {
 
   it('redelivery resumes before sending, so an immediate answer is accepted; a cancelled run refuses redelivery', async () => {
     const { root, host } = await boot({ queueFails: true })
-    const svc = root.get('triggerBindings')!
+    const svc = present(root.get('triggerBindings'), 'triggerBindings service')
     const bound = await svc.bindReviewLoop({
       task: 't',
       executorSession: EXECUTOR,
@@ -446,10 +480,13 @@ describe('cross-plugin service through the Cordis proxy', () => {
     await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 's' })
     emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await until(
-      () => (host.rows('runs') as RunRecord[])[0]!.status === 'paused-error',
+      () => present(host.rows('runs')[0], 'first run').status === 'paused-error',
       'parked run',
     )
-    const failed = (host.rows('deliveries') as DeliveryRecord[]).find((d) => d.state === 'failed')!
+    const failed = present(
+      host.rows('deliveries').find((d) => d.state === 'failed'),
+      'failed round-1 delivery',
+    )
 
     // The counterpart answers the moment the prompt lands — DURING the send,
     // before controlRun returns. The run must already accept signals by then.
@@ -478,13 +515,13 @@ describe('cross-plugin service through the Cordis proxy', () => {
     }
     await svc.controlRun(bound.runId, 'redeliver', { deliveryId: failed.id })
     await until(() => host.prompts.length === 1, 're-sent delivery')
-    expect(host.prompts[0]!.requestId).toBe(failed.requestId)
-    expect((host.rows('runs') as RunRecord[])[0]!.status).toBe('active')
+    expect(present(host.prompts[0], 'first prompt').requestId).toBe(failed.requestId)
+    expect(present(host.rows('runs')[0], 'first run').status).toBe('active')
     // The immediate answer was accepted — no paused-run rejection window.
     expect(inlineAnswer).toMatchObject({ ok: true })
     emit(root, PARENT, { type: 'turn/end', data: { turn: 5, reason: { kind: 'completed' } } })
     await until(
-      () => (host.rows('runs') as RunRecord[])[0]!.status === 'completed',
+      () => present(host.rows('runs')[0], 'first run').status === 'completed',
       'run completion',
     )
 
@@ -505,14 +542,20 @@ describe('cross-plugin service through the Cordis proxy', () => {
     })
     await until(
       () =>
-        (host.rows('runs') as RunRecord[]).find((r) => r.id === second.runId)!.status ===
-        'paused-error',
+        present(
+          host.rows('runs').find((r) => r.id === second.runId),
+          'second run',
+        ).status === 'paused-error',
       'second parked run',
     )
     await svc.controlRun(second.runId, 'cancel')
-    const failedSecond = (host.rows('deliveries') as DeliveryRecord[])
-      .filter((d) => d.runId === second.runId)
-      .find((d) => d.state === 'failed')!
+    const failedSecond = present(
+      host
+        .rows('deliveries')
+        .filter((d) => d.runId === second.runId)
+        .find((d) => d.state === 'failed'),
+      'failed second-run delivery',
+    )
     await expect(
       svc.controlRun(second.runId, 'redeliver', { deliveryId: failedSecond.id }),
     ).rejects.toThrow('运行已结束')

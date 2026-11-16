@@ -66,6 +66,17 @@ interface SkillLocator {
   readonly directory: string
 }
 
+/** Narrow the opaque provider handle back to this provider's own locator. */
+function isSkillLocator(value: unknown): value is SkillLocator {
+  if (typeof value !== 'object' || value === null) return false
+  return (
+    'path' in value &&
+    typeof value.path === 'string' &&
+    'directory' in value &&
+    typeof value.directory === 'string'
+  )
+}
+
 interface ScanState {
   readonly candidates: SkillCandidate[]
   readonly watchTargets: FsTarget[]
@@ -139,7 +150,8 @@ export class RecursiveSkillProvider implements SkillProvider {
     candidate: SkillCandidate,
     options: SkillLookupOptions,
   ): Promise<SkillDefinition | undefined> {
-    const locator = candidate.locator as SkillLocator
+    const locator = candidate.locator
+    if (!isSkillLocator(locator)) return undefined
     options.signal?.throwIfAborted()
     let target: FsTarget
     try {

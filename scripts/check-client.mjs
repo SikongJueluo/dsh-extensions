@@ -64,10 +64,11 @@ const PLATFORM_REQUESTS = new Set([
 const HOST_REQUESTS = new Set(['@deepseek-ai/dsh-client-ui-primitives'])
 const PRIMITIVES = '@deepseek-ai/dsh-client-ui-primitives'
 
+const stubComponent = () => null
+
 /** Module-shape stand-in for runtimes that cannot require the host ESM package. */
 function stubHostPrimitives() {
-  const component = () => null
-  return new Proxy({}, { get: () => component })
+  return new Proxy({}, { get: () => stubComponent })
 }
 
 function checkRequire(request) {
@@ -82,7 +83,7 @@ const failures = []
 // typecheck against a different module than the shell serves.
 const catalog = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8')
 const pinnedPrimitives = catalog.match(
-  /^\s+'@deepseek-ai\/dsh-client-ui-primitives':\s*(\S+)\s*$/m,
+  /^\s+'@deepseek-ai\/dsh-client-ui-primitives':\s*(\S+)\s*$/mu,
 )?.[1]
 if (pinnedPrimitives === undefined) {
   failures.push(['catalog', [`${PRIMITIVES} is not pinned in pnpm-workspace.yaml`]])
@@ -128,8 +129,9 @@ function createDocument() {
 }
 
 /** A permissive remote stand-in: any call resolves to an unsuccessful envelope. */
+const call = () => Promise.resolve({ ok: false })
+
 function createRemote() {
-  const call = () => Promise.resolve({ ok: false })
   const node = new Proxy(call, {
     get: () => node,
     apply: () => Promise.resolve({ ok: false }),
@@ -204,7 +206,7 @@ for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })
       problems.push('stylesheet was not inlined into the factory')
     }
     const requires = [
-      ...new Set([...code.matchAll(/\brequire\("([^"]+)"\)/g)].map((match) => match[1])),
+      ...new Set([...code.matchAll(/\brequire\("([^"]+)"\)/gu)].map((match) => match[1])),
     ]
     for (const request of requires) {
       if (!allowedRequests.has(request)) {

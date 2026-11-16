@@ -14,7 +14,7 @@
  * llm-service wrapper is covered by unit tests.
  */
 import { readFileSync } from 'node:fs'
-import yaml from 'js-yaml'
+import { load } from 'js-yaml'
 import {
   buildAdapters,
   createNullAuditPort,
@@ -30,7 +30,7 @@ const mode = process.argv[2] ?? '--providers'
 function chatgptToken() {
   if (!process.env.CHATGPT_OAUTH) return undefined
   try {
-    const doc = yaml.load(readFileSync(`${process.env.HOME}/.dsh/.credentials.yaml`, 'utf8'))
+    const doc = load(readFileSync(`${process.env.HOME}/.dsh/.credentials.yaml`, 'utf8'))
     const payload = doc?.records?.['oauth-providers/chatgpt']?.payload
     if (typeof payload?.access !== 'string') return undefined
     if (typeof payload?.expires === 'number' && Date.now() > payload.expires) {

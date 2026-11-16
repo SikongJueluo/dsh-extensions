@@ -15,6 +15,7 @@ import { dirname } from 'node:path'
 import {
   coerceModelChoice,
   coercePresetChoice,
+  isRecord,
   type ModelChoice,
   type PresetChoice,
 } from './choice.js'
@@ -70,7 +71,7 @@ const META_SUFFIX = '-handoff.meta.json'
 
 /** The sidecar path for one brief path. */
 export function metaPathFor(briefPath: string): string {
-  return `${briefPath.replace(/\.md$/, '')}.meta.json`
+  return `${briefPath.replace(/\.md$/u, '')}.meta.json`
 }
 
 /** Persist one record; callers decide how a failure degrades. */
@@ -81,8 +82,8 @@ export async function writeMeta(metaPath: string, meta: HandoffMeta): Promise<vo
 
 /** Narrow the review section of an untrusted record. */
 function coerceReview(value: unknown): HandoffReviewMeta | undefined {
-  if (typeof value !== 'object' || value === null) return undefined
-  const record = value as Record<string, unknown>
+  if (!isRecord(value)) return undefined
+  const record = value
   if (
     typeof record.maxRounds !== 'number' ||
     !Number.isInteger(record.maxRounds) ||
@@ -105,15 +106,14 @@ function coerceReview(value: unknown): HandoffReviewMeta | undefined {
 
 /** Narrow one untrusted JSON document into a record; corrupt files read as absent. */
 function coerceMeta(value: unknown): HandoffMeta | undefined {
-  if (typeof value !== 'object' || value === null) return undefined
-  const record = value as Record<string, unknown>
+  if (!isRecord(value)) return undefined
+  const record = value
   if (record.version !== 1) return undefined
   if (typeof record.task !== 'string' || record.task.length === 0) return undefined
   if (typeof record.originSession !== 'string' || record.originSession.length === 0)
     return undefined
-  const target = record.target
-  if (typeof target !== 'object' || target === null) return undefined
-  const targetRecord = target as Record<string, unknown>
+  const targetRecord = record.target
+  if (!isRecord(targetRecord)) return undefined
   if (typeof targetRecord.path !== 'string' || targetRecord.path.length === 0) return undefined
   if (typeof targetRecord.title !== 'string' || targetRecord.title.length === 0) return undefined
   const workspaceId = targetRecord.workspaceId
@@ -161,12 +161,12 @@ export async function findLatestUnspawned(dir: string): Promise<RecoveredHandoff
   } catch {
     return undefined
   }
-  const sorted = names
+  const newestFirst = names
     .filter((name) => name.endsWith(META_SUFFIX))
-    .sort()
-    .reverse()
-  for (const name of sorted) {
-    const metaPath = `${dir.replace(/\/+$/, '')}/${name}`
+    .toSorted()
+    .toReversed()
+  for (const name of newestFirst) {
+    const metaPath = `${dir.replace(/\/+$/u, '')}/${name}`
     try {
       const meta = coerceMeta(JSON.parse(await readFile(metaPath, 'utf8')))
       if (meta !== undefined && meta.spawnedAt === undefined) {

@@ -15,6 +15,7 @@
  * @module dsh-execution-guard/jj
  */
 import { execFile } from 'node:child_process'
+import { isRecord } from './goal-evidence.js'
 
 /** The facts an anchor needs: working layer ids plus the workspace root. */
 export interface JjFacts {
@@ -52,10 +53,11 @@ export const defaultExecFile: ExecFile = (file, args, options) =>
       },
       (error, stdout, stderr) => {
         if (error !== null) {
-          reject(Object.assign(error, { stderr: String(stderr ?? '') }))
+          const failure: Error & { stderr: string } = Object.assign(error, { stderr: stderr ?? '' })
+          reject(failure)
           return
         }
-        resolve({ stdout: String(stdout), stderr: String(stderr ?? ''), code: 0 })
+        resolve({ stdout, stderr: stderr ?? '', code: 0 })
       },
     )
     void child
@@ -85,13 +87,28 @@ export function workspaceRootArgv(): readonly string[] {
   return [...JJ_GLOBAL, 'workspace', 'root']
 }
 
+/**
+ * Shape of the failures the classifier reads. The predicate only proves it is
+ * a record — the declared field types let the template below keep the exact
+ * implicit-stringification behavior the classifier has always had.
+ */
+interface FailureLike {
+  readonly killed?: boolean
+  readonly message?: string
+  readonly stderr?: string
+}
+
+function isFailureLike(value: unknown): value is FailureLike {
+  return isRecord(value)
+}
+
 function classify(error: unknown): JjRead {
-  const err = error as { killed?: boolean; message?: string; stderr?: string }
+  const err = isFailureLike(error) ? error : undefined
   const detail = `${err?.message ?? ''} ${err?.stderr ?? ''}`.trim()
-  if (err?.killed === true || /timed? out/i.test(detail)) {
+  if (err?.killed === true || /timed? out/iu.test(detail)) {
     return { ok: false, reason: 'timeout', detail }
   }
-  if (/not a jj repo|no jj repo/i.test(detail) || /No such repo/i.test(detail)) {
+  if (/not a jj repo|no jj repo/iu.test(detail) || /No such repo/iu.test(detail)) {
     return { ok: false, reason: 'not-jj', detail }
   }
   return { ok: false, reason: 'failed', detail }
@@ -107,7 +124,7 @@ function parseLayer(stdout: string): LayerLine | undefined {
   const changeId = (lines[0] ?? '').trim()
   if (changeId === '') return undefined
   const parents = (lines[1] ?? '').trim()
-  const parentChangeIds = parents === '' ? [] : parents.split(/\s+/)
+  const parentChangeIds = parents === '' ? [] : parents.split(/\s+/u)
   if (parentChangeIds.some((id) => id === '')) return undefined
   return { changeId, parentChangeIds }
 }

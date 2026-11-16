@@ -37,10 +37,10 @@ export function createDiscovery({ options, tokenStore, catalog }: DiscoveryDeps)
     // missing or expired login surfaces as the provider's failure reason.
     const token = await tokenStore.resolve(options().refreshMarginMs)
     const models = await catalog.forceRefresh(oauthHeaders(token.access, token.accountId))
-    return models.map((model) => ({
-      id: model.id,
-      name: model.name,
-      ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
-    }))
+    return models.map((model) => {
+      const view: DiscoveredModelView = { id: model.id, name: model.name }
+      if (model.contextWindow !== undefined) view.contextWindow = model.contextWindow
+      return view
+    })
   }
 }

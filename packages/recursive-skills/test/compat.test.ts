@@ -71,8 +71,8 @@ describe('parser compatibility with the stock provider', () => {
         const stockList = stockCandidates as readonly SkillCandidate[]
         const recursiveList = recursiveCandidates as readonly SkillCandidate[]
         expect(stockList).toHaveLength(4)
-        expect(recursiveList.map((candidate) => candidate.name).sort()).toEqual(
-          stockList.map((candidate) => candidate.name).sort(),
+        expect(recursiveList.map((candidate) => candidate.name).toSorted()).toEqual(
+          stockList.map((candidate) => candidate.name).toSorted(),
         )
 
         for (const expected of stockList) {

@@ -14,6 +14,7 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { parse } from 'yaml'
+import { isRecord } from './record.js'
 import type { KeySource } from './keys.js'
 
 /** One loaded model descriptor from the YAML file. */
@@ -22,7 +23,7 @@ export interface ModelConfig {
   name?: string
   contextWindow?: number
   maxTokens?: number
-  input?: Array<'text' | 'image'>
+  input?: ('text' | 'image')[]
   reasoning?: false | string[]
 }
 
@@ -47,9 +48,9 @@ export interface ResolvedProvider {
 
 export class ConfigError extends Error {}
 
-const PROVIDER_ID = /^[a-z0-9][a-z0-9-]*$/
-const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
-const SECRET_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+const PROVIDER_ID = /^[a-z0-9][a-z0-9-]*$/u
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
+const SECRET_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u
 const THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 const PROVIDER_KEYS = new Set([
   'kind',
@@ -92,10 +93,10 @@ function fail(path: string, message: string): never {
 }
 
 function asRecord(value: unknown, path: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return fail(path, 'expected an object')
   }
-  return value as Record<string, unknown>
+  return value
 }
 
 function rejectUnknown(raw: Record<string, unknown>, allowed: Set<string>, path: string): void {
@@ -155,10 +156,12 @@ function optionalStringArray(
 ): string[] | undefined {
   const value = raw[key]
   if (value === undefined || value === null) return undefined
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
-    return fail(`${path}.${key}`, 'expected an array of strings')
-  }
-  return value as string[]
+  if (!isStringArray(value)) return fail(`${path}.${key}`, 'expected an array of strings')
+  return value
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
 }
 
 function optionalHeaderRecord(
@@ -191,6 +194,18 @@ function optionalUrl(
   raw: Record<string, unknown>,
   key: string,
   path: string,
+  required: true,
+): string
+function optionalUrl(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
+  required: false,
+): string | undefined
+function optionalUrl(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
   required: boolean,
 ): string | undefined {
   const value = required ? requiredString(raw, key, path) : optionalString(raw, key, path)
@@ -203,7 +218,7 @@ function optionalUrl(
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:')
     fail(`${path}.${key}`, 'expected an http(s) URL')
-  return value.replace(/\/+$/, '')
+  return value.replace(/\/+$/u, '')
 }
 
 function optionalApi(raw: Record<string, unknown>, key: string, path: string): Api | undefined {
@@ -257,37 +272,38 @@ function parseModels(raw: Record<string, unknown>, path: string): ModelConfig[] 
     const contextWindow = optionalPositiveInteger(record, 'contextWindow', modelPath)
     const maxTokens = optionalPositiveInteger(record, 'maxTokens', modelPath)
     const inputRaw = optionalStringArray(record, 'input', modelPath)
-    const input = inputRaw?.map((value) => {
-      if (value !== 'text' && value !== 'image')
+    const input = inputRaw?.map((mode) => {
+      if (mode !== 'text' && mode !== 'image')
         fail(`${modelPath}.input`, 'only "text" and "image" are supported')
-      return value
+      return mode
     })
     const reasoningRaw = record.reasoning
     let reasoning: false | string[] | undefined
     if (reasoningRaw === false) {
       reasoning = false
     } else if (reasoningRaw !== undefined && reasoningRaw !== null) {
-      if (
-        !Array.isArray(reasoningRaw) ||
-        reasoningRaw.length === 0 ||
-        reasoningRaw.some((v) => typeof v !== 'string')
-      ) {
+      if (!Array.isArray(reasoningRaw) || reasoningRaw.length === 0) {
         fail(`${modelPath}.reasoning`, 'expected false or a non-empty array of thinking levels')
       }
-      for (const level of reasoningRaw as string[]) {
+      const levels: string[] = []
+      for (const level of reasoningRaw) {
+        if (typeof level !== 'string')
+          fail(`${modelPath}.reasoning`, 'expected false or a non-empty array of thinking levels')
+        levels.push(level)
+      }
+      for (const level of levels) {
         if (!THINKING_LEVELS.has(level))
           fail(`${modelPath}.reasoning`, `unknown thinking level "${level}"`)
       }
-      reasoning = [...(reasoningRaw as string[])]
+      reasoning = levels
     }
-    return {
-      id,
-      ...(name === undefined ? {} : { name }),
-      ...(contextWindow === undefined ? {} : { contextWindow }),
-      ...(maxTokens === undefined ? {} : { maxTokens }),
-      ...(input === undefined ? {} : { input }),
-      ...(reasoning === undefined ? {} : { reasoning }),
-    }
+    const model: ModelConfig = { id }
+    if (name !== undefined) model.name = name
+    if (contextWindow !== undefined) model.contextWindow = contextWindow
+    if (maxTokens !== undefined) model.maxTokens = maxTokens
+    if (input !== undefined) model.input = input
+    if (reasoning !== undefined) model.reasoning = reasoning
+    return model
   })
 }
 
@@ -341,7 +357,7 @@ function parseBaseFields(
     fail(`${path}.catalog`, 'is not supported on a custom provider')
   const api =
     optionalApi(raw, 'api', path) ?? fail(`${path}.api`, 'is required for a custom provider')
-  const baseURL = optionalUrl(raw, 'baseURL', path, true) as string
+  const baseURL = optionalUrl(raw, 'baseURL', path, true)
   const modelsURL = optionalUrl(raw, 'modelsURL', path, false)
   const models = parseModels(raw, path)
   if (modelsURL === undefined && models === undefined) {
@@ -514,13 +530,17 @@ export async function loadConfig(path: string): Promise<ResolvedProvider[]> {
   try {
     text = await readFile(path, 'utf8')
   } catch (error) {
-    throw new ConfigError(`cannot read ${path}: ${(error as Error).message}`)
+    throw new ConfigError(
+      `cannot read ${path}: ${error instanceof Error ? error.message : String(error)}`,
+    )
   }
   let value: unknown
   try {
     value = parse(text)
   } catch (error) {
-    throw new ConfigError(`invalid YAML in ${path}: ${(error as Error).message}`)
+    throw new ConfigError(
+      `invalid YAML in ${path}: ${error instanceof Error ? error.message : String(error)}`,
+    )
   }
   return resolveConfig(value)
 }

@@ -616,6 +616,6 @@ describe('long human prompts', () => {
     expect(joined).toContain('Run the RealSense wire test')
     expect(joined).toContain('newest authorization')
     expect(joined.length).toBeLessThanOrEqual(12000)
-    expect(evidence.prompts[evidence.prompts.length - 1]).toContain('newest authorization')
+    expect(evidence.prompts.at(-1)).toContain('newest authorization')
   })
 })
