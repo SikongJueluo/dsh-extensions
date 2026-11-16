@@ -86,7 +86,7 @@ export class SkillWatcher {
     this.states.clear()
     await Promise.all(states.map((state) => this.closeState(state)))
     // Error-path closes are detached from any catalog read; disposal owns them.
-    while (this.retiring.size > 0) await Promise.all([...this.retiring])
+    while (this.retiring.size > 0) await Promise.all(this.retiring)
   }
 
   private async apply(desired: ReadonlyMap<string, FsTarget>): Promise<boolean> {
@@ -113,7 +113,7 @@ export class SkillWatcher {
       })
       pending.push(state.opening)
     }
-    for (const [key, state] of [...this.states]) {
+    for (const [key, state] of this.states) {
       if (desired.has(key)) continue
       this.states.delete(key)
       pending.push(this.closeState(state))

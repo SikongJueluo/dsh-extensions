@@ -20,7 +20,7 @@ const writeSchema = {
 } as const
 
 const schemas: Record<string, unknown> = { read: readSchema, write: writeSchema }
-const schemaOf = (tool: string): unknown | undefined => schemas[tool]
+const schemaOf = (tool: string): unknown => schemas[tool]
 
 describe('checkCall', () => {
   it('accepts arguments satisfying the schema (parsed args)', () => {

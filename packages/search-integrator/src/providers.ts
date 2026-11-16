@@ -182,8 +182,8 @@ interface TavilyHit {
   readonly title?: unknown
   readonly url?: unknown
   readonly content?: unknown
-  readonly raw_content?: unknown | null
-  readonly published_date?: unknown | null
+  readonly raw_content?: unknown
+  readonly published_date?: unknown
 }
 
 interface TavilyResponse {
@@ -298,7 +298,7 @@ function createBraveAdapter(config: AdapterConfig): SearchAdapter {
         q: query,
         count: String(settings.perSourceResults),
         extra_snippets: 'true',
-      })}`
+      }).toString()}`
       const body = await withRetry(
         () =>
           io

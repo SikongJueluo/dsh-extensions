@@ -40,6 +40,7 @@ import { PACKAGE_NAME, SERVICE_NAME } from './identity.js'
 import {
   DEFAULT_MAX_ROUNDS,
   SIGNAL_OUTCOMES,
+  isSignalOutcome,
   defaultTemplateRefs,
   type BindingRecord,
   type DeliveryKind,
@@ -1084,24 +1085,30 @@ export class TriggerService extends Service implements TriggerBindingsService {
     const store = await this.ready()
     if (typeof args.runId !== 'string' || args.runId.length === 0)
       return { ok: false, error: 'runId 缺失。' }
-    if (!SIGNAL_OUTCOMES.includes(args.outcome as SignalOutcome)) {
+    if (!isSignalOutcome(args.outcome)) {
       return { ok: false, error: `outcome 必须是 ${SIGNAL_OUTCOMES.join(' / ')} 之一。` }
     }
     if (typeof args.summary !== 'string' || args.summary.trim().length === 0) {
       return { ok: false, error: 'summary 不能为空：写明结论与证据指引。' }
     }
+    // Narrow once: the checks above do not carry into the callback below.
+    const runId = args.runId
+    const outcome = args.outcome
+    const summary = args.summary
     // The read-modify-write half runs on the run's serial chain: a signal
     // racing a cancel/transition must see the run's latest committed state.
-    return this.synchronize(args.runId, () => this.acceptSignal(store, callerSession, args))
+    return this.synchronize(runId, () =>
+      this.acceptSignal(store, callerSession, { runId, outcome, summary }),
+    )
   }
 
   /** Signal acceptance proper — always invoked on the run's serial chain. */
   private async acceptSignal(
     store: TriggerStore,
     callerSession: string,
-    args: { runId: unknown; outcome: unknown; summary: unknown },
+    args: { runId: string; outcome: SignalOutcome; summary: string },
   ): Promise<{ ok: true; note: string } | { ok: false; error: string }> {
-    const run = store.runs.get(args.runId as string)
+    const run = store.runs.get(args.runId)
     if (run === undefined) {
       return { ok: false, error: `没有 runId=${args.runId} 的运行；请核对触发器提示中的 runId。` }
     }
@@ -1129,8 +1136,8 @@ export class TriggerService extends Service implements TriggerBindingsService {
     const result = submitSignal(
       run,
       callerSession,
-      args.outcome as SignalOutcome,
-      (args.summary as string).trim(),
+      args.outcome,
+      args.summary.trim(),
       turn,
       Date.now(),
     )

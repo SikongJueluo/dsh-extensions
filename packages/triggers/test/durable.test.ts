@@ -54,7 +54,7 @@ class FileUnit {
     tables: Record<string, Record<string, unknown>>
   }> {
     try {
-      const parsed = JSON.parse(await readFileSync(this.file, 'utf8')) as { version?: number }
+      const parsed = JSON.parse(readFileSync(this.file, 'utf8')) as { version?: number }
       if (parsed.version !== this.descriptor.version) throw new Error('version-mismatch')
       return parsed as { version: number; tables: Record<string, Record<string, unknown>> }
     } catch (failure) {
@@ -74,13 +74,13 @@ class FileUnit {
 
   async putRecord(table: string, key: string, value: unknown): Promise<void> {
     const doc = await this.load()
-    doc.tables[table] = { ...(doc.tables[table] ?? {}), [key]: value }
+    doc.tables[table] = { ...doc.tables[table], [key]: value }
     await writeAtomic(this.file, JSON.stringify(doc))
   }
 
   async deleteRecord(table: string, key: string): Promise<void> {
     const doc = await this.load()
-    const next = { ...(doc.tables[table] ?? {}) }
+    const next = { ...doc.tables[table] }
     delete next[key]
     doc.tables[table] = next
     await writeAtomic(this.file, JSON.stringify(doc))

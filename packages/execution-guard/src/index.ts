@@ -118,7 +118,7 @@ class SchemaCache {
     this.generation += 1
   }
 
-  schemaOf(agent: object | undefined): (tool: string) => unknown | undefined {
+  schemaOf(agent: object | undefined): (tool: string) => unknown {
     let hit = agent !== undefined ? this.cache.get(agent) : undefined
     if (hit === undefined || hit.gen !== this.generation) {
       const map = new Map<string, unknown>()
@@ -126,7 +126,7 @@ class SchemaCache {
       hit = { gen: this.generation, map }
       if (agent !== undefined) this.cache.set(agent, { gen: hit.gen, map: hit.map })
     }
-    return (tool: string): unknown | undefined => hit?.map.get(tool)
+    return (tool: string): unknown => hit?.map.get(tool)
   }
 }
 

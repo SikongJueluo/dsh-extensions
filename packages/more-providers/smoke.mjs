@@ -388,7 +388,7 @@ check(
 )
 check(
   'apply adapter lists custom models',
-  (await llm.registrations[0]?.adapter.listModels('mdkj-stable')).length === 1,
+  (await llm.registrations[0]?.adapter.listModels('mdkj-stable'))?.length === 1,
 )
 
 const missingContext = new Context()

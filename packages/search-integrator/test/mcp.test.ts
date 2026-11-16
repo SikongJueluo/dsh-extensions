@@ -83,7 +83,7 @@ describe('mcpCallTool', () => {
     // Bearer auth + session id ride the tool call.
     expect(requests[0]?.headers.authorization).toBe('Bearer key-1')
     expect(requests[2]?.headers['mcp-session-id']).toBe('sess-1')
-    const params = (requests[2]?.body as { params?: { name?: string } }).params
+    const params = (requests[2]?.body as { params?: { name?: string } } | undefined)?.params
     expect(params?.name).toBe('web_search')
   })
 
@@ -113,7 +113,7 @@ describe('mcpCallTool', () => {
     )
     expect(result.text).toBe('{}')
     expect(requests).toHaveLength(5)
-    const retry = (requests[4]?.body as { params?: { name?: string } }).params
+    const retry = (requests[4]?.body as { params?: { name?: string } } | undefined)?.params
     expect(retry?.name).toBe('web_search_pro')
   })
 

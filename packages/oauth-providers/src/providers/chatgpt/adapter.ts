@@ -236,11 +236,15 @@ async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<Strea
       throw new LlmError('malformed SSE payload', 'MALFORMED_RESPONSE')
     }
     const type = ev.type
+    // Index fields are optional on the wire; bucket keys must not read
+    // `undefined`, so narrow once per event.
+    const outputIndex = typeof ev.output_index === 'number' ? ev.output_index : -1
+    const contentIndex = typeof ev.content_index === 'number' ? ev.content_index : -1
 
     if (type === 'response.output_item.added') {
       const item = (ev.item ?? {}) as { type?: string; call_id?: string; name?: string }
       if (item.type === 'function_call') {
-        const block = open(`f:${ev.output_index}`, 'tool-call')
+        const block = open(`f:${outputIndex}`, 'tool-call')
         if (typeof item.call_id === 'string') block.callId = item.call_id
         if (typeof item.name === 'string') block.name = item.name
         state.sawToolCall = true
@@ -248,14 +252,14 @@ async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<Strea
         if (chunk) yield chunk
       }
     } else if (type === 'response.output_text.delta') {
-      const block = open(`t:${ev.output_index}:${ev.content_index}`, 'text')
+      const block = open(`t:${outputIndex}:${contentIndex}`, 'text')
       const chunk = start(block)
       if (chunk) yield chunk
       const delta = typeof ev.delta === 'string' ? ev.delta : ''
       block.text += delta
       if (delta.length > 0) yield { type: 'text-delta', index: block.index, text: delta }
     } else if (type === 'response.function_call_arguments.delta') {
-      const block = open(`f:${ev.output_index}`, 'tool-call')
+      const block = open(`f:${outputIndex}`, 'tool-call')
       const chunk = start(block)
       if (chunk) yield chunk
       const delta = typeof ev.delta === 'string' ? ev.delta : ''
@@ -268,14 +272,14 @@ async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<Strea
         argumentsDelta: delta,
       }
     } else if (type === 'response.reasoning_summary_text.delta') {
-      const block = open(`r:${ev.output_index}:${ev.content_index}`, 'reasoning')
+      const block = open(`r:${outputIndex}:${contentIndex}`, 'reasoning')
       const chunk = start(block)
       if (chunk) yield chunk
       const delta = typeof ev.delta === 'string' ? ev.delta : ''
       block.text += delta
       if (delta.length > 0) yield { type: 'reasoning-delta', index: block.index, text: delta }
     } else if (type === 'response.output_text.done') {
-      const block = open(`t:${ev.output_index}:${ev.content_index}`, 'text')
+      const block = open(`t:${outputIndex}:${contentIndex}`, 'text')
       const chunk = start(block)
       if (chunk) yield chunk
       if (typeof ev.text === 'string' && block.text.length === 0 && ev.text.length > 0) {
@@ -287,7 +291,7 @@ async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<Strea
     } else if (type === 'response.output_item.done') {
       const item = (ev.item ?? {}) as { type?: string }
       if (item.type === 'function_call') {
-        const block = blocks.get(`f:${ev.output_index}`)
+        const block = blocks.get(`f:${outputIndex}`)
         if (block) {
           const ended = end(block)
           if (ended) yield ended

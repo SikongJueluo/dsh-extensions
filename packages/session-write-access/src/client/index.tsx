@@ -168,7 +168,7 @@ interface WriteAccessView {
 
 interface WorkspaceClient {
   openSession?(sessionId: string): unknown
-  pickDirectory?(): Promise<unknown> | unknown
+  pickDirectory?(): unknown
 }
 
 interface SharedState {

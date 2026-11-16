@@ -44,6 +44,11 @@ function triggerTable<K extends string, V>(schema: z.ZodType<V, any, any>): Doma
 export const SIGNAL_OUTCOMES = ['deliver', 'rework', 'pass', 'needs_user'] as const
 export type SignalOutcome = (typeof SIGNAL_OUTCOMES)[number]
 
+/** Narrow an untrusted tool argument into a signal verdict. */
+export function isSignalOutcome(value: unknown): value is SignalOutcome {
+  return typeof value === 'string' && SIGNAL_OUTCOMES.some((outcome) => outcome === value)
+}
+
 /** Whose turn it is inside an active run. */
 export type RunPhase = 'awaiting-delivery' | 'awaiting-review'
 

@@ -882,7 +882,7 @@ function RunActions(props: { t: Translate; run: TriggerRun; onAction: ActionFn }
   function control(action: string, extra?: Record<string, unknown>) {
     if (busy) return
     setBusy(true)
-    void Promise.resolve(onAction('run.control', { runId: run.id, action, ...(extra ?? {}) }))
+    void Promise.resolve(onAction('run.control', { runId: run.id, action, ...extra }))
       .then((ok) => {
         if (ok) setNote('')
       })

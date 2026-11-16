@@ -126,7 +126,7 @@ export function checkCall(parameters: unknown, call: PreflightCall): CallVerdict
  */
 export function checkBatch(
   calls: readonly PreflightCall[],
-  schemaOf: (tool: string) => unknown | undefined,
+  schemaOf: (tool: string) => unknown,
 ): PreflightDecision {
   const invalid: { tool: string; callId: string; violations: readonly string[] }[] = []
   const unchecked: {

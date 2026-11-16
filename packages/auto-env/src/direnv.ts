@@ -405,8 +405,7 @@ export class DirenvLoader {
     if (!existsSync(allowDir)) return
     try {
       const watcher = watch(allowDir, () => {
-        for (const rcDir of [...this.#watchers.keys()])
-          this.#invalidate(rcDir, 'allow list changed')
+        for (const rcDir of this.#watchers.keys()) this.#invalidate(rcDir, 'allow list changed')
       })
       watcher.on('error', () => {
         if (this.#allowWatcher === watcher) this.#allowWatcher = undefined

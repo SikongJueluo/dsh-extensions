@@ -222,7 +222,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
       } else if (header.isSeeded && this.forkActive && access.member(sessionId) === undefined) {
         // A plugin Fork target: hold its steps until the Fork call returns and
         // the exact new id is committed. Never guess the target from events.
-        this.held.set(sessionId, { ...(header.cwd === undefined ? {} : { cwd: header.cwd }) })
+        this.held.set(sessionId, header.cwd === undefined ? {} : { cwd: header.cwd })
         return
       } else {
         await access.ensureRootSession(facts)
@@ -321,7 +321,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
         try {
           await access.ensureRootSession({
             sessionId: reported,
-            ...(this.held.get(reported) ?? {}),
+            ...this.held.get(reported),
           })
         } catch {
           // Pre-step retries attribution; no inherited permission is recorded.
@@ -344,7 +344,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
           try {
             await access.ensureRootSession({
               sessionId: reported,
-              ...(this.held.get(reported) ?? {}),
+              ...this.held.get(reported),
             })
           } catch {
             // Pre-step retries attribution; no inherited permission is recorded.

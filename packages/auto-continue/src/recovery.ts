@@ -251,7 +251,7 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
     () => async () => {
       disposeListener()
       lifetime.abort(new Error('auto-continue plugin disposed'))
-      await Promise.allSettled([...active])
+      await Promise.allSettled(active)
     },
     'auto-continue: abort and drain active recovery',
   )

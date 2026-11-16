@@ -98,13 +98,10 @@ export function createLlmPort(
           assembler.push(chunk)
         }
         const usage = assembler.usage
-        const snapshot = {
-          ...(usage === undefined
+        const snapshot =
+          usage === undefined
             ? {}
-            : {
-                usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens },
-              }),
-        }
+            : { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } }
         if (!sawFinish) {
           return {
             ok: false,

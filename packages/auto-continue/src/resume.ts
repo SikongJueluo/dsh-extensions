@@ -225,7 +225,7 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
   ctx.effect(
     () => async () => {
       lifetime.abort(new Error('auto-continue plugin disposed'))
-      await Promise.allSettled([...pending.values()])
+      await Promise.allSettled(pending.values())
     },
     'auto-continue: abort and drain pending resumptions',
   )
