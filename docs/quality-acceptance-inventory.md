@@ -15,7 +15,7 @@
 | 发布内容 | `pnpm check:pack` | ✅ 20 个 bundle 的 pack 内容 |
 | Storybook | `pnpm build:storybook` | ✅ 构建成功 |
 | 测试 | `pnpm test` | ✅ 12 个包；51 个 vitest 文件 + handoff 的 18 个 `node:test` 用例 |
-| smoke | 无统一入口，12 个脚本 | ⚠️ 8 过、2 挂/挂起、1 依赖真实凭据、1 读真实 `$DSH_HOME` |
+| smoke | 无统一入口，12 个脚本 | ✅ 12 个都退出 0；其中 1 个依赖真实凭据、1 个读真实 `$DSH_HOME`（见第 4 节） |
 
 `pnpm check` = `typecheck` + `build` + `check:client`，不含 test / smoke / pack / Storybook。
 
@@ -51,13 +51,14 @@ search-integrator  session-write-access  task-anchor  toolchain-access  triggers
 | `plan-usage/smoke.mjs` | ✅ 0 | stub fetch |
 | `remote-exec/smoke.mjs` | ✅ 0 | 只验证构造/解析，不建立 SSH |
 | `rtk-rewrite/smoke.mjs` | ✅ 0 | 纯函数 |
-| `auto-env/smoke.mjs` | ❌ 1 | 6 条断言过期：`timeoutMs`/`maxTimeoutMs`/`maxOutputBytes`/`graceMs`/`cwd` 的默认值形状已变（现在打印为 `{}` 的 lazy/volatile 包装） |
-| `handoff/smoke.mjs` | ❌ 1 | 过期 stub：`agent.model.current()` 为 `undefined` → `TypeError`（生产契约要求 `agent.model`） |
-| `auto-continue/smoke.mjs` | ❌ 124 | 打印 `smoke OK` 后**进程不退出**（残留 timer/handle），180s 超时被 kill |
+| `auto-env/smoke.mjs` | ✅ 0 | 曾因 `Config` 默认值改为 `Volatile` 包装而 6 条断言失效；已改为读 `.get()` |
+| `handoff/smoke.mjs` | ✅ 0 | 曾因 stub 缺 `agent.model` 而 `TypeError`；已按 `agent.model.current()`（pending → lastUsed → options）补桩 |
+| `auto-continue/smoke.mjs` | ✅ 0 | 曾打印 `smoke OK` 后不退出（4 个未拆除 lifetime 的 retry timer）；脚本现在显式 `process.exit(0)`，未拆除的 lifetime 留给 vitest 覆盖 |
 | `search-integrator/scripts/smoke-research.mjs` | ⚠️ 0 | 默认 `--providers`；无 API key 时无输出、空转成功，**不是真实检查**；有凭据时才打真实端点 |
 
-结论：这些脚本“看起来存在、实际从未运行”。两个已经随 SDK/配置演进而失效，
-一个根本不会退出。Fallow 的“未被任何入口引用”是同一问题的另一面。
+此前三个脚本已随 SDK/配置演进而失效或根本不退出，这一层已修复；它们仍然没有接进任何
+`package.json` 脚本，所以依旧不会在 `pnpm test` / `pnpm check` 里自动执行。Fallow 的
+“未被任何入口引用”仍是同一问题的另一面，接线放在聚合层。
 
 ## 4. 需要环境、凭据或交互，不能进自动门禁
 

@@ -66,6 +66,9 @@ console.log('registered command:', registered.name, '|', registered.description)
 const part1Agent = {
   id: 'part1-session',
   session: { header: { cwd: '/nonexistent-smoke' } },
+  // The Agent owns the durable selection; the error paths below never read it,
+  // so the stub reports "no selection" by returning nothing.
+  model: { current() {} },
   followup() {},
 }
 const result = await registered.handler({ rawInput: '   ', agent: part1Agent, signal: null })
@@ -194,6 +197,12 @@ const agent = {
   id: 'origin-session',
   options: { provider: 'origin-provider', model: 'origin-model', maxTokens: 4096 },
   session: { header: { cwd } },
+  // `agent.model.current()` folds pending → last used → creation options, the
+  // same order the /model popup shows. The origin session's pending selection
+  // is what the fresh session must inherit, effort included.
+  model: {
+    current: () => ({ provider: 'origin-provider', model: 'origin-model', reasoningEffort: 'medium' }),
+  },
   followup(message) { followups.push(message) },
 }
 

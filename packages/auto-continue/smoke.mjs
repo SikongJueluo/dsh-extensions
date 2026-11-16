@@ -561,3 +561,9 @@ if (failures > 0) {
   process.exit(1)
 }
 console.log('smoke OK')
+// Every scenario above mounts a real recovery/resume lifetime on a stub ctx and
+// only some of them are disposed, so the retry sleeps they armed stay pending
+// and keep the event loop alive. The checks are all awaited by this point;
+// exiting explicitly keeps this script usable as a one-shot command. Draining
+// every lifetime belongs to the vitest suite, which owns real teardown.
+process.exit(0)

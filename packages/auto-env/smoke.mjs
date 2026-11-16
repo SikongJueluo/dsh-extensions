@@ -32,11 +32,11 @@ function check(label, condition) {
 // ── Part 1: plugin surface ────────────────────────────────────────────────
 const config = Config({})
 console.log('defaults:', JSON.stringify(config))
-check('default timeoutMs', config.timeoutMs === 120000)
-check('default maxTimeoutMs', config.maxTimeoutMs === 600000)
-check('default maxOutputBytes', config.maxOutputBytes === 64000)
-check('default graceMs', config.graceMs === 3000)
-check('cwd stays optional', config.cwd === undefined)
+check('default timeoutMs', config.timeoutMs.get() === 120000)
+check('default maxTimeoutMs', config.maxTimeoutMs.get() === 600000)
+check('default maxOutputBytes', config.maxOutputBytes.get() === 64000)
+check('default graceMs', config.graceMs.get() === 3000)
+check('cwd stays optional', config.cwd.get() === undefined)
 check('default direnvPath', config.direnvPath === 'direnv')
 check('default direnvTimeoutMs', config.direnvTimeoutMs === 30000)
 check('default direnvRevalidateMs', config.direnvRevalidateMs === 30000)
@@ -45,7 +45,7 @@ check('class extends SandboxBashExecutor', Object.getPrototypeOf(AutoEnvBashExec
 check('inject adds shellEnv to the parents set', AutoEnvBashExecutor.inject.join(',') === ['subprocess', 'sandbox', 'sandboxPolicy', 'shellEnv'].join(','))
 check('static Config is the exported schema', AutoEnvBashExecutor.Config === Config)
 const resolved = Config({ timeoutMs: 60000 })
-check('row-style partial config keeps direnv defaults', resolved.timeoutMs === 60000 && resolved.direnvPath === 'direnv')
+check('row-style partial config keeps direnv defaults', resolved.timeoutMs.get() === 60000 && resolved.direnvPath === 'direnv')
 
 // ── Part 2: pure helpers ──────────────────────────────────────────────────
 const sanitized = sanitizeDirenvDump({
