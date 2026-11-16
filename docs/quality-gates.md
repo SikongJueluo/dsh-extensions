@@ -280,8 +280,8 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 ## 7. 未验证 / 缺口
 
 - CI 尚未建立：没有 `.github/workflows`，本地与远端共用入口、远端成功记录、平台必需检查都还是待办（需要推送授权）。
-- 现有测试/smoke 的真实聚合范围未定案：`pnpm test` 不覆盖全部 smoke，`auto-permit/test/notice-order.mjs` 未被 Vitest 收集；这些在“验收聚合”层处理。Fallow 的 5 个“未被任何脚本引用”的脚本是同一问题的证据。
-- `context-audit` smoke 读取 `$DSH_HOME` 真会话日志，需在聚合时决定隔离/失败策略。
+- 现有测试/smoke 的真实范围已逐项实测并列在 [quality-acceptance-inventory.md](quality-acceptance-inventory.md)：`pnpm test` 只覆盖声明了 `test` 的 12 个包（9 个包没有测试入口），12 个 smoke 脚本全部未接线，其中 `auto-env`/`handoff` 已失效、`auto-continue` 跑完不退出、`notice-order.mjs` 未被 Vitest 收集。这些在“验收聚合”层处理。
+- `context-audit` smoke 读取 `$DSH_HOME` 真会话日志（本次实测扫了 62 个日志），需在聚合时改为 fixture 隔离，不能直接进门禁。
 - Node 20 产物兼容性尚未验证（本次只跑 Node 24 的 typecheck/build/lint）。
 - 需要 profile/凭据/交互的验证（如 session-write-access 的手工 recipe）不在脚本覆盖内。
 - Oxfmt 尚未真正改写任何文件；228 个文件的迁移会在独立层完成并跑完整检查。
