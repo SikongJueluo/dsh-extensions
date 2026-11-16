@@ -18,6 +18,8 @@ import {
 } from '../src/judge.js'
 import { MAX_COMMAND_CHARS } from '../src/evidence.js'
 import type { Evidence } from '../src/evidence.js'
+import { JUDGE_OUTPUT_TOKENS } from '../src/settings.js'
+import type { AutoPermitSettings } from '../src/settings.js'
 import { execFileSync } from 'node:child_process'
 import { rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
@@ -321,10 +323,14 @@ function judgeWith(
   llm: { stream: (request: never) => AsyncIterable<StreamChunk> },
   evidence: Evidence,
   timeoutMs?: number,
+  settings: Partial<AutoPermitSettings> = {},
 ) {
   return judge(
-    { llm } as unknown as Context,
-    { enabled: true, provider: 'test-provider', model: 'test-model' },
+    {
+      llm,
+      logger: { info: () => {}, warn: () => {} },
+    } as unknown as Context,
+    { enabled: true, provider: 'test-provider', model: 'test-model', ...settings },
     evidence,
     'sess-judge' as SessionId,
     undefined,
@@ -346,6 +352,38 @@ describe('judge investigation loop', () => {
     expect(result.steps).toBe(1)
     expect(result.evidence).toEqual([])
     expect(llm.calls()).toBe(1)
+  })
+
+  it('requests the configured per-step output budget', async () => {
+    let requested: { maxTokens?: number } | undefined
+    const llm = {
+      stream: (request: { maxTokens?: number }) => {
+        requested = request
+        return (async function* () {
+          yield* textChunks('VERDICT: allow\nREASON: a direct engine state query')
+        })()
+      },
+    }
+    const result = await judgeWith(llm, evidenceFor(root, 'podman ps'), undefined, {
+      maxOutputTokens: 4096,
+    })
+    expect(result.verdict).toBe('allow')
+    expect(requested?.maxTokens).toBe(4096)
+  })
+
+  it('falls back to the bounded default when the row predates the budget field', async () => {
+    let requested: { maxTokens?: number } | undefined
+    const llm = {
+      stream: (request: { maxTokens?: number }) => {
+        requested = request
+        return (async function* () {
+          yield* textChunks('VERDICT: allow\nREASON: a direct engine state query')
+        })()
+      },
+    }
+    const result = await judgeWith(llm, evidenceFor(root, 'podman ps'))
+    expect(result.verdict).toBe('allow')
+    expect(requested?.maxTokens).toBe(JUDGE_OUTPUT_TOKENS.default)
   })
 
   it('reads a project script and then allows on the inspected operations', async () => {

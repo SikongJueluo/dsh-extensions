@@ -15,6 +15,7 @@ import type { Context, Volatile, VolatileSnapshot } from '@deepseek-ai/cordis'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { apply } from '../src/index.js'
 import { MAX_COMMAND_CHARS } from '../src/evidence.js'
+import { JUDGE_OUTPUT_TOKENS } from '../src/settings.js'
 
 const vol = <T>(value: T): Volatile<T> => ({ get: () => value as VolatileSnapshot<T> })
 
@@ -92,6 +93,7 @@ function makeFixture(
     enabled: vol(true),
     provider: vol('test-provider'),
     model: vol('test-model'),
+    maxOutputTokens: vol(JUDGE_OUTPUT_TOKENS.default),
   })
   const answer = (
     callId: string,

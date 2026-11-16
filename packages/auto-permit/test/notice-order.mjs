@@ -108,6 +108,7 @@ function makeConfig() {
     provider: cell('deepseek-official'),
     model: cell('deepseek-flash'),
     reasoningEffort: cell('high'),
+    maxOutputTokens: cell(8192),
   }
 }
 

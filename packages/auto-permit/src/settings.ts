@@ -15,6 +15,21 @@
 import type { Context, Volatile } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 
+/**
+ * Bounds for the judge's per-request output-token budget.
+ *
+ * The DeepSeek Messages route counts reasoning tokens toward `max_tokens`, so
+ * a budget tuned for visible output alone truncates the verdict under a
+ * thinking effort. 8192 is the initial calibration point; it leaves room for
+ * reasoning while staying bounded, and the range rejects typos without
+ * silently clamping a deliberate value.
+ */
+export const JUDGE_OUTPUT_TOKENS = {
+  default: 8192,
+  min: 256,
+  max: 32768,
+} as const
+
 /** Resolved judge configuration (live row config). */
 export interface AutoPermitSettings {
   /** Master switch; an unconfigured route is treated as disabled regardless. */
@@ -25,6 +40,8 @@ export interface AutoPermitSettings {
   model: string
   /** Optional adapter-owned reasoning effort for the judge model. */
   reasoningEffort?: string
+  /** Per-request output-token budget; absent means the schema default. */
+  maxOutputTokens?: number
 }
 
 /** Plugin-row configuration; the Settings form edits these fields live. */
@@ -33,6 +50,7 @@ export interface Config {
   provider: Volatile<string>
   model: Volatile<string>
   reasoningEffort?: Volatile<string | undefined>
+  maxOutputTokens: Volatile<number>
 }
 
 // No `Schema<Config>` annotation: schemastery ≥ 3.18.4 types volatile modes
@@ -56,6 +74,14 @@ export const Config = Schema.object({
   reasoningEffort: Schema.string()
     .volatile()
     .description('Optional reasoning effort for the judge model.'),
+  maxOutputTokens: Schema.natural()
+    .min(JUDGE_OUTPUT_TOKENS.min)
+    .max(JUDGE_OUTPUT_TOKENS.max)
+    .default(JUDGE_OUTPUT_TOKENS.default)
+    .volatile()
+    .description(
+      'Output-token budget for each judge model request. Reasoning tokens count toward it.',
+    ),
 })
 
 /**
@@ -71,6 +97,7 @@ export function registerSettings(_ctx: Context, config: Config): () => AutoPermi
     provider: config.provider.get(),
     model: config.model.get(),
     reasoningEffort: config.reasoningEffort?.get(),
+    maxOutputTokens: config.maxOutputTokens.get(),
   })
 }
 

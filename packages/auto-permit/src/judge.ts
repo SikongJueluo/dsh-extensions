@@ -41,6 +41,7 @@ import type { Evidence } from './evidence.js'
 import { isMutableFileDependent } from './container.js'
 import { createInspector } from './inspect.js'
 import type { Inspector } from './inspect.js'
+import { JUDGE_OUTPUT_TOKENS } from './settings.js'
 import type { AutoPermitSettings } from './settings.js'
 
 /** Judge verdict: `allow` claims the request; `defer` delegates to the human. */
@@ -76,8 +77,6 @@ export const PROMPT_VERSION = 'dsh-auto-permit-v5'
 export const JUDGE_LIMITS = {
   /** Model requests per approval. */
   maxSteps: 6,
-  /** Output tokens per model request. */
-  maxOutputTokens: 1024,
   /** Wall-clock budget for the whole investigation. */
   timeoutMs: 45000,
 } as const
@@ -381,6 +380,10 @@ export async function judge(
     timedOut = true
     controller.abort()
   }, timeoutMs)
+  const startedAt = Date.now()
+  const maxOutputTokens = settings.maxOutputTokens ?? JUDGE_OUTPUT_TOKENS.default
+  const effort = settings.reasoningEffort
+  const effortLabel = effort === undefined || effort === '' ? 'adapter-default' : effort
 
   const timeoutResult = (step?: number): JudgeResult =>
     defer('timeout', `no verdict within ${timeoutMs} ms`, step)
@@ -426,13 +429,13 @@ export async function judge(
       const stream = ctx.llm.stream({
         provider: settings.provider,
         model: settings.model,
-        ...(settings.reasoningEffort === undefined || settings.reasoningEffort === ''
+        ...(effort === undefined || effort === ''
           ? {}
-          : { reasoningEffort: ReasoningEffortId(settings.reasoningEffort) }),
+          : { reasoningEffort: ReasoningEffortId(effort) }),
         system: SYSTEM_PROMPT,
         messages,
         ...(tools === undefined ? {} : { tools }),
-        maxTokens: JUDGE_LIMITS.maxOutputTokens,
+        maxTokens: maxOutputTokens,
         sessionId,
         signal: controller.signal,
       })
@@ -443,6 +446,20 @@ export async function judge(
 
       const blocks = assembler.blocks()
       const finish = assembler.finish
+      // Per-step telemetry: the requested budget, the effort actually sent, the
+      // terminal finish, the provider's disjoint token counts, and elapsed time.
+      // This is what separates a real token-limit truncation from a policy
+      // DEFER without retaining reasoning text or credentials.
+      ctx.logger.info(
+        'auto-permit: judge step %d/%d finish=%s budget=%d effort=%s usage=%o elapsed=%dms',
+        step,
+        JUDGE_LIMITS.maxSteps,
+        finish.kind,
+        maxOutputTokens,
+        effortLabel,
+        assembler.usage,
+        Date.now() - startedAt,
+      )
       if (finish.kind === 'aborted') {
         return timedOut ? timeoutResult(step) : cancelledResult(step)
       }

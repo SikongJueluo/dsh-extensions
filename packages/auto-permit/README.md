@@ -63,12 +63,20 @@ budget`），绝不用截断前缀让模型判完整命令。
   判官的系统指令或用户消息。
 - **预算**：每次审批最多 6 个模型 step、12 次工具调用、32 KiB 证据输出
   （单次读 12 KiB、单文件 256 KiB、搜索扫描 4 MiB / 400 文件 / 60 条匹配）、
-  总时限 45 秒。总输出是**硬上限**：会越界的整次结果被拒绝，不截断后放行。
-  任何工具错误、截断、搜索上限、超大/非文本文件或预算耗尽都会把本回合永久
-  标记为不可 ALLOW；后续成功读取不会“补全”并清除该事实，最终裁决由程序
+  总时限 45 秒。工具证据总输出是**硬上限**：会越界的整次结果被拒绝，不截断后
+  放行。任何工具错误、截断、搜索上限、超大/非文本文件或预算耗尽都会把本回合
+  永久标记为不可 ALLOW；后续成功读取不会“补全”并清除该事实，最终裁决由程序
   强制回人工。策略排除项（`.git`、`.env`、`node_modules` 等）**不计入**
   `list_dir` 截断；只有真正超过可见条目上限、或 `search_files` 匹配行被
   裁剪、或有文件被跳过时才算不完整。
+- **模型输出预算**：每次模型请求的输出预算默认 8192 token（行 config
+  `maxOutputTokens`，允许 256–32768）。思考模型的 reasoning token 计入该
+  预算，因此按可见输出估算的 1024 会在 `high` 思考下截断判决。命中上限仍然
+  一律 defer 交人工，不解析残缺 verdict，也不因片段里出现 `allow` 而放行。
+  每个 step 通过 `ctx.logger` 记录 finish kind、请求预算、effort、usage 与
+  耗时，用于区分 token 截断、政策 DEFER 和超时。usage 取决于适配器上报：
+  当前 DeepSeek 适配器给出 input / output / cache 计数，不单独提供
+  `reasoningTokens`，因此总输出可观测，精确思考用量可能缺失。
 - **版本复核**：判官读过的每个逻辑路径记录 realpath 目标 + 内容 sha256 +
   `mtime+size`。同一路径第二次读取若目标或哈希变化，立即 invalidated 并拒绝
   后续 ALLOW；准备 ALLOW 前还会重新 realpath、stat、重读哈希，因此 symlink
@@ -233,11 +241,15 @@ shell 脚本另外再加一道：即使来源合格也不重放（可变文件/�
 
 ## 配置
 
-插件行 config（全部 volatile，`{enabled, provider, model, reasoningEffort?}`）：
+插件行 config（全部 volatile，`{enabled, provider, model, reasoningEffort?, maxOutputTokens}`）：
 
 - **enabled**（默认开；未配置判官模型时不生效）。
 - **provider** / **model**：判官模型路由。必须显式指定——不跟随会话模型，
   避免主模型审自己。可选 **reasoningEffort** 思考强度。
+- **maxOutputTokens**（默认 8192，范围 256–32768）：单次模型请求的输出
+  token 预算；思考 token 计入。达到上限仍回人工。Web 设置分区目前只编辑
+  enabled / 模型 / 思考强度，预算字段在行 config 声明处（Nix、profile patch
+  或 settings API）修改；不声明时使用默认值。
 - 写错模型 id 是安全的：判官调用失败 → defer → 回人工弹窗（fail-open）。
 
 容器判据与只读调查（v5）随插件启用生效，**没有单独的开关**：安装插件并配置判官路由
