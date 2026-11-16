@@ -186,6 +186,55 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 都改变运行时行为，须逐处确认；`no-void`、`no-floating-promises` 更不允许靠加 `void`
 或空 `.catch()` 消音。
 
+#### 3.7.1 类型逃生口按区域分布
+
+| 规则 | src | client | test | 合计 |
+| --- | ---: | ---: | ---: | ---: |
+| `no-unsafe-type-assertion` | 214 | 15 | 245 | 474 |
+| `no-non-null-assertion` | 21 | 1 | 167 | 189 |
+| `no-unsafe-member-access` | 8 | 8 | 7 | 23 |
+| `no-unsafe-assignment` | 1 | 0 | 9 | 10 |
+| `no-unsafe-call` | 0 | 8 | 1 | 9 |
+| `no-unsafe-return` / `argument` | 0 / 2 | 5 / 0 | 3 / 1 | 11 |
+| `no-explicit-any` | 5 | 0 | 0 | 5 |
+
+另有 1 条 `no-unsafe-assignment` 在 `.storybook/preview.tsx`（不在上表四列内，故合计仍为 722）。
+
+八条规则合计：生产代码（src + client）**288 条**、测试 **433 条**、Storybook 预览 1 条。其中 `no-unsafe-type-assertion` 在生产侧 229 条、测试侧 245 条。测试占比高不代表可以整体
+豁免——测试里的假类型同样会在重构时骗过编译器——但修复顺序应先生产后测试：生产侧的断言
+掩盖的是真实契约。
+
+#### 3.7.2 生产侧按写法分类（229 条）
+
+| 写法 | 数量 | 例子 | 正确修法 |
+| --- | ---: | --- | --- |
+| 收窄断言（`x as T`，含 `JSON.parse` 与 `ctx.get`） | 173 | `JSON.parse(payload) as JsonRpcResponse`（`search-integrator/src/mcp.ts:63`） | 在边界做真实校验（schema/type guard），或补 SDK 泛型 |
+| 从 `any` 断言 | 52 | `ctx.get('spillStore') as SpillStoreLike \| undefined`（`search-integrator/src/audit.ts:49`） | 查宿主契约后用带类型的 getter；`ctx.get` 的返回形状要靠 SDK 类型验证 |
+| 泛型断言（类型参数可任意实例化） | 4 | — | 用真实的泛型约束替代断言 |
+
+按语言惯用法再切一刀（src 内文本匹配）：`as unknown as` 18 处、`as never` 10 处、
+`JSON.parse(...) as T` 15 处、`ctx.get(...) as T` 8 处——这 51 处是最值得先处理的一批，
+因为它们是“边界未校验”或“宿主契约未验证”的明确信号。
+
+热点文件：`search-integrator/src/providers.ts` 17、`integrate.ts` 10、
+`triggers/src/service.ts` 9、`search-integrator/src/tool.ts` 8、`cmd-permit/src/index.ts` 7、
+`more-providers/src/config.ts` 7、`triggers/src/replay.ts` 7、`triggers/src/channel.ts` 7。
+
+#### 3.7.3 修复顺序（每层独立 jj 层）
+
+1. **边界校验**（`JSON.parse(...) as T` 15 处）：补 schema 或 type guard，顺带覆盖真实运行时
+   输入；这是唯一能真正消除断言的一类。
+2. **宿主服务形状**（`ctx.get(...) as T` 8 处）：先核 SDK 类型与 Inspect 提供的方法签名，
+   能用官方泛型就用；不能用的逐处记录契约依据。
+3. **`as unknown as`（18）与 `as never`（10）**：逐个看是否真的跨越了类型边界；`as never`
+   多用于 `throw`，与 `only-throw-error` 一起处理。
+4. **`!` 非空断言（生产 22 处）**：改成显式判空或改类型；不允许用 `?.` 掩盖“本该存在”的契约。
+5. **测试断言（412 处）**：优先把 fixture 构造成真实类型；确实需要构造“非法形状”时，用
+   `satisfies` 或显式 helper 收拢，而不是散落的 `as unknown as`。
+
+每层都要跑 `typecheck` + 相关测试；改动涉及错误传播、后台任务或 fail-open 语义时先问，
+不靠加 `void`、空 `catch` 或防御性 fallback 消音。
+
 ## 4. Fallow
 
 ### 4.1 自动识别的模型（未手写 entry 列表）
