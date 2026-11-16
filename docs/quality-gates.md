@@ -121,12 +121,33 @@ oxfmt 0.78.0           fallow 3.43.1
 实测（`OXC_LOG=debug oxlint`）：
 
 ```text
-Starting to assign files to programs. Total files: 276
-Done assigning files to programs. Total programs: 30. Unmatched files: 23
+Starting to assign files to programs. Total files: 277
+Done assigning files to programs. Total programs: 30. Unmatched files: 24
 ```
 
-23 个 unmatched **全部是 `.mjs`**（测试/smoke/脚本），与 C2 的“JS 不做类型感知”一致。
-宿主、客户端、ui、构建配置、Storybook、tooling 的 TS/TSX 全部落在真实 program 里。
+24 个 unmatched **全部是 `.mjs`**（测试/smoke/脚本），与 C2 的“JS 不做类型感知”一致。
+253 个文件分到 30 个真实 program；宿主、客户端、ui、构建配置、Storybook、tooling 的
+TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
+
+| program | 文件 |
+| --- | ---: |
+| 根 `tsconfig.json`（配置、测试、脚本、tooling、Storybook） | 37 |
+| `packages/ui` | 24 |
+| `search-integrator` | 21 |
+| `auto-permit` | 16 |
+| `triggers` | 15 |
+| `oauth-providers` / `session-write-access` | 14 / 14 |
+| `execution-guard` / `handoff` | 12 / 12 |
+| `plan-usage` | 11 |
+| `auto-continue` / `recursive-skills` | 10 / 10 |
+| `task-anchor` | 9 |
+| `jj-workspace` | 8 |
+| `toolchain-access` | 7 |
+| `more-providers` / `cmd-permit` | 6 / 6 |
+| `context-audit` / `remote-exec` | 3 / 3 |
+| `auto-env` / `rtk-rewrite` | 2 / 2 |
+| `crew` | 1 |
+| 8 个 `packages/*/src/client/tsconfig.json` | 各 1（jj-workspace 3） |
 
 违规样例验证（临时文件，验证后删除）：在宿主 `src/*.ts`、客户端 `src/client/*.tsx`、
 `scripts/*.mjs` 各放 `await 1` + 未处理 Promise，三处都报出
@@ -243,7 +264,13 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 ### 5.2 范围与验证
 
 - 覆盖 JS/TS/TSX/JSON/CSS/YAML：`oxfmt --list-different` 当前列出 **228** 个文件
-  （159 ts、21 mjs、19 tsx、18 json、9 css、2 yml），这就是纯排版迁移层的规模。
+  （159 ts、21 mjs、19 tsx、18 json、9 css、2 yml）。在副本上实跑一遍排版，规模是
+  **+13472 / -5128 行**，最大单个文件 `plan-usage/smoke.mjs`（+550 / -124）。
+- 行宽保持默认 100：现有 55446 行里 p95 = 97、p99 = 132，100 最贴近既有写法。换成 120
+  会把改动降到 207 个文件 / +8200 -4607 行，但那是为了少改而改标准，不采用。
+- **排版不是一次收敛的**：`packages/triggers/src/service.ts` 第一遍排版后仍会再变一次
+  （第二遍才稳定，之后 `--list-different` 为 0）。排版层必须“跑到稳定”再跑
+  `format:check`，否则刚写完就会红。
 - **YAML 已验证**：40 个 patch 文件的副本全部格式化后，7 条 `!!js` 行逐字未变
   （`disabled: !!js process.platform === 'win32'` 等），注释与层级保持不变。实际会变的只有
   `auto-permit` 的两个文件，差异是空字符串引号 `""` → `''`；用 js-yaml + 自定义 `!!js` tag
