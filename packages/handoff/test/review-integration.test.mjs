@@ -261,7 +261,7 @@ async function completeBrief(host, originId) {
     3000,
     'briefing followup',
   )
-  const briefPath = briefMsg.content[0].text.match(/\S+handoff\.md/)?.[0]
+  const briefPath = briefMsg.content[0].text.match(/\S+handoff\.md/u)?.[0]
   if (briefPath === undefined) throw new Error('brief instruction names no file')
   await writeFile(briefPath, '# Goal\nintegration\n<!-- handoff:complete -->\n', 'utf8')
   const created = await until(() => host.state.createdAgents.at(-1), 5000, 'agents.create')
@@ -271,7 +271,7 @@ async function completeBrief(host, originId) {
 test('flag path: --review binds the loop before the first prompt and the loop closes', async () => {
   const config = handoffPlugin.Config ? handoffPlugin.Config({}) : {}
   const { root, host } = await boot({ config: { ...config, pollMs: 100, timeoutMs: 8000 } })
-  const _t = await test.context
+  await test.context
   try {
     const command = host.state.commandDefs.get('handoff')
     assert.ok(command, 'handoff command registered')
@@ -315,7 +315,7 @@ test('flag path: --review binds the loop before the first prompt and the loop cl
     )
     assert.equal(bindings[0].parent, 'origin-flag')
     assert.equal(bindings[0].executor, String(created.sessionId))
-    assert.ok(runs.length >= 1)
+    assert.ok(runs.length > 0)
     const run = runs.find((r) => r.parent === 'origin-flag')
     assert.ok(run, 'run for this origin exists')
     assert.equal(run.status, 'active')
@@ -323,7 +323,7 @@ test('flag path: --review binds the loop before the first prompt and the loop cl
     assert.equal(run.maxRounds, 5)
     assert.equal(run.autoDeliver, true, 'handoff binds auto-deliver runs')
 
-    const metaPath = briefPath.replace(/\.md$/, '.meta.json')
+    const metaPath = briefPath.replace(/\.md$/u, '.meta.json')
     await until(
       async () => {
         const metaNow = JSON.parse(await readFile(metaPath, 'utf8'))
@@ -542,7 +542,7 @@ test('flag-fixed summary: --workspace + --review reaches the card with the real 
     assert.equal(answer.kind, 'success', JSON.stringify(answer))
     assert.ok(answer.text.includes('已请求'), answer.text)
     const { briefPath } = await completeBrief(host2, 'origin-flags')
-    const meta = JSON.parse(await readFile(briefPath.replace(/\.md$/, '.meta.json'), 'utf8'))
+    const meta = JSON.parse(await readFile(briefPath.replace(/\.md$/u, '.meta.json'), 'utf8'))
     assert.equal(meta.target?.path, '/int/other', 'the flag target actually runs')
     assert.equal(meta.review?.maxRounds, 5)
   } finally {

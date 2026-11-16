@@ -17,7 +17,7 @@
  * reachable from CI, and host-side ssh needs the operator's ~/.ssh); see the
  * package README for the live verification recipe.
  */
-import { execFileSync, spawn as spawnChild } from 'node:child_process'
+import { execFileSync, spawn as spawnChild, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -322,8 +322,10 @@ check('no port → ssh config decides', !argvNoPort.includes('-p') && argvNoPort
   )
 }
 
+function controlRecord(kind, detail = '') {
+  return { kind, detail, before: '' }
+}
 {
-  const control = (kind, detail = '') => ({ kind, detail, before: '' })
   check(
     'classify no control + exit 0 is status-unknown',
     classifyOutcome(0, undefined, false, false) === 'status-unknown',
@@ -339,39 +341,39 @@ check('no port → ssh config decides', !argvNoPort.includes('-p') && argvNoPort
   )
   check(
     'classify command-start is ok',
-    classifyOutcome(0, control('command-start', '0'), false, false) === 'ok',
+    classifyOutcome(0, controlRecord('command-start', '0'), false, false) === 'ok',
   )
   check(
     'classify command exit 255 is ok when command-start is present',
-    classifyOutcome(255, control('command-start', '255'), false, false) === 'ok',
+    classifyOutcome(255, controlRecord('command-start', '255'), false, false) === 'ok',
   )
   check(
     'classify prep-error control',
-    classifyOutcome(PREP_EXIT_CODE, control('prep-error'), false, false) === 'prep-error',
+    classifyOutcome(PREP_EXIT_CODE, controlRecord('prep-error'), false, false) === 'prep-error',
   )
   check(
     'classify status-unknown control',
-    classifyOutcome(127, control('status-unknown'), false, false) === 'status-unknown',
+    classifyOutcome(127, controlRecord('status-unknown'), false, false) === 'status-unknown',
   )
   check(
     'classify env-error control',
-    classifyOutcome(ENV_EXIT_CODE, control('env-error'), false, false) === 'env-error',
+    classifyOutcome(ENV_EXIT_CODE, controlRecord('env-error'), false, false) === 'env-error',
   )
   check(
     'classify cwd-error control',
-    classifyOutcome(CWD_EXIT_CODE, control('cwd-error'), false, false) === 'cwd-error',
+    classifyOutcome(CWD_EXIT_CODE, controlRecord('cwd-error'), false, false) === 'cwd-error',
   )
   check(
     'classify timeout wins over command-start',
-    classifyOutcome(0, control('command-start'), true, false) === 'timeout-unknown',
+    classifyOutcome(0, controlRecord('command-start'), true, false) === 'timeout-unknown',
   )
   check(
     'classify cancel wins over command-start',
-    classifyOutcome(0, control('command-start'), false, true) === 'cancelled-unknown',
+    classifyOutcome(0, controlRecord('command-start'), false, true) === 'cancelled-unknown',
   )
   check(
     'classify timeout wins over cancel',
-    classifyOutcome(0, control('command-start'), true, true) === 'timeout-unknown',
+    classifyOutcome(0, controlRecord('command-start'), true, true) === 'timeout-unknown',
   )
   check(
     'outcome enum includes the phase-1 outcomes',
@@ -390,7 +392,7 @@ check('no port → ssh config decides', !argvNoPort.includes('-p') && argvNoPort
 }
 
 // ── Part 4: display ──────────────────────────────────────────────────────
-check('display strips ANSI', formatDisplay('\x1b[31mred\x1b[0m\n', 1024).text === 'red\n')
+check('display strips ANSI', formatDisplay('\u001B[31mred\u001B[0m\n', 1024).text === 'red\n')
 check(
   'display collapses CR progress',
   formatDisplay('progress 1\rprogress 2\rprogress 3\n', 1024).text === 'progress 3\n',
@@ -443,8 +445,8 @@ check(
 function controlLine(token, kind, detail = '') {
   return `\nremote-exec:${token}:${kind}${detail === '' ? '' : `:${detail}`}\n`
 }
-function nonceOf(script) {
-  return /\/tmp\/remote-exec-([0-9a-f]{32})\.status/.exec(script)?.[1]
+function nonceOf(scriptText) {
+  return /\/tmp\/remote-exec-([0-9a-f]{32})\.status/u.exec(scriptText)?.[1]
 }
 function stubSubprocess({
   exitCode = 0,
@@ -533,10 +535,10 @@ const runTarget = {
   envInit: 'none',
   autoStart: false,
 }
-async function runStub(stub, { displayMaxBytes, cwd = '/w', timeoutMs = 5000 } = {}) {
+async function runStub(stub, { displayMaxBytes, cwd: workdir = '/w', timeoutMs = 5000 } = {}) {
   const cfg = Config(displayMaxBytes === undefined ? {} : { displayMaxBytes })
   return new RemoteRunner(stub.ctx, cfg).run('gpu', runTarget, 'echo ok', {
-    cwd,
+    cwd: workdir,
     timeoutMs,
     owner: { sessionId: 'session-1' },
     callId: 'call-1',
@@ -887,7 +889,12 @@ function fakeToolCtx() {
     ctx: {
       logger: () => ({ info: () => {}, warn: () => {}, error: () => {} }),
       get: () => undefined,
-      tools: { register: (definition) => (registered.push(definition), () => {}) },
+      tools: {
+        register: (definition) => {
+          registered.push(definition)
+          return () => {}
+        },
+      },
       subprocess: {
         resolveExecutable: async () => '/usr/bin/ssh',
         spawn: () => {
@@ -959,7 +966,24 @@ function fakeToolCtx() {
 }
 
 // ── Part 8: local fixture through fake ssh/docker + real bash/fish ───────
-{
+// The fixture drives the real `fish` binary as the container shell and asserts
+// that login-shell noise is diverted into the env log. An image without fish
+// (a plain CI runner) skips this part with the reason printed instead of
+// failing the gate on a shell the package does not itself require.
+/** Read one collected stream slice the way the host's subprocess reader does. */
+function readCollected(chunks) {
+  const text = Buffer.concat(chunks).toString('utf8')
+  return { text, nextOffset: Buffer.byteLength(text), lossy: false }
+}
+
+const fishBinary = spawnSync('which', ['fish'], { encoding: 'utf8' }).stdout?.trim() ?? ''
+if (fishBinary === '') {
+  console.log('skip - Part 8 fixture checks: the real `fish` binary is not installed')
+} else {
+  await fixtureChecks(fishBinary)
+}
+
+async function fixtureChecks(fishPath) {
   const root = await mkdtemp(join(tmpdir(), 'remote-exec-fixture-'))
   const bin = join(root, 'bin')
   const fakebin = join(root, 'fakebin')
@@ -970,7 +994,6 @@ function fakeToolCtx() {
   const home = join(root, 'home')
   const project = join(root, 'project')
   const envProject = join(root, 'env-project')
-  const fishPath = execFileSync('which', ['fish'], { encoding: 'utf8' }).trim()
   await mkdir(bin, { recursive: true })
   await mkdir(fakebin, { recursive: true })
   await mkdir(envbin, { recursive: true })
@@ -1110,15 +1133,11 @@ esac
                 { once: true },
               )
             })
-            const read = (chunks) => {
-              const text = Buffer.concat(chunks).toString('utf8')
-              return { text, nextOffset: Buffer.byteLength(text), lossy: false }
-            }
             return {
               done,
               collected: {
-                stdout: { readFrom: () => read(out) },
-                stderr: { readFrom: () => read(err) },
+                stdout: { readFrom: () => readCollected(out) },
+                stderr: { readFrom: () => readCollected(err) },
               },
             }
           },
@@ -1135,22 +1154,27 @@ esac
     autoStart: true,
   }
   async function runFixture(
-    command,
+    commandLine,
     {
-      cwd = project,
-      target = fixtureTarget,
+      cwd: workdir = project,
+      target: selectedTarget = fixtureTarget,
       displayMaxBytes,
       timeoutMs = 5000,
       env = fixtureEnv,
     } = {},
   ) {
     const cfg = Config(displayMaxBytes === undefined ? {} : { displayMaxBytes })
-    return new RemoteRunner(fixtureSubprocess(env).ctx, cfg).run('fixture', target, command, {
-      cwd,
-      timeoutMs,
-      owner: { sessionId: 'session-fixture' },
-      callId: 'call-fixture',
-    })
+    return new RemoteRunner(fixtureSubprocess(env).ctx, cfg).run(
+      'fixture',
+      selectedTarget,
+      commandLine,
+      {
+        cwd: workdir,
+        timeoutMs,
+        owner: { sessionId: 'session-fixture' },
+        callId: 'call-fixture',
+      },
+    )
   }
   try {
     {

@@ -3,11 +3,13 @@ name: quality
 # One entry point for local development and CI: `pnpm check:quality`.
 # This workflow only provisions the environment and calls it.
 #
-# NOT YET VERIFIED REMOTELY: the repository has no workflow history at the time
-# this file was written, and the smoke runner needs `jj` (installed below). The
-# first real run is the evidence; until then this file proves intent, not
-# enforcement. Branch protection / required checks are a repository setting the
-# maintainer must enable separately.
+# First real runs (2026-11-16, commits leading to `main` at rozzpxpt) exposed
+# three things this file now carries: the smoke runner needs `jj`, the
+# remote-exec smoke drives a real `fish`, and the only substantive failure was
+# the lint backlog the local gate also reported. The environment steps below are
+# the fix for the first two; the lint clearance happened in the tree, not here.
+# Branch protection / required checks are a repository setting the maintainer
+# must enable separately.
 
 on:
   push:
@@ -56,6 +58,14 @@ jobs:
           user.name = "dsh-extensions CI"
           user.email = "ci@dsh-extensions.invalid"
           EOF
+
+      # Part 8 of `packages/remote-exec/smoke.mjs` drives the real `fish`
+      # binary as a container shell and asserts that login-shell noise is
+      # diverted into the env log. The runner image does not ship fish; the
+      # smoke skips that part with a printed reason when it is absent, and
+      # runs it here so CI keeps the coverage.
+      - name: Install fish
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends fish
 
       - run: pnpm install --frozen-lockfile
 
