@@ -82,7 +82,8 @@ export interface Inspector {
 export const INSPECT_TOOLS: readonly ToolSchema[] = [
   {
     name: 'read_file',
-    description: 'Read a UTF-8 text file from the session workspace. Returns line-numbered text; results are capped.',
+    description:
+      'Read a UTF-8 text file from the session workspace. Returns line-numbered text; results are capped.',
     parameters: {
       type: 'object',
       properties: {
@@ -111,7 +112,8 @@ export const INSPECT_TOOLS: readonly ToolSchema[] = [
       properties: {
         path: {
           type: 'string',
-          description: 'Workspace-relative directory, or an absolute path inside the workspace; defaults to the working directory.',
+          description:
+            'Workspace-relative directory, or an absolute path inside the workspace; defaults to the working directory.',
         },
       },
       additionalProperties: false,
@@ -119,7 +121,8 @@ export const INSPECT_TOOLS: readonly ToolSchema[] = [
   },
   {
     name: 'search_files',
-    description: 'Case-insensitive literal text search across workspace text files; skips VCS, cache, dependency, and build directories, and files larger than 256 KiB.',
+    description:
+      'Case-insensitive literal text search across workspace text files; skips VCS, cache, dependency, and build directories, and files larger than 256 KiB.',
     parameters: {
       type: 'object',
       properties: {
@@ -129,7 +132,8 @@ export const INSPECT_TOOLS: readonly ToolSchema[] = [
         },
         path: {
           type: 'string',
-          description: 'Workspace-relative text file or directory to search; defaults to the working directory.',
+          description:
+            'Workspace-relative text file or directory to search; defaults to the working directory.',
         },
       },
       required: ['text'],
@@ -140,16 +144,30 @@ export const INSPECT_TOOLS: readonly ToolSchema[] = [
 
 /** Directories never listed, read, or searched, even inside the workspace. */
 const DENIED_DIRS = new Set([
-  '.git', '.jj', '.ssh', '.gnupg', '.aws', '.kube', '.docker',
-  '.password-store', 'node_modules', '__pycache__', '.venv', 'venv',
-  '.mypy_cache', '.pytest_cache', '.ruff_cache', '.tox',
+  '.git',
+  '.jj',
+  '.ssh',
+  '.gnupg',
+  '.aws',
+  '.kube',
+  '.docker',
+  '.password-store',
+  'node_modules',
+  '__pycache__',
+  '.venv',
+  'venv',
+  '.mypy_cache',
+  '.pytest_cache',
+  '.ruff_cache',
+  '.tox',
 ])
 
 /** Heavy output directories skipped only by recursive search. */
 const SEARCH_SKIP_DIRS = new Set(['dist', 'build', 'target', 'coverage'])
 
 /** Files that may carry credentials or private keys. */
-const DENIED_FILE = /^(?:\.env(?:\.(?!example$|sample$|template$)[^/]*)?$|\.netrc|\.git-credentials|id_(?:rsa|dsa|ecdsa|ed25519)|[^/]*\.(?:pem|key|p12|pfx))$/i
+const DENIED_FILE =
+  /^(?:\.env(?:\.(?!example$|sample$|template$)[^/]*)?$|\.netrc|\.git-credentials|id_(?:rsa|dsa|ecdsa|ed25519)|[^/]*\.(?:pem|key|p12|pfx))$/i
 
 function bytesOf(text: string): number {
   return Buffer.byteLength(text, 'utf8')
@@ -325,7 +343,11 @@ export async function createInspector(
    * target and bytes; otherwise the turn is invalidated and the old evidence
    * is never silently replaced by the new version.
    */
-  const recordRead = (resolved: Resolved, raw: Buffer, info: { mtimeMs: number; size: number }): boolean => {
+  const recordRead = (
+    resolved: Resolved,
+    raw: Buffer,
+    info: { mtimeMs: number; size: number },
+  ): boolean => {
     const hash = hashOf(raw)
     const prior = state.reads.get(resolved.logical)
     if (prior === undefined) {
@@ -342,7 +364,10 @@ export async function createInspector(
     if (prior.real !== resolved.real || prior.hash !== hash) {
       state.invalidated = true
       state.changed.add(resolved.logicalRel)
-      markProblem('evidence-changed', `evidence changed during the investigation: ${resolved.logicalRel}`)
+      markProblem(
+        'evidence-changed',
+        `evidence changed during the investigation: ${resolved.logicalRel}`,
+      )
       return false
     }
     return true
@@ -386,12 +411,14 @@ export async function createInspector(
       return fail(`offset ${offset} is past the end of ${resolved.rel} (${lines.length} lines)`)
     }
     if (!recordRead(resolved, raw, info)) {
-      return fail(`evidence changed since it was first read: ${resolved.logicalRel}`, 'evidence-changed', true)
+      return fail(
+        `evidence changed since it was first read: ${resolved.logicalRel}`,
+        'evidence-changed',
+        true,
+      )
     }
     const selected = lines.slice(offset - 1, offset - 1 + limit)
-    let text = selected
-      .map((line, index) => `${offset + index}: ${line}`)
-      .join('\n')
+    let text = selected.map((line, index) => `${offset + index}: ${line}`).join('\n')
     let truncated = false
     let returned = selected.length
     if (bytesOf(text) > INSPECT_LIMITS.maxReadBytes) {
@@ -408,7 +435,9 @@ export async function createInspector(
       truncated = true
     }
     if (truncated) text += '\n…[truncated; request a narrower offset/limit]'
-    recordRef(`${resolved.logicalRel}:${lineRange(offset, Math.max(offset, Math.min(offset - 1 + returned, lines.length)))}`)
+    recordRef(
+      `${resolved.logicalRel}:${lineRange(offset, Math.max(offset, Math.min(offset - 1 + returned, lines.length)))}`,
+    )
     return spend(text, truncated)
   }
 
@@ -424,7 +453,9 @@ export async function createInspector(
     // only entries the tool would have listed but for the count cap are.
     const eligible = entries
       .filter((entry) => !isDeniedComponent(entry.name))
-      .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
+      .sort(
+        (a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name),
+      )
     const visible = eligible.slice(0, INSPECT_LIMITS.maxListEntries)
     const lines: string[] = []
     for (const entry of visible) {
@@ -471,11 +502,16 @@ export async function createInspector(
       try {
         entries = await readdir(dir, { withFileTypes: true })
       } catch {
-        markProblem('evidence-unavailable', `cannot read directory during search: ${relativeToRoot(root, dir)}`)
+        markProblem(
+          'evidence-unavailable',
+          `cannot read directory during search: ${relativeToRoot(root, dir)}`,
+        )
         capped = true
         return
       }
-      entries.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
+      entries.sort(
+        (a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name),
+      )
       for (const entry of entries) {
         if (capped) return
         if (isDeniedComponent(entry.name)) continue
@@ -504,7 +540,18 @@ export async function createInspector(
           }
           raw = await readFile(full, { signal })
           scanned += raw.length
-          if (!recordRead({ logical: full, real: full, rel: relativeToRoot(root, full), logicalRel: relativeToRoot(root, full) }, raw, fileInfo)) {
+          if (
+            !recordRead(
+              {
+                logical: full,
+                real: full,
+                rel: relativeToRoot(root, full),
+                logicalRel: relativeToRoot(root, full),
+              },
+              raw,
+              fileInfo,
+            )
+          ) {
             capped = true
             return
           }
@@ -538,7 +585,11 @@ export async function createInspector(
     } else {
       if (!baseInfo.isFile()) return fail(`not a regular file: ${resolved.rel}`)
       if (baseInfo.size > INSPECT_LIMITS.maxFileBytes) {
-        return fail(`file is too large to search (${baseInfo.size} bytes): ${resolved.rel}`, 'budget', true)
+        return fail(
+          `file is too large to search (${baseInfo.size} bytes): ${resolved.rel}`,
+          'budget',
+          true,
+        )
       }
       const raw = await readFile(resolved.real, { signal })
       signal?.throwIfAborted()
@@ -546,7 +597,11 @@ export async function createInspector(
         return fail(`not a UTF-8 text file: ${resolved.rel}`)
       }
       if (!recordRead(resolved, raw, baseInfo)) {
-        return fail(`evidence changed since it was first read: ${resolved.logicalRel}`, 'evidence-changed', true)
+        return fail(
+          `evidence changed since it was first read: ${resolved.logicalRel}`,
+          'evidence-changed',
+          true,
+        )
       }
       const lines = raw.toString('utf8').split('\n')
       for (let i = 0; i < lines.length; i += 1) {
@@ -569,9 +624,13 @@ export async function createInspector(
     const note = notes.length > 0 ? `\n…[${notes.join('; ')}]` : ''
     const incomplete = capped || skipped > 0 || lineTruncated
     if (matches.length === 0) {
-      return spend(`no matches for ${JSON.stringify(needle)}${capped ? ' (search capped)' : ''}${note}`, incomplete)
+      return spend(
+        `no matches for ${JSON.stringify(needle)}${capped ? ' (search capped)' : ''}${note}`,
+        incomplete,
+      )
     }
-    const text = matches.join('\n') + (capped ? '\n…[search capped; results are incomplete]' : '') + note
+    const text =
+      matches.join('\n') + (capped ? '\n…[search capped; results are incomplete]' : '') + note
     return spend(text, incomplete)
   }
 
@@ -602,7 +661,9 @@ export async function createInspector(
         return fail(`unknown evidence tool: ${name}`)
       } catch (error) {
         if (signal?.aborted === true) throw error
-        return fail(`evidence tool failed: ${error instanceof Error ? error.message : String(error)}`)
+        return fail(
+          `evidence tool failed: ${error instanceof Error ? error.message : String(error)}`,
+        )
       }
     },
     references: () => [...state.refs],
@@ -624,8 +685,12 @@ export async function createInspector(
         }
         try {
           const after = await stat(realNow)
-          if (!after.isFile() || after.mtimeMs !== before.mtimeMs || after.size !== before.size
-            || after.size > INSPECT_LIMITS.maxFileBytes) {
+          if (
+            !after.isFile() ||
+            after.mtimeMs !== before.mtimeMs ||
+            after.size !== before.size ||
+            after.size > INSPECT_LIMITS.maxFileBytes
+          ) {
             changed.add(before.logicalRel)
             continue
           }

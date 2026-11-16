@@ -52,13 +52,36 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 const SECRET_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 const PROVIDER_KEYS = new Set([
-  'kind', 'enabled', 'displayName', 'catalog', 'api', 'baseURL', 'modelsURL',
-  'models', 'compat', 'headers', 'apiKeyFile', 'secretName', 'apiKeyEnv',
-  'accounts', 'zdr',
+  'kind',
+  'enabled',
+  'displayName',
+  'catalog',
+  'api',
+  'baseURL',
+  'modelsURL',
+  'models',
+  'compat',
+  'headers',
+  'apiKeyFile',
+  'secretName',
+  'apiKeyEnv',
+  'accounts',
+  'zdr',
 ])
 const ACCOUNT_KEYS = new Set([
-  'enabled', 'displayName', 'routeId', 'api', 'baseURL', 'modelsURL', 'models',
-  'compat', 'headers', 'apiKeyFile', 'secretName', 'apiKeyEnv', 'zdr',
+  'enabled',
+  'displayName',
+  'routeId',
+  'api',
+  'baseURL',
+  'modelsURL',
+  'models',
+  'compat',
+  'headers',
+  'apiKeyFile',
+  'secretName',
+  'apiKeyEnv',
+  'zdr',
 ])
 const MODEL_KEYS = new Set(['id', 'name', 'contextWindow', 'maxTokens', 'input', 'reasoning'])
 const API_VALUES = new Set<Api>(['openai-completions', 'openai-responses', 'anthropic-messages'])
@@ -84,10 +107,15 @@ function rejectUnknown(raw: Record<string, unknown>, allowed: Set<string>, path:
   }
 }
 
-function optionalString(raw: Record<string, unknown>, key: string, path: string): string | undefined {
+function optionalString(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
+): string | undefined {
   const value = raw[key]
   if (value === undefined || value === null) return undefined
-  if (typeof value !== 'string' || value.trim() === '') return fail(`${path}.${key}`, 'expected a non-empty string')
+  if (typeof value !== 'string' || value.trim() === '')
+    return fail(`${path}.${key}`, 'expected a non-empty string')
   return value.trim()
 }
 
@@ -96,14 +124,22 @@ function requiredString(raw: Record<string, unknown>, key: string, path: string)
   return value ?? fail(`${path}.${key}`, 'is required')
 }
 
-function optionalBoolean(raw: Record<string, unknown>, key: string, path: string): boolean | undefined {
+function optionalBoolean(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
+): boolean | undefined {
   const value = raw[key]
   if (value === undefined || value === null) return undefined
   if (typeof value !== 'boolean') return fail(`${path}.${key}`, 'expected a boolean')
   return value
 }
 
-function optionalPositiveInteger(raw: Record<string, unknown>, key: string, path: string): number | undefined {
+function optionalPositiveInteger(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
+): number | undefined {
   const value = raw[key]
   if (value === undefined || value === null) return undefined
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
@@ -112,7 +148,11 @@ function optionalPositiveInteger(raw: Record<string, unknown>, key: string, path
   return value
 }
 
-function optionalStringArray(raw: Record<string, unknown>, key: string, path: string): string[] | undefined {
+function optionalStringArray(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
+): string[] | undefined {
   const value = raw[key]
   if (value === undefined || value === null) return undefined
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
@@ -121,7 +161,11 @@ function optionalStringArray(raw: Record<string, unknown>, key: string, path: st
   return value as string[]
 }
 
-function optionalHeaderRecord(raw: Record<string, unknown>, key: string, path: string): Record<string, string> | undefined {
+function optionalHeaderRecord(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
+): Record<string, string> | undefined {
   const value = raw[key]
   if (value === undefined || value === null) return undefined
   const record = asRecord(value, `${path}.${key}`)
@@ -133,13 +177,22 @@ function optionalHeaderRecord(raw: Record<string, unknown>, key: string, path: s
   return headers
 }
 
-function optionalCompat(raw: Record<string, unknown>, key: string, path: string): PiAiCompatProfile | undefined {
+function optionalCompat(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
+): PiAiCompatProfile | undefined {
   const value = raw[key]
   if (value === undefined || value === null) return undefined
   return asRecord(value, `${path}.${key}`) as PiAiCompatProfile
 }
 
-function optionalUrl(raw: Record<string, unknown>, key: string, path: string, required: boolean): string | undefined {
+function optionalUrl(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
+  required: boolean,
+): string | undefined {
   const value = required ? requiredString(raw, key, path) : optionalString(raw, key, path)
   if (value === undefined) return undefined
   let url: URL
@@ -148,7 +201,8 @@ function optionalUrl(raw: Record<string, unknown>, key: string, path: string, re
   } catch {
     return fail(`${path}.${key}`, 'expected an absolute http(s) URL')
   }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') fail(`${path}.${key}`, 'expected an http(s) URL')
+  if (url.protocol !== 'http:' && url.protocol !== 'https:')
+    fail(`${path}.${key}`, 'expected an http(s) URL')
   return value.replace(/\/+$/, '')
 }
 
@@ -165,7 +219,11 @@ function hasKeyFields(raw: Record<string, unknown>): boolean {
   return KEY_FIELDS.some((field) => raw[field] !== undefined && raw[field] !== null)
 }
 
-function keySourceOf(raw: Record<string, unknown>, path: string, secretDir: string): KeySource | undefined {
+function keySourceOf(
+  raw: Record<string, unknown>,
+  path: string,
+  secretDir: string,
+): KeySource | undefined {
   const apiKeyFile = optionalString(raw, 'apiKeyFile', path)
   if (apiKeyFile !== undefined) {
     if (!isAbsolute(apiKeyFile)) fail(`${path}.apiKeyFile`, 'expected an absolute path')
@@ -178,7 +236,8 @@ function keySourceOf(raw: Record<string, unknown>, path: string, secretDir: stri
   }
   const apiKeyEnv = optionalString(raw, 'apiKeyEnv', path)
   if (apiKeyEnv !== undefined) {
-    if (!ENV_NAME.test(apiKeyEnv)) fail(`${path}.apiKeyEnv`, 'expected an environment variable name')
+    if (!ENV_NAME.test(apiKeyEnv))
+      fail(`${path}.apiKeyEnv`, 'expected an environment variable name')
     return { kind: 'env', name: apiKeyEnv }
   }
   return undefined
@@ -187,7 +246,8 @@ function keySourceOf(raw: Record<string, unknown>, path: string, secretDir: stri
 function parseModels(raw: Record<string, unknown>, path: string): ModelConfig[] | undefined {
   const value = raw.models
   if (value === undefined || value === null) return undefined
-  if (!Array.isArray(value) || value.length === 0) fail(`${path}.models`, 'expected a non-empty array')
+  if (!Array.isArray(value) || value.length === 0)
+    fail(`${path}.models`, 'expected a non-empty array')
   return value.map((entry, index) => {
     const modelPath = `${path}.models[${index}]`
     const record = asRecord(entry, modelPath)
@@ -198,7 +258,8 @@ function parseModels(raw: Record<string, unknown>, path: string): ModelConfig[] 
     const maxTokens = optionalPositiveInteger(record, 'maxTokens', modelPath)
     const inputRaw = optionalStringArray(record, 'input', modelPath)
     const input = inputRaw?.map((value) => {
-      if (value !== 'text' && value !== 'image') fail(`${modelPath}.input`, 'only "text" and "image" are supported')
+      if (value !== 'text' && value !== 'image')
+        fail(`${modelPath}.input`, 'only "text" and "image" are supported')
       return value
     })
     const reasoningRaw = record.reasoning
@@ -206,11 +267,16 @@ function parseModels(raw: Record<string, unknown>, path: string): ModelConfig[] 
     if (reasoningRaw === false) {
       reasoning = false
     } else if (reasoningRaw !== undefined && reasoningRaw !== null) {
-      if (!Array.isArray(reasoningRaw) || reasoningRaw.length === 0 || reasoningRaw.some((v) => typeof v !== 'string')) {
+      if (
+        !Array.isArray(reasoningRaw) ||
+        reasoningRaw.length === 0 ||
+        reasoningRaw.some((v) => typeof v !== 'string')
+      ) {
         fail(`${modelPath}.reasoning`, 'expected false or a non-empty array of thinking levels')
       }
       for (const level of reasoningRaw as string[]) {
-        if (!THINKING_LEVELS.has(level)) fail(`${modelPath}.reasoning`, `unknown thinking level "${level}"`)
+        if (!THINKING_LEVELS.has(level))
+          fail(`${modelPath}.reasoning`, `unknown thinking level "${level}"`)
       }
       reasoning = [...(reasoningRaw as string[])]
     }
@@ -246,7 +312,8 @@ function parseBaseFields(
 ): BaseFields {
   if (kind === 'builtin') {
     for (const key of ['api', 'baseURL', 'modelsURL', 'models', 'compat', 'headers', 'zdr']) {
-      if (raw[key] !== undefined && raw[key] !== null) fail(`${path}.${key}`, 'is not supported on a builtin provider')
+      if (raw[key] !== undefined && raw[key] !== null)
+        fail(`${path}.${key}`, 'is not supported on a builtin provider')
     }
     const catalog = optionalString(raw, 'catalog', path) ?? providerId
     if (!PROVIDER_ID.test(catalog)) fail(`${path}.catalog`, 'expected a catalog provider id')
@@ -255,7 +322,8 @@ function parseBaseFields(
 
   if (kind === 'command-code') {
     for (const key of ['catalog', 'api', 'models', 'compat', 'headers']) {
-      if (raw[key] !== undefined && raw[key] !== null) fail(`${path}.${key}`, 'is not supported on a command-code provider')
+      if (raw[key] !== undefined && raw[key] !== null)
+        fail(`${path}.${key}`, 'is not supported on a command-code provider')
     }
     const baseURL = optionalUrl(raw, 'baseURL', path, false)
     const modelsURL = optionalUrl(raw, 'modelsURL', path, false)
@@ -269,8 +337,10 @@ function parseBaseFields(
     }
   }
 
-  if (raw.catalog !== undefined && raw.catalog !== null) fail(`${path}.catalog`, 'is not supported on a custom provider')
-  const api = optionalApi(raw, 'api', path) ?? fail(`${path}.api`, 'is required for a custom provider')
+  if (raw.catalog !== undefined && raw.catalog !== null)
+    fail(`${path}.catalog`, 'is not supported on a custom provider')
+  const api =
+    optionalApi(raw, 'api', path) ?? fail(`${path}.api`, 'is required for a custom provider')
   const baseURL = optionalUrl(raw, 'baseURL', path, true) as string
   const modelsURL = optionalUrl(raw, 'modelsURL', path, false)
   const models = parseModels(raw, path)
@@ -291,13 +361,10 @@ function parseBaseFields(
   }
 }
 
-function parseProvider(
-  providerId: string,
-  value: unknown,
-  secretDir: string,
-): ResolvedProvider[] {
+function parseProvider(providerId: string, value: unknown, secretDir: string): ResolvedProvider[] {
   const path = `providers.${providerId}`
-  if (!PROVIDER_ID.test(providerId)) fail(path, 'provider ids must be lowercase letters, digits, or hyphens')
+  if (!PROVIDER_ID.test(providerId))
+    fail(path, 'provider ids must be lowercase letters, digits, or hyphens')
   const raw = asRecord(value, path)
   rejectUnknown(raw, PROVIDER_KEYS, path)
   const kindRaw = requiredString(raw, 'kind', path)
@@ -311,7 +378,9 @@ function parseProvider(
 
   const accountsRaw = raw.accounts
   if (accountsRaw === undefined || accountsRaw === null) {
-    const keySource = keySourceOf(raw, path, secretDir) ?? fail(path, 'no key source (apiKeyFile, secretName, or apiKeyEnv)')
+    const keySource =
+      keySourceOf(raw, path, secretDir) ??
+      fail(path, 'no key source (apiKeyFile, secretName, or apiKeyEnv)')
     return [{ ...base, route: providerId, displayName, keySource }]
   }
 
@@ -322,22 +391,25 @@ function parseProvider(
   const result: ResolvedProvider[] = []
   for (const [accountId, accountValue] of entries) {
     const accountPath = `${path}.accounts.${accountId}`
-    if (!PROVIDER_ID.test(accountId)) fail(accountPath, 'account ids must be lowercase letters, digits, or hyphens')
+    if (!PROVIDER_ID.test(accountId))
+      fail(accountPath, 'account ids must be lowercase letters, digits, or hyphens')
     const account = asRecord(accountValue, accountPath)
     rejectUnknown(account, ACCOUNT_KEYS, accountPath)
     if (optionalBoolean(account, 'enabled', accountPath) === false) continue
 
     const routeId = optionalString(account, 'routeId', accountPath) ?? `${providerId}-${accountId}`
-    if (!PROVIDER_ID.test(routeId)) fail(`${accountPath}.routeId`, 'expected lowercase letters, digits, or hyphens')
-    const accountDisplay = optionalString(account, 'displayName', accountPath) ?? `${displayName} (${accountId})`
-    const keySource = hasKeyFields(account)
-      ? keySourceOf(account, accountPath, secretDir)
-      : baseKey
-    if (keySource === undefined) fail(accountPath, 'no key source (apiKeyFile, secretName, or apiKeyEnv)')
+    if (!PROVIDER_ID.test(routeId))
+      fail(`${accountPath}.routeId`, 'expected lowercase letters, digits, or hyphens')
+    const accountDisplay =
+      optionalString(account, 'displayName', accountPath) ?? `${displayName} (${accountId})`
+    const keySource = hasKeyFields(account) ? keySourceOf(account, accountPath, secretDir) : baseKey
+    if (keySource === undefined)
+      fail(accountPath, 'no key source (apiKeyFile, secretName, or apiKeyEnv)')
 
     if (kind === 'builtin') {
       for (const key of ['api', 'baseURL', 'modelsURL', 'models', 'compat', 'headers', 'zdr']) {
-        if (account[key] !== undefined && account[key] !== null) fail(`${accountPath}.${key}`, 'is not supported on a builtin account')
+        if (account[key] !== undefined && account[key] !== null)
+          fail(`${accountPath}.${key}`, 'is not supported on a builtin account')
       }
       result.push({ ...base, route: routeId, displayName: accountDisplay, keySource })
       continue
@@ -345,7 +417,8 @@ function parseProvider(
 
     if (kind === 'command-code') {
       for (const key of ['catalog', 'api', 'models', 'compat', 'headers']) {
-        if (account[key] !== undefined && account[key] !== null) fail(`${accountPath}.${key}`, 'is not supported on a command-code account')
+        if (account[key] !== undefined && account[key] !== null)
+          fail(`${accountPath}.${key}`, 'is not supported on a command-code account')
       }
       const baseURL = optionalUrl(account, 'baseURL', accountPath, false)
       const modelsURL = optionalUrl(account, 'modelsURL', accountPath, false)
@@ -362,13 +435,16 @@ function parseProvider(
       continue
     }
 
-    if (account.catalog !== undefined && account.catalog !== null) fail(`${accountPath}.catalog`, 'is not supported')
-    if (account.zdr !== undefined && account.zdr !== null) fail(`${accountPath}.zdr`, 'is not supported on a custom account')
+    if (account.catalog !== undefined && account.catalog !== null)
+      fail(`${accountPath}.catalog`, 'is not supported')
+    if (account.zdr !== undefined && account.zdr !== null)
+      fail(`${accountPath}.zdr`, 'is not supported on a custom account')
     const api = optionalApi(account, 'api', accountPath) ?? base.api
     const baseURL = optionalUrl(account, 'baseURL', accountPath, false) ?? base.baseURL
     const modelsURL = optionalUrl(account, 'modelsURL', accountPath, false) ?? base.modelsURL
     const models = parseModels(account, accountPath) ?? base.models
-    if (modelsURL === undefined && models === undefined) fail(accountPath, 'needs modelsURL or models')
+    if (modelsURL === undefined && models === undefined)
+      fail(accountPath, 'needs modelsURL or models')
     const compat = optionalCompat(account, 'compat', accountPath)
     const headers = optionalHeaderRecord(account, 'headers', accountPath)
     result.push({
@@ -392,7 +468,8 @@ export function resolveConfig(value: unknown): ResolvedProvider[] {
   const raw = asRecord(value, 'config')
   rejectUnknown(raw, new Set(['secretDir', 'providers']), 'config')
   const secretDir = optionalString(raw, 'secretDir', 'config')
-  if (secretDir !== undefined && !isAbsolute(secretDir)) fail('config.secretDir', 'expected an absolute path')
+  if (secretDir !== undefined && !isAbsolute(secretDir))
+    fail('config.secretDir', 'expected an absolute path')
   const effectiveSecretDir = secretDir ?? defaultSecretDir()
   const providersRaw = raw.providers
   if (providersRaw === undefined || providersRaw === null) fail('config.providers', 'is required')
@@ -401,7 +478,8 @@ export function resolveConfig(value: unknown): ResolvedProvider[] {
   const result: ResolvedProvider[] = []
   for (const [providerId, provider] of Object.entries(providers)) {
     for (const resolved of parseProvider(providerId, provider, effectiveSecretDir)) {
-      if (routes.has(resolved.route)) fail(`providers.${providerId}`, `duplicate route id "${resolved.route}"`)
+      if (routes.has(resolved.route))
+        fail(`providers.${providerId}`, `duplicate route id "${resolved.route}"`)
       routes.add(resolved.route)
       result.push(resolved)
     }
@@ -424,7 +502,10 @@ export function resolveConfigPath(explicit?: string): string {
     return isAbsolute(configured) ? configured : resolve(configured)
   }
   const home = process.env.DSH_HOME?.trim()
-  return join(home !== undefined && home !== '' ? home : join(homedir(), '.dsh'), 'more-providers.yaml')
+  return join(
+    home !== undefined && home !== '' ? home : join(homedir(), '.dsh'),
+    'more-providers.yaml',
+  )
 }
 
 /** Read and validate the YAML file. Throws ConfigError on any problem. */

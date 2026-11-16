@@ -23,16 +23,23 @@ const READ_ONLY = {
 } as const
 
 const HEAD = [
-  '--ro-bind', '/', '/',
-  '--dev', '/dev',
+  '--ro-bind',
+  '/',
+  '/',
+  '--dev',
+  '/dev',
   '--unshare-pid',
-  '--proc', '/proc',
+  '--proc',
+  '/proc',
   '--die-with-parent',
 ]
 
 const WS_TAIL = ['--tmpfs', '/tmp', '--bind', '/ws/proj', '/ws/proj']
 
-function stockConfined(policy: typeof POLICY | typeof READ_ONLY, command: readonly string[]): string[] {
+function stockConfined(
+  policy: typeof POLICY | typeof READ_ONLY,
+  command: readonly string[],
+): string[] {
   return ['bwrap', ...expectedStockProfileArgs(policy), '--', ...command]
 }
 
@@ -64,10 +71,18 @@ describe('expectedStockProfileArgs with policy extra roots', () => {
   it('binds the workspace, then every additional root in policy order', () => {
     const policy = { ...POLICY, additionalWritableRoots: [extraRoot, secondRoot] } as const
     expect(expectedStockProfileArgs(policy)).toEqual([
-      ...HEAD, '--tmpfs', '/tmp',
-      '--bind', '/ws/proj', '/ws/proj',
-      '--bind', extraRoot, extraRoot,
-      '--bind', secondRoot, secondRoot,
+      ...HEAD,
+      '--tmpfs',
+      '/tmp',
+      '--bind',
+      '/ws/proj',
+      '/ws/proj',
+      '--bind',
+      extraRoot,
+      extraRoot,
+      '--bind',
+      secondRoot,
+      secondRoot,
     ])
   })
 
@@ -78,9 +93,15 @@ describe('expectedStockProfileArgs with policy extra roots', () => {
       additionalWritableRoots: [workspaceRoot, extraRoot],
     }
     expect(expectedStockProfileArgs(policy)).toEqual([
-      ...HEAD, '--tmpfs', '/tmp',
-      '--bind', workspaceRoot, workspaceRoot,
-      '--bind', extraRoot, extraRoot,
+      ...HEAD,
+      '--tmpfs',
+      '/tmp',
+      '--bind',
+      workspaceRoot,
+      workspaceRoot,
+      '--bind',
+      extraRoot,
+      extraRoot,
     ])
   })
 
@@ -105,9 +126,15 @@ describe('insertGrantBinds', () => {
     const command = ['cargo', 'build']
     const confined = stockConfined(POLICY, command)
     expect(insertGrantBinds(confined, command, POLICY, [BIND])).toEqual([
-      'bwrap', ...HEAD, ...WS_TAIL,
-      '--bind', '/home/u/.cache/uv', '/home/u/.cache/uv',
-      '--', 'cargo', 'build',
+      'bwrap',
+      ...HEAD,
+      ...WS_TAIL,
+      '--bind',
+      '/home/u/.cache/uv',
+      '/home/u/.cache/uv',
+      '--',
+      'cargo',
+      'build',
     ])
   })
 
@@ -128,9 +155,15 @@ describe('insertGrantBinds', () => {
       { source: '/home/u/.cache/semgrep-state', destination: '/home/u/.semgrep' },
     ])
     expect(result).toEqual([
-      'bwrap', ...HEAD, ...WS_TAIL,
-      '--bind', '/home/u/.cache/semgrep-state', '/home/u/.semgrep',
-      '--', 'semgrep', 'scan',
+      'bwrap',
+      ...HEAD,
+      ...WS_TAIL,
+      '--bind',
+      '/home/u/.cache/semgrep-state',
+      '/home/u/.semgrep',
+      '--',
+      'semgrep',
+      'scan',
     ])
   })
 
@@ -142,9 +175,18 @@ describe('insertGrantBinds', () => {
     // verified to equal the command verbatim; the command's own "--" stays
     // in place after it.
     expect(result).toEqual([
-      'bwrap', ...HEAD, ...WS_TAIL,
-      '--bind', '/home/u/.cache/uv', '/home/u/.cache/uv',
-      '--', 'printf', '--', '--ro-bind', '/etc', '/etc',
+      'bwrap',
+      ...HEAD,
+      ...WS_TAIL,
+      '--bind',
+      '/home/u/.cache/uv',
+      '/home/u/.cache/uv',
+      '--',
+      'printf',
+      '--',
+      '--ro-bind',
+      '/etc',
+      '/etc',
     ])
   })
 
@@ -152,9 +194,13 @@ describe('insertGrantBinds', () => {
     const command = ['true']
     const result = insertGrantBinds(stockConfined(READ_ONLY, command), command, READ_ONLY, [BIND])
     expect(result).toEqual([
-      'bwrap', ...HEAD,
-      '--bind', '/home/u/.cache/uv', '/home/u/.cache/uv',
-      '--', 'true',
+      'bwrap',
+      ...HEAD,
+      '--bind',
+      '/home/u/.cache/uv',
+      '/home/u/.cache/uv',
+      '--',
+      'true',
     ])
   })
 
@@ -170,7 +216,9 @@ describe('fail-closed on non-stock layouts', () => {
   it('a runnerCommand wrapper prefix is refused', () => {
     const wrapped = ['/opt/bwrap-shim', ...expectedStockProfileArgs(POLICY), '--', ...command]
     expect(() => insertGrantBinds(wrapped, command, POLICY, [BIND])).toThrow(GrantArgvError)
-    expect(() => insertGrantBinds(wrapped, command, POLICY, [BIND])).toThrow(/runner is "\/opt\/bwrap-shim"/)
+    expect(() => insertGrantBinds(wrapped, command, POLICY, [BIND])).toThrow(
+      /runner is "\/opt\/bwrap-shim"/,
+    )
   })
 
   it('a mutated profile element is refused with its index', () => {
@@ -190,7 +238,14 @@ describe('fail-closed on non-stock layouts', () => {
   })
 
   it('a tail that differs from the caller argv is refused', () => {
-    const swapped = ['bwrap', ...expectedStockProfileArgs(POLICY), '--', 'cargo', 'build', '--release']
+    const swapped = [
+      'bwrap',
+      ...expectedStockProfileArgs(POLICY),
+      '--',
+      'cargo',
+      'build',
+      '--release',
+    ]
     expect(() => insertGrantBinds(swapped, command, POLICY, [BIND])).toThrow(/caller argv/)
   })
 

@@ -40,18 +40,23 @@ export interface Config {
 // into the schema generics, and an annotation would fight the inference the
 // loader validates `Config` against.
 export const Config = Schema.object({
-  enabled: Schema.boolean().default(true).volatile().description(
-    'Master switch. With no judge route configured the plugin never claims an approval.',
-  ),
-  provider: Schema.string().default('').volatile().description(
-    'Judge model provider (llm route id). Configure from the Web Settings page.',
-  ),
-  model: Schema.string().default('').volatile().description(
-    'Judge model id. Configure from the Web Settings page.',
-  ),
-  reasoningEffort: Schema.string().volatile().description(
-    'Optional reasoning effort for the judge model.',
-  ),
+  enabled: Schema.boolean()
+    .default(true)
+    .volatile()
+    .description(
+      'Master switch. With no judge route configured the plugin never claims an approval.',
+    ),
+  provider: Schema.string()
+    .default('')
+    .volatile()
+    .description('Judge model provider (llm route id). Configure from the Web Settings page.'),
+  model: Schema.string()
+    .default('')
+    .volatile()
+    .description('Judge model id. Configure from the Web Settings page.'),
+  reasoningEffort: Schema.string()
+    .volatile()
+    .description('Optional reasoning effort for the judge model.'),
 })
 
 /**

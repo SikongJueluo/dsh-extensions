@@ -62,18 +62,30 @@ export class AuthError extends Error {
 /** Parse a grant record's payload, or report why it is not usable. */
 function parseGrant(record: CredentialRecord | undefined): OAuthGrant {
   if (record === undefined) {
-    throw new AuthError('AUTH_MISSING', 'oauth-providers/chatgpt: no sign-in stored — open Settings → OAuth Providers and click "Sign in"')
+    throw new AuthError(
+      'AUTH_MISSING',
+      'oauth-providers/chatgpt: no sign-in stored — open Settings → OAuth Providers and click "Sign in"',
+    )
   }
   if (record.kind !== 'grant') {
-    throw new AuthError('AUTH_INVALID', `oauth-providers/chatgpt: credential record has kind "${record.kind}", expected "grant"`)
+    throw new AuthError(
+      'AUTH_INVALID',
+      `oauth-providers/chatgpt: credential record has kind "${record.kind}", expected "grant"`,
+    )
   }
   const payload = record.payload as Partial<OAuthGrant> | null
   if (
-    typeof payload?.access !== 'string' || payload.access.length === 0 ||
-    typeof payload?.refresh !== 'string' || payload.refresh.length === 0 ||
-    typeof payload?.expires !== 'number' || !Number.isFinite(payload.expires)
+    typeof payload?.access !== 'string' ||
+    payload.access.length === 0 ||
+    typeof payload?.refresh !== 'string' ||
+    payload.refresh.length === 0 ||
+    typeof payload?.expires !== 'number' ||
+    !Number.isFinite(payload.expires)
   ) {
-    throw new AuthError('AUTH_INVALID', 'oauth-providers/chatgpt: stored sign-in is malformed — sign in again')
+    throw new AuthError(
+      'AUTH_INVALID',
+      'oauth-providers/chatgpt: stored sign-in is malformed — sign in again',
+    )
   }
   return {
     access: payload.access,
@@ -118,7 +130,8 @@ export class TokenStore {
   async resolve(marginMs: number = DEFAULT_REFRESH_MARGIN_MS): Promise<ResolvedToken> {
     const grant = parseGrant(await this.credentials.readRecord(this.key))
     const needsRefresh = grant.expires <= Date.now() + marginMs
-    if (!needsRefresh) return { access: grant.access, ...(grant.accountId ? { accountId: grant.accountId } : {}) }
+    if (!needsRefresh)
+      return { access: grant.access, ...(grant.accountId ? { accountId: grant.accountId } : {}) }
     this.refreshing ??= this.refresh(grant, marginMs).finally(() => {
       this.refreshing = null
     })
@@ -134,7 +147,10 @@ export class TokenStore {
         const asSeen = parseGrant(current)
         if (asSeen.expires > Date.now() + marginMs) return undefined
         const next = await refreshGrant(this.fetch, asSeen.refresh)
-        this.logger?.debug?.('oauth-providers/chatgpt: refreshed OAuth grant (expires %s)', new Date(next.expires).toISOString())
+        this.logger?.debug?.(
+          'oauth-providers/chatgpt: refreshed OAuth grant (expires %s)',
+          new Date(next.expires).toISOString(),
+        )
         return grantRecord(next)
       })
       const grant = parseGrant(updated ?? (await this.credentials.readRecord(this.key)))

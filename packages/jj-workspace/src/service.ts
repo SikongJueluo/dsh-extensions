@@ -86,14 +86,20 @@ export const Config = z.object({
     .string()
     .default('dsh-')
     .description('Prefix for automatically generated branch, bookmark, and checkout names.'),
-  gitCommand: z.string().default('git').description('Executable name or absolute execution-world path of Git.'),
+  gitCommand: z
+    .string()
+    .default('git')
+    .description('Executable name or absolute execution-world path of Git.'),
   nodeCommand: z
     .string()
     .default('node')
     .description('Node executable used for sandboxed directory allocation.'),
   timeoutMs: z.number().default(60_000).description('Deadline in milliseconds for one command.'),
   graceMs: z.number().default(3_000).description('Subprocess termination grace in milliseconds.'),
-  maxOutputBytes: z.number().default(65_536).description('Maximum captured bytes per subprocess output stream.'),
+  maxOutputBytes: z
+    .number()
+    .default(65_536)
+    .description('Maximum captured bytes per subprocess output stream.'),
   workspaceDirectory: z
     .string()
     .default('.agents/workspaces')
@@ -120,7 +126,9 @@ export interface JjCreatedFields {
 }
 
 /** The creation result the tool and the Forge record consume. */
-export type CreatedWorkspace = (CreatedWorktree & { vcs: 'git' }) | (CreatedWorktree & JjCreatedFields)
+export type CreatedWorkspace =
+  | (CreatedWorktree & { vcs: 'git' })
+  | (CreatedWorktree & JjCreatedFields)
 
 /** A creation request that also says which entry point started it. */
 export type CreateWorkspaceRequest = CreateWorktreeRequest & { origin?: JjTaskOrigin }
@@ -170,7 +178,8 @@ export default class JjWorktreeService extends Service {
       return { ...(await this.git.create(agent, request, signal, onPhase)), vcs: 'git' }
     }
 
-    const operationSignal = signal === undefined ? this.lifetime.signal : AbortSignal.any([this.lifetime.signal, signal])
+    const operationSignal =
+      signal === undefined ? this.lifetime.signal : AbortSignal.any([this.lifetime.signal, signal])
     operationSignal.throwIfAborted()
     const operation = this.createJj(agent, cwd, request, operationSignal, onPhase)
     this.pending.add(operation)
@@ -191,7 +200,10 @@ export default class JjWorktreeService extends Service {
     signal?: AbortSignal,
     onPhase?: (phase: CreateWorktreePhase) => void,
   ): Promise<RestoredWorktree> {
-    if ((await this.isJjRoot(request.repositoryRoot, signal)) || (await this.isJjRoot(request.path, signal))) {
+    if (
+      (await this.isJjRoot(request.repositoryRoot, signal)) ||
+      (await this.isJjRoot(request.path, signal))
+    ) {
       throw new Error(
         `jj workspace restore is not supported: ${request.path}. The workspace directory and its task bookmark are retained; recreate or delete them with jj.`,
       )
@@ -204,7 +216,11 @@ export default class JjWorktreeService extends Service {
     const session = this.ctx.sessions.get(sessionId as SessionId)
     if (session === undefined) return { kind: 'none' }
     const directory = this.ctx.workingDirectory.get(session)
-    const root = await findVcsRoot(directory, this.probe(this.lifetime.signal), this.lifetime.signal)
+    const root = await findVcsRoot(
+      directory,
+      this.probe(this.lifetime.signal),
+      this.lifetime.signal,
+    )
     if (root === undefined) return { kind: 'none' }
     if (!root.jj) return { kind: 'git', root: root.root }
     const git = await this.ctx.fs.lstat(join(root.root, '.git'), undefined, this.lifetime.signal)
@@ -221,7 +237,13 @@ export default class JjWorktreeService extends Service {
         bookmarks: [...bookmarks.keys()].sort(),
       }
     } catch {
-      return { kind: 'jj', root: root.root, hasGit: git !== undefined, blocker: 'jj-unavailable', bookmarks: [] }
+      return {
+        kind: 'jj',
+        root: root.root,
+        hasGit: git !== undefined,
+        blocker: 'jj-unavailable',
+        bookmarks: [],
+      }
     }
   }
 
@@ -240,7 +262,11 @@ export default class JjWorktreeService extends Service {
     const session = this.ctx.sessions.get(sessionId as SessionId)
     if (session === undefined) return []
     const directory = this.ctx.workingDirectory.get(session)
-    const root = await findVcsRoot(directory, this.probe(this.lifetime.signal), this.lifetime.signal)
+    const root = await findVcsRoot(
+      directory,
+      this.probe(this.lifetime.signal),
+      this.lifetime.signal,
+    )
     if (root?.jj !== true) return []
     const policy = this.ctx.sandboxPolicy.resolve({ session })
     const host = this.hostFor(policy)
@@ -248,7 +274,9 @@ export default class JjWorktreeService extends Service {
     let records: JjTaskRecord[]
     try {
       projectRoot = await projectRootOf(host, root.root, this.lifetime.signal)
-      records = (await this.readRecords(projectRoot)).filter((record) => record.sessionId === sessionId)
+      records = (await this.readRecords(projectRoot)).filter(
+        (record) => record.sessionId === sessionId,
+      )
     } catch {
       return []
     }
@@ -259,7 +287,11 @@ export default class JjWorktreeService extends Service {
       workspaces = await listWorkspaces(host, projectRoot, this.lifetime.signal)
       bookmarks = await listBookmarks(host, projectRoot, this.lifetime.signal)
     } catch (error) {
-      return records.map((record) => ({ ...record, state: 'unavailable', message: messageOf(error) }))
+      return records.map((record) => ({
+        ...record,
+        state: 'unavailable',
+        message: messageOf(error),
+      }))
     }
     const states: JjTaskState[] = []
     for (const record of records) {
@@ -316,9 +348,12 @@ export default class JjWorktreeService extends Service {
   }
 
   private async readRecords(projectRoot: string): Promise<JjTaskRecord[]> {
-    const target = await this.ctx.fs.resolve(taskRecordPath(projectRoot, this.config.workspaceDirectory), {
-      cwd: projectRoot,
-    })
+    const target = await this.ctx.fs.resolve(
+      taskRecordPath(projectRoot, this.config.workspaceDirectory),
+      {
+        cwd: projectRoot,
+      },
+    )
     try {
       return parseTaskRecords(await this.ctx.fs.readText(target))
     } catch (error) {
@@ -345,7 +380,12 @@ export default class JjWorktreeService extends Service {
       ...(onPhase === undefined ? {} : { onPhase }),
     })
     try {
-      await this.appendRecord(created, jjTaskRecord(created, agent.session.id, request.origin ?? 'ui'), policy, signal)
+      await this.appendRecord(
+        created,
+        jjTaskRecord(created, agent.session.id, request.origin ?? 'ui'),
+        policy,
+        signal,
+      )
     } catch (error) {
       throw new Error(
         `jj workspace ${created.workspace} and bookmark ${created.bookmark} were created at ${created.path}, but their task record could not be written. ${messageOf(error)}`,
@@ -393,10 +433,20 @@ export default class JjWorktreeService extends Service {
 
   private hostFor(policy: SandboxExecutionPolicy): JjWorkspaceHost {
     return {
-      run: async (cwd, args, signal) => await runJj(this.ctx, this.config, policy, cwd, args, signal),
-      exists: async (path, signal) => (await this.ctx.fs.lstat(path, undefined, signal)) !== undefined,
+      run: async (cwd, args, signal) =>
+        await runJj(this.ctx, this.config, policy, cwd, args, signal),
+      exists: async (path, signal) =>
+        (await this.ctx.fs.lstat(path, undefined, signal)) !== undefined,
       prepare: async (projectRoot, poolPath, destination, signal) =>
-        await prepareJjDirectory(this.ctx, this.config, policy, projectRoot, poolPath, destination, signal),
+        await prepareJjDirectory(
+          this.ctx,
+          this.config,
+          policy,
+          projectRoot,
+          poolPath,
+          destination,
+          signal,
+        ),
     }
   }
 
@@ -419,7 +469,9 @@ export default class JjWorktreeService extends Service {
 function jjBlocker(policy: SandboxExecutionPolicy, projectRoot: string): JjStatus['blocker'] {
   if (policy.mode === 'read-only') return 'read-only'
   if (policy.mode === 'danger-full-access') return null
-  return workspaceWritableRoots(policy).some((root) => isWithin(root, projectRoot)) ? null : 'outside-writable-root'
+  return workspaceWritableRoots(policy).some((root) => isWithin(root, projectRoot))
+    ? null
+    : 'outside-writable-root'
 }
 
 /** The text of a failure. */

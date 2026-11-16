@@ -34,9 +34,17 @@ interface Config {
 // No `Schema<Config>` annotation: see AGENTS.md — the loader validates the
 // inferred shape, and an annotation would fight schemastery's generics.
 export const Config = Schema.object({
-  days: Schema.number().step(1).min(1).max(3650).default(14)
+  days: Schema.number()
+    .step(1)
+    .min(1)
+    .max(3650)
+    .default(14)
     .description('/context-audit 不带参数时的默认扫描窗口（天）。'),
-  sessionLimit: Schema.number().step(1).min(1).max(100).default(15)
+  sessionLimit: Schema.number()
+    .step(1)
+    .min(1)
+    .max(100)
+    .default(15)
     .description('按会话表格最多列出的会话数。'),
 })
 
@@ -45,7 +53,10 @@ function dshHome(): string {
   return process.env.DSH_HOME ?? join(homedir(), '.dsh')
 }
 
-function parseDays(rawInput: string, fallback: number): { days: number | undefined } | { error: string } {
+function parseDays(
+  rawInput: string,
+  fallback: number,
+): { days: number | undefined } | { error: string } {
   const text = rawInput.trim()
   if (text.length === 0) return { days: fallback }
   if (text === 'all' || text === '全部') return { days: undefined }
@@ -59,7 +70,8 @@ function parseDays(rawInput: string, fallback: number): { days: number | undefin
 function contextAuditDefinition(config: Config): CommandDefinition {
   return {
     name: CONTEXT_AUDIT_COMMAND,
-    description: '扫描本地会话日志，输出各路由/会话的缓存命中率、token 用量与各工具的调用/失败统计（参数：天数，或 all）',
+    description:
+      '扫描本地会话日志，输出各路由/会话的缓存命中率、token 用量与各工具的调用/失败统计（参数：天数，或 all）',
     async handler(invocation: CommandInvocation): Promise<CommandResult> {
       const parsed = parseDays(invocation.rawInput, config.days ?? 14)
       if ('error' in parsed) return { kind: 'error', text: parsed.error }

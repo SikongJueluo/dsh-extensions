@@ -25,7 +25,13 @@ describe('currentStepCalls (assistant-message batch source)', () => {
   it('returns the whole batch from the last assistant tool-call message', () => {
     const events = [
       assistantMessage([block('c1', 'read', '{"file_path":"a"}')]),
-      ev('tool/call', { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{"file_path":"a"}' }),
+      ev('tool/call', {
+        turn: 1,
+        step: 1,
+        callId: 'c1',
+        name: 'read',
+        arguments: '{"file_path":"a"}',
+      }),
       assistantMessage([
         block('c2', 'write', '{"file_path":"b","content":"x"}'),
         { type: 'text', text: 'doing two things' },
@@ -40,7 +46,13 @@ describe('currentStepCalls (assistant-message batch source)', () => {
   it('sees the full batch even when only the first tool/call event exists (host appends one at a time)', () => {
     const events = [
       assistantMessage([block('c1', 'read', '{"file_path":"a"}'), block('c2', 'write', '{}')]),
-      ev('tool/call', { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{"file_path":"a"}' }),
+      ev('tool/call', {
+        turn: 1,
+        step: 1,
+        callId: 'c1',
+        name: 'read',
+        arguments: '{"file_path":"a"}',
+      }),
     ]
     expect(currentStepCalls(events).map((c) => c.callId)).toEqual(['c1', 'c2'])
   })
@@ -80,6 +92,8 @@ describe('lastHumanSeq', () => {
   })
 
   it('returns -1 with no human message', () => {
-    expect(lastHumanSeq([ev('user/message', { source: { kind: 'agent-inject' }, content: [] })])).toBe(-1)
+    expect(
+      lastHumanSeq([ev('user/message', { source: { kind: 'agent-inject' }, content: [] })]),
+    ).toBe(-1)
   })
 })

@@ -50,7 +50,9 @@ export class OAuthProvidersService extends Service {
     try {
       return await resolve()
     } catch (error) {
-      this.ctx.logger(PACKAGE_NAME).warn?.('token for "%s" unavailable: %s', provider, (error as Error).message)
+      this.ctx
+        .logger(PACKAGE_NAME)
+        .warn?.('token for "%s" unavailable: %s', provider, (error as Error).message)
       return undefined
     }
   }

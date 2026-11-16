@@ -44,7 +44,9 @@ export const SizesAndStates: Story = {
           Disabled primary
         </Button>
       </div>
-      <Button className="dshx:w-fit">A deliberately long button label that wraps only at the container edge</Button>
+      <Button className="dshx:w-fit">
+        A deliberately long button label that wraps only at the container edge
+      </Button>
     </div>
   ),
 }

@@ -108,8 +108,9 @@ function dangerousRemovalTarget(target: string): boolean {
   if (target.startsWith('~')) return true
   if (/^\$(?:\{HOME\b|HOME(?:\/|$))/.test(target)) return true
   if (target.startsWith('/')) return true
-  return target === '..' || target.startsWith('../')
-    || target.includes('/../') || target.endsWith('/..')
+  return (
+    target === '..' || target.startsWith('../') || target.includes('/../') || target.endsWith('/..')
+  )
 }
 
 /**
@@ -155,7 +156,9 @@ function destructiveRemoval(command: string): boolean {
  * @returns true when the command must go to the human dialog untouched.
  */
 export function isHighRisk(command: string): boolean {
-  return destructiveRemoval(command)
-    || SHAPES.some((shape) => shape.test(command))
-    || containerRisk(command) !== undefined
+  return (
+    destructiveRemoval(command) ||
+    SHAPES.some((shape) => shape.test(command)) ||
+    containerRisk(command) !== undefined
+  )
 }

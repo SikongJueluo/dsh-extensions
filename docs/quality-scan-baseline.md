@@ -221,7 +221,7 @@
 ```sh
 pnpm lint                      # oxlint（含 type-aware，读 .oxlintrc.json）
 OXC_LOG=debug pnpm lint        # 打印 program 分配与 unmatched 列表
-pnpm format:check              # oxfmt --check .（228 个文件待排版）
+pnpm format:check              # oxfmt --check .（排版已收敛，当前 0 差异）
 pnpm fallow                    # fallow dead-code（102 条 error 级）
 pnpm fallow:health             # 复杂度报告（不阻塞）
 pnpm fallow:dupes              # 重复度报告（不阻塞）

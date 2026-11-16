@@ -54,7 +54,9 @@ export async function generatePkce(): Promise<{ verifier: string; challenge: str
   const verifierBytes = new Uint8Array(32)
   globalThis.crypto.getRandomValues(verifierBytes)
   const verifier = base64url(verifierBytes)
-  const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)))
+  const digest = new Uint8Array(
+    await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)),
+  )
   return { verifier, challenge: base64url(digest) }
 }
 
@@ -115,7 +117,10 @@ export function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
   const parts = jwt.split('.')
   if (parts.length !== 3) return null
   try {
-    return JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8')) as Record<string, unknown>
+    return JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8')) as Record<
+      string,
+      unknown
+    >
   } catch {
     return null
   }
@@ -133,7 +138,11 @@ export function accountIdOf(accessToken: string): string | undefined {
 /** Validate a token-endpoint response and map it into an {@link OAuthGrant}. */
 export function grantFromTokenResponse(json: unknown): OAuthGrant {
   const body = json as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown }
-  if (typeof body?.access_token !== 'string' || typeof body?.refresh_token !== 'string' || typeof body?.expires_in !== 'number') {
+  if (
+    typeof body?.access_token !== 'string' ||
+    typeof body?.refresh_token !== 'string' ||
+    typeof body?.expires_in !== 'number'
+  ) {
     throw new Error(`OpenAI token response missing fields: ${JSON.stringify(json).slice(0, 200)}`)
   }
   const accountId = accountIdOf(body.access_token)
@@ -147,7 +156,11 @@ export function grantFromTokenResponse(json: unknown): OAuthGrant {
 }
 
 /** POST the token endpoint with form-urlencoded parameters. */
-async function tokenRequest(fetch: FetchLike, params: Record<string, string>, signal?: AbortSignal): Promise<OAuthGrant> {
+async function tokenRequest(
+  fetch: FetchLike,
+  params: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<OAuthGrant> {
   const response = await fetch(OAUTH_TOKEN_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -156,7 +169,9 @@ async function tokenRequest(fetch: FetchLike, params: Record<string, string>, si
   })
   if (!response.ok) {
     const text = await response.text().catch(() => '')
-    throw new Error(`OpenAI token endpoint returned HTTP ${response.status}: ${text.slice(0, 200) || response.statusText}`)
+    throw new Error(
+      `OpenAI token endpoint returned HTTP ${response.status}: ${text.slice(0, 200) || response.statusText}`,
+    )
   }
   return grantFromTokenResponse(await response.json())
 }
@@ -168,22 +183,34 @@ export function exchangeAuthorizationCode(
   verifier: string,
   signal?: AbortSignal,
 ): Promise<OAuthGrant> {
-  return tokenRequest(fetch, {
-    grant_type: 'authorization_code',
-    client_id: OAUTH_CLIENT_ID,
-    code,
-    code_verifier: verifier,
-    redirect_uri: OAUTH_REDIRECT_URI,
-  }, signal)
+  return tokenRequest(
+    fetch,
+    {
+      grant_type: 'authorization_code',
+      client_id: OAUTH_CLIENT_ID,
+      code,
+      code_verifier: verifier,
+      redirect_uri: OAUTH_REDIRECT_URI,
+    },
+    signal,
+  )
 }
 
 /** Refresh a grant from its refresh token. */
-export function refreshGrant(fetch: FetchLike, refreshToken: string, signal?: AbortSignal): Promise<OAuthGrant> {
-  return tokenRequest(fetch, {
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: OAUTH_CLIENT_ID,
-  }, signal)
+export function refreshGrant(
+  fetch: FetchLike,
+  refreshToken: string,
+  signal?: AbortSignal,
+): Promise<OAuthGrant> {
+  return tokenRequest(
+    fetch,
+    {
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: OAUTH_CLIENT_ID,
+    },
+    signal,
+  )
 }
 
 /** The callback server's externally controlled handle. */

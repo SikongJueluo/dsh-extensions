@@ -19,9 +19,24 @@ import type { EvidenceSource, RawHit } from './types.js'
  * anything not here stays part of the dedup key.
  */
 const TRACKING_PARAMS: ReadonlySet<string> = new Set([
-  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-  'utm_id', 'utm_name', 'fbclid', 'gclid', 'msclkid', 'igshid', 'mc_cid',
-  'mc_eid', 'spm', 'scm', 'vd_source', 'ref_src', 'ref_url',
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'utm_id',
+  'utm_name',
+  'fbclid',
+  'gclid',
+  'msclkid',
+  'igshid',
+  'mc_cid',
+  'mc_eid',
+  'spm',
+  'scm',
+  'vd_source',
+  'ref_src',
+  'ref_url',
 ])
 
 /**
@@ -38,8 +53,10 @@ export function urlDedupKey(url: string): string {
     parsed.password = ''
     parsed.protocol = parsed.protocol.toLowerCase()
     parsed.hostname = parsed.hostname.toLowerCase()
-    if ((parsed.protocol === 'https:' && parsed.port === '443')
-      || (parsed.protocol === 'http:' && parsed.port === '80')) {
+    if (
+      (parsed.protocol === 'https:' && parsed.port === '443') ||
+      (parsed.protocol === 'http:' && parsed.port === '80')
+    ) {
       parsed.port = ''
     }
     const kept: [string, string][] = []
@@ -114,8 +131,11 @@ function mergeRawHits(hits: readonly RawHit[]): Working[] {
   const merged: Working[] = []
   for (const entry of [...byUrl.values()].sort((a, b) => a.order - b.order)) {
     const key = syndicationKey({
-      provider: '', query: '', url: entry.url,
-      title: entry.title, snippet: entry.snippet,
+      provider: '',
+      query: '',
+      url: entry.url,
+      title: entry.title,
+      snippet: entry.snippet,
     })
     if (key === undefined) {
       merged.push(entry)
@@ -173,7 +193,9 @@ export function buildEvidence(
   terms: Iterable<string>,
   cap: number,
 ): EvidenceSource[] {
-  const termSet = new Set([...terms].map((term) => term.toLowerCase()).filter((term) => term.length > 1))
+  const termSet = new Set(
+    [...terms].map((term) => term.toLowerCase()).filter((term) => term.length > 1),
+  )
   const ranked = mergeRawHits(hits)
     .map((entry) => ({ entry, score: score(entry, termSet) }))
     .sort((a, b) => b.score - a.score || a.entry.order - b.entry.order)
@@ -187,8 +209,9 @@ export function buildEvidence(
     }
   }
   const keptDomains = new Set(kept.map(({ entry }) => domainOf(entry.url)))
-  const dissent = ranked.slice(limit).find(({ entry, score }) =>
-    score > 0 && !keptDomains.has(domainOf(entry.url)))
+  const dissent = ranked
+    .slice(limit)
+    .find(({ entry, score }) => score > 0 && !keptDomains.has(domainOf(entry.url)))
   if (dissent !== undefined) kept.push(dissent)
   return kept.map(({ entry, score }, index) => ({
     id: index + 1,
@@ -205,9 +228,8 @@ export function buildEvidence(
 
 /** The excerpt one source contributes to the digest: content first, snippet fallback. */
 export function excerptOf(source: EvidenceSource, cap: number): string {
-  const text = source.content !== undefined && source.content !== ''
-    ? source.content
-    : source.snippet
+  const text =
+    source.content !== undefined && source.content !== '' ? source.content : source.snippet
   return text.length > cap ? `${text.slice(0, cap)}…` : text
 }
 
@@ -265,7 +287,9 @@ export function buildDigest(
       source.title ?? '',
       source.publishedAt === undefined ? 'date unknown' : `published ${source.publishedAt}`,
       `via ${source.providers.join('+')}`,
-    ].filter((part) => part !== '').join(' — ')
+    ]
+      .filter((part) => part !== '')
+      .join(' — ')
     const headerBlock = meta === '' ? header : `${header}\n    ${meta}`
     lines.push(headerBlock)
     used += headerBlock.length

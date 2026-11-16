@@ -58,15 +58,22 @@ function isPendingWait(value: unknown): value is PendingWait {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
   return (
-    typeof v.sessionId === 'string' && v.sessionId.length > 0 &&
+    typeof v.sessionId === 'string' &&
+    v.sessionId.length > 0 &&
     typeof v.provider === 'string' &&
     typeof v.code === 'string' &&
-    typeof v.turn === 'number' && Number.isFinite(v.turn) &&
-    typeof v.lastSeq === 'number' && Number.isFinite(v.lastSeq) &&
-    typeof v.firstFailureAt === 'number' && Number.isFinite(v.firstFailureAt) &&
-    typeof v.attempts === 'number' && Number.isFinite(v.attempts) &&
-    typeof v.probes === 'number' && Number.isFinite(v.probes) &&
-    typeof v.retryAt === 'number' && Number.isFinite(v.retryAt)
+    typeof v.turn === 'number' &&
+    Number.isFinite(v.turn) &&
+    typeof v.lastSeq === 'number' &&
+    Number.isFinite(v.lastSeq) &&
+    typeof v.firstFailureAt === 'number' &&
+    Number.isFinite(v.firstFailureAt) &&
+    typeof v.attempts === 'number' &&
+    Number.isFinite(v.attempts) &&
+    typeof v.probes === 'number' &&
+    Number.isFinite(v.probes) &&
+    typeof v.retryAt === 'number' &&
+    Number.isFinite(v.retryAt)
   )
 }
 
@@ -93,7 +100,9 @@ export class WaitSpool {
     }
     try {
       const parsed: unknown = JSON.parse(raw)
-      const list = Array.isArray((parsed as { pending?: unknown })?.pending) ? (parsed as { pending: unknown[] }).pending : []
+      const list = Array.isArray((parsed as { pending?: unknown })?.pending)
+        ? (parsed as { pending: unknown[] }).pending
+        : []
       for (const entry of list) {
         if (isPendingWait(entry)) this.entries.set(entry.sessionId, entry)
       }

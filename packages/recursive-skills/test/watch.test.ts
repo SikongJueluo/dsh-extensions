@@ -3,13 +3,7 @@ import { join } from 'node:path'
 import type { FsTarget } from '@deepseek-ai/dsh-fs'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import { describe, expect, it } from 'vitest'
-import {
-  catalogNames,
-  createHarness,
-  eventually,
-  skillDocument,
-  writeSkill,
-} from './helpers.js'
+import { catalogNames, createHarness, eventually, skillDocument, writeSkill } from './helpers.js'
 
 describe('hot refresh', () => {
   it('discovers a newly created category and skill without restarting', async () => {
@@ -39,8 +33,9 @@ describe('hot refresh', () => {
     const directory = join(harness.skillsRoot, 'category', 'pdf')
     try {
       await writeSkill(directory, ['name: pdf', 'description: Old description'])
-      expect((await harness.ctx.skills.list()).find((skill) => skill.name === 'pdf')?.description)
-        .toBe('Old description')
+      expect(
+        (await harness.ctx.skills.list()).find((skill) => skill.name === 'pdf')?.description,
+      ).toBe('Old description')
 
       await writeSkill(directory, ['name: pdf', 'description: Updated description'])
       await eventually(

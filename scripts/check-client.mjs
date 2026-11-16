@@ -45,7 +45,8 @@ if (canMaterializeHostEsm) {
 // only to prove a component mounts) logs a harmless warning for each one.
 const consoleError = console.error
 console.error = (...args) => {
-  if (typeof args[0] === 'string' && args[0].includes('useLayoutEffect does nothing on the server')) return
+  if (typeof args[0] === 'string' && args[0].includes('useLayoutEffect does nothing on the server'))
+    return
   consoleError(...args)
 }
 
@@ -80,7 +81,9 @@ const failures = []
 // version pinned for this host release; a stale or floating install would
 // typecheck against a different module than the shell serves.
 const catalog = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8')
-const pinnedPrimitives = catalog.match(/^\s+'@deepseek-ai\/dsh-client-ui-primitives':\s*(\S+)\s*$/m)?.[1]
+const pinnedPrimitives = catalog.match(
+  /^\s+'@deepseek-ai\/dsh-client-ui-primitives':\s*(\S+)\s*$/m,
+)?.[1]
 if (pinnedPrimitives === undefined) {
   failures.push(['catalog', [`${PRIMITIVES} is not pinned in pnpm-workspace.yaml`]])
 } else {
@@ -187,9 +190,9 @@ for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })
   }
   const allowedRequests = new Set([...PLATFORM_REQUESTS, ...declared])
 
-
   if (!target) problems.push('exports["./client"] is missing')
-  if (existsSync(join(dir, 'client'))) problems.push('legacy client/ source directory still present')
+  if (existsSync(join(dir, 'client')))
+    problems.push('legacy client/ source directory still present')
   if (!existsSync(file)) {
     problems.push(`missing built bundle ${relative(root, file)}`)
   } else {
@@ -200,7 +203,9 @@ for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })
     if (!code.includes('data-plugin-css')) {
       problems.push('stylesheet was not inlined into the factory')
     }
-    const requires = [...new Set([...code.matchAll(/\brequire\("([^"]+)"\)/g)].map((match) => match[1]))]
+    const requires = [
+      ...new Set([...code.matchAll(/\brequire\("([^"]+)"\)/g)].map((match) => match[1])),
+    ]
     for (const request of requires) {
       if (!allowedRequests.has(request)) {
         problems.push(`undeclared require(${JSON.stringify(request)})`)
@@ -230,14 +235,18 @@ for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })
       }
       vm.runInNewContext(code, context, { filename: file })
     } catch (error) {
-      problems.push(`factory evaluation failed: ${error instanceof Error ? error.message : String(error)}`)
+      problems.push(
+        `factory evaluation failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
     }
 
     if (!loaded) {
       problems.push('loader never received a module')
     } else {
       if (loaded.id !== manifest.name) {
-        problems.push(`registered id ${JSON.stringify(loaded.id)} != ${JSON.stringify(manifest.name)}`)
+        problems.push(
+          `registered id ${JSON.stringify(loaded.id)} != ${JSON.stringify(manifest.name)}`,
+        )
       }
       const registrations = []
       try {

@@ -41,13 +41,26 @@ const en = {
   routes: 'Routes (cache hit = cacheRead / (cacheRead + uncached))',
   tools: 'Tools (failure = isError / completed)',
   sessions: 'Heaviest sessions (by uncached input)',
-  colRoute: 'route', colRequests: 'reqs', colPrompt: 'prompt', colCacheRead: 'cache read',
-  colHit: 'hit', colOutput: 'output', colSessions: 'sessions',
-  colTool: 'tool', colCalls: 'calls', colErrors: 'errors', colFail: 'fail',
-  colAvg: 'avg', colMax: 'max', colUnfinished: 'no result',
-  colSession: 'session', colWindow: 'time range', colUncached: 'uncached',
+  colRoute: 'route',
+  colRequests: 'reqs',
+  colPrompt: 'prompt',
+  colCacheRead: 'cache read',
+  colHit: 'hit',
+  colOutput: 'output',
+  colSessions: 'sessions',
+  colTool: 'tool',
+  colCalls: 'calls',
+  colErrors: 'errors',
+  colFail: 'fail',
+  colAvg: 'avg',
+  colMax: 'max',
+  colUnfinished: 'no result',
+  colSession: 'session',
+  colWindow: 'time range',
+  colUncached: 'uncached',
   errorCodes: 'error codes:',
-  lastDays: '{n}d', allHistory: 'all',
+  lastDays: '{n}d',
+  allHistory: 'all',
   fetchFailed: 'Scan failed: {message}',
   empty: 'No model or tool usage in this window.',
   moreRows: '…and {n} more',
@@ -62,13 +75,26 @@ const zh = {
   routes: '路由汇总（命中率 = cacheRead / (cacheRead + uncached输入)）',
   tools: '工具汇总（失败率 = isError / 已完成结果）',
   sessions: '输入量最大的会话（按 uncached 输入）',
-  colRoute: '路由', colRequests: '请求', colPrompt: 'prompt总量', colCacheRead: '缓存命中',
-  colHit: '命中率', colOutput: '输出', colSessions: '会话数',
-  colTool: '工具', colCalls: '调用', colErrors: '失败', colFail: '失败率',
-  colAvg: '平均', colMax: '最长', colUnfinished: '无结果',
-  colSession: '会话', colWindow: '时间范围', colUncached: 'uncached',
+  colRoute: '路由',
+  colRequests: '请求',
+  colPrompt: 'prompt总量',
+  colCacheRead: '缓存命中',
+  colHit: '命中率',
+  colOutput: '输出',
+  colSessions: '会话数',
+  colTool: '工具',
+  colCalls: '调用',
+  colErrors: '失败',
+  colFail: '失败率',
+  colAvg: '平均',
+  colMax: '最长',
+  colUnfinished: '无结果',
+  colSession: '会话',
+  colWindow: '时间范围',
+  colUncached: 'uncached',
   errorCodes: '错误码分布：',
-  lastDays: '{n}天', allHistory: '全部',
+  lastDays: '{n}天',
+  allHistory: '全部',
   fetchFailed: '扫描失败：{message}',
   empty: '窗口内没有模型或工具用量。',
   moreRows: '…还有 {n} 项',
@@ -98,7 +124,9 @@ function fmtDuration(ms: number) {
 function fmtClock(ms: number) {
   const d = new Date(ms)
   const p = (n: number) => String(n).padStart(2, '0')
-  return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
+  return (
+    p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
+  )
 }
 
 function fmtHit(cacheRead: number, uncached: number) {
@@ -167,16 +195,18 @@ function callReport(days: number | undefined): Promise<Report> {
       method: 'report',
       payload,
     }),
-  }).then((res) => {
-    if (!res.ok) throw new Error('HTTP ' + res.status)
-    return res.json()
-  }).then((envelope: ReportEnvelope) => {
-    const result = envelope && envelope.result
-    if (!result || result.ok !== true) {
-      throw new Error(result?.error?.message || 'bad response')
-    }
-    return result.value as Report
   })
+    .then((res) => {
+      if (!res.ok) throw new Error('HTTP ' + res.status)
+      return res.json()
+    })
+    .then((envelope: ReportEnvelope) => {
+      const result = envelope && envelope.result
+      if (!result || result.ok !== true) {
+        throw new Error(result?.error?.message || 'bad response')
+      }
+      return result.value as Report
+    })
 }
 
 const TH_L = 'dshx:whitespace-nowrap'
@@ -249,7 +279,9 @@ function ToolsTable({ t, rows }: { t: Translate; rows: ToolStat[] }) {
               <TableCell className={TD_R}>{tool.calls}</TableCell>
               <TableCell className={TD_R}>{tool.errors}</TableCell>
               <TableCell className={TD_R}>
-                {tool.completed === 0 ? '—' : ((tool.errors / tool.completed) * 100).toFixed(1) + '%'}
+                {tool.completed === 0
+                  ? '—'
+                  : ((tool.errors / tool.completed) * 100).toFixed(1) + '%'}
               </TableCell>
               <TableCell className={TD_R}>
                 {tool.completed === 0 ? '—' : fmtDuration(tool.totalDurationMs / tool.completed)}
@@ -308,14 +340,17 @@ function ContextAuditPage({ t }: { t: Translate }) {
   const load = useCallback(() => {
     setBusy(true)
     setError(undefined)
-    callReport(days).then((value) => {
-      setReport(value)
-    }).catch((err: unknown) => {
-      const withMessage = err as { message?: string } | undefined
-      setError(withMessage && withMessage.message ? withMessage.message : String(err))
-    }).finally(() => {
-      setBusy(false)
-    })
+    callReport(days)
+      .then((value) => {
+        setReport(value)
+      })
+      .catch((err: unknown) => {
+        const withMessage = err as { message?: string } | undefined
+        setError(withMessage && withMessage.message ? withMessage.message : String(err))
+      })
+      .finally(() => {
+        setBusy(false)
+      })
   }, [days])
 
   useEffect(load, [load])
@@ -358,7 +393,9 @@ function ContextAuditPage({ t }: { t: Translate }) {
                 <span className="dshx:text-fg-muted">{t('errorCodes')}</span>
                 {withCodes.map((tool) => (
                   <Badge key={tool.name} variant="outline" className="dshx:my-0.5 dshx:mr-1.5">
-                    {tool.name + ': ' + (tool.errorCodes ?? []).map((pair) => pair[0] + '×' + pair[1]).join(', ')}
+                    {tool.name +
+                      ': ' +
+                      (tool.errorCodes ?? []).map((pair) => pair[0] + '×' + pair[1]).join(', ')}
                   </Badge>
                 ))}
               </div>
@@ -439,10 +476,7 @@ function ContextAuditIcon() {
 }
 
 function apply(ctx: DshClientContext) {
-  ctx.effect(
-    () => ctx.locale.register(LOCALE_NS, { zh, en }),
-    'dsh-context-audit: locale',
-  )
+  ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'dsh-context-audit: locale')
   const t = ctx.locale.bind(LOCALE_NS)
   const boundPage = () => <ContextAuditPage t={t} />
   ctx.slots.inject('main', () => {

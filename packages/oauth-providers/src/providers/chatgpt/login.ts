@@ -35,7 +35,8 @@ export interface ChatGptSignInDeps {
 /** Parse and state-check a pasted authorization answer. */
 function codeOf(input: string, state: string): string | undefined {
   const parsed = parseAuthorizationInput(input)
-  if (parsed.state !== undefined && parsed.state !== state) throw new Error('Authorization state mismatch')
+  if (parsed.state !== undefined && parsed.state !== state)
+    throw new Error('Authorization state mismatch')
   return parsed.code
 }
 
@@ -48,7 +49,10 @@ function grantRecord(grant: OAuthGrant): { kind: 'grant'; payload: OAuthGrant } 
  * Register the ChatGPT authorization flow and declare the provider on the
  * shared browser sign-in channel.
  */
-export function registerChatGptSignIn(ctx: Context, { key, fetch, channel, settingsNs }: ChatGptSignInDeps): void {
+export function registerChatGptSignIn(
+  ctx: Context,
+  { key, fetch, channel, settingsNs }: ChatGptSignInDeps,
+): void {
   // Registry entry first: `providers`/`status` answer with or without the seam.
   channel.register({ id: PROVIDER, label: DISPLAY_NAME, settingsNs, key })
 
@@ -66,14 +70,16 @@ export function registerChatGptSignIn(ctx: Context, { key, fetch, channel, setti
         if (session.signal.aborted) onAbort()
         try {
           session.notify({
-            message: 'Sign in with your ChatGPT account in the browser. If no window opens, use this link.',
+            message:
+              'Sign in with your ChatGPT account in the browser. If no window opens, use this link.',
             url,
           })
           let manual: { input?: string; error?: Error } | undefined
           const manualPromise = session
             .prompt({
               kind: 'text',
-              message: 'If the browser cannot redirect back to this machine, paste the redirected URL or the authorization code here.',
+              message:
+                'If the browser cannot redirect back to this machine, paste the redirected URL or the authorization code here.',
               placeholder: OAUTH_REDIRECT_URI,
               signal: manualAbort.signal,
             })

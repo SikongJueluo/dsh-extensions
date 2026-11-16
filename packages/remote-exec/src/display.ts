@@ -40,10 +40,16 @@ export function formatDisplay(raw: string, budgetBytes: number): DisplayView {
   const tailBudget = contentBudget - headBudget
   const head = cutHead(bytes.subarray(0, headBudget).toString('utf8'))
   const tail = cutTail(bytes.subarray(bytes.length - tailBudget).toString('utf8'))
-  const omitted = Math.max(0, bytes.length - Buffer.byteLength(head, 'utf8') - Buffer.byteLength(tail, 'utf8'))
+  const omitted = Math.max(
+    0,
+    bytes.length - Buffer.byteLength(head, 'utf8') - Buffer.byteLength(tail, 'utf8'),
+  )
   const excerpt = `${head}\n[... ${omitted} bytes omitted ...]\n${tail}`
   const text = clean(excerpt)
-  return { text: Buffer.byteLength(text, 'utf8') <= budget ? text : hardCap(text, budget), truncated: true }
+  return {
+    text: Buffer.byteLength(text, 'utf8') <= budget ? text : hardCap(text, budget),
+    truncated: true,
+  }
 }
 
 /** Drop a partial last line from a head slice (keep the slice if it has no newline). */

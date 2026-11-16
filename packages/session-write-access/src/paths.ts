@@ -22,8 +22,8 @@ export class InvalidWriteRootError extends Error {
 export class ProtectedWriteRootError extends Error {
   constructor(path: string, protectedRoot: string) {
     super(
-      `session-write-access: refusing ${JSON.stringify(path)}: it overlaps the protected path `
-      + `${JSON.stringify(protectedRoot)} (authorization storage, profile, or plugin code)`,
+      `session-write-access: refusing ${JSON.stringify(path)}: it overlaps the protected path ` +
+        `${JSON.stringify(protectedRoot)} (authorization storage, profile, or plugin code)`,
     )
     this.name = 'ProtectedWriteRootError'
   }
@@ -63,7 +63,8 @@ export function canonicalDirectory(path: string): string {
   }
   try {
     const physical = realpathSync.native(path)
-    if (!statSync(physical).isDirectory()) throw new InvalidWriteRootError(path, 'is not a directory')
+    if (!statSync(physical).isDirectory())
+      throw new InvalidWriteRootError(path, 'is not a directory')
     return physical
   } catch (error) {
     if (error instanceof InvalidWriteRootError) throw error
@@ -81,18 +82,25 @@ export function canonicalDirectory(path: string): string {
  */
 export function physicalDirectory(path: string): string {
   if (!isAbsolute(path) || path.includes('\0') || path.trim() !== path) {
-    throw new InvalidWriteRootError(path, 'must be an absolute directory path without NUL bytes or surrounding whitespace')
+    throw new InvalidWriteRootError(
+      path,
+      'must be an absolute directory path without NUL bytes or surrounding whitespace',
+    )
   }
   let physical: string
   try {
     physical = realpathSync.native(path)
-    if (!statSync(physical).isDirectory()) throw new InvalidWriteRootError(path, 'is not a directory')
+    if (!statSync(physical).isDirectory())
+      throw new InvalidWriteRootError(path, 'is not a directory')
   } catch (error) {
     if (error instanceof InvalidWriteRootError) throw error
     throw new InvalidWriteRootError(path, `cannot be read: ${String(error)}`)
   }
   if (physical !== resolve(path)) {
-    throw new InvalidWriteRootError(path, `must be spelled as its physical path ${JSON.stringify(physical)}; symlinked grants are not supported`)
+    throw new InvalidWriteRootError(
+      path,
+      `must be spelled as its physical path ${JSON.stringify(physical)}; symlinked grants are not supported`,
+    )
   }
   return physical
 }
@@ -136,7 +144,7 @@ export function findProtectedOverlap(
   candidate: string,
   protectedRoots: readonly string[],
 ): string | undefined {
-  return protectedRoots.find(root => overlaps(candidate, root))
+  return protectedRoots.find((root) => overlaps(candidate, root))
 }
 
 /**

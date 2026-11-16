@@ -20,7 +20,11 @@ function fakeExecResponses(opts: FakeOpts): ExecFile {
       return { stdout: `${opts.root ?? '/repo'}\n`, stderr: '', code: 0 }
     }
     layerReads += 1
-    return { stdout: layerReads === 1 ? opts.first : (opts.recheck ?? opts.first), stderr: '', code: 0 }
+    return {
+      stdout: layerReads === 1 ? opts.first : (opts.recheck ?? opts.first),
+      stderr: '',
+      code: 0,
+    }
   }
 }
 
@@ -46,8 +50,15 @@ describe('argv discipline', () => {
 describe('readJjFacts', () => {
   it('reads layer + workspace root + stability recheck (three invocations)', async () => {
     const calls: string[][] = []
-    const layer = okLayer('fullchangeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1', ['fullparentbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2'])
-    const read = await readJjFacts('/repo/sub', fakeExecResponses({ first: layer, root: '/repo', recheck: layer, calls }), 'jj', 5000)
+    const layer = okLayer('fullchangeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1', [
+      'fullparentbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2',
+    ])
+    const read = await readJjFacts(
+      '/repo/sub',
+      fakeExecResponses({ first: layer, root: '/repo', recheck: layer, calls }),
+      'jj',
+      5000,
+    )
     expect(read).toEqual({
       ok: true,
       facts: {
@@ -62,44 +73,81 @@ describe('readJjFacts', () => {
   })
 
   it('reports merge commits as an ordered multi-parent list', async () => {
-    const layer = okLayer('mergecccccccccccccccccccccccccccccccccccccc3', ['p1ddddddddddddddddddddddddddddddddddddddd4', 'p2eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee5'])
-    const read = await readJjFacts('/repo', fakeExecResponses({ first: layer, root: '/repo', recheck: layer, calls: [] }), 'jj', 5000)
+    const layer = okLayer('mergecccccccccccccccccccccccccccccccccccccc3', [
+      'p1ddddddddddddddddddddddddddddddddddddddd4',
+      'p2eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee5',
+    ])
+    const read = await readJjFacts(
+      '/repo',
+      fakeExecResponses({ first: layer, root: '/repo', recheck: layer, calls: [] }),
+      'jj',
+      5000,
+    )
     expect(read.ok).toBe(true)
-    if (read.ok) expect(read.facts.parentChangeIds).toEqual(['p1ddddddddddddddddddddddddddddddddddddddd4', 'p2eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee5'])
+    if (read.ok)
+      expect(read.facts.parentChangeIds).toEqual([
+        'p1ddddddddddddddddddddddddddddddddddddddd4',
+        'p2eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee5',
+      ])
   })
 
   it('a parentless root commit yields an empty parent list', async () => {
     const layer = 'rootfffffffffffffffffffffffffffffffffffffff6\n\n'
-    const read = await readJjFacts('/repo', fakeExecResponses({ first: layer, root: '/repo', recheck: layer, calls: [] }), 'jj', 5000)
+    const read = await readJjFacts(
+      '/repo',
+      fakeExecResponses({ first: layer, root: '/repo', recheck: layer, calls: [] }),
+      'jj',
+      5000,
+    )
     expect(read.ok).toBe(true)
     if (read.ok) expect(read.facts.parentChangeIds).toEqual([])
   })
 
   it('fails as drift when the working layer moved between the reads (no retry)', async () => {
     const calls: string[][] = []
-    const read = await readJjFacts('/repo', fakeExecResponses({
-      first: okLayer('before111111111111111111111111111111111111111111', ['p00000000000000000000000000000000000000000000']),
-      recheck: okLayer('after222222222222222222222222222222222222222222', ['p00000000000000000000000000000000000000000000']),
-      root: '/repo',
-      calls,
-    }), 'jj', 5000)
+    const read = await readJjFacts(
+      '/repo',
+      fakeExecResponses({
+        first: okLayer('before111111111111111111111111111111111111111111', [
+          'p00000000000000000000000000000000000000000000',
+        ]),
+        recheck: okLayer('after222222222222222222222222222222222222222222', [
+          'p00000000000000000000000000000000000000000000',
+        ]),
+        root: '/repo',
+        calls,
+      }),
+      'jj',
+      5000,
+    )
     expect(read).toMatchObject({ ok: false, reason: 'drift' })
     expect(calls).toHaveLength(3)
   })
 
   it('fails as drift when only the parents were rewired (rebase keeps the change id)', async () => {
-    const read = await readJjFacts('/repo', fakeExecResponses({
-      first: okLayer('same3333333333333333333333333333333333333333333', ['oldp444444444444444444444444444444444444444444']),
-      recheck: okLayer('same3333333333333333333333333333333333333333333', ['newp555555555555555555555555555555555555555555']),
-      root: '/repo',
-      calls: [],
-    }), 'jj', 5000)
+    const read = await readJjFacts(
+      '/repo',
+      fakeExecResponses({
+        first: okLayer('same3333333333333333333333333333333333333333333', [
+          'oldp444444444444444444444444444444444444444444',
+        ]),
+        recheck: okLayer('same3333333333333333333333333333333333333333333', [
+          'newp555555555555555555555555555555555555555555',
+        ]),
+        root: '/repo',
+        calls: [],
+      }),
+      'jj',
+      5000,
+    )
     expect(read).toMatchObject({ ok: false, reason: 'drift' })
   })
 
   it('classifies a non-jj root as not-jj (no git fallback)', async () => {
     const exec: ExecFile = async () => {
-      throw Object.assign(new Error('Error: Not a jj repo'), { stderr: 'Error: Not a jj repo (no .jj directory)' })
+      throw Object.assign(new Error('Error: Not a jj repo'), {
+        stderr: 'Error: Not a jj repo (no .jj directory)',
+      })
     }
     const read = await readJjFacts('/repo', exec, 'jj', 5000)
     expect(read).toMatchObject({ ok: false, reason: 'not-jj' })
@@ -122,7 +170,12 @@ describe('readJjFacts', () => {
   })
 
   it('rejects empty layer output', async () => {
-    const read = await readJjFacts('/repo', fakeExecResponses({ first: '\n\n', recheck: '\n\n', root: '/repo', calls: [] }), 'jj', 5000)
+    const read = await readJjFacts(
+      '/repo',
+      fakeExecResponses({ first: '\n\n', recheck: '\n\n', root: '/repo', calls: [] }),
+      'jj',
+      5000,
+    )
     expect(read).toMatchObject({ ok: false, reason: 'failed' })
   })
 })

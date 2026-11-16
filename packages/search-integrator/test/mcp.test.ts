@@ -47,24 +47,36 @@ describe('parseRpcBody', () => {
   })
 
   it('parses the first SSE data frame', () => {
-    const sse = 'event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"a":1}}\n\ndata: {"jsonrpc":"2.0","id":3}\n'
+    const sse =
+      'event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"a":1}}\n\ndata: {"jsonrpc":"2.0","id":3}\n'
     expect(parseRpcBody('text/event-stream', sse).id).toBe(2)
   })
 
   it('throws on an SSE body without parsable frames', () => {
-    expect(() => parseRpcBody('text/event-stream', 'event: message\ndata: not-json\n'))
-      .toThrow(McpTransportError)
+    expect(() => parseRpcBody('text/event-stream', 'event: message\ndata: not-json\n')).toThrow(
+      McpTransportError,
+    )
   })
 })
 
 describe('mcpCallTool', () => {
   it('runs initialize → initialized → tools/call and parses the text payload', async () => {
     const { post, requests } = fakePost([
-      { body: '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18"}}', responseHeaders: { 'mcp-session-id': 'sess-1' } },
+      {
+        body: '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18"}}',
+        responseHeaders: { 'mcp-session-id': 'sess-1' },
+      },
       { status: 202, body: '' },
       { body: okCall },
     ])
-    const result = await mcpCallTool(post, 'https://mcp.test/x', 'key-1', 'web_search', { search_query: 'q' }, new AbortController().signal)
+    const result = await mcpCallTool(
+      post,
+      'https://mcp.test/x',
+      'key-1',
+      'web_search',
+      { search_query: 'q' },
+      new AbortController().signal,
+    )
     expect(result.text).toContain('search_result')
     const methods = requests.map((request) => (request.body as { method?: string }).method)
     expect(methods).toEqual(['initialize', 'notifications/initialized', 'tools/call'])
@@ -79,11 +91,26 @@ describe('mcpCallTool', () => {
     const { post, requests } = fakePost([
       { body: '{"jsonrpc":"2.0","id":1,"result":{}}', responseHeaders: { 'Mcp-Session-Id': 's' } },
       { status: 202, body: '' },
-      { body: '{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"Unknown tool: web_search"}}' },
+      {
+        body: '{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"Unknown tool: web_search"}}',
+      },
       { body: '{"jsonrpc":"2.0","id":3,"result":{"tools":[{"name":"web_search_pro"}]}}' },
-      { body: JSON.stringify({ jsonrpc: '2.0', id: 4, result: { content: [{ type: 'text', text: '{}' }] } }) },
+      {
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 4,
+          result: { content: [{ type: 'text', text: '{}' }] },
+        }),
+      },
     ])
-    const result = await mcpCallTool(post, 'https://mcp.test/discover', 'k', 'web_search', {}, new AbortController().signal)
+    const result = await mcpCallTool(
+      post,
+      'https://mcp.test/discover',
+      'k',
+      'web_search',
+      {},
+      new AbortController().signal,
+    )
     expect(result.text).toBe('{}')
     expect(requests).toHaveLength(5)
     const retry = (requests[4]?.body as { params?: { name?: string } }).params
@@ -94,8 +121,16 @@ describe('mcpCallTool', () => {
     const { post } = fakePost([
       { status: 401, body: '{"code":401,"msg":"令牌已过期或验证不正确","success":false}' },
     ])
-    await expect(mcpCallTool(post, 'https://mcp.test/x', 'bad', 'web_search', {}, new AbortController().signal))
-      .rejects.toThrow(/401/)
+    await expect(
+      mcpCallTool(
+        post,
+        'https://mcp.test/x',
+        'bad',
+        'web_search',
+        {},
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/401/)
   })
 
   it('surfaces JSON-RPC errors from the tool call', async () => {
@@ -104,8 +139,9 @@ describe('mcpCallTool', () => {
       { status: 202, body: '' },
       { body: '{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"quota exceeded"}}' },
     ])
-    await expect(mcpCallTool(post, 'https://mcp.test/x', 'k', 'web_search', {}, new AbortController().signal))
-      .rejects.toThrow(/quota exceeded/)
+    await expect(
+      mcpCallTool(post, 'https://mcp.test/x', 'k', 'web_search', {}, new AbortController().signal),
+    ).rejects.toThrow(/quota exceeded/)
   })
 
   it('accepts SSE-encoded tool results', async () => {
@@ -115,7 +151,14 @@ describe('mcpCallTool', () => {
       { status: 202, body: '' },
       { contentType: 'text/event-stream', body: sse },
     ])
-    const result = await mcpCallTool(post, 'https://mcp.test/x', 'k', 'web_search', {}, new AbortController().signal)
+    const result = await mcpCallTool(
+      post,
+      'https://mcp.test/x',
+      'k',
+      'web_search',
+      {},
+      new AbortController().signal,
+    )
     expect(result.text).toBe('hello')
   })
 })
@@ -167,27 +210,41 @@ describe('zhipu adapter over MCP', () => {
     const { post, requests } = fakePost([
       { body: '{"jsonrpc":"2.0","id":1,"result":{}}', responseHeaders: { 'mcp-session-id': 's' } },
       { status: 202, body: '' },
-      { body: JSON.stringify({ jsonrpc: '2.0', id: 3, result: { structuredContent: searchResult } }) },
+      {
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 3,
+          result: { structuredContent: searchResult },
+        }),
+      },
     ])
-    const { adapters } = buildAdapters(settings, { zhipu: 'k' }, {
-      postJson: (async () => {
-        throw new Error('postJson not expected')
-      }) as never,
-      getJson: (async () => {
-        throw new Error('getJson not expected')
-      }) as never,
-      rawPost: post,
-    })
+    const { adapters } = buildAdapters(
+      settings,
+      { zhipu: 'k' },
+      {
+        postJson: (async () => {
+          throw new Error('postJson not expected')
+        }) as never,
+        getJson: (async () => {
+          throw new Error('getJson not expected')
+        }) as never,
+        rawPost: post,
+      },
+    )
     const hits = await adapters[0]?.search('查询', new AbortController().signal)
-    expect(hits).toEqual([{
-      provider: 'zhipu',
-      query: '查询',
-      url: 'https://a.example/1',
-      title: 'T',
-      snippet: 'snippet',
-      publishedAt: '2026-01-01',
-    }])
-    const call = requests[2]?.body as { params?: { arguments?: { search_engine?: string; count?: number } } }
+    expect(hits).toEqual([
+      {
+        provider: 'zhipu',
+        query: '查询',
+        url: 'https://a.example/1',
+        title: 'T',
+        snippet: 'snippet',
+        publishedAt: '2026-01-01',
+      },
+    ])
+    const call = requests[2]?.body as {
+      params?: { arguments?: { search_engine?: string; count?: number } }
+    }
     expect(call.params?.arguments?.search_engine).toBe('search_std')
     expect(call.params?.arguments?.count).toBe(8)
   })
@@ -197,17 +254,27 @@ describe('zhipu adapter over MCP', () => {
     const { post } = fakePost([
       { body: '{"jsonrpc":"2.0","id":1,"result":{}}', responseHeaders: { 'mcp-session-id': 's' } },
       { status: 202, body: '' },
-      { body: JSON.stringify({ jsonrpc: '2.0', id: 3, result: { content: [{ type: 'text', text: JSON.stringify(hitsJson) }] } }) },
+      {
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 3,
+          result: { content: [{ type: 'text', text: JSON.stringify(hitsJson) }] },
+        }),
+      },
     ])
-    const { adapters } = buildAdapters(settings, { zhipu: 'k' }, {
-      postJson: (async () => {
-        throw new Error('postJson not expected')
-      }) as never,
-      getJson: (async () => {
-        throw new Error('getJson not expected')
-      }) as never,
-      rawPost: post,
-    })
+    const { adapters } = buildAdapters(
+      settings,
+      { zhipu: 'k' },
+      {
+        postJson: (async () => {
+          throw new Error('postJson not expected')
+        }) as never,
+        getJson: (async () => {
+          throw new Error('getJson not expected')
+        }) as never,
+        rawPost: post,
+      },
+    )
     const hits = await adapters[0]?.search('q', new AbortController().signal)
     expect(hits?.[0]?.url).toBe('https://a.example/1')
   })
@@ -216,15 +283,19 @@ describe('zhipu adapter over MCP', () => {
     const { post } = fakePost([
       { status: 401, body: '{"code":401,"msg":"令牌已过期或验证不正确","success":false}' },
     ])
-    const { adapters } = buildAdapters(settings, { zhipu: 'bad' }, {
-      postJson: (async () => {
-        throw new Error('postJson not expected')
-      }) as never,
-      getJson: (async () => {
-        throw new Error('getJson not expected')
-      }) as never,
-      rawPost: post,
-    })
+    const { adapters } = buildAdapters(
+      settings,
+      { zhipu: 'bad' },
+      {
+        postJson: (async () => {
+          throw new Error('postJson not expected')
+        }) as never,
+        getJson: (async () => {
+          throw new Error('getJson not expected')
+        }) as never,
+        rawPost: post,
+      },
+    )
     await expect(adapters[0]?.search('q', new AbortController().signal)).rejects.toThrow(/401/)
   })
 })

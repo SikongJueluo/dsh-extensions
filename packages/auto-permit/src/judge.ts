@@ -27,7 +27,13 @@ import {
   createToolResultMessage,
   createUserMessage,
 } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, Message, StreamChunk, ToolCallBlock, ToolSchema } from '@deepseek-ai/dsh-llm'
+import type {
+  ContentBlock,
+  Message,
+  StreamChunk,
+  ToolCallBlock,
+  ToolSchema,
+} from '@deepseek-ai/dsh-llm'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { MAX_COMMAND_CHARS } from './evidence.js'
@@ -92,19 +98,19 @@ export const SYSTEM_PROMPT = [
   'You may investigate the project with the provided read-only tools (read_file, list_dir, search_files) before deciding. Use them when the input invokes a project script, Makefile target, wrapper, manifest, or helper whose effective operations decide the request. Use only as many calls as needed; simple commands whose effects are visible in complete_bash_input need no tools. Never execute anything, never modify files, and never ask a tool for a capability it does not offer.',
   'If an evidence tool reports an error, a truncated or capped result, an unreadable or too-large file, a changed file, or exhausted budget, return DEFER. This turn cannot ALLOW on incomplete evidence; do not try to compensate for a failed request by guessing its contents.',
   'Return ALLOW when any of these holds:',
-  '(1) the human\'s explicit intent names or unambiguously identifies the target and effect of every operation in the input, the intent clearly covers its full scope, and every operation\'s effects are recoverable: reversible, or reproducible from the repository or the evidence at hand;',
+  "(1) the human's explicit intent names or unambiguously identifies the target and effect of every operation in the input, the intent clearly covers its full scope, and every operation's effects are recoverable: reversible, or reproducible from the repository or the evidence at hand;",
   '(2) the input is substantially equivalent to a command already approved in this session (listed in approved_in_session) — see the family rule below;',
   '(3) the input builds, tests, or temporarily runs THIS project in a local container for a human task that explicitly asks for that, and every effect stays inside the container boundary below. The input may invoke the engine directly or a project script/Makefile target whose effective engine operations you have established from inspected evidence; if any effective operation remains unknown, the wrapper is DEFER.',
-  'Cache ceiling (overrides rules (1) and (2)): out-of-workspace writes to a toolchain\'s well-known public cache/registry/store directories (~/.cargo, ~/.cache, ~/.npm, ~/.pnpm-store, ~/.uv, ~/.gradle, ~/.m2, go pkg dirs, …) are the sandbox layer\'s business, never the approver\'s. When the input\'s ONLY out-of-workspace effects are such cache writes — even when the human\'s intent plainly covers running the tool — the escalation to a wider sandbox mode is the wrong remedy: return DEFER. Cache writes are recoverable by reconstruction, which is exactly why they should be covered by a standing directory grant instead of a per-command sandbox widening. A request to escalate whose stated reason is a cache write is therefore DEFER regardless of family equivalence or how routine the command is. Explicit output targets the command names elsewhere (--out, --target-dir elsewhere, redirects) are not cache writes and fall under rule (1).',
+  "Cache ceiling (overrides rules (1) and (2)): out-of-workspace writes to a toolchain's well-known public cache/registry/store directories (~/.cargo, ~/.cache, ~/.npm, ~/.pnpm-store, ~/.uv, ~/.gradle, ~/.m2, go pkg dirs, …) are the sandbox layer's business, never the approver's. When the input's ONLY out-of-workspace effects are such cache writes — even when the human's intent plainly covers running the tool — the escalation to a wider sandbox mode is the wrong remedy: return DEFER. Cache writes are recoverable by reconstruction, which is exactly why they should be covered by a standing directory grant instead of a per-command sandbox widening. A request to escalate whose stated reason is a cache write is therefore DEFER regardless of family equivalence or how routine the command is. Explicit output targets the command names elsewhere (--out, --target-dir elsewhere, redirects) are not cache writes and fall under rule (1).",
   'Container runtime requirements — image and container storage under the home directory, namespaces, and overlay plumbing — are not toolchain cache writes: do not apply the cache ceiling to them; judge them under rule (3) and its boundary.',
-  'A container build that runs from the project\'s context may fetch its base image and build dependencies over its own network as part of the image build; that is not a host-namespace grant. Explicit --network host/--pid host/--ipc host and similar flags on an engine command remain DEFER.',
-  'Family equivalence rule for (2): commands of the same routine toolchain count as one family once any member is approved. A later command is equivalent when it differs only by which family subcommands it combines (fmt/check/clippy/build/test), output-limiting wrappers (tail -N, head -N, grep filters), environment-variable prefixes, or repeated idempotent execution — provided the escalation is justified under rule (1) on its own, no operation outside the workspace and the family\'s cache directories was added, and the cache ceiling above does not apply. A cache-only side effect never extends a family approval to a wider sandbox mode, and two approved commands never combine to cover a third family. The family rule never applies to container-engine operations: their effects depend on mutable files and engine state, so every container invocation must stand on rule (3) by itself. An input whose operation is carried out by a referenced file the evidence does not show (a shell script, Makefile target, compose or manifest file, or wrapper program) never becomes equivalent by repetition: its current effects are unknown, so it must stand on rule (1) or (3) on its own.',
+  "A container build that runs from the project's context may fetch its base image and build dependencies over its own network as part of the image build; that is not a host-namespace grant. Explicit --network host/--pid host/--ipc host and similar flags on an engine command remain DEFER.",
+  "Family equivalence rule for (2): commands of the same routine toolchain count as one family once any member is approved. A later command is equivalent when it differs only by which family subcommands it combines (fmt/check/clippy/build/test), output-limiting wrappers (tail -N, head -N, grep filters), environment-variable prefixes, or repeated idempotent execution — provided the escalation is justified under rule (1) on its own, no operation outside the workspace and the family's cache directories was added, and the cache ceiling above does not apply. A cache-only side effect never extends a family approval to a wider sandbox mode, and two approved commands never combine to cover a third family. The family rule never applies to container-engine operations: their effects depend on mutable files and engine state, so every container invocation must stand on rule (3) by itself. An input whose operation is carried out by a referenced file the evidence does not show (a shell script, Makefile target, compose or manifest file, or wrapper program) never becomes equivalent by repetition: its current effects are unknown, so it must stand on rule (1) or (3) on its own.",
   'Container rule (3) — ALLOW requires ALL of:',
   '- the human explicitly asked to build, test, run, or temporarily verify this project or artifact in a container; general phrasing such as "make it work" or "check that it builds" does not authorize container management;',
   '- the engine target is local and runs as the current user: no sudo, --remote, --url, --connection, --context, -H, or CONTAINER_HOST/DOCKER_HOST; an unknown or remote target is DEFER;',
   '- every effective engine invocation is visible: either the input invokes the engine directly, or a project script/Makefile target has been inspected and each engine operation it performs is accounted for; compose invocations, shell code generated at runtime, code fetched by the script and then executed on the host, and helpers whose effects you have not inspected are DEFER (a statically referenced project file may be inspected);',
-  '- the complete input and every inspected script operation are limited to engine state queries, pulling an image the build needs, building an image from the project\'s context, creating and running disposable (--rm) containers for the project\'s build or tests, and project-local bookkeeping for that build (mkdir/stat/read of build outputs inside the workspace, echo/printf, shell control flow, and read-only host queries such as id/uname/command -v); any separate start, stop, exec, rm, cp, or commit on an existing container is DEFER, and no host file deletion or write outside the workspace is allowed;',
-  '- every host path the input or inspected script reads or writes is inside the session workspace; $PWD, ${PWD}, and $(pwd) resolve to resolved_working_directory (the host joins a relative workdir to the recorded effective cwd, and an omitted workdir is that cwd), while session_workspace is the immutable original project and the two may differ; an unavailable directory, an unresolved path, or a working directory outside the session workspace is DEFER; the engine\'s own image/container storage is not a host path in this sense; no engine socket, no credential or config mounts, no home or host-root mounts;',
+  "- the complete input and every inspected script operation are limited to engine state queries, pulling an image the build needs, building an image from the project's context, creating and running disposable (--rm) containers for the project's build or tests, and project-local bookkeeping for that build (mkdir/stat/read of build outputs inside the workspace, echo/printf, shell control flow, and read-only host queries such as id/uname/command -v); any separate start, stop, exec, rm, cp, or commit on an existing container is DEFER, and no host file deletion or write outside the workspace is allowed;",
+  "- every host path the input or inspected script reads or writes is inside the session workspace; $PWD, ${PWD}, and $(pwd) resolve to resolved_working_directory (the host joins a relative workdir to the recorded effective cwd, and an omitted workdir is that cwd), while session_workspace is the immutable original project and the two may differ; an unavailable directory, an unresolved path, or a working directory outside the session workspace is DEFER; the engine's own image/container storage is not a host path in this sense; no engine socket, no credential or config mounts, no home or host-root mounts;",
   '- no host namespaces (--network, --pid, --ipc, --uts, or --userns set to host or container:), no --privileged, no added capabilities, no devices, no --security-opt relaxation, no --ssh;',
   '- no push, no system/service/machine/generate, no host container configuration change, no global prune/reset, and no deletion of a container, pod, volume, or image that this task did not create.',
   'Rootless execution, --rm, a "test" name, and a localhost image tag corroborate safety; they are never proof of it.',
@@ -134,9 +140,7 @@ export function buildJudgeMessage(
   reason?: string,
   toolsAvailable = false,
 ): Message {
-  const lines: string[] = [
-    `prompt_version: ${PROMPT_VERSION}`,
-  ]
+  const lines: string[] = [`prompt_version: ${PROMPT_VERSION}`]
   if (evidence.call === undefined) {
     lines.push('complete_bash_input: unavailable')
   } else {
@@ -179,7 +183,7 @@ export function buildJudgeMessage(
   )
   lines.push(
     toolsAvailable
-      ? 'evidence_tools: available (read-only project files; use only when the input\'s effective operations are not visible)'
+      ? "evidence_tools: available (read-only project files; use only when the input's effective operations are not visible)"
       : 'evidence_tools: unavailable (no readable project workspace for this request); decide only from the facts above and DEFER when project files are needed',
   )
   if (evidence.prompts.length === 0) {
@@ -241,11 +245,13 @@ function defer(category: JudgeCategory, detail?: string, steps?: number): JudgeR
 function evidenceRefs(text: string, inspector: Inspector | undefined): readonly string[] {
   const recorded = inspector?.references() ?? []
   const listed = EVIDENCE_PATTERN.exec(text)?.[1]
-  const claimed = listed === undefined
-    ? []
-    : listed.split(',')
-      .map((ref) => ref.trim())
-      .filter((ref) => ref !== '' && !/^(?:none|n\/a)$/i.test(ref))
+  const claimed =
+    listed === undefined
+      ? []
+      : listed
+          .split(',')
+          .map((ref) => ref.trim())
+          .filter((ref) => ref !== '' && !/^(?:none|n\/a)$/i.test(ref))
   if (recorded.length === 0) return claimed.slice(0, 12)
   // The model's citation is only a selection; a file it names must actually
   // have been read or searched. A fabricated citation never reaches the audit.
@@ -259,7 +265,8 @@ function reasonOf(text: string): string | undefined {
   if (reason !== undefined && reason !== '') return reason.slice(0, 300)
   const after = text.split('\n')
   const verdictAt = after.findIndex((line) => VERDICT_PATTERN.test(line))
-  const fallback = after.slice(verdictAt + 1)
+  const fallback = after
+    .slice(verdictAt + 1)
     .filter((line) => !EVIDENCE_PATTERN.test(line))
     .join(' ')
     .trim()
@@ -388,9 +395,12 @@ export async function judge(
         controller.signal,
       )
     } catch (error) {
-      return stopRequested() ?? defer(
-        'internal-error',
-        (error instanceof Error ? error.message : String(error)).slice(0, 300),
+      return (
+        stopRequested() ??
+        defer(
+          'internal-error',
+          (error instanceof Error ? error.message : String(error)).slice(0, 300),
+        )
       )
     }
     const beforeModel = stopRequested()
@@ -401,10 +411,9 @@ export async function judge(
         'the command depends on mutable project files but no readable project workspace is available',
       )
     }
-    const tools: ToolSchema[] | undefined = inspector === undefined ? undefined : [...inspector.tools]
-    const messages: Message[] = [
-      buildJudgeMessage(evidence, undefined, tools !== undefined),
-    ]
+    const tools: ToolSchema[] | undefined =
+      inspector === undefined ? undefined : [...inspector.tools]
+    const messages: Message[] = [buildJudgeMessage(evidence, undefined, tools !== undefined)]
 
     for (let step = 1; step <= JUDGE_LIMITS.maxSteps; step += 1) {
       const beforeStep = stopRequested(step)
@@ -436,7 +445,11 @@ export async function judge(
         return defer('provider-error', finish.failure.message.slice(0, 300), step)
       }
       if (finish.kind === 'max-tokens') {
-        return defer('invalid-response', 'the judge output was truncated at the output token limit', step)
+        return defer(
+          'invalid-response',
+          'the judge output was truncated at the output token limit',
+          step,
+        )
       }
 
       const text = textOf(blocks)
@@ -484,35 +497,54 @@ export async function judge(
       if (calls.length === 0) {
         return text === ''
           ? defer('empty-response', 'the judge returned no content', step)
-          : defer('invalid-response', 'the judge returned no verdict and requested no evidence', step)
+          : defer(
+              'invalid-response',
+              'the judge returned no verdict and requested no evidence',
+              step,
+            )
       }
 
       const replayState = assembler.replayState
-      messages.push(createAssistantMessage({
-        content: blocks,
-        source: {
-          provider: settings.provider,
-          model: settings.model,
-          ...(replayState === undefined ? {} : { replayState }),
-        },
-      }))
+      messages.push(
+        createAssistantMessage({
+          content: blocks,
+          source: {
+            provider: settings.provider,
+            model: settings.model,
+            ...(replayState === undefined ? {} : { replayState }),
+          },
+        }),
+      )
       for (const call of calls) {
         if (inspector === undefined) {
-          return defer('evidence-unavailable', 'the judge requested project evidence without a readable workspace', step)
+          return defer(
+            'evidence-unavailable',
+            'the judge requested project evidence without a readable workspace',
+            step,
+          )
         }
-        const result = await abortable(inspector.execute(call.name, call.arguments), controller.signal)
+        const result = await abortable(
+          inspector.execute(call.name, call.arguments),
+          controller.signal,
+        )
         const afterTool = stopRequested(step)
         if (afterTool !== undefined) return afterTool
-        messages.push(createToolResultMessage({
-          callId: ToolCallId(call.id),
-          content: [{ type: 'text', text: result.text }],
-          isError: result.isError,
-        }))
+        messages.push(
+          createToolResultMessage({
+            callId: ToolCallId(call.id),
+            content: [{ type: 'text', text: result.text }],
+            isError: result.isError,
+          }),
+        )
       }
       const afterTools = stopRequested(step)
       if (afterTools !== undefined) return afterTools
     }
-    return defer('budget', `no verdict after ${JUDGE_LIMITS.maxSteps} model steps`, JUDGE_LIMITS.maxSteps)
+    return defer(
+      'budget',
+      `no verdict after ${JUDGE_LIMITS.maxSteps} model steps`,
+      JUDGE_LIMITS.maxSteps,
+    )
   } catch (error) {
     if (timedOut) return timeoutResult()
     if (parentAborted || aborted()) return cancelledResult()

@@ -53,16 +53,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * change at all; `'unreadable'` = claims to be one but deviates from the
  * known shape (unknown version, malformed snapshot, unknown phase).
  */
-export function decodeGoalChangeV1(value: unknown):
-  | { op: 'snapshot'; snapshot: GoalSnapshot }
-  | { op: 'clear' }
-  | undefined
-  | 'unreadable' {
+export function decodeGoalChangeV1(
+  value: unknown,
+): { op: 'snapshot'; snapshot: GoalSnapshot } | { op: 'clear' } | undefined | 'unreadable' {
   if (!isRecord(value) || value.kind !== 'goal/change') return undefined
   if (value.version !== 1) return 'unreadable'
   if (value.operation === 'clear') {
-    return isRecord(value.cleared) && typeof value.cleared.id === 'string'
-      && typeof value.cleared.revision === 'number'
+    return isRecord(value.cleared) &&
+      typeof value.cleared.id === 'string' &&
+      typeof value.cleared.revision === 'number'
       ? { op: 'clear' }
       : 'unreadable'
   }
@@ -72,7 +71,8 @@ export function decodeGoalChangeV1(value: unknown):
   const revision = goal.revision
   const phase = goal.phase
   if (typeof goalId !== 'string' || goalId === '') return 'unreadable'
-  if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 1) return 'unreadable'
+  if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 1)
+    return 'unreadable'
   if (typeof phase !== 'string' || !PHASES.includes(phase as GoalPhase)) return 'unreadable'
   return { op: 'snapshot', snapshot: { goalId, revision, phase: phase as GoalPhase } }
 }
@@ -97,14 +97,20 @@ export function foldGoalEvents(events: readonly SessionEvent[]): GoalFold {
       fold = { kind: 'unreadable' }
       continue
     }
-    fold = decoded.op === 'clear' ? { kind: 'cleared' } : { kind: 'snapshot', snapshot: decoded.snapshot }
+    fold =
+      decoded.op === 'clear'
+        ? { kind: 'cleared' }
+        : { kind: 'snapshot', snapshot: decoded.snapshot }
   }
   return sawGoalEvent && fold.kind === 'none' ? { kind: 'unreadable' } : fold
 }
 
 /** What the checkpoint can honestly claim about the recorded goal. */
 export type GoalClaim =
-  | { goal: { goalId: string; revision: number; phase?: GoalPhase }; proof: 'fold-agrees' | 'args-only-unverified' }
+  | {
+      goal: { goalId: string; revision: number; phase?: GoalPhase }
+      proof: 'fold-agrees' | 'args-only-unverified'
+    }
   | { conflict: string }
   | Record<string, never>
 
@@ -130,17 +136,24 @@ export function mergeGoal(
   if (fold.kind === 'snapshot') {
     const { goalId, revision } = fold.snapshot
     if (goalId !== id) {
-      return { conflict: `goal id mismatch: checkpoint_task says ${id}, durable fold says ${goalId}` }
+      return {
+        conflict: `goal id mismatch: checkpoint_task says ${id}, durable fold says ${goalId}`,
+      }
     }
     if (revision !== rev) {
-      return { conflict: `goal revision mismatch: checkpoint_task says ${rev}, durable fold says ${revision} — re-read the goal and retry` }
+      return {
+        conflict: `goal revision mismatch: checkpoint_task says ${rev}, durable fold says ${revision} — re-read the goal and retry`,
+      }
     }
     return { goal: { goalId: id, revision: rev, phase: fold.snapshot.phase }, proof: 'fold-agrees' }
   }
   if (fold.kind === 'cleared') {
     // A clear tombstone is counter-evidence: the session HAD a goal and it
     // is gone. Asserting one now is a stale claim, not an unknown.
-    return { conflict: 'the session goal was cleared (durable tombstone); no active goal to checkpoint — re-read the goal state' }
+    return {
+      conflict:
+        'the session goal was cleared (durable tombstone); no active goal to checkpoint — re-read the goal state',
+    }
   }
   // 'none' (no goal events ever) or 'unreadable': no durable proof either
   // way — record the assertion, clearly unverified.

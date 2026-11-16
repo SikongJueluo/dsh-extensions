@@ -27,11 +27,17 @@ export interface RouteSummary {
 }
 
 /** Narrow a selection into our owned route summary. */
-function toRoute(selection: { provider: string; model: string; reasoningEffort?: string }): RouteSummary {
+function toRoute(selection: {
+  provider: string
+  model: string
+  reasoningEffort?: string
+}): RouteSummary {
   return {
     provider: selection.provider,
     model: selection.model,
-    ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }),
+    ...(selection.reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: selection.reasoningEffort }),
   }
 }
 
@@ -114,7 +120,7 @@ export interface CatalogSnapshot {
 /** Resolve `promise` within `timeoutMs`; `undefined` on timeout or rejection. */
 async function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<T | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<undefined>(resolve => {
+  const timeout = new Promise<undefined>((resolve) => {
     timer = setTimeout(() => resolve(undefined), timeoutMs)
   })
   try {
@@ -155,22 +161,30 @@ export async function loadModelCatalog(ctx: Context): Promise<CatalogSnapshot | 
           ...(model.reasoning === undefined
             ? {}
             : {
-              efforts: model.reasoning.efforts.map(effort => ({ id: effort.id, name: effort.name })),
-              ...(model.reasoning.defaultEffort === undefined
-                ? {}
-                : { defaultEffort: model.reasoning.defaultEffort }),
-            }),
+                efforts: model.reasoning.efforts.map((effort) => ({
+                  id: effort.id,
+                  name: effort.name,
+                })),
+                ...(model.reasoning.defaultEffort === undefined
+                  ? {}
+                  : { defaultEffort: model.reasoning.defaultEffort }),
+              }),
         })
       }
     }
     return {
       models,
-      failures: catalog.failures.map(failure => ({
+      failures: catalog.failures.map((failure) => ({
         id: failure.id,
         name: failure.name,
         message: failure.message,
       })),
-      providers: [...new Set([...catalog.groups.map(group => group.id), ...catalog.failures.map(failure => failure.id)])],
+      providers: [
+        ...new Set([
+          ...catalog.groups.map((group) => group.id),
+          ...catalog.failures.map((failure) => failure.id),
+        ]),
+      ],
       effortsKnown: true,
     }
   }
@@ -196,7 +210,12 @@ export async function loadModelCatalog(ctx: Context): Promise<CatalogSnapshot | 
         failures.push({ id: provider.id, name: provider.name, message: String(error) })
       }
     }
-    return { models, failures, providers: providers.map(provider => provider.id), effortsKnown: false }
+    return {
+      models,
+      failures,
+      providers: providers.map((provider) => provider.id),
+      effortsKnown: false,
+    }
   }
   return settleWithin(collect(), CATALOG_TIMEOUT_MS)
 }
@@ -210,11 +229,16 @@ export async function loadModelCatalog(ctx: Context): Promise<CatalogSnapshot | 
  * catalog entirely may still route a manually spelled model. An effort is
  * checked only against a model that advertises efforts.
  */
-export function modelChoiceIssue(catalog: CatalogSnapshot, choice: ModelChoice): string | undefined {
+export function modelChoiceIssue(
+  catalog: CatalogSnapshot,
+  choice: ModelChoice,
+): string | undefined {
   if (choice.kind !== 'model') return undefined
-  if (catalog.failures.some(failure => failure.id === choice.provider)) return undefined
+  if (catalog.failures.some((failure) => failure.id === choice.provider)) return undefined
   if (!catalog.providers.includes(choice.provider)) return undefined
-  const model = catalog.models.find(entry => entry.provider === choice.provider && entry.model === choice.model)
+  const model = catalog.models.find(
+    (entry) => entry.provider === choice.provider && entry.model === choice.model,
+  )
   if (model === undefined) {
     return `上次使用的模型已不可用：${choice.provider}/${choice.model}`
   }
@@ -222,7 +246,7 @@ export function modelChoiceIssue(catalog: CatalogSnapshot, choice: ModelChoice):
   // the first request instead of rejecting a potentially valid route.
   if (!catalog.effortsKnown || choice.reasoningEffort === undefined) return undefined
   const efforts = model.efforts ?? []
-  if (efforts.length === 0 || !efforts.some(effort => effort.id === choice.reasoningEffort)) {
+  if (efforts.length === 0 || !efforts.some((effort) => effort.id === choice.reasoningEffort)) {
     return `上次使用的思考强度 ${choice.reasoningEffort} 已不受 ${model.name}（${model.model}）支持`
   }
   return undefined

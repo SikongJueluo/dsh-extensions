@@ -130,7 +130,10 @@ export function defineClientConfig({ id, entry }: DshClientOptions): UserConfig 
         onwarn(warning, defaultHandler) {
           // Base UI and lucide ship React Server Component directives; they
           // are meaningless in this browser-only CJS bundle.
-          if (warning.code === 'MODULE_LEVEL_DIRECTIVE' && warning.message.includes('"use client"')) {
+          if (
+            warning.code === 'MODULE_LEVEL_DIRECTIVE' &&
+            warning.message.includes('"use client"')
+          ) {
             return
           }
           defaultHandler(warning)

@@ -73,8 +73,12 @@ export interface Config {
 // No `Schema<Config>` annotation: schemastery ≥ 3.18.4 bakes volatile modes
 // into the schema generics and the loader checks the inferred shape.
 export const Config = Schema.object({
-  preflight: Schema.boolean().default(true).description('Validate tool arguments before approval/side effects.'),
-  repeatHints: Schema.boolean().default(true).description('Attach correction hints on repeated INVALID_ARGS.'),
+  preflight: Schema.boolean()
+    .default(true)
+    .description('Validate tool arguments before approval/side effects.'),
+  repeatHints: Schema.boolean()
+    .default(true)
+    .description('Attach correction hints on repeated INVALID_ARGS.'),
 })
 
 export const inject = ['tools']
@@ -88,7 +92,11 @@ interface AgentLike {
     readonly id: string
     readonly header: { readonly cwd?: string }
     snapshotEvents(): readonly import('@deepseek-ai/dsh-session').SessionEvent[]
-    append(type: 'user/message', data: import('@deepseek-ai/dsh-llm').UserMessage, opts: { surfaceOp: 'append' }): unknown
+    append(
+      type: 'user/message',
+      data: import('@deepseek-ai/dsh-llm').UserMessage,
+      opts: { surfaceOp: 'append' },
+    ): unknown
   }
   /** Host's deferred next-step inbox channel; absent on older builds. */
   inject?(message: import('@deepseek-ai/dsh-llm').UserMessage): void
@@ -99,7 +107,11 @@ class SchemaCache {
   private generation = 0
   private readonly cache = new WeakMap<object, { gen: number; map: Map<string, unknown> }>()
 
-  constructor(private readonly readSchemas: (agent: object | undefined) => { name: string; parameters: unknown }[]) {
+  constructor(
+    private readonly readSchemas: (
+      agent: object | undefined,
+    ) => { name: string; parameters: unknown }[],
+  ) {
     void this.readSchemas
   }
 
@@ -161,8 +173,11 @@ function stateOf(agent: object): AgentState {
 
 function sessionOf(ctx: Context, agent: AgentLike | undefined) {
   if (agent?.session !== undefined) return agent.session
-  return (ctx.get('sessions') as unknown as { get(id: string): AgentLike['session'] | undefined } | undefined)
-    ?.get((agent as { id?: string } | undefined)?.id ?? '')
+  return (
+    ctx.get('sessions') as unknown as
+      | { get(id: string): AgentLike['session'] | undefined }
+      | undefined
+  )?.get((agent as { id?: string } | undefined)?.id ?? '')
 }
 
 /**
@@ -179,7 +194,10 @@ function preflightDecision(
   if (exec.parent !== undefined) {
     const parameters = (exec.schema as { parameters?: unknown } | undefined)?.parameters
     if (parameters === undefined) {
-      return { decision: { kind: 'allow' }, note: 'ptc sub-call without binding schema; deferred to host' }
+      return {
+        decision: { kind: 'allow' },
+        note: 'ptc sub-call without binding schema; deferred to host',
+      }
     }
     return {
       decision: checkBatch(
@@ -192,7 +210,10 @@ function preflightDecision(
   const schemaOf = cache.schemaOf(agent)
   if (session === undefined) {
     return {
-      decision: checkBatch([{ tool: exec.name, callId: exec.callId, args: exec.arguments }], schemaOf),
+      decision: checkBatch(
+        [{ tool: exec.name, callId: exec.callId, args: exec.arguments }],
+        schemaOf,
+      ),
     }
   }
   const events = session.snapshotEvents()
@@ -204,26 +225,38 @@ function preflightDecision(
   if (state !== undefined) state.tracker.noteHumanSeq(lastHumanSeq(events))
   if (!present) {
     return {
-      decision: checkBatch([{ tool: exec.name, callId: exec.callId, args: exec.arguments }], schemaOf),
-      note: siblings.length === 0
-        ? 'no assistant tool-call message found; checking current call only (batch atomicity not claimed)'
-        : `call ${String(exec.callId)} absent from the assistant batch; checking it alone`,
+      decision: checkBatch(
+        [{ tool: exec.name, callId: exec.callId, args: exec.arguments }],
+        schemaOf,
+      ),
+      note:
+        siblings.length === 0
+          ? 'no assistant tool-call message found; checking current call only (batch atomicity not claimed)'
+          : `call ${String(exec.callId)} absent from the assistant batch; checking it alone`,
     }
   }
-  const calls: PreflightCall[] = siblings.map((call) => ({ tool: call.tool, callId: call.callId, argsRaw: call.argsRaw }))
+  const calls: PreflightCall[] = siblings.map((call) => ({
+    tool: call.tool,
+    callId: call.callId,
+    argsRaw: call.argsRaw,
+  }))
   return { decision: checkBatch(calls, schemaOf) }
 }
 
 export function apply(ctx: Context, config: Config): void {
   const logger = ctx.logger
   const cache = new SchemaCache(
-    (agent) => ctx.tools.schemas(agent as never) as unknown as { name: string; parameters: unknown }[],
+    (agent) =>
+      ctx.tools.schemas(agent as never) as unknown as { name: string; parameters: unknown }[],
   )
   ctx.on('tools/change', () => cache.bump())
 
   ctx.on(
     'tools/pre-execute',
-    async (exec: ToolExecution, next: () => Promise<import('@deepseek-ai/dsh-tools').PreToolDecision>) => {
+    async (
+      exec: ToolExecution,
+      next: () => Promise<import('@deepseek-ai/dsh-tools').PreToolDecision>,
+    ) => {
       if (!config.preflight) return next()
       try {
         const { decision, note } = preflightDecision(ctx, cache, exec)
@@ -266,41 +299,46 @@ export function apply(ctx: Context, config: Config): void {
   // once for every frozen final outcome. Hints are appended to the session
   // with the standard 'execution-guard' source (not a fake user message),
   // so the notice itself never resets the tracker.
-  ctx.on('tools/result', (exec: Readonly<ToolExecution>, result: Readonly<import('@deepseek-ai/dsh-tools').ToolExecutionResult>) => {
-    try {
-      const agent = exec.agent as unknown as AgentLike | undefined
-      if (agent === undefined) return
-      const state = stateOf(agent)
-      const callId = String(exec.callId)
-      const wasValidDenied = state.validDenied.has(callId)
-      const ownViolations = state.deniedViolations.get(callId)
-      state.forget(callId)
-      if (!result.isError) {
-        // A genuine final success of the tool resets its failure shapes. A
-        // cancelled call settles as an error (ABORTED) and lands below.
-        state.tracker.noteSuccess(exec.name)
-        return
-      }
-      if (result.error?.info?.code !== INVALID_ARGS_CODE) return
-      if (wasValidDenied) return
-      // Host-final INVALID_ARGS outcomes count too: our own structured
-      // violations when preflight denied, else the error message lines.
-      const violations = ownViolations
-        ?? result.error.message.split(/\n|; /).filter((line) => line !== '')
-      const count = state.tracker.noteFailure(exec.name, violations)
-      if (config.repeatHints && count >= 2) {
-        const session = sessionOf(ctx, agent)
-        const parameters = cache.schemaOf(agent)(exec.name)
-        if (session !== undefined && parameters !== undefined) {
-          // Through deliverNotice, never a bare surface append: this observer
-          // runs per call inside the batch, so an append here would split a
-          // parallel batch's call/result pairing (see notice.ts).
-          deliverNotice(agent, buildHintMessage(exec.name, describeShape(parameters)))
+  ctx.on(
+    'tools/result',
+    (
+      exec: Readonly<ToolExecution>,
+      result: Readonly<import('@deepseek-ai/dsh-tools').ToolExecutionResult>,
+    ) => {
+      try {
+        const agent = exec.agent as unknown as AgentLike | undefined
+        if (agent === undefined) return
+        const state = stateOf(agent)
+        const callId = String(exec.callId)
+        const wasValidDenied = state.validDenied.has(callId)
+        const ownViolations = state.deniedViolations.get(callId)
+        state.forget(callId)
+        if (!result.isError) {
+          // A genuine final success of the tool resets its failure shapes. A
+          // cancelled call settles as an error (ABORTED) and lands below.
+          state.tracker.noteSuccess(exec.name)
+          return
         }
+        if (result.error?.info?.code !== INVALID_ARGS_CODE) return
+        if (wasValidDenied) return
+        // Host-final INVALID_ARGS outcomes count too: our own structured
+        // violations when preflight denied, else the error message lines.
+        const violations =
+          ownViolations ?? result.error.message.split(/\n|; /).filter((line) => line !== '')
+        const count = state.tracker.noteFailure(exec.name, violations)
+        if (config.repeatHints && count >= 2) {
+          const session = sessionOf(ctx, agent)
+          const parameters = cache.schemaOf(agent)(exec.name)
+          if (session !== undefined && parameters !== undefined) {
+            // Through deliverNotice, never a bare surface append: this observer
+            // runs per call inside the batch, so an append here would split a
+            // parallel batch's call/result pairing (see notice.ts).
+            deliverNotice(agent, buildHintMessage(exec.name, describeShape(parameters)))
+          }
+        }
+      } catch (error) {
+        logger.warn('%s: final-outcome accounting failed: %o', GUARD_NAME, error)
       }
-    } catch (error) {
-      logger.warn('%s: final-outcome accounting failed: %o', GUARD_NAME, error)
-    }
-  })
-
+    },
+  )
 }

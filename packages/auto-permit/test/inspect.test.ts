@@ -23,12 +23,15 @@ beforeAll(async () => {
   await mkdir(join(root, 'scripts'))
   await mkdir(join(root, 'src'))
   await mkdir(join(root, '.git'))
-  await writeFile(join(root, 'scripts', 'build.sh'), [
-    '#!/usr/bin/env bash',
-    'set -euo pipefail',
-    'podman build -t local/app:test .',
-    'podman run --rm -v "$PWD:/src:ro" local/app:test check',
-  ].join('\n'))
+  await writeFile(
+    join(root, 'scripts', 'build.sh'),
+    [
+      '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      'podman build -t local/app:test .',
+      'podman run --rm -v "$PWD:/src:ro" local/app:test check',
+    ].join('\n'),
+  )
   await writeFile(join(root, 'src', 'app.py'), 'def main():\n    print("hello")\n')
   await writeFile(join(root, '.env'), 'SECRET=do-not-read\n')
   await writeFile(join(root, '.env.example'), 'EXAMPLE=public\n')
@@ -48,7 +51,10 @@ afterAll(async () => {
 
 describe('read_file', () => {
   it('returns bounded line-numbered text', async () => {
-    const result = await inspector.execute('read_file', JSON.stringify({ path: 'scripts/build.sh' }))
+    const result = await inspector.execute(
+      'read_file',
+      JSON.stringify({ path: 'scripts/build.sh' }),
+    )
     expect(result.isError).toBe(false)
     expect(result.text).toContain('1: #!/usr/bin/env bash')
     expect(result.text).toContain('3: podman build -t local/app:test .')
@@ -56,12 +62,18 @@ describe('read_file', () => {
   })
 
   it('honours offset and limit', async () => {
-    const result = await inspector.execute('read_file', JSON.stringify({ path: 'scripts/build.sh', offset: 3, limit: 1 }))
+    const result = await inspector.execute(
+      'read_file',
+      JSON.stringify({ path: 'scripts/build.sh', offset: 3, limit: 1 }),
+    )
     expect(result.text).toBe('3: podman build -t local/app:test .')
   })
 
   it('rejects a path outside the workspace', async () => {
-    const result = await inspector.execute('read_file', JSON.stringify({ path: join(outside, 'secret.txt') }))
+    const result = await inspector.execute(
+      'read_file',
+      JSON.stringify({ path: join(outside, 'secret.txt') }),
+    )
     expect(result.isError).toBe(true)
     expect(result.text).toContain('outside the session workspace')
   })
@@ -86,8 +98,11 @@ describe('read_file', () => {
   it('does not invent a line range when one line exceeds the read budget', async () => {
     const longLine = await mkdtemp(join(tmpdir(), 'dsh-auto-permit-longline-'))
     try {
-      await writeFile(join(longLine, 'long.txt'), `${'x'.repeat(INSPECT_LIMITS.maxReadBytes + 100)}\n`)
-      const scoped = await createInspector(longLine, longLine) as Inspector
+      await writeFile(
+        join(longLine, 'long.txt'),
+        `${'x'.repeat(INSPECT_LIMITS.maxReadBytes + 100)}\n`,
+      )
+      const scoped = (await createInspector(longLine, longLine)) as Inspector
       const result = await scoped.execute('read_file', JSON.stringify({ path: 'long.txt' }))
       expect(result.isError).toBe(false)
       expect(result.incomplete).toBe(true)
@@ -125,7 +140,10 @@ describe('list_dir', () => {
 
 describe('search_files', () => {
   it('finds literal text with file and line references', async () => {
-    const result = await inspector.execute('search_files', JSON.stringify({ text: 'podman run --rm' }))
+    const result = await inspector.execute(
+      'search_files',
+      JSON.stringify({ text: 'podman run --rm' }),
+    )
     expect(result.isError).toBe(false)
     expect(result.text).toContain('scripts/build.sh:4:')
     expect(inspector.references()).toContain('scripts/build.sh:4')
@@ -134,19 +152,25 @@ describe('search_files', () => {
   it('never searches denied or escaping files', async () => {
     const env = await inspector.execute('search_files', JSON.stringify({ text: 'SECRET' }))
     expect(env.text).not.toContain('do-not-read')
-    const escaped = await inspector.execute('search_files', JSON.stringify({ text: 'outside-token-xyz' }))
+    const escaped = await inspector.execute(
+      'search_files',
+      JSON.stringify({ text: 'outside-token-xyz' }),
+    )
     expect(escaped.text).not.toContain('escape.txt')
   })
 
   it('reports no matches explicitly', async () => {
-    const result = await inspector.execute('search_files', JSON.stringify({ text: 'not-present-anywhere' }))
+    const result = await inspector.execute(
+      'search_files',
+      JSON.stringify({ text: 'not-present-anywhere' }),
+    )
     expect(result.text).toContain('no matches')
   })
 })
 
 describe('bounds and versions', () => {
   it('stops after the tool-call budget', async () => {
-    const budget = await createInspector(root, root) as Inspector
+    const budget = (await createInspector(root, root)) as Inspector
     let last
     for (let i = 0; i < INSPECT_LIMITS.maxToolCalls; i += 1) {
       last = await budget.execute('read_file', JSON.stringify({ path: 'src/app.py' }))
@@ -164,7 +188,7 @@ describe('bounds and versions', () => {
     try {
       const body = `${'a'.repeat(180)}\n`.repeat(70)
       for (const name of ['a.txt', 'b.txt', 'c.txt']) await writeFile(join(dir, name), body)
-      const scoped = await createInspector(dir, dir) as Inspector
+      const scoped = (await createInspector(dir, dir)) as Inspector
       let returned = 0
       let lastError = false
       for (const name of ['a.txt', 'b.txt', 'c.txt']) {
@@ -185,8 +209,11 @@ describe('bounds and versions', () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-auto-permit-big-'))
     try {
       await writeFile(join(dir, 'big.txt'), 'needle\n' + 'x'.repeat(300 * 1024))
-      const scoped = await createInspector(dir, dir) as Inspector
-      const result = await scoped.execute('search_files', JSON.stringify({ text: 'needle', path: 'big.txt' }))
+      const scoped = (await createInspector(dir, dir)) as Inspector
+      const result = await scoped.execute(
+        'search_files',
+        JSON.stringify({ text: 'needle', path: 'big.txt' }),
+      )
       expect(result.isError).toBe(true)
       expect(result.text).toContain('too large')
       expect(scoped.problem()?.category).toBe('budget')
@@ -199,8 +226,11 @@ describe('bounds and versions', () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-auto-permit-bin-'))
     try {
       await writeFile(join(dir, 'bin.dat'), Buffer.from([0, 1, 2, 3, 0, 4]))
-      const scoped = await createInspector(dir, dir) as Inspector
-      const result = await scoped.execute('search_files', JSON.stringify({ text: 'x', path: 'bin.dat' }))
+      const scoped = (await createInspector(dir, dir)) as Inspector
+      const result = await scoped.execute(
+        'search_files',
+        JSON.stringify({ text: 'x', path: 'bin.dat' }),
+      )
       expect(result.isError).toBe(true)
       expect(result.text).toContain('not a UTF-8')
     } finally {
@@ -212,11 +242,14 @@ describe('bounds and versions', () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-auto-permit-fifo-'))
     try {
       execFileSync('mkfifo', [join(dir, 'pipe')])
-      const scoped = await createInspector(dir, dir) as Inspector
+      const scoped = (await createInspector(dir, dir)) as Inspector
       const read = await scoped.execute('read_file', JSON.stringify({ path: 'pipe' }))
       expect(read.isError).toBe(true)
       expect(read.text).toContain('not a regular file')
-      const search = await scoped.execute('search_files', JSON.stringify({ text: 'x', path: 'pipe' }))
+      const search = await scoped.execute(
+        'search_files',
+        JSON.stringify({ text: 'x', path: 'pipe' }),
+      )
       expect(search.isError).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -228,10 +261,15 @@ describe('bounds and versions', () => {
     try {
       const file = join(dir, 'build.sh')
       await writeFile(file, 'echo safe\necho second\n')
-      const scoped = await createInspector(dir, dir) as Inspector
-      expect((await scoped.execute('read_file', JSON.stringify({ path: 'build.sh', limit: 1 }))).isError).toBe(false)
+      const scoped = (await createInspector(dir, dir)) as Inspector
+      expect(
+        (await scoped.execute('read_file', JSON.stringify({ path: 'build.sh', limit: 1 }))).isError,
+      ).toBe(false)
       await writeFile(file, 'podman run --privileged -v /:/host alpine\necho second\n')
-      const second = await scoped.execute('read_file', JSON.stringify({ path: 'build.sh', offset: 2 }))
+      const second = await scoped.execute(
+        'read_file',
+        JSON.stringify({ path: 'build.sh', offset: 2 }),
+      )
       expect(second.isError).toBe(true)
       expect(second.incomplete).toBe(true)
       expect(second.text).toContain('changed')
@@ -247,7 +285,7 @@ describe('bounds and versions', () => {
       await writeFile(join(dir, 'safe.sh'), 'echo safe\n')
       await writeFile(join(dir, 'bad.sh'), 'podman run --privileged -v /:/host alpine\n')
       await symlink(join(dir, 'safe.sh'), join(dir, 'entry.sh'))
-      const scoped = await createInspector(dir, dir) as Inspector
+      const scoped = (await createInspector(dir, dir)) as Inspector
       const read = await scoped.execute('read_file', JSON.stringify({ path: 'entry.sh' }))
       expect(read.isError).toBe(false)
       expect(scoped.references().some((ref) => ref.startsWith('entry.sh:'))).toBe(true)
@@ -260,7 +298,7 @@ describe('bounds and versions', () => {
   })
 
   it('reports files whose content changed after being read', async () => {
-    const changing = await createInspector(root, root) as Inspector
+    const changing = (await createInspector(root, root)) as Inspector
     await changing.execute('read_file', JSON.stringify({ path: 'src/app.py' }))
     expect(await changing.changedFiles()).toEqual([])
     await writeFile(join(root, 'src', 'app.py'), 'def main():\n    print("changed!")\n')
@@ -274,7 +312,6 @@ describe('bounds and versions', () => {
   })
 })
 
-
 describe('policy exclusions are not truncation', () => {
   it('lists a normal project root containing .git, .env, and node_modules', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-auto-permit-normal-'))
@@ -284,7 +321,7 @@ describe('policy exclusions are not truncation', () => {
       await mkdir(join(dir, 'scripts'))
       await writeFile(join(dir, '.env'), 'SECRET=x\n')
       await writeFile(join(dir, 'scripts', 'build.sh'), 'podman build .\n')
-      const scoped = await createInspector(dir, dir) as Inspector
+      const scoped = (await createInspector(dir, dir)) as Inspector
       const listed = await scoped.execute('list_dir', JSON.stringify({ path: '.' }))
       expect(listed.isError).toBe(false)
       expect(listed.incomplete).toBeUndefined()
@@ -305,7 +342,7 @@ describe('policy exclusions are not truncation', () => {
       for (let i = 0; i < INSPECT_LIMITS.maxListEntries + 1; i += 1) {
         await writeFile(join(dir, `file-${String(i).padStart(3, '0')}.txt`), 'x\n')
       }
-      const scoped = await createInspector(dir, dir) as Inspector
+      const scoped = (await createInspector(dir, dir)) as Inspector
       const listed = await scoped.execute('list_dir', JSON.stringify({ path: '.' }))
       expect(listed.incomplete).toBe(true)
       expect(listed.text).toContain('more entries omitted')
@@ -320,11 +357,14 @@ describe('truncated match lines are incomplete evidence', () => {
   it('marks an explicit single-file search whose matched line was clipped', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-auto-permit-line-'))
     try {
-      const line = 'podman run --rm --label note=' + 'x'.repeat(400)
-        + ' --privileged -v /:/host alpine true'
+      const line =
+        'podman run --rm --label note=' + 'x'.repeat(400) + ' --privileged -v /:/host alpine true'
       await writeFile(join(dir, 'long.sh'), `${line}\n`)
-      const scoped = await createInspector(dir, dir) as Inspector
-      const result = await scoped.execute('search_files', JSON.stringify({ text: 'podman', path: 'long.sh' }))
+      const scoped = (await createInspector(dir, dir)) as Inspector
+      const result = await scoped.execute(
+        'search_files',
+        JSON.stringify({ text: 'podman', path: 'long.sh' }),
+      )
       expect(result.isError).toBe(false)
       expect(result.incomplete).toBe(true)
       expect(result.text).not.toContain('privileged')
@@ -338,10 +378,10 @@ describe('truncated match lines are incomplete evidence', () => {
   it('marks a recursive search whose matched line was clipped', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-auto-permit-line-dir-'))
     try {
-      const line = 'podman run --rm --label note=' + 'x'.repeat(400)
-        + ' --privileged -v /:/host alpine true'
+      const line =
+        'podman run --rm --label note=' + 'x'.repeat(400) + ' --privileged -v /:/host alpine true'
       await writeFile(join(dir, 'long.sh'), `${line}\n`)
-      const scoped = await createInspector(dir, dir) as Inspector
+      const scoped = (await createInspector(dir, dir)) as Inspector
       const result = await scoped.execute('search_files', JSON.stringify({ text: 'podman' }))
       expect(result.isError).toBe(false)
       expect(result.incomplete).toBe(true)

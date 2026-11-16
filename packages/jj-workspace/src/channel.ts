@@ -55,7 +55,11 @@ export interface JjStatusSource {
  * page uses.
  */
 export function registerChannel(ctx: Context, source: JjStatusSource): void {
-  const serve = async (svcCtx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const serve = async (
+    svcCtx: Context,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> => {
     const rejection = svcCtx.connection.requestRejection(req)
     if (rejection !== undefined) {
       res.writeHead(rejection)
@@ -72,7 +76,10 @@ export function registerChannel(ctx: Context, source: JjStatusSource): void {
       respond(404, '{}')
       return
     }
-    if ((req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
+    if (
+      (req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !==
+      'application/json'
+    ) {
       respond(415, '{}')
       return
     }
@@ -113,7 +120,11 @@ export function registerChannel(ctx: Context, source: JjStatusSource): void {
     if (typeof sessionId !== 'string' || sessionId.length === 0) {
       result = {
         ok: false,
-        error: { code: 'UNKNOWN_ENDPOINT', message: `Unknown endpoint or payload "${endpoint}"`, details: {} },
+        error: {
+          code: 'UNKNOWN_ENDPOINT',
+          message: `Unknown endpoint or payload "${endpoint}"`,
+          details: {},
+        },
       }
     } else if (endpoint === 'status') {
       result = { ok: true, value: await source.status(sessionId) }

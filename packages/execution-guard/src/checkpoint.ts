@@ -75,23 +75,28 @@ const GOAL_PHASES = ['active', 'paused', 'blocked', 'complete'] as const
  * as drift even when the working change id survived it.
  */
 export function compareAnchor(anchor: TaskAnchor, current: AnchorCurrent): AnchorComparison {
-  const parentsMatch = current.parentChangeIds === undefined
-    ? undefined
-    : anchor.vcs.parentChangeIds.length === current.parentChangeIds.length
-      && anchor.vcs.parentChangeIds.every((id, i) => id === current.parentChangeIds?.[i])
+  const parentsMatch =
+    current.parentChangeIds === undefined
+      ? undefined
+      : anchor.vcs.parentChangeIds.length === current.parentChangeIds.length &&
+        anchor.vcs.parentChangeIds.every((id, i) => id === current.parentChangeIds?.[i])
   return {
     rootMatches: current.repoRoot === undefined ? undefined : current.repoRoot === anchor.repoRoot,
-    changeMatches: current.changeId === undefined ? undefined : current.changeId === anchor.vcs.changeId,
+    changeMatches:
+      current.changeId === undefined ? undefined : current.changeId === anchor.vcs.changeId,
     parentsMatch,
-    goalIdMatches: anchor.goal === undefined || current.goalId === undefined
-      ? undefined
-      : current.goalId === anchor.goal.goalId,
-    goalRevisionMatches: anchor.goal === undefined || current.goalRevision === undefined
-      ? undefined
-      : current.goalRevision === anchor.goal.revision,
-    goalPhaseMatches: anchor.goal?.phase === undefined || current.goalPhase === undefined
-      ? undefined
-      : current.goalPhase === anchor.goal.phase,
+    goalIdMatches:
+      anchor.goal === undefined || current.goalId === undefined
+        ? undefined
+        : current.goalId === anchor.goal.goalId,
+    goalRevisionMatches:
+      anchor.goal === undefined || current.goalRevision === undefined
+        ? undefined
+        : current.goalRevision === anchor.goal.revision,
+    goalPhaseMatches:
+      anchor.goal?.phase === undefined || current.goalPhase === undefined
+        ? undefined
+        : current.goalPhase === anchor.goal.phase,
   }
 }
 
@@ -106,18 +111,42 @@ export function parseAnchor(raw: string): TaskAnchor | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const a = value as Record<string, unknown>
   if (a.schemaVersion !== ANCHOR_SCHEMA_VERSION) return undefined
-  if (typeof a.sessionId !== 'string' || typeof a.repoRoot !== 'string' || typeof a.phase !== 'string') return undefined
-  if (typeof a.createdAt !== 'number' || !Array.isArray(a.ownedFiles) || typeof a.verification !== 'string') return undefined
+  if (
+    typeof a.sessionId !== 'string' ||
+    typeof a.repoRoot !== 'string' ||
+    typeof a.phase !== 'string'
+  )
+    return undefined
+  if (
+    typeof a.createdAt !== 'number' ||
+    !Array.isArray(a.ownedFiles) ||
+    typeof a.verification !== 'string'
+  )
+    return undefined
   const vcs = a.vcs as Record<string, unknown> | undefined
-  if (vcs === undefined || vcs.tool !== 'jj' || typeof vcs.changeId !== 'string'
-    || !Array.isArray(vcs.parentChangeIds) || !vcs.parentChangeIds.every((id) => typeof id === 'string')) {
+  if (
+    vcs === undefined ||
+    vcs.tool !== 'jj' ||
+    typeof vcs.changeId !== 'string' ||
+    !Array.isArray(vcs.parentChangeIds) ||
+    !vcs.parentChangeIds.every((id) => typeof id === 'string')
+  ) {
     return undefined
   }
   const goal = a.goal as Record<string, unknown> | undefined
-  if (goal !== undefined && (typeof goal.goalId !== 'string' || typeof goal.revision !== 'number'
-    || (goal.proof !== 'fold-agrees' && goal.proof !== 'args-only-unverified'))) return undefined
-  if (goal?.phase !== undefined
-    && (typeof goal.phase !== 'string' || !GOAL_PHASES.includes(goal.phase as typeof GOAL_PHASES[number]))) return undefined
+  if (
+    goal !== undefined &&
+    (typeof goal.goalId !== 'string' ||
+      typeof goal.revision !== 'number' ||
+      (goal.proof !== 'fold-agrees' && goal.proof !== 'args-only-unverified'))
+  )
+    return undefined
+  if (
+    goal?.phase !== undefined &&
+    (typeof goal.phase !== 'string' ||
+      !GOAL_PHASES.includes(goal.phase as (typeof GOAL_PHASES)[number]))
+  )
+    return undefined
   return value as TaskAnchor
 }
 
@@ -134,7 +163,10 @@ export interface AnchorStoreOptions {
 export class AnchorStore {
   private readonly onProblem: (message: string) => void
 
-  constructor(private readonly dir: string, options: AnchorStoreOptions = {}) {
+  constructor(
+    private readonly dir: string,
+    options: AnchorStoreOptions = {},
+  ) {
     this.onProblem = options.onProblem ?? (() => {})
   }
 
@@ -153,7 +185,10 @@ export class AnchorStore {
     const target = this.pathFor(anchor.sessionId)
     await mkdir(join(this.dir, 'anchors'), { recursive: true })
     await withFileLock(target, () =>
-      writeFileAtomic(target, `${JSON.stringify(anchor, null, 2)}\n`, { mode: 0o600, dirMode: 0o700 }),
+      writeFileAtomic(target, `${JSON.stringify(anchor, null, 2)}\n`, {
+        mode: 0o600,
+        dirMode: 0o700,
+      }),
     )
   }
 

@@ -1,7 +1,7 @@
 @layer theme, base, components, utilities;
-@import "tailwindcss/theme.css" layer(theme) prefix(dshx);
-@import "tailwindcss/utilities.css" layer(utilities) prefix(dshx);
-@import "@dsh-extensions/ui/theme.css";
+@import 'tailwindcss/theme.css' layer(theme) prefix(dshx);
+@import 'tailwindcss/utilities.css' layer(utilities) prefix(dshx);
+@import '@dsh-extensions/ui/theme.css';
 
 @source "./**/*.tsx";
 @source "../../../ui/src/**/*.tsx";

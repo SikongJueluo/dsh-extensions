@@ -193,12 +193,20 @@ describe('session-scoped grouping', () => {
 
   it('drops runs and bindings that do not involve this session', () => {
     const foreign = run({ id: 'run-x', executor: 'session-x', parent: 'session-y' })
-    const scoped = T.scopeSnapshot(dataWith({ bindings: [binding()], runs: [run(), foreign] }), SESSION)
+    const scoped = T.scopeSnapshot(
+      dataWith({ bindings: [binding()], runs: [run(), foreign] }),
+      SESSION,
+    )
     expect(scoped.runs.map((entry) => entry.id)).toEqual(['run-1'])
   })
 
   it('shortens session ids without collisions', () => {
-    const ids = ['session-1', 'session-2', 'session-10', 'session-3f2a9c1d-8b44-4e6a-9f01-c2d3e4f5a6b7']
+    const ids = [
+      'session-1',
+      'session-2',
+      'session-10',
+      'session-3f2a9c1d-8b44-4e6a-9f01-c2d3e4f5a6b7',
+    ]
     expect(new Set(ids.map((id) => T.shortId(id))).size).toBe(ids.length)
   })
 })
@@ -225,7 +233,10 @@ describe('run controls', () => {
   it('pauses an active run through run.control', async () => {
     const { renderer } = await mountView(dataWith({ bindings: [binding()], runs: [run()] }))
     await act(async () => {
-      renderer.root.findAllByType('button').find((button) => button.props['aria-expanded'] === false).props.onClick()
+      renderer.root
+        .findAllByType('button')
+        .find((button) => button.props['aria-expanded'] === false)
+        .props.onClick()
     })
     const pause = buttonWith(renderer, t('pause'))
     expect(pause).toBeDefined()
@@ -243,7 +254,10 @@ describe('run controls', () => {
     const paused = run({ status: 'paused-budget' })
     const { renderer } = await mountView(dataWith({ bindings: [binding()], runs: [paused] }))
     await act(async () => {
-      renderer.root.findAllByType('button').find((button) => button.props['aria-expanded'] === false).props.onClick()
+      renderer.root
+        .findAllByType('button')
+        .find((button) => button.props['aria-expanded'] === false)
+        .props.onClick()
     })
     const extend = buttonWith(renderer, t('extend'))
     expect(extend).toBeDefined()

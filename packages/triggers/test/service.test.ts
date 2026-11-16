@@ -10,7 +10,11 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { TriggerService } from '../src/service.js'
 import type { RunRecord } from '../src/model.js'
-import { BUILTIN_REVIEW_TEMPLATE, BUILTIN_REWORK_TEMPLATE, BUILTIN_START_TEMPLATE } from '../src/identity.js'
+import {
+  BUILTIN_REVIEW_TEMPLATE,
+  BUILTIN_REWORK_TEMPLATE,
+  BUILTIN_START_TEMPLATE,
+} from '../src/identity.js'
 
 interface FakePromptCall {
   requestId: string
@@ -36,7 +40,9 @@ function createFakeHost() {
     get: (key: string) => tables[name].get(key),
     entries: () => tables[name].entries() as IterableIterator<[string, never]>,
     keys: () => tables[name].keys() as IterableIterator<string>,
-    get size() { return tables[name].size },
+    get size() {
+      return tables[name].size
+    },
     put: async (key: string, value: unknown) => {
       tables[name].set(key, value)
     },
@@ -58,7 +64,12 @@ function createFakeHost() {
       }),
     },
     sessionController: {
-      prompt: async (request: { requestId: string, sessionId: string, mode: string, content: { type: string, text: string }[] }) => {
+      prompt: async (request: {
+        requestId: string
+        sessionId: string
+        mode: string
+        content: { type: string; text: string }[]
+      }) => {
         if (queue.fail) throw new Error('queue refused')
         prompts.push({
           requestId: request.requestId,
@@ -73,16 +84,20 @@ function createFakeHost() {
     // The host's log reader: no persisted history in this fake, so every
     // session reads as a genuinely empty log.
     sessionQuery: {
-      readSession: async (sessionId: string) => ({ session: { id: sessionId }, inheritedEventCount: 0, events: [] }),
+      readSession: async (sessionId: string) => ({
+        session: { id: sessionId },
+        inheritedEventCount: 0,
+        events: [],
+      }),
     },
     tools: { register: () => () => {} },
   }
 
-  const emit = (sessionId: string, event: { type: string, data: unknown }): void => {
+  const emit = (sessionId: string, event: { type: string; data: unknown }): void => {
     for (const listener of listeners.get('session/event') ?? []) listener({ id: sessionId }, event)
   }
   const flush = async (): Promise<void> => {
-    for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 5))
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 5))
   }
   const service = (): TriggerService => new TriggerService(ctx as never, {})
   return { tables, prompts, queue, emit, flush, service }
@@ -100,7 +115,12 @@ describe('loop end to end', () => {
   })
 
   it('binds, delivers nothing by default, and advances on the signal turn end', async () => {
-    const bound = await svc.bindReviewLoop({ task: '修复构建', executorSession: EXECUTOR, parentSession: PARENT, maxRounds: 5 })
+    const bound = await svc.bindReviewLoop({
+      task: '修复构建',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+      maxRounds: 5,
+    })
     expect(bound.runId).toMatch(/^run-/)
     // handoff-style bind sends no start prompt of its own
     expect(host.prompts).toHaveLength(0)
@@ -109,7 +129,11 @@ describe('loop end to end', () => {
 
     // executor signals inside turn 3
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 3 } })
-    const accepted = await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: '实现完成，测试 12/12' })
+    const accepted = await svc.signal(EXECUTOR, {
+      runId: bound.runId,
+      outcome: 'deliver',
+      summary: '实现完成，测试 12/12',
+    })
     expect(accepted).toMatchObject({ ok: true })
     // the turn has NOT ended yet: nothing queued
     expect(host.prompts).toHaveLength(0)
@@ -125,7 +149,11 @@ describe('loop end to end', () => {
   })
 
   it('rework queues round 2 to the executor; pass finishes with a notice', async () => {
-    const bound = await svc.bindReviewLoop({ task: '任务B', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await svc.bindReviewLoop({
+      task: '任务B',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
 
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 1 } })
     await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 'round1' })
@@ -163,7 +191,11 @@ describe('abuse and stop paths through the service', () => {
   it('a replayed or duplicate turn end never queues twice', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 1 } })
     await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 's' })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
@@ -178,24 +210,44 @@ describe('abuse and stop paths through the service', () => {
   it('a signal without a tracked turn is refused', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
-    const result = await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 's' })
+    const bound = await svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
+    const result = await svc.signal(EXECUTOR, {
+      runId: bound.runId,
+      outcome: 'deliver',
+      summary: 's',
+    })
     expect(result).toMatchObject({ ok: false })
   })
 
   it('a completed run refuses late signals', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
     await svc.controlRun(bound.runId, 'cancel')
-    const result = await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 'late' })
+    const result = await svc.signal(EXECUTOR, {
+      runId: bound.runId,
+      outcome: 'deliver',
+      summary: 'late',
+    })
     expect(result).toMatchObject({ ok: false })
   })
 
   it('pause keeps the run; an abnormal signal turn parks it', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
     const paused = await svc.controlRun(bound.runId, 'pause')
     expect(paused.status).toBe('paused-user')
     const resumed = await svc.controlRun(bound.runId, 'resume', { message: '继续' })
@@ -214,9 +266,17 @@ describe('abuse and stop paths through the service', () => {
   it('needs_user from the executor notifies the parent and pauses', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 1 } })
-    await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'needs_user', summary: '选哪个方案？' })
+    await svc.signal(EXECUTOR, {
+      runId: bound.runId,
+      outcome: 'needs_user',
+      summary: '选哪个方案？',
+    })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     const run = host.tables.runs.get(bound.runId) as RunRecord
@@ -232,7 +292,11 @@ describe('delivery failures', () => {
     const host = createFakeHost()
     host.queue.fail = true
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 1 } })
     await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 's' })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
@@ -240,7 +304,12 @@ describe('delivery failures', () => {
 
     const run = host.tables.runs.get(bound.runId) as RunRecord
     expect(run.status).toBe('paused-error')
-    const delivery = [...host.tables.deliveries.values()].at(-1) as { id: string, requestId: string, state: string, error?: string }
+    const delivery = [...host.tables.deliveries.values()].at(-1) as {
+      id: string
+      requestId: string
+      state: string
+      error?: string
+    }
     expect(delivery.state).toBe('failed')
     expect(delivery.error).toBeDefined()
 
@@ -256,10 +325,19 @@ describe('restart recovery', () => {
   it('a signal whose turn end has no log evidence keeps waiting after restart, and pending deliveries re-send under the same requestId', async () => {
     const host = createFakeHost()
     const svc1 = host.service()
-    const bound = await svc1.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT, deliverStart: true })
+    const bound = await svc1.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+      deliverStart: true,
+    })
     await host.flush()
     expect(host.prompts).toHaveLength(1)
-    const startDelivery = [...host.tables.deliveries.values()].at(-1) as { id: string, requestId: string, state: string }
+    const startDelivery = [...host.tables.deliveries.values()].at(-1) as {
+      id: string
+      requestId: string
+      state: string
+    }
     expect(startDelivery.state).toBe('sent')
 
     // Crash before the turn ends: a signal is pending, and (simulated) a
@@ -276,7 +354,7 @@ describe('restart recovery', () => {
     expect(run.status).toBe('active')
     expect(run.pendingSignal).toBeDefined()
     // pending delivery re-sent with the SAME requestId (idempotent replay)
-    const resent = host.prompts.filter(p => p.requestId === startDelivery.requestId)
+    const resent = host.prompts.filter((p) => p.requestId === startDelivery.requestId)
     expect(resent).toHaveLength(2)
     void svc2
   })
@@ -297,11 +375,27 @@ describe('turn-end auto-delivery', () => {
   it('submits the executor final reply when the turn ends completed', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: '任务', executorSession: EXECUTOR, parentSession: PARENT })
-    expect((host.tables.bindings.get(bound.bindingId) as { autoDeliver?: boolean }).autoDeliver).toBe(true)
+    const bound = await svc.bindReviewLoop({
+      task: '任务',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
+    expect(
+      (host.tables.bindings.get(bound.bindingId) as { autoDeliver?: boolean }).autoDeliver,
+    ).toBe(true)
 
     // The executor works and just… finishes its reply. No tool call.
-    host.emit(EXECUTOR, { type: 'assistant/message', data: { turn: 2, step: 3, message: { role: 'assistant', content: [{ type: 'text', text: '实现完成；54/54 通过，证据在 lib/ 目录' }] } } })
+    host.emit(EXECUTOR, {
+      type: 'assistant/message',
+      data: {
+        turn: 2,
+        step: 3,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '实现完成；54/54 通过，证据在 lib/ 目录' }],
+        },
+      },
+    })
     await host.flush()
     expect(host.prompts).toHaveLength(0) // nothing until the turn ends
 
@@ -316,9 +410,27 @@ describe('turn-end auto-delivery', () => {
   it('uses the LAST non-empty reply of a multi-step turn', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
-    host.emit(EXECUTOR, { type: 'assistant/message', data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '中间步骤输出' }] } } })
-    host.emit(EXECUTOR, { type: 'assistant/message', data: { turn: 1, step: 4, message: { role: 'assistant', content: [{ type: 'text', text: '最终交付说明' }] } } })
+    const bound = await svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
+    host.emit(EXECUTOR, {
+      type: 'assistant/message',
+      data: {
+        turn: 1,
+        step: 1,
+        message: { role: 'assistant', content: [{ type: 'text', text: '中间步骤输出' }] },
+      },
+    })
+    host.emit(EXECUTOR, {
+      type: 'assistant/message',
+      data: {
+        turn: 1,
+        step: 4,
+        message: { role: 'assistant', content: [{ type: 'text', text: '最终交付说明' }] },
+      },
+    })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(1)
@@ -330,16 +442,56 @@ describe('turn-end auto-delivery', () => {
   it('holds delivery while the executor session has an active goal, then delivers once it settles', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
 
-    host.emit(EXECUTOR, { type: 'goal/change', data: { kind: 'goal/change', version: 1, operation: 'create', goal: { phase: 'active' }, roundsStarted: 1, createdAt: 1, updatedAt: 1 } })
-    host.emit(EXECUTOR, { type: 'assistant/message', data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'goal 第 1 轮进展' }] } } })
+    host.emit(EXECUTOR, {
+      type: 'goal/change',
+      data: {
+        kind: 'goal/change',
+        version: 1,
+        operation: 'create',
+        goal: { phase: 'active' },
+        roundsStarted: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    })
+    host.emit(EXECUTOR, {
+      type: 'assistant/message',
+      data: {
+        turn: 1,
+        step: 1,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'goal 第 1 轮进展' }] },
+      },
+    })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(0) // goal may continue: no premature delivery
 
-    host.emit(EXECUTOR, { type: 'goal/change', data: { kind: 'goal/change', version: 1, operation: 'complete', goal: { phase: 'complete' }, roundsStarted: 2, createdAt: 1, updatedAt: 2 } })
-    host.emit(EXECUTOR, { type: 'assistant/message', data: { turn: 2, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '目标完成，最终交付' }] } } })
+    host.emit(EXECUTOR, {
+      type: 'goal/change',
+      data: {
+        kind: 'goal/change',
+        version: 1,
+        operation: 'complete',
+        goal: { phase: 'complete' },
+        roundsStarted: 2,
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    })
+    host.emit(EXECUTOR, {
+      type: 'assistant/message',
+      data: {
+        turn: 2,
+        step: 1,
+        message: { role: 'assistant', content: [{ type: 'text', text: '目标完成，最终交付' }] },
+      },
+    })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(1)
@@ -350,12 +502,27 @@ describe('turn-end auto-delivery', () => {
   it('an explicit signal still wins; the same turn never auto-delivers a second run', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const first = await svc.bindReviewLoop({ task: 't1', executorSession: EXECUTOR, parentSession: PARENT })
-    const second = await svc.bindReviewLoop({ task: 't2', executorSession: EXECUTOR, parentSession: 'sess-parent-2' })
+    const first = await svc.bindReviewLoop({
+      task: 't1',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
+    const second = await svc.bindReviewLoop({
+      task: 't2',
+      executorSession: EXECUTOR,
+      parentSession: 'sess-parent-2',
+    })
 
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 6 } })
     await svc.signal(EXECUTOR, { runId: first.runId, outcome: 'deliver', summary: '显式交付' })
-    host.emit(EXECUTOR, { type: 'assistant/message', data: { turn: 6, step: 2, message: { role: 'assistant', content: [{ type: 'text', text: '同回合最终回复' }] } } })
+    host.emit(EXECUTOR, {
+      type: 'assistant/message',
+      data: {
+        turn: 6,
+        step: 2,
+        message: { role: 'assistant', content: [{ type: 'text', text: '同回合最终回复' }] },
+      },
+    })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 6, reason: { kind: 'completed' } } })
     await host.flush()
     // only the explicit run advanced; the second loop was not dragged along
@@ -368,7 +535,11 @@ describe('turn-end auto-delivery', () => {
   it('a completed turn with no final reply nudges once, then stays quiet', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(1)
@@ -406,7 +577,11 @@ describe('missing-conclusion nudges', () => {
   it('a reviewer turn without a verdict gets one review nudge after the review prompt landed', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
     // deliver round 1 explicitly so a review delivery record exists
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 1 } })
     await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 's' })
@@ -429,12 +604,17 @@ describe('missing-conclusion nudges', () => {
   it('no review nudge before the review prompt has actually been sent', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT, deliverStart: true })
+    const bound = await svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+      deliverStart: true,
+    })
     await host.flush()
     // run is awaiting-delivery; a reviewer turn end must not nudge for review
     host.emit(PARENT, { type: 'turn/end', data: { turn: 9, reason: { kind: 'completed' } } })
     await host.flush()
-    const reviewNudges = host.prompts.filter(p => p.text.includes('仍在等待审核结论'))
+    const reviewNudges = host.prompts.filter((p) => p.text.includes('仍在等待审核结论'))
     expect(reviewNudges).toHaveLength(0)
     void bound
   })
@@ -448,7 +628,7 @@ describe('missing-conclusion nudges', () => {
     await host.flush()
     const run = [...host.tables.runs.values()].at(-1) as RunRecord
     expect(run.status).toBe('active') // not parked by a failed reminder
-    const nudge = [...host.tables.deliveries.values()].at(-1) as { kind: string, state: string }
+    const nudge = [...host.tables.deliveries.values()].at(-1) as { kind: string; state: string }
     expect(nudge.kind).toBe('nudge')
     expect(nudge.state).toBe('failed')
   })
@@ -458,23 +638,42 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
   it('two auto runs on one executor: one reply advances NEITHER; each gets an ambiguity nudge that demands an explicit signal', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const first = await svc.bindReviewLoop({ task: '任务 A', executorSession: EXECUTOR, parentSession: PARENT })
-    const second = await svc.bindReviewLoop({ task: '任务 B', executorSession: EXECUTOR, parentSession: 'sess-parent-2' })
+    const first = await svc.bindReviewLoop({
+      task: '任务 A',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
+    const second = await svc.bindReviewLoop({
+      task: '任务 B',
+      executorSession: EXECUTOR,
+      parentSession: 'sess-parent-2',
+    })
 
-    host.emit(EXECUTOR, { type: 'assistant/message', data: { turn: 5, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'Only task A completed' }] } } })
+    host.emit(EXECUTOR, {
+      type: 'assistant/message',
+      data: {
+        turn: 5,
+        step: 1,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Only task A completed' }] },
+      },
+    })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 5, reason: { kind: 'completed' } } })
     await host.flush()
 
     // No review anywhere: the reply cannot be attributed to one task.
-    expect(host.prompts.filter(p => p.sessionId === PARENT || p.sessionId === 'sess-parent-2')).toHaveLength(0)
+    expect(
+      host.prompts.filter((p) => p.sessionId === PARENT || p.sessionId === 'sess-parent-2'),
+    ).toHaveLength(0)
     expect((host.tables.runs.get(first.runId) as RunRecord).phase).toBe('awaiting-delivery')
     expect((host.tables.runs.get(second.runId) as RunRecord).phase).toBe('awaiting-delivery')
     // Each waiting run reminds once (bounded per round); the FULL composed
     // prompt must demand an explicit trigger_signal naming its runId…
-    const nudges = host.prompts.filter(p => p.sessionId === EXECUTOR && p.text.includes('必须调用 trigger_signal'))
+    const nudges = host.prompts.filter(
+      (p) => p.sessionId === EXECUTOR && p.text.includes('必须调用 trigger_signal'),
+    )
     expect(nudges).toHaveLength(2)
-    const nudgeForFirst = nudges.find(p => p.text.includes(`runId=${first.runId}`))!
-    const nudgeForSecond = nudges.find(p => p.text.includes(`runId=${second.runId}`))!
+    const nudgeForFirst = nudges.find((p) => p.text.includes(`runId=${first.runId}`))!
+    const nudgeForSecond = nudges.find((p) => p.text.includes(`runId=${second.runId}`))!
     expect(nudgeForFirst).toBeDefined()
     expect(nudgeForSecond).toBeDefined()
     // …and must NOT carry the standing auto rules, whose "a normal turn end
@@ -494,7 +693,7 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
     await host.flush()
     expect((host.tables.runs.get(first.runId) as RunRecord).phase).toBe('awaiting-review')
     expect((host.tables.runs.get(second.runId) as RunRecord).phase).toBe('awaiting-delivery')
-    const reviews = host.prompts.filter(p => p.sessionId === PARENT)
+    const reviews = host.prompts.filter((p) => p.sessionId === PARENT)
     expect(reviews).toHaveLength(1)
     expect(reviews[0]!.text).toContain('显式交付 A')
   })
@@ -502,17 +701,34 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
   it('an empty final assistant message never falls back to an earlier intermediate text', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
 
-    host.emit(EXECUTOR, { type: 'assistant/message', data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'I will inspect the failing test next' }] } } })
-    host.emit(EXECUTOR, { type: 'assistant/message', data: { turn: 1, step: 2, message: { role: 'assistant', content: [] } } })
+    host.emit(EXECUTOR, {
+      type: 'assistant/message',
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'I will inspect the failing test next' }],
+        },
+      },
+    })
+    host.emit(EXECUTOR, {
+      type: 'assistant/message',
+      data: { turn: 1, step: 2, message: { role: 'assistant', content: [] } },
+    })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
 
-    expect(host.prompts.filter(p => p.sessionId === PARENT)).toHaveLength(0) // no review
+    expect(host.prompts.filter((p) => p.sessionId === PARENT)).toHaveLength(0) // no review
     const run = host.tables.runs.get(bound.runId) as RunRecord
     expect(run.phase).toBe('awaiting-delivery')
-    const nudge = host.prompts.find(p => p.sessionId === EXECUTOR)
+    const nudge = host.prompts.find((p) => p.sessionId === EXECUTOR)
     expect(nudge?.text).toContain('没有可作为交付说明的最终回复')
     for (const p of host.prompts) expect(p.text).not.toContain('inspect the failing test')
   })
@@ -522,13 +738,31 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
     const svc = host.service()
     await svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
 
-    host.emit(EXECUTOR, { type: 'assistant/message', data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '中间输出' }] } } })
-    host.emit(EXECUTOR, { type: 'assistant/message', data: { turn: 1, step: 2, message: { role: 'assistant', content: [{ type: 'text', text: '   \n  ' }] } } })
+    host.emit(EXECUTOR, {
+      type: 'assistant/message',
+      data: {
+        turn: 1,
+        step: 1,
+        message: { role: 'assistant', content: [{ type: 'text', text: '中间输出' }] },
+      },
+    })
+    host.emit(EXECUTOR, {
+      type: 'assistant/message',
+      data: {
+        turn: 1,
+        step: 2,
+        message: { role: 'assistant', content: [{ type: 'text', text: '   \n  ' }] },
+      },
+    })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
 
-    expect(host.prompts.filter(p => p.sessionId === PARENT)).toHaveLength(0)
-    expect(host.prompts.some(p => p.sessionId === EXECUTOR && p.text.includes('没有可作为交付说明的最终回复'))).toBe(true)
+    expect(host.prompts.filter((p) => p.sessionId === PARENT)).toHaveLength(0)
+    expect(
+      host.prompts.some(
+        (p) => p.sessionId === EXECUTOR && p.text.includes('没有可作为交付说明的最终回复'),
+      ),
+    ).toBe(true)
   })
 
   it('a pending nudge that fails to re-send after a restart never parks the run', async () => {
@@ -538,7 +772,11 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
     // Produce one persisted nudge and force it back to pending (crash window).
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
-    const nudge = [...host.tables.deliveries.values()].at(-1) as { id: string, kind: string, state: string }
+    const nudge = [...host.tables.deliveries.values()].at(-1) as {
+      id: string
+      kind: string
+      state: string
+    }
     expect(nudge.kind).toBe('nudge')
 
     host.tables.deliveries.set(nudge.id, { ...nudge, state: 'pending' })
@@ -549,7 +787,7 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
 
     const run = [...host.tables.runs.values()].at(-1) as RunRecord
     expect(run.status).toBe('active') // best-effort semantics survive the restart
-    const after = host.tables.deliveries.get(nudge.id) as { kind: string, state: string }
+    const after = host.tables.deliveries.get(nudge.id) as { kind: string; state: string }
     expect(after.state).toBe('failed')
     void svc2
   })
@@ -559,8 +797,16 @@ describe('session-scoped snapshot', () => {
   it('filters bindings, runs, and deliveries to the participating session', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const first = await svc.bindReviewLoop({ task: '任务 A', executorSession: 'sess-a-exec', parentSession: 'sess-a-parent' })
-    const second = await svc.bindReviewLoop({ task: '任务 B', executorSession: 'sess-b-exec', parentSession: 'sess-b-parent' })
+    const first = await svc.bindReviewLoop({
+      task: '任务 A',
+      executorSession: 'sess-a-exec',
+      parentSession: 'sess-a-parent',
+    })
+    const second = await svc.bindReviewLoop({
+      task: '任务 B',
+      executorSession: 'sess-b-exec',
+      parentSession: 'sess-b-parent',
+    })
 
     // Advance the first loop far enough to persist a review delivery.
     host.emit('sess-a-exec', { type: 'turn/start', data: { turn: 1 } })
@@ -569,14 +815,14 @@ describe('session-scoped snapshot', () => {
     await host.flush()
 
     const scoped = await svc.snapshot('sess-a-parent')
-    expect(scoped.bindings.map(binding => binding.id)).toEqual([first.bindingId])
-    expect(scoped.runs.map(run => run.id)).toEqual([first.runId])
+    expect(scoped.bindings.map((binding) => binding.id)).toEqual([first.bindingId])
+    expect(scoped.runs.map((run) => run.id)).toEqual([first.runId])
     expect(scoped.deliveries.length).toBeGreaterThan(0)
-    expect(scoped.deliveries.every(delivery => delivery.runId === first.runId)).toBe(true)
+    expect(scoped.deliveries.every((delivery) => delivery.runId === first.runId)).toBe(true)
 
     const other = await svc.snapshot('sess-b-parent')
-    expect(other.bindings.map(binding => binding.id)).toEqual([second.bindingId])
-    expect(other.runs.map(run => run.id)).toEqual([second.runId])
+    expect(other.bindings.map((binding) => binding.id)).toEqual([second.bindingId])
+    expect(other.runs.map((run) => run.id)).toEqual([second.runId])
     expect(other.deliveries).toEqual([])
 
     const stranger = await svc.snapshot('sess-stranger')
@@ -588,7 +834,11 @@ describe('session-scoped snapshot', () => {
   it('keeps a run visible to its start-time counterpart after the binding pair changes', async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: '任务', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await svc.bindReviewLoop({
+      task: '任务',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
     const binding = [...host.tables.bindings.values()][0] as { id: string }
     await svc.saveBinding({
       id: binding.id,
@@ -602,21 +852,25 @@ describe('session-scoped snapshot', () => {
     // still carries the pair it started with.
     const oldParent = await svc.snapshot(PARENT)
     expect(oldParent.bindings).toEqual([])
-    expect(oldParent.runs.map(run => run.id)).toEqual([bound.runId])
+    expect(oldParent.runs.map((run) => run.id)).toEqual([bound.runId])
 
     const newParent = await svc.snapshot('sess-new-parent')
-    expect(newParent.bindings.map(record => record.id)).toEqual([binding.id])
+    expect(newParent.bindings.map((record) => record.id)).toEqual([binding.id])
     expect(newParent.runs).toEqual([])
 
     const executor = await svc.snapshot(EXECUTOR)
-    expect(executor.bindings.map(record => record.id)).toEqual([binding.id])
-    expect(executor.runs.map(run => run.id)).toEqual([bound.runId])
+    expect(executor.bindings.map((record) => record.id)).toEqual([binding.id])
+    expect(executor.runs.map((run) => run.id)).toEqual([bound.runId])
   })
 
-  it('does not let another session\'s history consume the run cap', async () => {
+  it("does not let another session's history consume the run cap", async () => {
     const host = createFakeHost()
     const svc = host.service()
-    const bound = await svc.bindReviewLoop({ task: '本会话任务', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await svc.bindReviewLoop({
+      task: '本会话任务',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
     const template = host.tables.runs.get(bound.runId) as RunRecord
     for (let index = 0; index < 60; index++) {
       host.tables.runs.set(`run-other-${index}`, {
@@ -634,7 +888,7 @@ describe('session-scoped snapshot', () => {
     }
 
     const scoped = await svc.snapshot(EXECUTOR)
-    expect(scoped.runs.map(run => run.id)).toEqual([bound.runId])
+    expect(scoped.runs.map((run) => run.id)).toEqual([bound.runId])
 
     // The unscoped snapshot still prefers the unfinished run and caps the rest.
     const global = await svc.snapshot()

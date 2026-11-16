@@ -25,7 +25,7 @@ export interface SessionFold {
    * of a turn decides whether it delivered anything; an empty final must
    * never fall back to an earlier intermediate text.
    */
-  lastReply?: { turn: number, text: string }
+  lastReply?: { turn: number; text: string }
   /** Whether the session's current goal is in durable phase `active`. */
   goalActive: boolean
 }
@@ -42,7 +42,7 @@ function contentText(content: unknown): string {
   const parts: string[] = []
   for (const block of content) {
     if (typeof block !== 'object' || block === null) continue
-    const { type, text } = block as { type?: unknown, text?: unknown }
+    const { type, text } = block as { type?: unknown; text?: unknown }
     if (type === 'text' && typeof text === 'string' && text.length > 0) parts.push(text)
   }
   return parts.join('\n')
@@ -66,7 +66,7 @@ export function foldEvent(fold: SessionFold, event: ReplayableEvent): void {
     return
   }
   if (event.type === 'assistant/message') {
-    const data = event.data as { turn?: unknown, message?: { content?: unknown } } | undefined
+    const data = event.data as { turn?: unknown; message?: { content?: unknown } } | undefined
     const turn = data?.turn
     if (typeof turn !== 'number') return
     // Track EVERY assistant message of the turn, empty ones included.
@@ -76,7 +76,7 @@ export function foldEvent(fold: SessionFold, event: ReplayableEvent): void {
   if (event.type === 'goal/change') {
     // GoalChangeMeta: operation 'clear' drops the goal; otherwise phase
     // 'active' means a continuation round may follow this turn.
-    const data = event.data as { operation?: unknown, goal?: { phase?: unknown } } | undefined
+    const data = event.data as { operation?: unknown; goal?: { phase?: unknown } } | undefined
     fold.goalActive = data?.operation !== 'clear' && data?.goal?.phase === 'active'
     return
   }
@@ -96,7 +96,7 @@ export interface TurnEndFact {
   readonly reasonKind: string
   readonly time: number
   /** This turn's LAST assistant reply, when it had one (may hold empty text). */
-  readonly reply: { turn: number, text: string } | undefined
+  readonly reply: { turn: number; text: string } | undefined
   /** Goal state AS OF this turn end (point-in-time, not log tail). */
   readonly goalActive: boolean
 }
@@ -106,12 +106,15 @@ export interface TurnEndFact {
  * ended in, plus the fold over the full log (the caches a live listener would
  * hold once caught up). Facts come out in log order.
  */
-export function scanTurnEnds(events: readonly ReplayableEvent[]): { facts: TurnEndFact[], final: SessionFold } {
+export function scanTurnEnds(events: readonly ReplayableEvent[]): {
+  facts: TurnEndFact[]
+  final: SessionFold
+} {
   const fold = emptyFold()
   const facts: TurnEndFact[] = []
   for (const event of events) {
     if (event.type === 'turn/end') {
-      const data = event.data as { turn?: unknown, reason?: { kind?: unknown } } | undefined
+      const data = event.data as { turn?: unknown; reason?: { kind?: unknown } } | undefined
       const turn = data?.turn
       const reasonKind = data?.reason?.kind
       const time = (event as { time?: unknown }).time

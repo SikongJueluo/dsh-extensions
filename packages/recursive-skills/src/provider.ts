@@ -116,9 +116,7 @@ export class RecursiveSkillProvider implements SkillProvider {
    * scan is repeated under the now-complete watch set, so the returned catalog
    * never caches away a change that happened in the blind window.
    */
-  async list(
-    options: SkillLookupOptions,
-  ): Promise<SkillCandidate[] | SkillProviderObservation> {
+  async list(options: SkillLookupOptions): Promise<SkillCandidate[] | SkillProviderObservation> {
     let state = await this.scan(options)
     if (this.watcher === undefined) return observation(state)
 
@@ -180,7 +178,13 @@ export class RecursiveSkillProvider implements SkillProvider {
       return undefined
     }
     return {
-      ...summary(parsed.skill, candidate.source, this.name, locator.directory, this.fs.processPath(target)),
+      ...summary(
+        parsed.skill,
+        candidate.source,
+        this.name,
+        locator.directory,
+        this.fs.processPath(target),
+      ),
       content: parsed.skill.content,
     }
   }
@@ -300,7 +304,13 @@ export class RecursiveSkillProvider implements SkillProvider {
     }
     state.names.set(parsed.skill.name, file.displayPath)
     state.candidates.push({
-      ...summary(parsed.skill, root.source, this.name, directory.displayPath, this.fs.processPath(file)),
+      ...summary(
+        parsed.skill,
+        root.source,
+        this.name,
+        directory.displayPath,
+        this.fs.processPath(file),
+      ),
       rank: this.rank,
       locator: { path: file.displayPath, directory: directory.displayPath } satisfies SkillLocator,
     })

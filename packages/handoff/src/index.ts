@@ -53,10 +53,14 @@ export const Config: Schema<Config> = Schema.object({
   dir: Schema.string()
     .default(DEFAULT_BRIEF_DIR)
     .description('Brief directory; relative paths resolve against the session workspace cwd.'),
-  timeoutMs: Schema.number().step(1).min(1000)
+  timeoutMs: Schema.number()
+    .step(1)
+    .min(1000)
     .default(600_000)
     .description('How long to wait for the completion marker before failing the handoff (ms).'),
-  pollMs: Schema.number().step(1).min(100)
+  pollMs: Schema.number()
+    .step(1)
+    .min(100)
     .default(1000)
     .description('Brief file poll interval (ms).'),
   confirm: Schema.boolean()
@@ -64,14 +68,22 @@ export const Config: Schema<Config> = Schema.object({
     .description('Ask the model question (and allow cancelling) before starting the handoff.'),
   modelMenu: Schema.boolean()
     .default(true)
-    .description('Enumerate every provider/model route in the dialog; slow providers degrade to base options + custom input.'),
-  pickTimeoutMs: Schema.number().step(1).min(5000)
+    .description(
+      'Enumerate every provider/model route in the dialog; slow providers degrade to base options + custom input.',
+    ),
+  pickTimeoutMs: Schema.number()
+    .step(1)
+    .min(5000)
     .default(120_000)
-    .description('How long the browser model picker may stay open before the command gives up (ms).'),
+    .description(
+      'How long the browser model picker may stay open before the command gives up (ms).',
+    ),
   notifyFailure: Schema.boolean()
     .default(true)
     .description('On failure, queue a visible notice turn on the origin session.'),
-  maxBriefChars: Schema.number().step(1).min(1024)
+  maxBriefChars: Schema.number()
+    .step(1)
+    .min(1024)
     .default(65_536)
     .description('Brief truncation guard for the first prompt (chars).'),
 })

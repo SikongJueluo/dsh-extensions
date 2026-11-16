@@ -8,7 +8,11 @@
  */
 import type { Api, Model, Provider } from '@earendil-works/pi-ai'
 import { createProvider, envApiKeyAuth } from '@earendil-works/pi-ai'
-import { anthropicMessagesApi, openAICompletionsApi, openAIResponsesApi } from '@earendil-works/pi-ai/compat'
+import {
+  anthropicMessagesApi,
+  openAICompletionsApi,
+  openAIResponsesApi,
+} from '@earendil-works/pi-ai/compat'
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { PiAiAdapterOptions, ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
@@ -75,7 +79,10 @@ export interface BuildResult {
   keys: Map<string, KeySource>
 }
 
-function reasoningOf(model: ModelConfig): { reasoning: boolean; thinkingLevelMap?: Record<string, string | null> } {
+function reasoningOf(model: ModelConfig): {
+  reasoning: boolean
+  thinkingLevelMap?: Record<string, string | null>
+} {
   if (model.reasoning === false) return { reasoning: false }
   const levels = model.reasoning ?? DEFAULT_THINKING_LEVELS
   const thinkingLevelMap: Record<string, string | null> = {}
@@ -91,7 +98,9 @@ function reasoningOf(model: ModelConfig): { reasoning: boolean; thinkingLevelMap
 
 function customModel(model: ModelConfig, resolved: ResolvedProvider): Model<Api> {
   if (resolved.api === undefined || resolved.baseURL === undefined) {
-    throw new ConfigError(`providers.${resolved.providerId}: custom provider is missing api/baseURL`)
+    throw new ConfigError(
+      `providers.${resolved.providerId}: custom provider is missing api/baseURL`,
+    )
   }
   const reasoning = reasoningOf(model)
   const built: Model<Api> = {
@@ -105,7 +114,9 @@ function customModel(model: ModelConfig, resolved: ResolvedProvider): Model<Api>
     contextWindow: model.contextWindow ?? FALLBACK_CONTEXT_WINDOW,
     maxTokens: model.maxTokens ?? FALLBACK_MAX_TOKENS,
     reasoning: reasoning.reasoning,
-    ...(reasoning.thinkingLevelMap === undefined ? {} : { thinkingLevelMap: reasoning.thinkingLevelMap }),
+    ...(reasoning.thinkingLevelMap === undefined
+      ? {}
+      : { thinkingLevelMap: reasoning.thinkingLevelMap }),
   }
   if (resolved.compat !== undefined) built.compat = resolved.compat as Model<Api>['compat']
   return built
@@ -136,13 +147,15 @@ function positiveInteger(value: unknown): number | undefined {
 
 function inputModalities(value: unknown): Array<'text' | 'image'> | undefined {
   if (!Array.isArray(value)) return undefined
-  const input = value.filter((entry): entry is 'text' | 'image' => entry === 'text' || entry === 'image')
+  const input = value.filter(
+    (entry): entry is 'text' | 'image' => entry === 'text' || entry === 'image',
+  )
   return input.length === 0 ? undefined : input
 }
 
 function catalogModels(body: unknown): ModelConfig[] {
   const record = asRecord(body)
-  const data = Array.isArray(body) ? body : record?.data ?? record?.models
+  const data = Array.isArray(body) ? body : (record?.data ?? record?.models)
   if (!Array.isArray(data)) return []
   const models: ModelConfig[] = []
   for (const entry of data) {
@@ -151,12 +164,14 @@ function catalogModels(body: unknown): ModelConfig[] {
     const id = item.id
     if (typeof id !== 'string' || id.trim() === '') continue
     const name = typeof item.name === 'string' && item.name !== '' ? item.name : undefined
-    const contextWindow = positiveInteger(item.context_length)
-      ?? positiveInteger(item.context_window)
-      ?? positiveInteger(item.contextWindow)
-    const maxTokens = positiveInteger(item.max_output_tokens)
-      ?? positiveInteger(item.max_tokens)
-      ?? positiveInteger(item.maxTokens)
+    const contextWindow =
+      positiveInteger(item.context_length) ??
+      positiveInteger(item.context_window) ??
+      positiveInteger(item.contextWindow)
+    const maxTokens =
+      positiveInteger(item.max_output_tokens) ??
+      positiveInteger(item.max_tokens) ??
+      positiveInteger(item.maxTokens)
     const modalities = asRecord(item.modalities)?.input ?? item.input_modalities
     const input = inputModalities(modalities)
     models.push({
@@ -214,16 +229,23 @@ function builtinProvider(resolved: ResolvedProvider): BuiltProvider {
   const catalog = resolved.catalog ?? resolved.providerId
   const provider = allBuiltinProviders().find((candidate) => candidate.id === catalog)
   if (provider === undefined) {
-    throw new ConfigError(`providers.${resolved.providerId}: unknown builtin catalog provider "${catalog}"`)
+    throw new ConfigError(
+      `providers.${resolved.providerId}: unknown builtin catalog provider "${catalog}"`,
+    )
   }
   const models = [...provider.getModels()]
   if (models.length === 0) {
-    throw new ConfigError(`providers.${resolved.providerId}: builtin catalog provider "${catalog}" has no chat models`)
+    throw new ConfigError(
+      `providers.${resolved.providerId}: builtin catalog provider "${catalog}" has no chat models`,
+    )
   }
   return { provider, models }
 }
 
-function withStaticMetadata(discovered: readonly ModelConfig[], staticModels: readonly ModelConfig[] | undefined): ModelConfig[] {
+function withStaticMetadata(
+  discovered: readonly ModelConfig[],
+  staticModels: readonly ModelConfig[] | undefined,
+): ModelConfig[] {
   if (staticModels === undefined) return [...discovered]
   const byId = new Map(staticModels.map((model) => [model.id, model]))
   return discovered.map((model) => {
@@ -245,13 +267,21 @@ function withStaticMetadata(discovered: readonly ModelConfig[], staticModels: re
   })
 }
 
-async function customProvider(resolved: ResolvedProvider, key: string, log: ProviderLogger): Promise<BuiltProvider> {
+async function customProvider(
+  resolved: ResolvedProvider,
+  key: string,
+  log: ProviderLogger,
+): Promise<BuiltProvider> {
   let models = resolved.models
   if (resolved.modelsURL !== undefined) {
     try {
       const fetched = await fetchModels(resolved.modelsURL, key)
       if (fetched.length > 0) models = withStaticMetadata(fetched, resolved.models)
-      else log.warn('more-providers: %s model catalog was empty; using the static fallback', resolved.route)
+      else
+        log.warn(
+          'more-providers: %s model catalog was empty; using the static fallback',
+          resolved.route,
+        )
     } catch (error) {
       log.warn('more-providers: %s model catalog failed: %o', resolved.route, error)
     }
@@ -260,7 +290,8 @@ async function customProvider(resolved: ResolvedProvider, key: string, log: Prov
     throw new Error('no models: model catalog failed and no static models were configured')
   }
   const api = resolved.api
-  if (api === undefined) throw new ConfigError(`providers.${resolved.providerId}: custom provider is missing api`)
+  if (api === undefined)
+    throw new ConfigError(`providers.${resolved.providerId}: custom provider is missing api`)
   const provider = createProvider({
     id: resolved.route,
     name: resolved.displayName,
@@ -293,7 +324,11 @@ async function commandCodeProvider(resolved: ResolvedProvider): Promise<BuiltPro
   }
 }
 
-async function buildOne(resolved: ResolvedProvider, key: string, log: ProviderLogger): Promise<BuiltProvider> {
+async function buildOne(
+  resolved: ResolvedProvider,
+  key: string,
+  log: ProviderLogger,
+): Promise<BuiltProvider> {
   switch (resolved.kind) {
     case 'builtin':
       return builtinProvider(resolved)
@@ -323,7 +358,15 @@ export async function buildProviders(
     }
     try {
       const built = await buildOne(provider, key, log)
-      profiles.set(provider.route, profileFor(provider.route, built.displayName ?? provider.displayName, built.provider, built.headers))
+      profiles.set(
+        provider.route,
+        profileFor(
+          provider.route,
+          built.displayName ?? provider.displayName,
+          built.provider,
+          built.headers,
+        ),
+      )
       keys.set(provider.route, provider.keySource)
     } catch (error) {
       if (error instanceof ConfigError) throw error
@@ -334,7 +377,10 @@ export async function buildProviders(
 }
 
 /** Build the adapter over the profiles that survived startup. */
-export function buildAdapter(profiles: ReadonlyMap<string, ResolvedPiAiProviderProfile>, keyOf: (provider: string) => string | undefined): PiAiAdapter {
+export function buildAdapter(
+  profiles: ReadonlyMap<string, ResolvedPiAiProviderProfile>,
+  keyOf: (provider: string) => string | undefined,
+): PiAiAdapter {
   return new PiAiAdapter({
     profiles: () => profiles as Map<string, ResolvedPiAiProviderProfile>,
     resolveApiKey: async (provider) => {

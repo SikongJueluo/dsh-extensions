@@ -54,7 +54,13 @@ export interface JjTaskRecord {
 }
 
 /** The live state of one recorded task, as observed without mutating jj. */
-export type JjTaskStateCode = 'ok' | 'moved' | 'bookmark-missing' | 'workspace-missing' | 'conflict' | 'unavailable'
+export type JjTaskStateCode =
+  | 'ok'
+  | 'moved'
+  | 'bookmark-missing'
+  | 'workspace-missing'
+  | 'conflict'
+  | 'unavailable'
 
 /** A recorded task plus the current state of its workspace and bookmark. */
 export interface JjTaskState extends JjTaskRecord {
@@ -89,7 +95,12 @@ export interface JjWorkspaceHost {
    * Create `poolPath` (self-ignoring when newly created) and `destination`
    * exclusively. An existing destination rejects the whole creation.
    */
-  prepare(projectRoot: string, poolPath: string, destination: string, signal: AbortSignal): Promise<void>
+  prepare(
+    projectRoot: string,
+    poolPath: string,
+    destination: string,
+    signal: AbortSignal,
+  ): Promise<void>
 }
 
 /** Inputs of one jj workspace creation. */
@@ -141,13 +152,20 @@ async function readOne(
   )
   const values = output.split('\n').filter((line) => line.length > 0)
   if (values.length !== 1) {
-    throw new Error(`jj revision ${JSON.stringify(revision)} must name exactly one change, not ${values.length}`)
+    throw new Error(
+      `jj revision ${JSON.stringify(revision)} must name exactly one change, not ${values.length}`,
+    )
   }
   return values[0]!
 }
 
 /** Resolve an explicit base revision to its pinned change id. */
-async function resolveFrom(host: JjWorkspaceHost, cwd: string, from: string, signal: AbortSignal): Promise<string> {
+async function resolveFrom(
+  host: JjWorkspaceHost,
+  cwd: string,
+  from: string,
+  signal: AbortSignal,
+): Promise<string> {
   if (from.startsWith('-')) throw new Error('jj base must not start with "-"')
   const output = await host.run(
     cwd,
@@ -156,7 +174,9 @@ async function resolveFrom(host: JjWorkspaceHost, cwd: string, from: string, sig
   )
   const values = output.split('\n').filter((line) => line.length > 0)
   if (values.length !== 1) {
-    throw new Error(`jj base ${JSON.stringify(from)} must name exactly one change, not ${values.length}`)
+    throw new Error(
+      `jj base ${JSON.stringify(from)} must name exactly one change, not ${values.length}`,
+    )
   }
   return values[0]!
 }
@@ -167,10 +187,25 @@ async function resolveFrom(host: JjWorkspaceHost, cwd: string, from: string, sig
  * the current workspace lives outside it (or the repository has no default),
  * the current workspace root is the fallback.
  */
-export async function projectRootOf(host: JjWorkspaceHost, workspaceRoot: string, signal: AbortSignal): Promise<string> {
-  const output = await host.run(workspaceRoot, ['--ignore-working-copy', 'workspace', 'list', '-T', ROOT_TEMPLATE], signal)
+export async function projectRootOf(
+  host: JjWorkspaceHost,
+  workspaceRoot: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const output = await host.run(
+    workspaceRoot,
+    ['--ignore-working-copy', 'workspace', 'list', '-T', ROOT_TEMPLATE],
+    signal,
+  )
   const current = resolve(workspaceRoot)
-  const roots = [...new Set(output.split('\n').map((line) => line.trim()).filter((line) => line.length > 0))]
+  const roots = [
+    ...new Set(
+      output
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0),
+    ),
+  ]
     .map((root) => resolve(root))
     .filter((root) => isWithin(root, current))
     .sort((left, right) => left.length - right.length)
@@ -187,7 +222,8 @@ export function validateWorkspaceName(name: string): string | undefined {
   }
   for (const segment of name.split('/')) {
     if (segment.length === 0) return 'workspace name must not contain empty path segments'
-    if (segment === '.' || segment === '..') return 'workspace name must not contain "." or ".." segments'
+    if (segment === '.' || segment === '..')
+      return 'workspace name must not contain "." or ".." segments'
     if (segment.includes('..') || segment.endsWith('.') || segment.endsWith('.lock')) {
       return 'workspace name segments must not contain "..", end with ".", or end with ".lock"'
     }
@@ -209,7 +245,11 @@ export function isWithin(parent: string, child: string): boolean {
  * A nested Git worktree (a `.git` file at its root) is Git even when an outer
  * directory is a jj workspace; a colocated workspace has both markers and is jj.
  */
-export async function findVcsRoot(cwd: string, probe: VcsProbe, signal?: AbortSignal): Promise<VcsRoot | undefined> {
+export async function findVcsRoot(
+  cwd: string,
+  probe: VcsProbe,
+  signal?: AbortSignal,
+): Promise<VcsRoot | undefined> {
   let directory = resolve(cwd)
   for (;;) {
     signal?.throwIfAborted()
@@ -229,7 +269,11 @@ export async function listWorkspaces(
   cwd: string,
   signal: AbortSignal,
 ): Promise<Map<string, string>> {
-  const output = await host.run(cwd, ['--ignore-working-copy', 'workspace', 'list', '-T', 'name ++ "\\t" ++ root ++ "\\n"'], signal)
+  const output = await host.run(
+    cwd,
+    ['--ignore-working-copy', 'workspace', 'list', '-T', 'name ++ "\\t" ++ root ++ "\\n"'],
+    signal,
+  )
   const workspaces = new Map<string, string>()
   for (const line of output.split('\n')) {
     if (line.length === 0) continue
@@ -252,11 +296,16 @@ export async function listBookmarks(
   const template =
     'name ++ "\\t" ++ self.remote() ++ "\\t" ++ self.present() ++ "\\t" ++ self.conflict()' +
     ' ++ "\\t" ++ if(self.conflict(), "", if(self.present(), normal_target.change_id(), "")) ++ "\\n"'
-  const output = await host.run(cwd, ['--ignore-working-copy', 'bookmark', 'list', '-T', template], signal)
+  const output = await host.run(
+    cwd,
+    ['--ignore-working-copy', 'bookmark', 'list', '-T', template],
+    signal,
+  )
   const bookmarks = new Map<string, BookmarkInfo>()
   for (const line of output.split('\n')) {
     if (line.length === 0) continue
-    const [name = '', remote = '', present = 'false', conflict = 'false', changeId = ''] = line.split('\t')
+    const [name = '', remote = '', present = 'false', conflict = 'false', changeId = ''] =
+      line.split('\t')
     if (name.length === 0 || remote.length > 0 || present !== 'true') continue
     bookmarks.set(name, { name, conflict: conflict === 'true', changeId })
   }
@@ -301,7 +350,8 @@ async function assertAvailable(
     throw new Error(`jj bookmark already exists: ${name}`)
   }
 
-  if (await host.exists(destination, signal)) throw new Error(`workspace path already exists: ${destination}`)
+  if (await host.exists(destination, signal))
+    throw new Error(`workspace path already exists: ${destination}`)
 }
 
 /**
@@ -331,17 +381,28 @@ export async function createJjWorkspace(
   const projectRoot = await projectRootOf(host, workspaceRoot, signal)
   const poolPath = resolve(projectRoot, poolDirectory)
   const destination = resolve(poolPath, name)
-  if (!isWithin(projectRoot, poolPath) || !isWithin(poolPath, destination) || poolPath === destination) {
+  if (
+    !isWithin(projectRoot, poolPath) ||
+    !isWithin(poolPath, destination) ||
+    poolPath === destination
+  ) {
     throw new Error(`workspace destination escapes the project pool: ${destination}`)
   }
 
   await assertAvailable(host, workspaceRoot, name, destination, signal)
-  const revision = from === undefined || from.length === 0 ? '@' : await resolveFrom(host, workspaceRoot, from, signal)
+  const revision =
+    from === undefined || from.length === 0
+      ? '@'
+      : await resolveFrom(host, workspaceRoot, from, signal)
 
   await host.prepare(projectRoot, poolPath, destination, signal)
   onPhase?.('checkout')
   try {
-    await host.run(workspaceRoot, ['workspace', 'add', '--name', name, '-r', revision, '--', destination], signal)
+    await host.run(
+      workspaceRoot,
+      ['workspace', 'add', '--name', name, '-r', revision, '--', destination],
+      signal,
+    )
     await host.run(destination, ['bookmark', 'create', '-r', '@', '--', name], signal)
   } catch (error) {
     throw new Error(

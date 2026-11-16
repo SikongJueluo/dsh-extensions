@@ -75,24 +75,36 @@ export interface Config {
 // No `Schema<Config>` annotation: schemastery >= 3.18.4 types volatile modes
 // into the schema generics; the inferred shape keeps the loader contract.
 export const Config = Schema.object({
-  providerName: Schema.string().min(1).default('recursive-filesystem').description(
-    'Provider name recorded on every candidate. Must be unique within its registry layer and cannot be "runtime".',
-  ),
+  providerName: Schema.string()
+    .min(1)
+    .default('recursive-filesystem')
+    .description(
+      'Provider name recorded on every candidate. Must be unique within its registry layer and cannot be "runtime".',
+    ),
   agentsHome: Schema.string().description(
     'Shared agent config root; the default scan root is <agentsHome>/skills. Defaults to $DSH_AGENTS_HOME, then ~/.agents. The singular ~/.agent is never guessed.',
   ),
-  extraRoots: Schema.array(Schema.string()).default([]).description(
-    'Additional skill roots scanned with the same rules (direct skills skipped, nested bundles discovered). Tilde prefixes are expanded; relative paths resolve against the host process cwd.',
-  ),
-  maxDepth: Schema.natural().min(2).default(4).description(
-    'Deepest bundle directory accepted relative to a root, where the root itself is depth 0 and a category child is depth 1. A nested bundle lives at depth >= 2. The default covers category/nested/category layouts.',
-  ),
-  rank: Schema.natural().default(NESTED_USER_RANK).description(
-    'Precedence inside one registry layer (lower wins). The default 501 keeps the stock user-agents provider (500) ahead on duplicate names while still preceding bundled skills (600).',
-  ),
-  watch: Schema.boolean().default(true).description(
-    'Watch scanned roots/categories and each discovered SKILL.md, invalidating this provider registration on changes. Requires ctx.fs.watch; a failing watcher degrades hot refresh but not discovery.',
-  ),
+  extraRoots: Schema.array(Schema.string())
+    .default([])
+    .description(
+      'Additional skill roots scanned with the same rules (direct skills skipped, nested bundles discovered). Tilde prefixes are expanded; relative paths resolve against the host process cwd.',
+    ),
+  maxDepth: Schema.natural()
+    .min(2)
+    .default(4)
+    .description(
+      'Deepest bundle directory accepted relative to a root, where the root itself is depth 0 and a category child is depth 1. A nested bundle lives at depth >= 2. The default covers category/nested/category layouts.',
+    ),
+  rank: Schema.natural()
+    .default(NESTED_USER_RANK)
+    .description(
+      'Precedence inside one registry layer (lower wins). The default 501 keeps the stock user-agents provider (500) ahead on duplicate names while still preceding bundled skills (600).',
+    ),
+  watch: Schema.boolean()
+    .default(true)
+    .description(
+      'Watch scanned roots/categories and each discovered SKILL.md, invalidating this provider registration on changes. Requires ctx.fs.watch; a failing watcher degrades hot refresh but not discovery.',
+    ),
 })
 
 /**

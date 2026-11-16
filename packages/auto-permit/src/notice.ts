@@ -47,7 +47,8 @@ const SUMMARY_PREFIX: Record<NoticeOutcome, string> = {
 
 const BODY_PREFIX: Record<NoticeOutcome, string> = {
   allowed: '[auto-permit] allowed this escalation to full access',
-  'allowed-by-memory': '[auto-permit] allowed this escalation (an equivalent command was approved earlier in this session)',
+  'allowed-by-memory':
+    '[auto-permit] allowed this escalation (an equivalent command was approved earlier in this session)',
   'allowed-by-cmd-permit': '[cmd-permit via auto-permit] allowed this escalation: allowlist hit',
   deferred: '[auto-permit] deferred this escalation to the user',
   'high-risk': '[auto-permit] routed this escalation to the user: irreversible shape',

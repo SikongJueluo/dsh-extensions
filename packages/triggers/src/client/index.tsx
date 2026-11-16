@@ -13,15 +13,7 @@
 // widths shrink with the viewport, and hover is only an enhancement.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import {
-  Alert,
-  Badge,
-  Button,
-  Input,
-  Root,
-  cn,
-  type DshClientContext,
-} from '@dsh-extensions/ui'
+import { Alert, Badge, Button, Input, Root, cn, type DshClientContext } from '@dsh-extensions/ui'
 import './styles.css'
 
 const RPC_BASE = '/dsh-triggers'
@@ -136,8 +128,7 @@ interface RpcEnvelope<T> {
 }
 
 function callRpc<T>(endpoint: string, payload?: Record<string, unknown>): Promise<T> {
-  const signal =
-    typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(30000) : undefined
+  const signal = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(30000) : undefined
   return fetch(`${RPC_BASE}/${endpoint}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -161,18 +152,30 @@ function callRpc<T>(endpoint: string, payload?: Record<string, unknown>): Promis
 const zh: Record<string, string> = {
   viewLabel: '触发器',
   title: '触发器',
-  refresh: '刷新', loading: '加载中…', loadFailed: '读取失败：{message}', retry: '重试', close: '关闭',
+  refresh: '刷新',
+  loading: '加载中…',
+  loadFailed: '读取失败：{message}',
+  retry: '重试',
+  close: '关闭',
   noSession: '没有选中的会话。',
   activeSummary: '{n} 个运行进行中',
   emptyTitle: '当前会话暂无关联触发器。',
   emptyHint: '通过交接流程建立的循环会显示在这里。',
-  roleExecutor: '你是执行者', roleReviewer: '你是审核者',
-  peerExecutor: '执行者', peerReviewer: '审核者',
-  unknownSession: '会话不可见', round: '第 {round}/{max} 轮',
-  noRun: '尚未启动', noRunHint: '绑定已建立，等待第一次运行。',
-  statusActiveDelivery: '等待交付', statusActiveReview: '等待审核',
-  statusPausedUser: '等待用户', statusPausedBudget: '预算用尽',
-  statusPausedError: '异常暂停', statusCompleted: '已完成', statusCancelled: '已取消',
+  roleExecutor: '你是执行者',
+  roleReviewer: '你是审核者',
+  peerExecutor: '执行者',
+  peerReviewer: '审核者',
+  unknownSession: '会话不可见',
+  round: '第 {round}/{max} 轮',
+  noRun: '尚未启动',
+  noRunHint: '绑定已建立，等待第一次运行。',
+  statusActiveDelivery: '等待交付',
+  statusActiveReview: '等待审核',
+  statusPausedUser: '等待用户',
+  statusPausedBudget: '预算用尽',
+  statusPausedError: '异常暂停',
+  statusCompleted: '已完成',
+  statusCancelled: '已取消',
   reasonAwaitingDeliverySelf: '等待你完成本回合并交付。',
   reasonAwaitingDeliveryPeer: '等待执行者完成本回合并交付。',
   reasonAwaitingReviewSelf: '等待你提交 rework / pass / needs_user 裁决。',
@@ -183,87 +186,167 @@ const zh: Record<string, string> = {
   reasonPausedBudget: '轮次预算已用尽；续一轮后可以继续。',
   reasonPausedBudgetRework: '轮次预算已用尽；待返工的审核意见：{summary}',
   reasonPausedError: '运行因异常暂停；请查看投递错误，或恢复后重试。',
-  reasonCompleted: '运行已完成。', reasonCancelled: '运行已取消。',
+  reasonCompleted: '运行已完成。',
+  reasonCancelled: '运行已取消。',
   pendingSignalNote: '本回合已有待提交信号；回合结束后按该信号推进。',
   endNote: '备注',
-  pause: '暂停', resume: '恢复',
+  pause: '暂停',
+  resume: '恢复',
   resumeNotePlaceholder: '随恢复带给对方的说明（可空）',
-  extend: '续一轮', cancel: '取消', confirmCancel: '取消该运行？', redeliver: '重投',
+  extend: '续一轮',
+  cancel: '取消',
+  confirmCancel: '取消该运行？',
+  redeliver: '重投',
   actionFailed: '操作失败：{message}',
-  details: '详情', otherRuns: '其他运行',
-  historyTitle: '历史', historyTruncated: '最近 {shown} 条，共 {total} 条',
-  deliveriesTitle: '投递', attentionDeliveries: '需要处理', sentDeliveries: '已送达',
+  details: '详情',
+  otherRuns: '其他运行',
+  historyTitle: '历史',
+  historyTruncated: '最近 {shown} 条，共 {total} 条',
+  deliveriesTitle: '投递',
+  attentionDeliveries: '需要处理',
+  sentDeliveries: '已送达',
   deliveriesTruncated: '最近 {shown} 条，共 {total} 条',
-  deliveryTo: '→ {to}', deliveryError: '错误：{message}',
+  deliveryTo: '→ {to}',
+  deliveryError: '错误：{message}',
   configTitle: '配置',
-  configExecutor: '执行会话', configReviewer: '审核会话', configRounds: '轮次预算',
-  configAuto: '自动送审', configTemplates: '模板', configEnabled: '绑定状态',
-  configEnabledOn: '启用', configDisabled: '已停用',
+  configExecutor: '执行会话',
+  configReviewer: '审核会话',
+  configRounds: '轮次预算',
+  configAuto: '自动送审',
+  configTemplates: '模板',
+  configEnabled: '绑定状态',
+  configEnabledOn: '启用',
+  configDisabled: '已停用',
   configHint: '配置来自交接流程，本页只读。',
-  autoOn: '开', autoOff: '关',
+  autoOn: '开',
+  autoOff: '关',
   missingBindingNote: '绑定配置当前不可见；以下运行保留启动时的会话快照。',
   snapshotNote: '当前绑定已改配对；本次运行仍按启动时的会话快照显示。',
   untitledRun: '未命名运行',
-  tplStart: '开工', tplReview: '送审', tplRework: '返工',
-  expand: '展开详情', collapse: '收起详情',
-  statePending: '待发送', stateSent: '已送达', stateFailed: '失败',
-  kindStart: '开工', kindReview: '送审', kindRework: '返工', kindNotice: '通知', kindResume: '恢复', kindNudge: '提醒',
-  histStarted: '启动', histSignal: '信号', histAdvance: '推进', histPause: '暂停',
-  histResume: '恢复', histEnd: '结束', histNote: '备注', histDelivery: '投递', histNudge: '提醒',
+  tplStart: '开工',
+  tplReview: '送审',
+  tplRework: '返工',
+  expand: '展开详情',
+  collapse: '收起详情',
+  statePending: '待发送',
+  stateSent: '已送达',
+  stateFailed: '失败',
+  kindStart: '开工',
+  kindReview: '送审',
+  kindRework: '返工',
+  kindNotice: '通知',
+  kindResume: '恢复',
+  kindNudge: '提醒',
+  histStarted: '启动',
+  histSignal: '信号',
+  histAdvance: '推进',
+  histPause: '暂停',
+  histResume: '恢复',
+  histEnd: '结束',
+  histNote: '备注',
+  histDelivery: '投递',
+  histNudge: '提醒',
 }
 
 const en: Record<string, string> = {
   viewLabel: 'Triggers',
   title: 'Triggers',
-  refresh: 'Refresh', loading: 'Loading…', loadFailed: 'Could not load: {message}', retry: 'Retry', close: 'Dismiss',
+  refresh: 'Refresh',
+  loading: 'Loading…',
+  loadFailed: 'Could not load: {message}',
+  retry: 'Retry',
+  close: 'Dismiss',
   noSession: 'No session selected.',
   activeSummary: '{n} runs active',
   emptyTitle: 'No triggers are associated with this session.',
   emptyHint: 'Loops created by a handoff appear here.',
-  roleExecutor: 'You are the executor', roleReviewer: 'You are the reviewer',
-  peerExecutor: 'Executor', peerReviewer: 'Reviewer',
-  unknownSession: 'session unavailable', round: 'round {round}/{max}',
-  noRun: 'Not started', noRunHint: 'The binding exists; waiting for its first run.',
-  statusActiveDelivery: 'Awaiting delivery', statusActiveReview: 'Awaiting review',
-  statusPausedUser: 'Waiting for user', statusPausedBudget: 'Round budget spent',
-  statusPausedError: 'Paused on error', statusCompleted: 'Completed', statusCancelled: 'Cancelled',
+  roleExecutor: 'You are the executor',
+  roleReviewer: 'You are the reviewer',
+  peerExecutor: 'Executor',
+  peerReviewer: 'Reviewer',
+  unknownSession: 'session unavailable',
+  round: 'round {round}/{max}',
+  noRun: 'Not started',
+  noRunHint: 'The binding exists; waiting for its first run.',
+  statusActiveDelivery: 'Awaiting delivery',
+  statusActiveReview: 'Awaiting review',
+  statusPausedUser: 'Waiting for user',
+  statusPausedBudget: 'Round budget spent',
+  statusPausedError: 'Paused on error',
+  statusCompleted: 'Completed',
+  statusCancelled: 'Cancelled',
   reasonAwaitingDeliverySelf: 'Waiting for you to finish this round and deliver.',
   reasonAwaitingDeliveryPeer: 'Waiting for the executor to finish this round and deliver.',
   reasonAwaitingReviewSelf: 'Waiting for your rework / pass / needs_user verdict.',
   reasonAwaitingReviewPeer: "Waiting for the reviewer's verdict.",
   reasonPausedUser: 'Waiting for the user to resolve it, then resume.',
   reasonPausedUserSelf: 'This session raised a decision for the user; the loop resumes afterwards.',
-  reasonPausedUserPeer: 'The other side raised a decision for the user; the loop resumes afterwards.',
+  reasonPausedUserPeer:
+    'The other side raised a decision for the user; the loop resumes afterwards.',
   reasonPausedBudget: 'The round budget is spent; extend it to continue.',
   reasonPausedBudgetRework: 'The round budget is spent; pending rework: {summary}',
   reasonPausedError: 'The run paused on an error; check delivery errors or resume to retry.',
-  reasonCompleted: 'The run completed.', reasonCancelled: 'The run was cancelled.',
+  reasonCompleted: 'The run completed.',
+  reasonCancelled: 'The run was cancelled.',
   pendingSignalNote: 'A signal is already pending this turn; the run advances when the turn ends.',
   endNote: 'Note',
-  pause: 'Pause', resume: 'Resume',
+  pause: 'Pause',
+  resume: 'Resume',
   resumeNotePlaceholder: 'Optional note to deliver with the resume',
-  extend: '+1 round', cancel: 'Cancel', confirmCancel: 'Cancel this run?', redeliver: 'Resend',
+  extend: '+1 round',
+  cancel: 'Cancel',
+  confirmCancel: 'Cancel this run?',
+  redeliver: 'Resend',
   actionFailed: 'Action failed: {message}',
-  details: 'Details', otherRuns: 'Other runs',
-  historyTitle: 'History', historyTruncated: 'latest {shown} of {total}',
-  deliveriesTitle: 'Deliveries', attentionDeliveries: 'Needs attention', sentDeliveries: 'Sent',
+  details: 'Details',
+  otherRuns: 'Other runs',
+  historyTitle: 'History',
+  historyTruncated: 'latest {shown} of {total}',
+  deliveriesTitle: 'Deliveries',
+  attentionDeliveries: 'Needs attention',
+  sentDeliveries: 'Sent',
   deliveriesTruncated: 'latest {shown} of {total}',
-  deliveryTo: '→ {to}', deliveryError: 'Error: {message}',
+  deliveryTo: '→ {to}',
+  deliveryError: 'Error: {message}',
   configTitle: 'Configuration',
-  configExecutor: 'Executor', configReviewer: 'Reviewer', configRounds: 'Round budget',
-  configAuto: 'Auto-deliver', configTemplates: 'Templates', configEnabled: 'Binding',
-  configEnabledOn: 'enabled', configDisabled: 'disabled',
+  configExecutor: 'Executor',
+  configReviewer: 'Reviewer',
+  configRounds: 'Round budget',
+  configAuto: 'Auto-deliver',
+  configTemplates: 'Templates',
+  configEnabled: 'Binding',
+  configEnabledOn: 'enabled',
+  configDisabled: 'disabled',
   configHint: 'Set by the handoff; read-only here.',
-  autoOn: 'on', autoOff: 'off',
-  missingBindingNote: 'The binding configuration is not visible here; runs below keep their start-time session snapshot.',
+  autoOn: 'on',
+  autoOff: 'off',
+  missingBindingNote:
+    'The binding configuration is not visible here; runs below keep their start-time session snapshot.',
   snapshotNote: 'The binding pair changed; this run still follows its start-time session snapshot.',
   untitledRun: 'Untitled run',
-  tplStart: 'Start', tplReview: 'Review', tplRework: 'Rework',
-  expand: 'Expand details', collapse: 'Collapse details',
-  statePending: 'pending', stateSent: 'sent', stateFailed: 'failed',
-  kindStart: 'start', kindReview: 'review', kindRework: 'rework', kindNotice: 'notice', kindResume: 'resume', kindNudge: 'nudge',
-  histStarted: 'started', histSignal: 'signal', histAdvance: 'advanced', histPause: 'paused',
-  histResume: 'resumed', histEnd: 'ended', histNote: 'note', histDelivery: 'delivery', histNudge: 'nudge',
+  tplStart: 'Start',
+  tplReview: 'Review',
+  tplRework: 'Rework',
+  expand: 'Expand details',
+  collapse: 'Collapse details',
+  statePending: 'pending',
+  stateSent: 'sent',
+  stateFailed: 'failed',
+  kindStart: 'start',
+  kindReview: 'review',
+  kindRework: 'rework',
+  kindNotice: 'notice',
+  kindResume: 'resume',
+  kindNudge: 'nudge',
+  histStarted: 'started',
+  histSignal: 'signal',
+  histAdvance: 'advanced',
+  histPause: 'paused',
+  histResume: 'resumed',
+  histEnd: 'ended',
+  histNote: 'note',
+  histDelivery: 'delivery',
+  histNudge: 'nudge',
 }
 
 function template(text: string, vars: Record<string, unknown>): string {
@@ -282,8 +365,13 @@ function fmtTime(ms: number): string {
   const date = new Date(ms)
   const pad = (value: number): string => String(value).padStart(2, '0')
   return (
-    pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' +
-    pad(date.getHours()) + ':' + pad(date.getMinutes())
+    pad(date.getMonth() + 1) +
+    '-' +
+    pad(date.getDate()) +
+    ' ' +
+    pad(date.getHours()) +
+    ':' +
+    pad(date.getMinutes())
   )
 }
 
@@ -316,14 +404,20 @@ function sessionLabel(t: Translate, sessionsById: SessionsById, id: string | und
   return shortId(id) + (catalogKnown ? ' · ' + t('unknownSession') : '')
 }
 
-function roleOf(record: TriggerRun | TriggerBinding | undefined, sessionId: string): Role | undefined {
+function roleOf(
+  record: TriggerRun | TriggerBinding | undefined,
+  sessionId: string,
+): Role | undefined {
   if (!record) return undefined
   if (record.executor === sessionId) return 'executor'
   if (record.parent === sessionId) return 'parent'
   return undefined
 }
 
-function peerOf(record: TriggerRun | TriggerBinding | undefined, sessionId: string): string | undefined {
+function peerOf(
+  record: TriggerRun | TriggerBinding | undefined,
+  sessionId: string,
+): string | undefined {
   if (!record) return undefined
   if (record.executor === sessionId) return record.parent
   if (record.parent === sessionId) return record.executor
@@ -331,20 +425,35 @@ function peerOf(record: TriggerRun | TriggerBinding | undefined, sessionId: stri
 }
 
 const STATUS_KEYS: Record<string, string> = {
-  'paused-user': 'statusPausedUser', 'paused-budget': 'statusPausedBudget',
-  'paused-error': 'statusPausedError', completed: 'statusCompleted', cancelled: 'statusCancelled',
+  'paused-user': 'statusPausedUser',
+  'paused-budget': 'statusPausedBudget',
+  'paused-error': 'statusPausedError',
+  completed: 'statusCompleted',
+  cancelled: 'statusCancelled',
 }
 const HISTORY_KEYS: Record<string, string> = {
-  started: 'histStarted', signal: 'histSignal', advance: 'histAdvance',
-  pause: 'histPause', resume: 'histResume', end: 'histEnd',
-  note: 'histNote', delivery: 'histDelivery', nudge: 'histNudge',
+  started: 'histStarted',
+  signal: 'histSignal',
+  advance: 'histAdvance',
+  pause: 'histPause',
+  resume: 'histResume',
+  end: 'histEnd',
+  note: 'histNote',
+  delivery: 'histDelivery',
+  nudge: 'histNudge',
 }
 const KIND_KEYS: Record<string, string> = {
-  start: 'kindStart', review: 'kindReview', rework: 'kindRework',
-  notice: 'kindNotice', resume: 'kindResume', nudge: 'kindNudge',
+  start: 'kindStart',
+  review: 'kindReview',
+  rework: 'kindRework',
+  notice: 'kindNotice',
+  resume: 'kindResume',
+  nudge: 'kindNudge',
 }
 const DELIVERY_STATE_KEYS: Record<string, string> = {
-  pending: 'statePending', sent: 'stateSent', failed: 'stateFailed',
+  pending: 'statePending',
+  sent: 'stateSent',
+  failed: 'stateFailed',
 }
 
 type Tone = 'idle' | 'success' | 'warn' | 'error'
@@ -394,7 +503,12 @@ function groupTitle(t: Translate, group: RunGroup): string {
 }
 
 const RUN_RANK: Record<string, number> = {
-  'paused-error': 0, 'paused-user': 1, 'paused-budget': 2, active: 3, completed: 4, cancelled: 5,
+  'paused-error': 0,
+  'paused-user': 1,
+  'paused-budget': 2,
+  active: 3,
+  completed: 4,
+  cancelled: 5,
 }
 
 function pickCurrentRun(runs: TriggerRun[]): TriggerRun | undefined {
@@ -406,7 +520,12 @@ function pickCurrentRun(runs: TriggerRun[]): TriggerRun | undefined {
 }
 
 const GROUP_RANK: Record<string, number> = {
-  'paused-error': 0, 'paused-user': 1, 'paused-budget': 2, active: 3, completed: 5, cancelled: 6,
+  'paused-error': 0,
+  'paused-user': 1,
+  'paused-budget': 2,
+  active: 3,
+  completed: 5,
+  cancelled: 6,
 }
 
 function groupRank(group: RunGroup): number {
@@ -467,7 +586,8 @@ function buildGroups(data: ScopedSnapshot, sessionId: string): RunGroup[] {
     group.peer = peerOf(record, sessionId)
   }
   groups.sort(
-    (left, right) => groupRank(left) - groupRank(right) || groupActivity(right) - groupActivity(left),
+    (left, right) =>
+      groupRank(left) - groupRank(right) || groupActivity(right) - groupActivity(left),
   )
   return groups
 }
@@ -610,9 +730,17 @@ function ConfigFacts(props: {
   }
   const refs = binding.templates ?? {}
   const templatesLine =
-    t('tplStart') + ' ' + templateName(refs.start) + ' · ' +
-    t('tplReview') + ' ' + templateName(refs.review) + ' · ' +
-    t('tplRework') + ' ' + templateName(refs.rework)
+    t('tplStart') +
+    ' ' +
+    templateName(refs.start) +
+    ' · ' +
+    t('tplReview') +
+    ' ' +
+    templateName(refs.review) +
+    ' · ' +
+    t('tplRework') +
+    ' ' +
+    templateName(refs.rework)
   return (
     <section
       aria-label={t('configTitle')}
@@ -754,9 +882,7 @@ function RunActions(props: { t: Translate; run: TriggerRun; onAction: ActionFn }
   function control(action: string, extra?: Record<string, unknown>) {
     if (busy) return
     setBusy(true)
-    void Promise.resolve(
-      onAction('run.control', { runId: run.id, action, ...(extra ?? {}) }),
-    )
+    void Promise.resolve(onAction('run.control', { runId: run.id, action, ...(extra ?? {}) }))
       .then((ok) => {
         if (ok) setNote('')
       })
@@ -892,7 +1018,12 @@ function RunDetails(props: {
         />
       ) : null}
       {binding !== undefined ? (
-        <ConfigFacts t={t} binding={binding} sessionsById={sessionsById} templates={props.templates} />
+        <ConfigFacts
+          t={t}
+          binding={binding}
+          sessionsById={sessionsById}
+          templates={props.templates}
+        />
       ) : null}
     </Disclosure>
   )
@@ -960,7 +1091,8 @@ function RunEntry(props: {
   const { t, run, sessionId, sessionsById, deliveries, onAction } = props
   const [open, setOpen] = useState(false)
   const tone = statusTone(run.status)
-  const title = typeof run.task === 'string' && run.task.trim().length > 0 ? run.task : t('untitledRun')
+  const title =
+    typeof run.task === 'string' && run.task.trim().length > 0 ? run.task : t('untitledRun')
   const detailId = 'dsh-triggers-run-' + safeId(run.id)
   return (
     <div>
@@ -972,7 +1104,9 @@ function RunEntry(props: {
         className="dshx:flex dshx:w-full dshx:min-h-11 dshx:items-center dshx:gap-2.5 dshx:rounded-md dshx:py-2 dshx:text-left dshx:hover:bg-surface-2 dshx:focus-visible:outline-offset-[-2px]"
       >
         <Chip tone={tone}>{runStateText(t, run)}</Chip>
-        <span className="dshx:min-w-0 dshx:flex-1 dshx:truncate dshx:text-sm dshx:font-medium">{title}</span>
+        <span className="dshx:min-w-0 dshx:flex-1 dshx:truncate dshx:text-sm dshx:font-medium">
+          {title}
+        </span>
         <span className="dshx:shrink-0 dshx:whitespace-nowrap dshx:text-2xs dshx:text-fg-secondary dshx:max-[600px]:hidden">
           {t('round', { round: run.round, max: run.maxRounds }) + ' · ' + fmtTime(run.startedAt)}
         </span>
@@ -1061,11 +1195,7 @@ function TriggerRow(props: {
                 </span>
               ) : null}
               {group.role ? <span className="dshx:opacity-55">·</span> : null}
-              {group.role ? (
-                <span>{peerLabel + ' ' + peer}</span>
-              ) : (
-                <span>{peer}</span>
-              )}
+              {group.role ? <span>{peerLabel + ' ' + peer}</span> : <span>{peer}</span>}
               {current ? <span className="dshx:opacity-55">·</span> : null}
               {current ? (
                 <span>{t('round', { round: current.round, max: current.maxRounds })}</span>
@@ -1113,7 +1243,12 @@ function TriggerRow(props: {
           )}
           {current === undefined && binding !== undefined ? (
             <Disclosure label={t('configTitle')}>
-              <ConfigFacts t={t} binding={binding} sessionsById={sessionsById} templates={templates} />
+              <ConfigFacts
+                t={t}
+                binding={binding}
+                sessionsById={sessionsById}
+                templates={templates}
+              />
             </Disclosure>
           ) : null}
           {others.length > 0 ? (
@@ -1172,7 +1307,12 @@ function TriggerListView(props: {
     actionError !== undefined ? (
       <Alert variant="error" className={BANNER_CLASS}>
         <span className="dshx:min-w-0 dshx:[overflow-wrap:anywhere]">{actionError}</span>
-        <Button variant="ghost" size="icon" aria-label={t('close')} onClick={props.onDismissActionError}>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={t('close')}
+          onClick={props.onDismissActionError}
+        >
           ×
         </Button>
       </Alert>
@@ -1293,7 +1433,8 @@ interface TriggersViewProps {
 // --- the fetch/poll wrapper; TriggerListView stays pure for tests ---------
 function TriggersView(props: TriggersViewProps) {
   const { t } = props
-  const sessionId = props.sessionId === undefined || props.sessionId === null ? '' : String(props.sessionId)
+  const sessionId =
+    props.sessionId === undefined || props.sessionId === null ? '' : String(props.sessionId)
   const sessionsById = props.useSessions((state) => state.byId)
   const [state, setState] = useState<{
     sessionId: string
@@ -1385,10 +1526,7 @@ function TriggersView(props: TriggersViewProps) {
 }
 
 function apply(ctx: DshClientContext) {
-  ctx.effect(
-    () => ctx.locale.register(LOCALE_NS, { zh, en }),
-    'dsh-triggers: locale',
-  )
+  ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'dsh-triggers: locale')
   const t = ctx.locale.bind(LOCALE_NS)
   ctx.slots.inject('conversation.view', () => {
     return ctx.slots.register(

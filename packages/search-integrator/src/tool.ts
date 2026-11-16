@@ -58,7 +58,10 @@ export interface ToolHost {
 }
 
 export interface ToolHostLlm {
-  call(req: { system: string; user: string; maxTokens: number }, signal: AbortSignal): Promise<{
+  call(
+    req: { system: string; user: string; maxTokens: number },
+    signal: AbortSignal,
+  ): Promise<{
     ok: boolean
     text: string
     finishKind: string
@@ -76,18 +79,20 @@ export function createToolHost(ctx: Context, config: Config): ToolHost {
       const resolved = await ctx.credentials.resolve(credentialRef(ref))
       return resolved?.value
     },
-    llmFor: (settings) => (integratorConfigured(settings)
-      ? createLlmPort(ctx, {
-        provider: settings.integratorProvider,
-        model: settings.integratorModel,
-        maxTokens: settings.integratorMaxTokens,
-      })
-      : undefined),
-    auditFor: (callId, sessionId) => createAuditPort(ctx, {
-      toolName: config.toolName,
-      callId,
-      ...(sessionId === undefined ? {} : { sessionId: sessionId as never }),
-    }),
+    llmFor: (settings) =>
+      integratorConfigured(settings)
+        ? createLlmPort(ctx, {
+            provider: settings.integratorProvider,
+            model: settings.integratorModel,
+            maxTokens: settings.integratorMaxTokens,
+          })
+        : undefined,
+    auditFor: (callId, sessionId) =>
+      createAuditPort(ctx, {
+        toolName: config.toolName,
+        callId,
+        ...(sessionId === undefined ? {} : { sessionId: sessionId as never }),
+      }),
     postJson,
     getJson,
     rawPost: fetchRawPost(),
@@ -95,7 +100,11 @@ export function createToolHost(ctx: Context, config: Config): ToolHost {
       // Opportunistic: the oauthProviders service exists only while the
       // oauth-providers plugin is mounted and signed in.
       const service = ctx.get('oauthProviders') as
-        | { token?: (provider: string) => Promise<{ access: string; accountId?: string } | undefined> }
+        | {
+            token?: (
+              provider: string,
+            ) => Promise<{ access: string; accountId?: string } | undefined>
+          }
         | undefined
       return service?.token?.('chatgpt')
     },
@@ -117,12 +126,14 @@ function parseArgs(args: unknown): ParsedArgs {
   if (question === '') throw new Error('question must be a non-empty string')
   if (record.queries === undefined) return { question }
   if (!Array.isArray(record.queries)) throw new Error('queries must be an array of strings')
-  const queries = [...new Set(
-    record.queries
-      .filter((query): query is string => typeof query === 'string')
-      .map((query) => query.trim())
-      .filter((query) => query !== ''),
-  )].slice(0, MAX_QUERIES)
+  const queries = [
+    ...new Set(
+      record.queries
+        .filter((query): query is string => typeof query === 'string')
+        .map((query) => query.trim())
+        .filter((query) => query !== ''),
+    ),
+  ].slice(0, MAX_QUERIES)
   return queries.length === 0 ? { question } : { question, queries }
 }
 
@@ -149,7 +160,8 @@ export function makeResearchTool(
       question: {
         type: 'string',
         required: true,
-        description: 'The complete question or information need, phrased the way you want it answered.',
+        description:
+          'The complete question or information need, phrased the way you want it answered.',
       },
       queries: {
         type: 'array',
@@ -173,7 +185,11 @@ export function makeResearchTool(
               additionalProperties: false,
               properties: {
                 text: { type: 'string', required: true },
-                status: { type: 'string', enum: ['supported', 'conflict', 'insufficient'], required: true },
+                status: {
+                  type: 'string',
+                  enum: ['supported', 'conflict', 'insufficient'],
+                  required: true,
+                },
                 sources: { type: 'array', required: true, items: { type: 'integer' } },
                 sides: {
                   type: 'array',
@@ -244,10 +260,15 @@ export function makeResearchTool(
           degradedReason: { type: 'string' },
         },
       },
-      render: (_args, value) => [{
-        type: 'text',
-        text: renderResearch(value as unknown as ResearchResult, host.readSettings().maxRenderChars),
-      }],
+      render: (_args, value) => [
+        {
+          type: 'text',
+          text: renderResearch(
+            value as unknown as ResearchResult,
+            host.readSettings().maxRenderChars,
+          ),
+        },
+      ],
       presentationMeta: (_args, value) => researchMeta(value as unknown as ResearchResult),
     },
     timeoutMs: options.timeoutMs,
@@ -258,7 +279,7 @@ export function makeResearchTool(
       const sessionId = sessionIdOf(exec)
 
       const keys: Partial<Record<'zhipu' | 'tavily' | 'exa' | 'brave' | 'openai', string>> = {}
-      const wanted: [('zhipu' | 'tavily' | 'exa' | 'brave' | 'openai'), string][] = []
+      const wanted: ['zhipu' | 'tavily' | 'exa' | 'brave' | 'openai', string][] = []
       if (settings.zhipuEnabled) wanted.push(['zhipu', settings.zhipuApiKeyRef])
       if (settings.tavilyEnabled) wanted.push(['tavily', settings.tavilyApiKeyRef])
       if (settings.exaEnabled) wanted.push(['exa', settings.exaApiKeyRef])
@@ -269,7 +290,8 @@ export function makeResearchTool(
       )
       resolvedKeys.forEach((outcome, index) => {
         if (outcome.status === 'fulfilled' && outcome.value !== undefined && outcome.value !== '') {
-          keys[wanted[index]?.[0] as 'zhipu' | 'tavily' | 'exa' | 'brave' | 'openai'] = outcome.value
+          keys[wanted[index]?.[0] as 'zhipu' | 'tavily' | 'exa' | 'brave' | 'openai'] =
+            outcome.value
         }
       })
 
@@ -280,7 +302,7 @@ export function makeResearchTool(
         chatgptToken: host.chatgptToken,
       })
       try {
-        return await runResearch(
+        return (await runResearch(
           {
             adapters,
             configFailures: failures,
@@ -290,7 +312,7 @@ export function makeResearchTool(
           },
           parsed,
           exec.signal,
-        ) as never
+        )) as never
       } catch (error) {
         if (exec.signal.aborted) throw error
         host.warn('search-integrator: research run crashed:', error)

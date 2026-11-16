@@ -21,7 +21,12 @@
 import { z } from 'zod'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { DomainTableSpec } from '@deepseek-ai/dsh-storage-domain'
-import { BUILTIN_REVIEW_TEMPLATE, BUILTIN_REWORK_TEMPLATE, BUILTIN_START_TEMPLATE, DOMAIN_NAME } from './identity.js'
+import {
+  BUILTIN_REVIEW_TEMPLATE,
+  BUILTIN_REWORK_TEMPLATE,
+  BUILTIN_START_TEMPLATE,
+  DOMAIN_NAME,
+} from './identity.js'
 
 /**
  * Bridge over a zod-version skew: the host runs zod 4.6, whose `ZodObject`
@@ -89,7 +94,16 @@ export interface PendingRework {
 /** One compact history line (bounded; the session logs stay the full record). */
 export interface RunHistoryEntry {
   readonly at: number
-  readonly kind: 'started' | 'signal' | 'advance' | 'pause' | 'resume' | 'end' | 'note' | 'delivery' | 'nudge'
+  readonly kind:
+    | 'started'
+    | 'signal'
+    | 'advance'
+    | 'pause'
+    | 'resume'
+    | 'end'
+    | 'note'
+    | 'delivery'
+    | 'nudge'
   readonly detail?: string
 }
 
@@ -138,7 +152,7 @@ export interface RunRecord {
    * new round's delivery. Absent on records written before the checkpoint
    * existed; recovery initializes it from the log tail on first sight.
    */
-  readonly consumedTurns?: { readonly executor?: number, readonly parent?: number }
+  readonly consumedTurns?: { readonly executor?: number; readonly parent?: number }
   /** Which side a `needs_user` pause came from (resume notes go there). */
   readonly pausedBy?: 'executor' | 'parent'
   readonly startedAt: number
@@ -229,7 +243,14 @@ export interface OutboxEntry {
 // ── zod boundary schemas ─────────────────────────────────────────────────────
 
 const schemaSignalOutcome = z.enum(SIGNAL_OUTCOMES)
-const schemaRunStatus = z.enum(['active', 'paused-user', 'paused-budget', 'paused-error', 'completed', 'cancelled'])
+const schemaRunStatus = z.enum([
+  'active',
+  'paused-user',
+  'paused-budget',
+  'paused-error',
+  'completed',
+  'cancelled',
+])
 const schemaRunPhase = z.enum(['awaiting-delivery', 'awaiting-review'])
 
 const schemaPendingSignal = z.object({
@@ -254,7 +275,17 @@ const schemaPendingRework = z.object({
 
 const schemaHistoryEntry = z.object({
   at: z.number(),
-  kind: z.enum(['started', 'signal', 'advance', 'pause', 'resume', 'end', 'note', 'delivery', 'nudge']),
+  kind: z.enum([
+    'started',
+    'signal',
+    'advance',
+    'pause',
+    'resume',
+    'end',
+    'note',
+    'delivery',
+    'nudge',
+  ]),
   detail: z.string().optional(),
 })
 
@@ -277,37 +308,40 @@ const schemaOutboxEntry = z.object({
   createdAt: z.number(),
 })
 
-const schemaRun = z.object({
-  id: z.string().min(1),
-  bindingId: z.string().min(1),
-  task: z.string(),
-  status: schemaRunStatus,
-  phase: schemaRunPhase,
-  round: z.number().int().positive(),
-  maxRounds: z.number().int().positive(),
-  executor: z.string().min(1),
-  parent: z.string().min(1),
-  templates: schemaTemplateBodies,
-  autoDeliver: z.boolean().optional(),
-  pendingSignal: schemaPendingSignal.optional(),
-  pendingRework: schemaPendingRework.optional(),
-  nudgeState: schemaNudgeState.optional(),
-  outbox: z.array(schemaOutboxEntry).optional(),
-  consumedTurns: z.object({
-    executor: z.number().int().optional(),
-    parent: z.number().int().optional(),
-  }).optional(),
-  pausedBy: z.enum(['executor', 'parent']).optional(),
-  startedAt: z.number(),
-  endedAt: z.number().optional(),
-  endNote: z.string().optional(),
-  history: z.array(schemaHistoryEntry),
-})
-  .refine(run => run.pendingRework === undefined || run.status === 'paused-budget', {
+const schemaRun = z
+  .object({
+    id: z.string().min(1),
+    bindingId: z.string().min(1),
+    task: z.string(),
+    status: schemaRunStatus,
+    phase: schemaRunPhase,
+    round: z.number().int().positive(),
+    maxRounds: z.number().int().positive(),
+    executor: z.string().min(1),
+    parent: z.string().min(1),
+    templates: schemaTemplateBodies,
+    autoDeliver: z.boolean().optional(),
+    pendingSignal: schemaPendingSignal.optional(),
+    pendingRework: schemaPendingRework.optional(),
+    nudgeState: schemaNudgeState.optional(),
+    outbox: z.array(schemaOutboxEntry).optional(),
+    consumedTurns: z
+      .object({
+        executor: z.number().int().optional(),
+        parent: z.number().int().optional(),
+      })
+      .optional(),
+    pausedBy: z.enum(['executor', 'parent']).optional(),
+    startedAt: z.number(),
+    endedAt: z.number().optional(),
+    endNote: z.string().optional(),
+    history: z.array(schemaHistoryEntry),
+  })
+  .refine((run) => run.pendingRework === undefined || run.status === 'paused-budget', {
     message: 'pendingRework only lives on a paused-budget run',
     path: ['pendingRework'],
   })
-  .refine(run => run.pendingSignal === undefined || run.status === 'active', {
+  .refine((run) => run.pendingSignal === undefined || run.status === 'active', {
     message: 'pendingSignal only lives on an active run',
     path: ['pendingSignal'],
   })
@@ -318,19 +352,20 @@ const schemaTemplateRefs = z.object({
   rework: z.string().min(1),
 })
 
-const schemaBinding = z.object({
-  id: z.string().min(1),
-  name: z.string(),
-  executor: z.string().min(1),
-  parent: z.string().min(1),
-  maxRounds: z.number().int().min(1).max(50),
-  enabled: z.boolean(),
-  autoDeliver: z.boolean().optional(),
-  templates: schemaTemplateRefs,
-  createdAt: z.number(),
-  updatedAt: z.number(),
-})
-  .refine(binding => binding.executor !== binding.parent, {
+const schemaBinding = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    executor: z.string().min(1),
+    parent: z.string().min(1),
+    maxRounds: z.number().int().min(1).max(50),
+    enabled: z.boolean(),
+    autoDeliver: z.boolean().optional(),
+    templates: schemaTemplateRefs,
+    createdAt: z.number(),
+    updatedAt: z.number(),
+  })
+  .refine((binding) => binding.executor !== binding.parent, {
     message: 'executor and parent must be two different sessions',
     path: ['parent'],
   })
@@ -372,7 +407,11 @@ export const TRIGGER_DOMAIN = defineDomain({
 
 /** Default template refs a new binding gets (the seeded built-ins). */
 export function defaultTemplateRefs(): BindingTemplateRefs {
-  return { start: BUILTIN_START_TEMPLATE, review: BUILTIN_REVIEW_TEMPLATE, rework: BUILTIN_REWORK_TEMPLATE }
+  return {
+    start: BUILTIN_START_TEMPLATE,
+    review: BUILTIN_REVIEW_TEMPLATE,
+    rework: BUILTIN_REWORK_TEMPLATE,
+  }
 }
 
 /** Default round budget for new bindings and runs. */

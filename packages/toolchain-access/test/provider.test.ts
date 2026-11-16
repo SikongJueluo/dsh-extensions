@@ -96,7 +96,10 @@ const DEFAULT_BINDS: Array<[source: string, destination: string]> = [
   ['/home/u/.cargo/.package-cache-mutate', '/home/u/.cargo/.package-cache-mutate'],
   ['/home/u/.cargo/.global-cache', '/home/u/.cargo/.global-cache'],
   ['/home/u/.local/share/pnpm/store', '/home/u/.local/share/pnpm/store'],
-  ['/run/user/1000/pnpm-store-operation-locks-1000', '/run/user/1000/pnpm-store-operation-locks-1000'],
+  [
+    '/run/user/1000/pnpm-store-operation-locks-1000',
+    '/run/user/1000/pnpm-store-operation-locks-1000',
+  ],
   ['/home/u/.gradle/caches', '/home/u/.gradle/caches'],
   ['/home/u/.gradle/wrapper', '/home/u/.gradle/wrapper'],
   ['/home/u/.gradle/daemon', '/home/u/.gradle/daemon'],
@@ -142,15 +145,26 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
     expect(result.denialSignatures).toEqual(['read-only file system'])
     expect(result.argv).toEqual([
       'bwrap',
-      '--ro-bind', '/', '/',
-      '--dev', '/dev',
+      '--ro-bind',
+      '/',
+      '/',
+      '--dev',
+      '/dev',
       '--unshare-pid',
-      '--proc', '/proc',
+      '--proc',
+      '/proc',
       '--die-with-parent',
-      '--tmpfs', '/tmp',
-      '--bind', '/ws/proj', '/ws/proj',
-      '--bind', '/home/u/.cache/uv', '/home/u/.cache/uv',
-      '--', 'cargo', 'build',
+      '--tmpfs',
+      '/tmp',
+      '--bind',
+      '/ws/proj',
+      '/ws/proj',
+      '--bind',
+      '/home/u/.cache/uv',
+      '/home/u/.cache/uv',
+      '--',
+      'cargo',
+      'build',
     ])
   })
 
@@ -159,12 +173,18 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
     const result = await provider.confine(COMMAND, RO_POLICY)
     expect(result.argv).toEqual([
       'bwrap',
-      '--ro-bind', '/', '/',
-      '--dev', '/dev',
+      '--ro-bind',
+      '/',
+      '/',
+      '--dev',
+      '/dev',
       '--unshare-pid',
-      '--proc', '/proc',
+      '--proc',
+      '/proc',
       '--die-with-parent',
-      '--', 'cargo', 'build',
+      '--',
+      'cargo',
+      'build',
     ])
   })
 
@@ -173,14 +193,23 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
     const result = await provider.confine(COMMAND, WS_POLICY)
     expect(result.argv).toEqual([
       'bwrap',
-      '--ro-bind', '/', '/',
-      '--dev', '/dev',
+      '--ro-bind',
+      '/',
+      '/',
+      '--dev',
+      '/dev',
       '--unshare-pid',
-      '--proc', '/proc',
+      '--proc',
+      '/proc',
       '--die-with-parent',
-      '--tmpfs', '/tmp',
-      '--bind', '/ws/proj', '/ws/proj',
-      '--', 'cargo', 'build',
+      '--tmpfs',
+      '/tmp',
+      '--bind',
+      '/ws/proj',
+      '/ws/proj',
+      '--',
+      'cargo',
+      'build',
     ])
   })
 
@@ -190,19 +219,35 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
     const root = EXTRA_ROOT
     {
       const provider = makeProvider(['uv-cache'])
-      const result = await provider.confine(COMMAND, { ...WS_POLICY, additionalWritableRoots: [root] })
+      const result = await provider.confine(COMMAND, {
+        ...WS_POLICY,
+        additionalWritableRoots: [root],
+      })
       expect(result.argv).toEqual([
         'bwrap',
-        '--ro-bind', '/', '/',
-        '--dev', '/dev',
+        '--ro-bind',
+        '/',
+        '/',
+        '--dev',
+        '/dev',
         '--unshare-pid',
-        '--proc', '/proc',
+        '--proc',
+        '/proc',
         '--die-with-parent',
-        '--tmpfs', '/tmp',
-        '--bind', '/ws/proj', '/ws/proj',
-        '--bind', root, root,
-        '--bind', '/home/u/.cache/uv', '/home/u/.cache/uv',
-        '--', 'cargo', 'build',
+        '--tmpfs',
+        '/tmp',
+        '--bind',
+        '/ws/proj',
+        '/ws/proj',
+        '--bind',
+        root,
+        root,
+        '--bind',
+        '/home/u/.cache/uv',
+        '/home/u/.cache/uv',
+        '--',
+        'cargo',
+        'build',
       ])
     }
   })
@@ -214,34 +259,50 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
     const root = EXTRA_ROOT
     const uv = join(root, '.cache', 'uv')
     {
-      const provider = mountedProvider(
-        Config({ presets: ['uv-cache'], paths: { uvCache: uv } }),
-        { ...DEFAULT_ENTRIES, [uv]: { dir: true } },
-      )
-      const result = await provider.confine(COMMAND, { ...WS_POLICY, additionalWritableRoots: [root] })
+      const provider = mountedProvider(Config({ presets: ['uv-cache'], paths: { uvCache: uv } }), {
+        ...DEFAULT_ENTRIES,
+        [uv]: { dir: true },
+      })
+      const result = await provider.confine(COMMAND, {
+        ...WS_POLICY,
+        additionalWritableRoots: [root],
+      })
       // The policy root is already the stock wrap's bind; a grant beneath it
       // adds no capability, so it must not become a second mount.
       expect(result.argv).toEqual([
         'bwrap',
-        '--ro-bind', '/', '/',
-        '--dev', '/dev',
+        '--ro-bind',
+        '/',
+        '/',
+        '--dev',
+        '/dev',
         '--unshare-pid',
-        '--proc', '/proc',
+        '--proc',
+        '/proc',
         '--die-with-parent',
-        '--tmpfs', '/tmp',
-        '--bind', '/ws/proj', '/ws/proj',
-        '--bind', root, root,
-        '--', 'cargo', 'build',
+        '--tmpfs',
+        '/tmp',
+        '--bind',
+        '/ws/proj',
+        '/ws/proj',
+        '--bind',
+        root,
+        root,
+        '--',
+        'cargo',
+        'build',
       ])
     }
   })
 
   it('refuses a missing policy extra root instead of splicing around it', async () => {
     const provider = makeProvider(['uv-cache'])
-    await expect(provider.confine(COMMAND, {
-      ...WS_POLICY,
-      additionalWritableRoots: [join(tmpdir(), 'toolchain-extra-does-not-exist')],
-    })).rejects.toThrow(/Invalid additional writable directory/)
+    await expect(
+      provider.confine(COMMAND, {
+        ...WS_POLICY,
+        additionalWritableRoots: [join(tmpdir(), 'toolchain-extra-does-not-exist')],
+      }),
+    ).rejects.toThrow(/Invalid additional writable directory/)
   })
 
   it('drops grants already covered by the workspace bind', async () => {
@@ -251,19 +312,31 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
     // inside the workspace that exists in the table via uv-cache default.
     provider.grantPaths = {}
     provider.grantFs = fakeGrantFs({ '/home/u/.cache/uv': { dir: true } })
-    const result = await provider.confine(COMMAND, { mode: 'workspace-write', workspaceRoot: '/home/u' })
+    const result = await provider.confine(COMMAND, {
+      mode: 'workspace-write',
+      workspaceRoot: '/home/u',
+    })
     // HOME is the workspace root here: the uv grant is inside it, so the
     // wrap must stay exactly stock.
     expect(result.argv).toEqual([
       'bwrap',
-      '--ro-bind', '/', '/',
-      '--dev', '/dev',
+      '--ro-bind',
+      '/',
+      '/',
+      '--dev',
+      '/dev',
       '--unshare-pid',
-      '--proc', '/proc',
+      '--proc',
+      '/proc',
       '--die-with-parent',
-      '--tmpfs', '/tmp',
-      '--bind', '/home/u', '/home/u',
-      '--', 'cargo', 'build',
+      '--tmpfs',
+      '/tmp',
+      '--bind',
+      '/home/u',
+      '/home/u',
+      '--',
+      'cargo',
+      'build',
     ])
   })
 
@@ -279,25 +352,35 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
   })
 
   it('fails closed when a configured runnerCommand wrapper carries the wrap', async () => {
-    const provider = new ToolchainAccessSandboxProvider(fakeCtx(), Config({
-      presets: ['uv-cache'],
-      runnerCommand: ['/opt/bwrap-shim'],
-      runnerFailureSignatures: ['bwrap: '],
-    }))
+    const provider = new ToolchainAccessSandboxProvider(
+      fakeCtx(),
+      Config({
+        presets: ['uv-cache'],
+        runnerCommand: ['/opt/bwrap-shim'],
+        runnerFailureSignatures: ['bwrap: '],
+      }),
+    )
     provider.grantEnv = grantEnvFrom('/home/u', 1000, {})
     provider.grantFs = fakeGrantFs(ENTRIES)
-    await expect(provider.confine(COMMAND, WS_POLICY)).rejects.toThrow(/not the pinned stock bwrap layout/)
+    await expect(provider.confine(COMMAND, WS_POLICY)).rejects.toThrow(
+      /not the pinned stock bwrap layout/,
+    )
   })
 
   it('fails closed when the Linux chain selects the Landlock rung', async () => {
-    const provider = new ToolchainAccessSandboxProvider(fakeCtx(), Config({ presets: ['uv-cache'] }))
+    const provider = new ToolchainAccessSandboxProvider(
+      fakeCtx(),
+      Config({ presets: ['uv-cache'] }),
+    )
     provider.internals.platform = 'linux'
     provider.internals.probeBwrap = () => false
     provider.internals.probeLandlock = () => 'full'
     provider.internals.landlockLauncher = '/fake/landlock-run'
     provider.grantEnv = grantEnvFrom('/home/u', 1000, {})
     provider.grantFs = fakeGrantFs(ENTRIES)
-    await expect(provider.confine(COMMAND, WS_POLICY)).rejects.toThrow(/not the pinned stock bwrap layout/)
+    await expect(provider.confine(COMMAND, WS_POLICY)).rejects.toThrow(
+      /not the pinned stock bwrap layout/,
+    )
   })
 
   it('rejects unknown preset ids at config time', () => {
@@ -325,7 +408,10 @@ describe('config default presets', () => {
   it('an explicit list replaces the default exactly: [] stays off, subsets stay subsets', () => {
     expect(Config({ presets: [] }).presets).toEqual([])
     expect(Config({ presets: ['uv-cache'] }).presets).toEqual(['uv-cache'])
-    expect(Config({ presets: ['pnpm-engine', 'gradle-jdks'] }).presets).toEqual(['pnpm-engine', 'gradle-jdks'])
+    expect(Config({ presets: ['pnpm-engine', 'gradle-jdks'] }).presets).toEqual([
+      'pnpm-engine',
+      'gradle-jdks',
+    ])
   })
 
   it('the schema default reaches confine: binds for exactly the seven presets', async () => {
@@ -334,15 +420,24 @@ describe('config default presets', () => {
     expect(result.enforcement).toBe('full')
     expect(result.argv).toEqual([
       'bwrap',
-      '--ro-bind', '/', '/',
-      '--dev', '/dev',
+      '--ro-bind',
+      '/',
+      '/',
+      '--dev',
+      '/dev',
       '--unshare-pid',
-      '--proc', '/proc',
+      '--proc',
+      '/proc',
       '--die-with-parent',
-      '--tmpfs', '/tmp',
-      '--bind', '/ws/proj', '/ws/proj',
+      '--tmpfs',
+      '/tmp',
+      '--bind',
+      '/ws/proj',
+      '/ws/proj',
       ...DEFAULT_BINDS.flatMap(([source, destination]) => ['--bind', source, destination]),
-      '--', 'cargo', 'build',
+      '--',
+      'cargo',
+      'build',
     ])
   })
 
@@ -351,12 +446,18 @@ describe('config default presets', () => {
     const result = await provider.confine(COMMAND, RO_POLICY)
     expect(result.argv).toEqual([
       'bwrap',
-      '--ro-bind', '/', '/',
-      '--dev', '/dev',
+      '--ro-bind',
+      '/',
+      '/',
+      '--dev',
+      '/dev',
       '--unshare-pid',
-      '--proc', '/proc',
+      '--proc',
+      '/proc',
       '--die-with-parent',
-      '--', 'cargo', 'build',
+      '--',
+      'cargo',
+      'build',
     ])
   })
 
@@ -372,15 +473,17 @@ describe('config default presets', () => {
 
 describe('grantEnvFrom', () => {
   it('keeps only absolute exported anchors', () => {
-    expect(grantEnvFrom('/home/u', 1000, {
-      XDG_RUNTIME_DIR: '/run/user/1000',
-      XDG_CONFIG_HOME: '/home/u/.config',
-      CARGO_HOME: 'relative/path',
-      PNPM_HOME: '',
-      UV_CACHE_DIR: '/data/uv',
-      SEMGREP_LOG_FILE: '/data/logs/semgrep.log',
-      SEMGREP_VERSION_CACHE_PATH: 'relative/cache',
-    })).toEqual({
+    expect(
+      grantEnvFrom('/home/u', 1000, {
+        XDG_RUNTIME_DIR: '/run/user/1000',
+        XDG_CONFIG_HOME: '/home/u/.config',
+        CARGO_HOME: 'relative/path',
+        PNPM_HOME: '',
+        UV_CACHE_DIR: '/data/uv',
+        SEMGREP_LOG_FILE: '/data/logs/semgrep.log',
+        SEMGREP_VERSION_CACHE_PATH: 'relative/cache',
+      }),
+    ).toEqual({
       home: '/home/u',
       uid: 1000,
       xdgRuntimeDir: '/run/user/1000',

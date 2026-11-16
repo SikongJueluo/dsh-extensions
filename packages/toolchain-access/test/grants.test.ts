@@ -74,9 +74,10 @@ function plan(
   const fs: GrantFs = fakeFs(table)
   fs.ensure = (path, kind) => {
     ensured.push({ path, kind })
-    table[path] = kind === 'lock-file' || kind === 'state-file'
-      ? { file: true, mode: 0o644 }
-      : { dir: true, mode: kind === 'lock-dir' ? 0o700 : 0o755 }
+    table[path] =
+      kind === 'lock-file' || kind === 'state-file'
+        ? { file: true, mode: 0o644 }
+        : { dir: true, mode: kind === 'lock-dir' ? 0o700 : 0o755 }
   }
   const result = resolveGrants({
     presets,
@@ -165,7 +166,11 @@ describe('default derivation', () => {
       mkdirSync(realRuntime, { recursive: true, mode: 0o700 })
       symlinkSync(realRuntime, join(root, 'link-runtime'))
       const lockName = `pnpm-store-operation-locks-${process.getuid?.() ?? 1000}`
-      const env = { home: join(root, 'home'), uid: process.getuid?.() ?? -1, xdgRuntimeDir: join(root, 'link-runtime') }
+      const env = {
+        home: join(root, 'home'),
+        uid: process.getuid?.() ?? -1,
+        xdgRuntimeDir: join(root, 'link-runtime'),
+      }
       const first = resolve({
         presets: ['pnpm-runtime-locks'],
         overrides: {},
@@ -232,16 +237,26 @@ describe('default derivation', () => {
       '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
     } as const
     // Re-spelling pnpm's own lock dir: fine.
-    const sameDir = plan(['pnpm-runtime-locks'], { ...standard }, {
-      overrides: { pnpmRuntimeLocks: '/run/user/1000/pnpm-store-operation-locks-1000' },
-    })
+    const sameDir = plan(
+      ['pnpm-runtime-locks'],
+      { ...standard },
+      {
+        overrides: { pnpmRuntimeLocks: '/run/user/1000/pnpm-store-operation-locks-1000' },
+      },
+    )
     expect(sameDir.issues).toEqual([])
-    expect(sameDir.binds.map((bind) => bind.source)).toEqual(['/run/user/1000/pnpm-store-operation-locks-1000'])
+    expect(sameDir.binds.map((bind) => bind.source)).toEqual([
+      '/run/user/1000/pnpm-store-operation-locks-1000',
+    ])
 
     // Relocating it: pnpm cannot be redirected, so the grant is refused.
-    const relocated = plan(['pnpm-runtime-locks'], { ...standard, '/data/my-locks': dir() }, {
-      overrides: { pnpmRuntimeLocks: '/data/my-locks' },
-    })
+    const relocated = plan(
+      ['pnpm-runtime-locks'],
+      { ...standard, '/data/my-locks': dir() },
+      {
+        overrides: { pnpmRuntimeLocks: '/data/my-locks' },
+      },
+    )
     expect(relocated.binds).toEqual([])
     expect(relocated.issues[0]?.reason).toBe('lock-dir-mismatch')
     expect(relocated.issues[0]?.message).toContain('/run/user/1000/pnpm-store-operation-locks-1000')
@@ -271,10 +286,10 @@ describe('fail-closed validation', () => {
   })
 
   it('refuses floor roots through symlink targets', () => {
-    const result = plan(
-      ['uv-cache'],
-      { '/home/u/.cache/uv': { target: '/etc/uv' }, '/etc/uv': dir() },
-    )
+    const result = plan(['uv-cache'], {
+      '/home/u/.cache/uv': { target: '/etc/uv' },
+      '/etc/uv': dir(),
+    })
     expect(result.issues[0]?.reason).toBe('floor-path')
   })
 
@@ -345,13 +360,10 @@ describe('fail-closed validation', () => {
     )
     expect(direct.issues[0]?.reason).toBe('credential-segment')
 
-    const linked = plan(
-      ['uv-cache'],
-      {
-        '/home/u/.cache/uv': { target: '/home/u/.ssh/uv' },
-        '/home/u/.ssh/uv': { dir: true },
-      },
-    )
+    const linked = plan(['uv-cache'], {
+      '/home/u/.cache/uv': { target: '/home/u/.ssh/uv' },
+      '/home/u/.ssh/uv': { dir: true },
+    })
     expect(linked.issues[0]?.reason).toBe('credential-segment')
 
     for (const path of ['/home/u/.git-credentials', '/home/u/.npmrc', '/run/user/1000/gnupg']) {
@@ -389,60 +401,55 @@ describe('fail-closed validation', () => {
   it('rejects paths the owner cannot write (a grant must keep the tool working)', () => {
     const dirResult = plan(['uv-cache'], { '/home/u/.cache/uv': dir({ mode: 0o555 }) })
     expect(dirResult.issues[0]?.reason).toBe('not-owner-writable')
-    const fileResult = plan(
-      ['cargo-cache'],
-      {
-        '/home/u/.cargo/registry': dir(),
-        '/home/u/.cargo/git': dir(),
-        '/home/u/.cargo/.package-cache': { file: true, mode: 0o444 },
-        '/home/u/.cargo/.package-cache-mutate': { file: true, mode: 0o644 },
-        '/home/u/.cargo/.global-cache': { file: true, mode: 0o644 },
-      },
-    )
+    const fileResult = plan(['cargo-cache'], {
+      '/home/u/.cargo/registry': dir(),
+      '/home/u/.cargo/git': dir(),
+      '/home/u/.cargo/.package-cache': { file: true, mode: 0o444 },
+      '/home/u/.cargo/.package-cache-mutate': { file: true, mode: 0o644 },
+      '/home/u/.cargo/.global-cache': { file: true, mode: 0o644 },
+    })
     expect(fileResult.issues[0]?.reason).toBe('not-owner-writable')
   })
 
-  it('refuses pnpm-runtime-locks when the runtime dir fails pnpm\'s own conditions', () => {
+  it("refuses pnpm-runtime-locks when the runtime dir fails pnpm's own conditions", () => {
     // pnpm 12.8.2+ falls back to /tmp for locks unless $XDG_RUNTIME_DIR is
     // a directory of this uid that the owner can write AND search, with
     // group/other write bits clear — the bind must cover the lock domain
     // pnpm actually uses, not merely a directory that exists.
-    const groupWritable = plan(
-      ['pnpm-runtime-locks'],
-      {
-        '/run/user/1000': { dir: true, mode: 0o775 },
-        '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
-      },
-    )
+    const groupWritable = plan(['pnpm-runtime-locks'], {
+      '/run/user/1000': { dir: true, mode: 0o775 },
+      '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
+    })
     expect(groupWritable.binds).toEqual([])
     expect(groupWritable.issues[0]?.reason).toBe('runtime-dir-unwritable')
 
-    const notSearchable = plan(
-      ['pnpm-runtime-locks'],
-      { '/run/user/1000': { dir: true, mode: 0o600 } },
-    )
+    const notSearchable = plan(['pnpm-runtime-locks'], {
+      '/run/user/1000': { dir: true, mode: 0o600 },
+    })
     expect(notSearchable.issues[0]?.reason).toBe('runtime-dir-unwritable')
 
-    const foreign = plan(
-      ['pnpm-runtime-locks'],
-      { '/run/user/1000': { dir: true, mode: 0o700, uid: 0 } },
-    )
+    const foreign = plan(['pnpm-runtime-locks'], {
+      '/run/user/1000': { dir: true, mode: 0o700, uid: 0 },
+    })
     expect(foreign.issues[0]?.reason).toBe('runtime-dir-unwritable')
 
     // The standard systemd layout passes.
-    const standard = plan(
-      ['pnpm-runtime-locks'],
-      {
-        '/run/user/1000': { dir: true, mode: 0o700 },
-        '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
-      },
-    )
+    const standard = plan(['pnpm-runtime-locks'], {
+      '/run/user/1000': { dir: true, mode: 0o700 },
+      '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
+    })
     expect(standard.issues).toEqual([])
-    expect(standard.binds.map((bind) => bind.source)).toEqual(['/run/user/1000/pnpm-store-operation-locks-1000'])
+    expect(standard.binds.map((bind) => bind.source)).toEqual([
+      '/run/user/1000/pnpm-store-operation-locks-1000',
+    ])
   })
 
   it('a HOME with a trailing slash or a symlinked HOME still derives defaults', () => {
-    const trailing = plan(['uv-cache'], { '/home/u/.cache/uv': dir() }, { env: { home: '/home/u/' } })
+    const trailing = plan(
+      ['uv-cache'],
+      { '/home/u/.cache/uv': dir() },
+      { env: { home: '/home/u/' } },
+    )
     expect(trailing.issues).toEqual([])
     expect(trailing.binds.map((bind) => bind.source)).toEqual(['/home/u/.cache/uv'])
 
@@ -465,15 +472,12 @@ describe('fail-closed validation', () => {
   })
 
   it('one bad preset poisons the whole plan (no partial grants)', () => {
-    const result = plan(
-      ['uv-cache', 'cargo-cache'],
-      {
-        '/home/u/.cache/uv': dir(),
-        '/home/u/.cargo/registry': dir(),
-        '/home/u/.cargo/git': dir(),
-        // .package-cache* files missing entirely and prepare not requested
-      },
-    )
+    const result = plan(['uv-cache', 'cargo-cache'], {
+      '/home/u/.cache/uv': dir(),
+      '/home/u/.cargo/registry': dir(),
+      '/home/u/.cargo/git': dir(),
+      // .package-cache* files missing entirely and prepare not requested
+    })
     expect(result.binds).toEqual([])
     expect(result.issues.length).toBeGreaterThanOrEqual(3)
     expect(result.issues.every((issue) => issue.reason === 'missing')).toBe(true)
@@ -534,20 +538,14 @@ describe('explicit overrides', () => {
 
 describe('dedupe and workspace subtraction', () => {
   it('keeps the outermost path and notes the covered one, regardless of preset order', () => {
-    const engineFirst = plan(
-      ['pnpm-engine', 'pnpm-store'],
-      {
-        '/home/u/.local/share/pnpm': dir(),
-        '/home/u/.local/share/pnpm/store': dir(),
-      },
-    )
-    const storeFirst = plan(
-      ['pnpm-store', 'pnpm-engine'],
-      {
-        '/home/u/.local/share/pnpm': dir(),
-        '/home/u/.local/share/pnpm/store': dir(),
-      },
-    )
+    const engineFirst = plan(['pnpm-engine', 'pnpm-store'], {
+      '/home/u/.local/share/pnpm': dir(),
+      '/home/u/.local/share/pnpm/store': dir(),
+    })
+    const storeFirst = plan(['pnpm-store', 'pnpm-engine'], {
+      '/home/u/.local/share/pnpm': dir(),
+      '/home/u/.local/share/pnpm/store': dir(),
+    })
     for (const result of [engineFirst, storeFirst]) {
       expect(result.binds.map((bind) => bind.source)).toEqual(['/home/u/.local/share/pnpm'])
       expect(result.notes).toEqual([
@@ -600,7 +598,10 @@ describe('java toolchain presets', () => {
   })
 
   it('gradle-jdks is separate executable-content trust, not part of gradle-cache', () => {
-    const withBoth = plan(['gradle-cache', 'gradle-jdks'], { ...gradleTree(), '/home/u/.gradle/jdks': dir() })
+    const withBoth = plan(['gradle-cache', 'gradle-jdks'], {
+      ...gradleTree(),
+      '/home/u/.gradle/jdks': dir(),
+    })
     expect(withBoth.issues).toEqual([])
     expect(withBoth.binds.map((bind) => bind.source)).toContain('/home/u/.gradle/jdks')
 
@@ -611,7 +612,9 @@ describe('java toolchain presets', () => {
   it('GRADLE_USER_HOME exported counts as explicit: outside HOME ok, never prepared', () => {
     const entries: Record<string, Entry> = {
       '/data/gradle': dir(),
-      ...Object.fromEntries(GRADLE_DIRS.map((path) => [path.replace('/home/u/.gradle/', '/data/gradle/'), dir()])),
+      ...Object.fromEntries(
+        GRADLE_DIRS.map((path) => [path.replace('/home/u/.gradle/', '/data/gradle/'), dir()]),
+      ),
     }
     const viaEnv = plan(['gradle-cache'], entries, { env: { gradleUserHome: '/data/gradle' } })
     expect(viaEnv.issues).toEqual([])
@@ -651,7 +654,10 @@ describe('java toolchain presets', () => {
       { overrides: { mavenHome: '/data/m2' }, prepare: true },
     )
     expect(result.issues).toEqual([])
-    expect(result.binds.map((bind) => bind.source)).toEqual(['/data/m2/repository', '/data/m2/wrapper'])
+    expect(result.binds.map((bind) => bind.source)).toEqual([
+      '/data/m2/repository',
+      '/data/m2/wrapper',
+    ])
     expect(result.ensured).toEqual([])
   })
 })
@@ -726,18 +732,24 @@ describe('semgrep state preset', () => {
   })
 
   it('follows XDG_CONFIG_HOME only when it is an existing directory (semgrep rule)', () => {
-    const withXdg = plan(['semgrep-state'], {
-      '/home/u/.config': dir(),
-      '/home/u/.config/.semgrep': dir(),
-      '/home/u/.cache/semgrep-state': dir(),
-      '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
-    }, { env: { xdgConfigHome: '/home/u/.config' } })
+    const withXdg = plan(
+      ['semgrep-state'],
+      {
+        '/home/u/.config': dir(),
+        '/home/u/.config/.semgrep': dir(),
+        '/home/u/.cache/semgrep-state': dir(),
+        '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
+      },
+      { env: { xdgConfigHome: '/home/u/.config' } },
+    )
     expect(withXdg.issues).toEqual([])
     // semgrep joins `.semgrep` directly under XDG_CONFIG_HOME.
     expect(withXdg.binds.at(-1)?.destination).toBe('/home/u/.config/.semgrep')
 
     // A configured-but-missing XDG_CONFIG_HOME falls back to ~/.semgrep.
-    const missingXdg = plan(['semgrep-state'], SEMGREP_ENTRIES, { env: { xdgConfigHome: '/home/u/.config' } })
+    const missingXdg = plan(['semgrep-state'], SEMGREP_ENTRIES, {
+      env: { xdgConfigHome: '/home/u/.config' },
+    })
     expect(missingXdg.issues).toEqual([])
     expect(missingXdg.binds.at(-1)?.destination).toBe('/home/u/.semgrep')
   })
@@ -745,30 +757,42 @@ describe('semgrep state preset', () => {
   it('the mount point may cross a credential tree, a grant source may not', () => {
     // `~/.config/.semgrep` is fine as a mount point: the shadow REPLACES it,
     // so the host's credential-bearing settings.yml stays out of the sandbox.
-    const shadow = plan(['semgrep-state'], {
-      '/home/u/.config': dir(),
-      '/home/u/.config/.semgrep': dir(),
-      '/home/u/.cache/semgrep-state': dir(),
-      '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
-    }, { env: { xdgConfigHome: '/home/u/.config' } })
+    const shadow = plan(
+      ['semgrep-state'],
+      {
+        '/home/u/.config': dir(),
+        '/home/u/.config/.semgrep': dir(),
+        '/home/u/.cache/semgrep-state': dir(),
+        '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
+      },
+      { env: { xdgConfigHome: '/home/u/.config' } },
+    )
     expect(shadow.issues).toEqual([])
     expect(shadow.binds.at(-1)?.source).toBe('/home/u/.cache/semgrep-state')
 
     // The writable source itself is still a grant and obeys every rule.
-    const source = plan(['semgrep-state'], {
-      ...SEMGREP_ENTRIES,
-      '/home/u/.config/semgrep-state': dir(),
-    }, { overrides: { semgrepState: '/home/u/.config/semgrep-state' } })
+    const source = plan(
+      ['semgrep-state'],
+      {
+        ...SEMGREP_ENTRIES,
+        '/home/u/.config/semgrep-state': dir(),
+      },
+      { overrides: { semgrepState: '/home/u/.config/semgrep-state' } },
+    )
     expect(source.binds).toEqual([])
     expect(source.issues[0]?.reason).toBe('credential-segment')
   })
 
   it('the mount point is refused inside a system floor (XDG_CONFIG_HOME=/etc)', () => {
-    const result = plan(['semgrep-state'], {
-      '/etc': dir(),
-      '/home/u/.cache/semgrep-state': dir(),
-      '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
-    }, { env: { xdgConfigHome: '/etc' }, prepare: true })
+    const result = plan(
+      ['semgrep-state'],
+      {
+        '/etc': dir(),
+        '/home/u/.cache/semgrep-state': dir(),
+        '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
+      },
+      { env: { xdgConfigHome: '/etc' }, prepare: true },
+    )
     expect(result.binds).toEqual([])
     expect(result.issues[0]?.reason).toBe('floor-path')
     expect(result.ensured).toEqual([])
@@ -784,35 +808,45 @@ describe('semgrep state preset', () => {
     // The mount is about the sandbox VIEW: uv-cache may already make the
     // shadow source writable, yet semgrep still needs the private state dir
     // mounted at ~/.semgrep.
-    const result = plan(['uv-cache', 'semgrep-state'], {
-      '/data/cache': dir(),
-      '/data/cache/semgrep-state': dir(),
-      '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
-      '/home/u/.semgrep': dir(),
-    }, {
-      overrides: { uvCache: '/data/cache', semgrepState: '/data/cache/semgrep-state' },
-    })
+    const result = plan(
+      ['uv-cache', 'semgrep-state'],
+      {
+        '/data/cache': dir(),
+        '/data/cache/semgrep-state': dir(),
+        '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
+        '/home/u/.semgrep': dir(),
+      },
+      {
+        overrides: { uvCache: '/data/cache', semgrepState: '/data/cache/semgrep-state' },
+      },
+    )
     expect(result.issues).toEqual([])
     expect(result.binds.find((bind) => bind.destination === '/home/u/.semgrep')).toMatchObject({
       source: '/data/cache/semgrep-state',
       preset: 'semgrep-state',
     })
     // The covered state source is not restated as a second plain grant.
-    expect(result.binds.filter((bind) => bind.source === '/data/cache/semgrep-state')).toHaveLength(1)
+    expect(result.binds.filter((bind) => bind.source === '/data/cache/semgrep-state')).toHaveLength(
+      1,
+    )
   })
 
   it('honors SEMGREP_LOG_FILE / SEMGREP_VERSION_CACHE_PATH as explicit files', () => {
-    const result = plan(['semgrep-state'], {
-      '/home/u/.cache/semgrep-state': dir(),
-      '/data/state/semgrep.log': { file: true, mode: 0o644 },
-      '/data/cache/semgrep_version': { file: true, mode: 0o644 },
-      '/home/u/.semgrep': dir(),
-    }, {
-      env: {
-        semgrepLogFile: '/data/state/semgrep.log',
-        semgrepVersionCache: '/data/cache/semgrep_version',
+    const result = plan(
+      ['semgrep-state'],
+      {
+        '/home/u/.cache/semgrep-state': dir(),
+        '/data/state/semgrep.log': { file: true, mode: 0o644 },
+        '/data/cache/semgrep_version': { file: true, mode: 0o644 },
+        '/home/u/.semgrep': dir(),
       },
-    })
+      {
+        env: {
+          semgrepLogFile: '/data/state/semgrep.log',
+          semgrepVersionCache: '/data/cache/semgrep_version',
+        },
+      },
+    )
     expect(result.issues).toEqual([])
     expect(result.binds.map((bind) => bind.source)).toEqual([
       '/data/state/semgrep.log',
@@ -832,13 +866,17 @@ describe('semgrep state preset', () => {
     ])
   })
 
-  it('the version-cache default follows semgrep\'s XDG_CACHE_HOME is-a-directory test', () => {
-    const result = plan(['semgrep-state'], {
-      '/data/xdg-cache': dir(),
-      '/data/xdg-cache/semgrep-state': dir(),
-      '/data/xdg-cache/semgrep_version': { file: true, mode: 0o644 },
-      '/home/u/.semgrep': dir(),
-    }, { env: { xdgCacheHome: '/data/xdg-cache' } })
+  it("the version-cache default follows semgrep's XDG_CACHE_HOME is-a-directory test", () => {
+    const result = plan(
+      ['semgrep-state'],
+      {
+        '/data/xdg-cache': dir(),
+        '/data/xdg-cache/semgrep-state': dir(),
+        '/data/xdg-cache/semgrep_version': { file: true, mode: 0o644 },
+        '/home/u/.semgrep': dir(),
+      },
+      { env: { xdgCacheHome: '/data/xdg-cache' } },
+    )
     expect(result.issues).toEqual([])
     expect(result.binds.map((bind) => bind.source)).toEqual([
       '/data/xdg-cache/semgrep_version',
@@ -849,9 +887,15 @@ describe('semgrep state preset', () => {
 
 describe('controlled preparation (confine time only)', () => {
   it('creates a missing default lock dir as 0700 (reboot-wiped /run/user)', () => {
-    const result = plan(['pnpm-runtime-locks'], { '/run/user/1000': { dir: true, mode: 0o700 } }, { prepare: true })
+    const result = plan(
+      ['pnpm-runtime-locks'],
+      { '/run/user/1000': { dir: true, mode: 0o700 } },
+      { prepare: true },
+    )
     expect(result.issues).toEqual([])
-    expect(result.binds.map((bind) => bind.source)).toEqual(['/run/user/1000/pnpm-store-operation-locks-1000'])
+    expect(result.binds.map((bind) => bind.source)).toEqual([
+      '/run/user/1000/pnpm-store-operation-locks-1000',
+    ])
     expect(result.ensured).toEqual([
       { path: '/run/user/1000/pnpm-store-operation-locks-1000', kind: 'lock-dir' },
     ])

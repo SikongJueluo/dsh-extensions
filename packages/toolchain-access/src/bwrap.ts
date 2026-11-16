@@ -37,10 +37,14 @@ import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 
 /** The stock bwrap profile head, identical for both confined modes. */
 const STOCK_PROFILE_HEAD: readonly string[] = Object.freeze([
-  '--ro-bind', '/', '/',
-  '--dev', '/dev',
+  '--ro-bind',
+  '/',
+  '/',
+  '--dev',
+  '/dev',
   '--unshare-pid',
-  '--proc', '/proc',
+  '--proc',
+  '/proc',
   '--die-with-parent',
 ])
 
@@ -60,7 +64,9 @@ export function expectedStockProfileArgs(policy: SandboxPolicy): string[] {
 /** Layout mismatch: the confined argv is not the pinned stock bwrap shape. */
 export class GrantArgvError extends Error {
   constructor(detail: string) {
-    super(`toolchain-access: refusing to add directory grants — the confined argv is not the pinned stock bwrap layout (${detail}); fail closed instead of editing an unfamiliar sandbox layout`)
+    super(
+      `toolchain-access: refusing to add directory grants — the confined argv is not the pinned stock bwrap layout (${detail}); fail closed instead of editing an unfamiliar sandbox layout`,
+    )
     this.name = 'GrantArgvError'
   }
 }
@@ -105,18 +111,24 @@ export function insertGrantBinds(
 ): string[] {
   if (binds.length === 0) return [...confined]
   if (confined[0] !== 'bwrap') {
-    throw new GrantArgvError(`runner is ${describe(confined[0] ?? '<empty>')}, not the stock "bwrap" — a configured runnerCommand wrapper or a non-bwrap backend cannot carry directory grants`)
+    throw new GrantArgvError(
+      `runner is ${describe(confined[0] ?? '<empty>')}, not the stock "bwrap" — a configured runnerCommand wrapper or a non-bwrap backend cannot carry directory grants`,
+    )
   }
   const expected = expectedStockProfileArgs(policy)
   for (let index = 0; index < expected.length; index += 1) {
     const got = confined[1 + index]
     if (got !== expected[index]) {
-      throw new GrantArgvError(`profile argument ${index} is ${describe(got ?? '<missing>')}, expected ${describe(expected[index]!)}`)
+      throw new GrantArgvError(
+        `profile argument ${index} is ${describe(got ?? '<missing>')}, expected ${describe(expected[index]!)}`,
+      )
     }
   }
   const separator = 1 + expected.length
   if (confined[separator] !== '--') {
-    throw new GrantArgvError(`element ${separator} is ${describe(confined[separator] ?? '<missing>')}, expected the "--" separator`)
+    throw new GrantArgvError(
+      `element ${separator} is ${describe(confined[separator] ?? '<missing>')}, expected the "--" separator`,
+    )
   }
   const tail = confined.slice(separator + 1)
   if (tail.length !== original.length || tail.some((item, index) => item !== original[index])) {

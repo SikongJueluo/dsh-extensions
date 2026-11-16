@@ -101,9 +101,10 @@ function textOf(content: readonly unknown[]): string {
   const parts: string[] = []
   for (const block of content) {
     if (
-      typeof block === 'object' && block !== null
-      && (block as { type?: unknown }).type === 'text'
-      && typeof (block as { text?: unknown }).text === 'string'
+      typeof block === 'object' &&
+      block !== null &&
+      (block as { type?: unknown }).type === 'text' &&
+      typeof (block as { text?: unknown }).text === 'string'
     ) {
       parts.push((block as { text: string }).text)
     }
@@ -136,20 +137,21 @@ function parseBashArguments(raw: unknown): BashCall | undefined {
     command: args.command,
     description: typeof args.description === 'string' ? args.description : undefined,
     workdir: typeof args.workdir === 'string' ? args.workdir : undefined,
-    sandboxPermissions: typeof args.sandbox_permissions === 'string'
-      ? args.sandbox_permissions
-      : undefined,
+    sandboxPermissions:
+      typeof args.sandbox_permissions === 'string' ? args.sandbox_permissions : undefined,
     justification: typeof args.justification === 'string' ? args.justification : undefined,
   }
 }
 
 /** Structural identity for the duplicate-id conflict check. */
 function sameBashCall(a: BashCall, b: BashCall): boolean {
-  return a.command === b.command
-    && (a.description ?? '') === (b.description ?? '')
-    && (a.workdir ?? '') === (b.workdir ?? '')
-    && (a.sandboxPermissions ?? '') === (b.sandboxPermissions ?? '')
-    && (a.justification ?? '') === (b.justification ?? '')
+  return (
+    a.command === b.command &&
+    (a.description ?? '') === (b.description ?? '') &&
+    (a.workdir ?? '') === (b.workdir ?? '') &&
+    (a.sandboxPermissions ?? '') === (b.sandboxPermissions ?? '') &&
+    (a.justification ?? '') === (b.justification ?? '')
+  )
 }
 
 /**
@@ -177,10 +179,7 @@ function boundedPath(value: string | undefined): string | undefined {
  * `resolveWorkdir` in dsh-tool-bash: missing workdir → effective cwd;
  * relative workdir → joined to the effective cwd; absolute workdir → as-is.
  */
-function resolveWorkdir(
-  workdir: string | undefined,
-  cwd: string | undefined,
-): string | undefined {
+function resolveWorkdir(workdir: string | undefined, cwd: string | undefined): string | undefined {
   if (cwd === undefined) return undefined
   if (workdir === undefined) return cwd
   if (workdir.length > MAX_PATH_CHARS) return undefined
@@ -383,11 +382,7 @@ export function foldPrompt(text: string, budget: number): string {
  *   full: hard rules and the allowlist must see the entire input. Only the
  *   judge path applies the evidence budget, and it defers over-budget input.
  */
-export function collectEvidence(
-  session: Session,
-  callId: string,
-  effectiveCwd?: string,
-): Evidence {
+export function collectEvidence(session: Session, callId: string, effectiveCwd?: string): Evidence {
   const { calls, asked, decided, prompts, cwd } = fold(session.snapshotEvents())
 
   // Prior allowed bash calls, in log order (asked/decided pairs are appended
@@ -415,8 +410,7 @@ export function collectEvidence(
       if (decided.get(id) !== 'allowed-once') continue
       const prior = calls.get(ask.callId)
       if (prior === undefined) continue
-      if (prior.command === pending.command
-        && (prior.sandboxPermissions ?? '') === mode) {
+      if (prior.command === pending.command && (prior.sandboxPermissions ?? '') === mode) {
         repeatSources.push(ask.callId)
       }
     }
@@ -433,11 +427,12 @@ export function collectEvidence(
   const workspace = boundedPath(workspaceOf(session))
   // A provided host value is authoritative even when it is over-long (then
   // the boundary is unknown, not a different fallback).
-  const currentCwd = effectiveCwd !== undefined
-    ? boundedPath(effectiveCwd)
-    : cwd !== undefined
-      ? boundedPath(cwd)
-      : workspace
+  const currentCwd =
+    effectiveCwd !== undefined
+      ? boundedPath(effectiveCwd)
+      : cwd !== undefined
+        ? boundedPath(cwd)
+        : workspace
 
   const promptWindow: string[] = []
   let budget = MAX_PROMPT_CHARS
@@ -453,12 +448,13 @@ export function collectEvidence(
   }
 
   return {
-    call: call === undefined ? undefined : {
-      ...call,
-      ...(call.workdir === undefined
-        ? {}
-        : { workdir: clip(call.workdir, MAX_PATH_CHARS) }),
-    },
+    call:
+      call === undefined
+        ? undefined
+        : {
+            ...call,
+            ...(call.workdir === undefined ? {} : { workdir: clip(call.workdir, MAX_PATH_CHARS) }),
+          },
     workspace,
     effectiveCwd: currentCwd,
     resolvedWorkdir: resolveWorkdir(call?.workdir, currentCwd),

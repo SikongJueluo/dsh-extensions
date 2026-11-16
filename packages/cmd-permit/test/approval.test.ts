@@ -20,11 +20,18 @@ interface Fixture {
   events: { type: string; data: unknown }[]
   injected: { source?: { kind?: string; summary?: string } }[]
   service: CmdPermit
-  answer(callId: string, toolName?: string): Promise<{ outcome: ApprovalOutcome; fellThrough: boolean }>
+  answer(
+    callId: string,
+    toolName?: string,
+  ): Promise<{ outcome: ApprovalOutcome; fellThrough: boolean }>
 }
 
 function makeFixture(overrides: Partial<Record<keyof Config, unknown>> = {}): Fixture {
-  const listeners: { type: string; fn: (...args: unknown[]) => Promise<ApprovalOutcome>; prepend: boolean }[] = []
+  const listeners: {
+    type: string
+    fn: (...args: unknown[]) => Promise<ApprovalOutcome>
+    prepend: boolean
+  }[] = []
   const events: { type: string; data: unknown }[] = []
   const injected: unknown[] = []
   const session = {
@@ -57,13 +64,10 @@ function makeFixture(overrides: Partial<Record<keyof Config, unknown>> = {}): Fi
     const entry = listeners.find((item) => item.type === 'approval/request')
     if (entry === undefined) throw new Error('no approval/request listener registered')
     let fellThrough = false
-    const outcome = entry.fn(
-      { agent, toolName, callId, signal: undefined },
-      async () => {
-        fellThrough = true
-        return 'rejected' as const
-      },
-    )
+    const outcome = entry.fn({ agent, toolName, callId, signal: undefined }, async () => {
+      fellThrough = true
+      return 'rejected' as const
+    })
     return outcome.then((value) => ({ outcome: value, fellThrough }))
   }
   return { events, injected: injected as Fixture['injected'], service, answer }
@@ -92,7 +96,14 @@ describe('cmd-permit answerer over PTC evidence', () => {
     const fixture = makeFixture()
     fixture.events.push({
       type: 'tool/call',
-      data: { callId: 'c1', name: 'bash', arguments: JSON.stringify({ command: 'cargo build', sandbox_permissions: 'workspace-write' }) },
+      data: {
+        callId: 'c1',
+        name: 'bash',
+        arguments: JSON.stringify({
+          command: 'cargo build',
+          sandbox_permissions: 'workspace-write',
+        }),
+      },
     })
     const { outcome, fellThrough } = await fixture.answer('c1')
     expect(outcome).toBe('allowed-once')
@@ -101,7 +112,10 @@ describe('cmd-permit answerer over PTC evidence', () => {
 
   it('does not let an allowlisted sibling cover its uncovered neighbor', async () => {
     const fixture = makeFixture()
-    ptcBash(fixture, 'root:ptc:1', { command: 'npm install', sandbox_permissions: 'workspace-write' })
+    ptcBash(fixture, 'root:ptc:1', {
+      command: 'npm install',
+      sandbox_permissions: 'workspace-write',
+    })
     ptcBash(fixture, 'root:ptc:2', { command: 'rtk sync', sandbox_permissions: 'workspace-write' })
     const uncovered = await fixture.answer('root:ptc:1')
     expect(uncovered.fellThrough).toBe(true)
@@ -113,7 +127,10 @@ describe('cmd-permit answerer over PTC evidence', () => {
 
   it('defers a high-risk PTC sub-call even when its head is allowlisted', async () => {
     const fixture = makeFixture()
-    ptcBash(fixture, 'root:ptc:1', { command: 'cargo build && sudo rm -rf /tmp/x', sandbox_permissions: 'danger-full-access' })
+    ptcBash(fixture, 'root:ptc:1', {
+      command: 'cargo build && sudo rm -rf /tmp/x',
+      sandbox_permissions: 'danger-full-access',
+    })
     const { fellThrough } = await fixture.answer('root:ptc:1')
     expect(fellThrough).toBe(true)
     expect(fixture.injected).toEqual([])
@@ -129,7 +146,10 @@ describe('cmd-permit answerer over PTC evidence', () => {
 
   it('defers when the requested mode is wider than maxMode', async () => {
     const fixture = makeFixture({ maxMode: vol('workspace-write' as MaxMode) })
-    ptcBash(fixture, 'root:ptc:1', { command: 'rtk sync', sandbox_permissions: 'danger-full-access' })
+    ptcBash(fixture, 'root:ptc:1', {
+      command: 'rtk sync',
+      sandbox_permissions: 'danger-full-access',
+    })
     const { fellThrough } = await fixture.answer('root:ptc:1')
     expect(fellThrough).toBe(true)
     expect(fixture.injected).toEqual([])
@@ -139,11 +159,23 @@ describe('cmd-permit answerer over PTC evidence', () => {
     const fixture = makeFixture()
     fixture.events.push({
       type: 'tool/ptc-dispatch-start',
-      data: { rootCallId: 'root', parentCallId: 'root', subCallId: 'root:ptc:1', name: 'bash', arguments: { command: 'rtk sync', sandbox_permissions: 'workspace-write' } },
+      data: {
+        rootCallId: 'root',
+        parentCallId: 'root',
+        subCallId: 'root:ptc:1',
+        name: 'bash',
+        arguments: { command: 'rtk sync', sandbox_permissions: 'workspace-write' },
+      },
     })
     fixture.events.push({
       type: 'tool/ptc-dispatch-start',
-      data: { rootCallId: 'root', parentCallId: 'root', subCallId: 'root:ptc:1', name: 'read', arguments: { file_path: 'a.txt' } },
+      data: {
+        rootCallId: 'root',
+        parentCallId: 'root',
+        subCallId: 'root:ptc:1',
+        name: 'read',
+        arguments: { file_path: 'a.txt' },
+      },
     })
     const { outcome, fellThrough } = await fixture.answer('root:ptc:1')
     expect(fellThrough).toBe(true)

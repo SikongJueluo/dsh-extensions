@@ -42,21 +42,36 @@ export interface Config {
 // into the schema generics, and an annotation would fight the inference the
 // loader validates `Config` against.
 export const Config = Schema.object({
-  enabled: Schema.boolean().default(true).volatile().description(
-    'Master switch. When off, every approval falls through to the rest of the chain (e.g. the auto-permit judge).',
-  ),
-  allow: Schema.array(Schema.string()).default([]).volatile().description(
-    'Command names that may be auto-allowed when they escalate the sandbox (e.g. rtk, cargo, direnv). A compound command is allowed only when every segment is covered by an entry here or in allowPattern.',
-  ),
-  allowPattern: Schema.array(Schema.string()).default([]).volatile().description(
-    'Regex sources (e.g. "^gh pr (list|view)"). One pattern matching every segment of the command also allows it; invalid regexes are ignored with a warning.',
-  ),
-  denyShape: Schema.array(Schema.string()).default([]).volatile().description(
-    'Regex sources added to the built-in high-risk shapes; a hit always defers to the human answerer, both here and in the auto-permit judge (when that plugin is also mounted).',
-  ),
-  maxMode: Schema.union(['workspace-write', 'danger-full-access']).default('danger-full-access').volatile().description(
-    'Highest sandbox mode an allowlisted command may be auto-escalated to; a wider request defers to the human.',
-  ),
+  enabled: Schema.boolean()
+    .default(true)
+    .volatile()
+    .description(
+      'Master switch. When off, every approval falls through to the rest of the chain (e.g. the auto-permit judge).',
+    ),
+  allow: Schema.array(Schema.string())
+    .default([])
+    .volatile()
+    .description(
+      'Command names that may be auto-allowed when they escalate the sandbox (e.g. rtk, cargo, direnv). A compound command is allowed only when every segment is covered by an entry here or in allowPattern.',
+    ),
+  allowPattern: Schema.array(Schema.string())
+    .default([])
+    .volatile()
+    .description(
+      'Regex sources (e.g. "^gh pr (list|view)"). One pattern matching every segment of the command also allows it; invalid regexes are ignored with a warning.',
+    ),
+  denyShape: Schema.array(Schema.string())
+    .default([])
+    .volatile()
+    .description(
+      'Regex sources added to the built-in high-risk shapes; a hit always defers to the human answerer, both here and in the auto-permit judge (when that plugin is also mounted).',
+    ),
+  maxMode: Schema.union(['workspace-write', 'danger-full-access'])
+    .default('danger-full-access')
+    .volatile()
+    .description(
+      'Highest sandbox mode an allowlisted command may be auto-escalated to; a wider request defers to the human.',
+    ),
 })
 
 /**

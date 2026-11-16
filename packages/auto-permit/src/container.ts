@@ -44,10 +44,26 @@ const SEGMENT_SEPARATOR = /(?:&&|\|\||[;|\n])/
  * — the judge and the human remain the decision makers.
  */
 const VALUE_OPTIONS = new Set([
-  '--root', '--runroot', '--storage-driver', '--storage-opt', '--runtime',
-  '--runtime-flag', '--tmpdir', '--events-backend', '--cgroup-manager',
-  '--conmon', '--identity', '--log-level', '--url', '--connection',
-  '--context', '--config', '--hooks-dir', '-c', '-H', '--host',
+  '--root',
+  '--runroot',
+  '--storage-driver',
+  '--storage-opt',
+  '--runtime',
+  '--runtime-flag',
+  '--tmpdir',
+  '--events-backend',
+  '--cgroup-manager',
+  '--conmon',
+  '--identity',
+  '--log-level',
+  '--url',
+  '--connection',
+  '--context',
+  '--config',
+  '--hooks-dir',
+  '-c',
+  '-H',
+  '--host',
 ])
 
 /** Risk labels, shown to the user in the notice row. */
@@ -65,8 +81,17 @@ export const CONTAINER_RISKS = {
 } as const
 
 const LIFECYCLE = new Set([
-  'exec', 'attach', 'stop', 'kill', 'rm', 'restart', 'start', 'pause',
-  'unpause', 'cp', 'commit',
+  'exec',
+  'attach',
+  'stop',
+  'kill',
+  'rm',
+  'restart',
+  'start',
+  'pause',
+  'unpause',
+  'cp',
+  'commit',
 ])
 
 /**
@@ -75,8 +100,20 @@ const LIFECYCLE = new Set([
  * so the nested command is what the risk table must classify.
  */
 const COMMAND_GROUPS = new Set([
-  'container', 'image', 'pod', 'volume', 'network', 'manifest', 'secret',
-  'artifact', 'node', 'service', 'stack', 'plugin', 'builder', 'buildx',
+  'container',
+  'image',
+  'pod',
+  'volume',
+  'network',
+  'manifest',
+  'secret',
+  'artifact',
+  'node',
+  'service',
+  'stack',
+  'plugin',
+  'builder',
+  'buildx',
   'context',
 ])
 
@@ -106,7 +143,10 @@ function segmentsOf(command: string): string[][] {
 }
 
 /** The first non-option token after an engine, skipping option values. */
-function subcommandOf(tokens: readonly string[], engineAt: number): { name: string; at: number } | undefined {
+function subcommandOf(
+  tokens: readonly string[],
+  engineAt: number,
+): { name: string; at: number } | undefined {
   for (let i = engineAt + 1; i < tokens.length; i += 1) {
     const token = tokens[i]
     if (token === undefined) return undefined
@@ -169,9 +209,9 @@ function hostPathSources(tokens: readonly string[]): string[] {
       const spec = equals === -1 ? tokens[i + 1] : clean.slice(equals + 1)
       if (spec === undefined) continue
       const parts = spec.split(',')
-      const source = parts.find((part) => /^(?:source|src)=/.test(part))
-        ?.replace(/^(?:source|src)=/, '')
-        ?? (name === '--mount' ? parts[0]?.split(':')[0] : undefined)
+      const source =
+        parts.find((part) => /^(?:source|src)=/.test(part))?.replace(/^(?:source|src)=/, '') ??
+        (name === '--mount' ? parts[0]?.split(':')[0] : undefined)
       if (source !== undefined) sources.push(barePath(source))
       continue
     }
@@ -216,16 +256,24 @@ function sensitiveSource(raw: string): boolean {
   if (source === '/root' || source.startsWith('/root/')) return true
   if (source === '/') return true
   if (/^\/home\/[^/]+$/.test(source) || /^\/Users\/[^/]+$/.test(source)) return true
-  if (/^\/run\/user\/[^/]+$/.test(source) || (source.startsWith('/run/user/') && source.endsWith('/podman'))) {
+  if (
+    /^\/run\/user\/[^/]+$/.test(source) ||
+    (source.startsWith('/run/user/') && source.endsWith('/podman'))
+  ) {
     return true
   }
   if (source === '/dev' || source.startsWith('/dev/')) return true
   if (source === '/proc' || source.startsWith('/proc/')) return true
   if (source === '/sys' || source.startsWith('/sys/')) return true
-  if (/(?:^|\/)(?:\.ssh|\.gnupg|\.aws|\.kube|\.docker|\.config|\.netrc|\.git-credentials|\.password-store)(?:\/|$)/.test(source)) {
+  if (
+    /(?:^|\/)(?:\.ssh|\.gnupg|\.aws|\.kube|\.docker|\.config|\.netrc|\.git-credentials|\.password-store)(?:\/|$)/.test(
+      source,
+    )
+  ) {
     return true
   }
-  if (source.includes('/.config/containers') || source.includes('/.local/share/containers')) return true
+  if (source.includes('/.config/containers') || source.includes('/.local/share/containers'))
+    return true
   if (source.includes('/var/lib/containers') || source.includes('/etc/containers')) return true
   if (source.includes('podman.sock') || source.includes('docker.sock')) return true
   return false
@@ -252,7 +300,8 @@ function segmentRisk(tokens: readonly string[]): string | undefined {
       // `podman push`, `podman container prune` / `podman system prune`.
       const action = COMMAND_GROUPS.has(sub.name) ? next : sub.name
       if (sub.name === 'compose' || action === 'compose') return CONTAINER_RISKS.compose
-      if (sub.name === 'kube' && (next === 'play' || next === 'down')) return CONTAINER_RISKS.compose
+      if (sub.name === 'kube' && (next === 'play' || next === 'down'))
+        return CONTAINER_RISKS.compose
       if (sub.name === 'play' && next === 'kube') return CONTAINER_RISKS.compose
       if (action === 'push') return CONTAINER_RISKS.push
       if (action === 'generate') return CONTAINER_RISKS.hostConfig
@@ -273,8 +322,10 @@ function segmentRisk(tokens: readonly string[]): string | undefined {
           return CONTAINER_RISKS.hostConfig
         }
       }
-      if (sub.name === 'swarm'
-        && ['init', 'join', 'leave', 'update', 'unlock', 'unlock-key'].includes(next)) {
+      if (
+        sub.name === 'swarm' &&
+        ['init', 'join', 'leave', 'update', 'unlock', 'unlock-key'].includes(next)
+      ) {
         return CONTAINER_RISKS.hostConfig
       }
     }
@@ -283,25 +334,45 @@ function segmentRisk(tokens: readonly string[]): string | undefined {
     // GLOBAL options: only the tokens before the subcommand belong to this
     // engine (`bash -c "podman …"` must not look like a connection target).
     const globalTokens = tokens.slice(i + 1, sub?.at ?? tokens.length)
-    if (hasOption(globalTokens, '--remote') || hasOption(globalTokens, '--url')
-      || hasOption(globalTokens, '--connection') || hasOption(globalTokens, '--context')) {
+    if (
+      hasOption(globalTokens, '--remote') ||
+      hasOption(globalTokens, '--url') ||
+      hasOption(globalTokens, '--connection') ||
+      hasOption(globalTokens, '--context')
+    ) {
       return CONTAINER_RISKS.remote
     }
-    if (engine === 'podman' && optionValues(globalTokens, '-c').length > 0) return CONTAINER_RISKS.remote
-    if (engine === 'docker' && (optionValues(globalTokens, '-H').length > 0
-      || optionValues(globalTokens, '--host').length > 0)) {
+    if (engine === 'podman' && optionValues(globalTokens, '-c').length > 0)
+      return CONTAINER_RISKS.remote
+    if (
+      engine === 'docker' &&
+      (optionValues(globalTokens, '-H').length > 0 ||
+        optionValues(globalTokens, '--host').length > 0)
+    ) {
       return CONTAINER_RISKS.remote
     }
 
     if (hasOption(tokens, '--hooks-dir')) return CONTAINER_RISKS.hostConfig
 
-    if (hasOption(tokens, '--privileged') || hasOption(tokens, '--cap-add')
-      || hasOption(tokens, '--device') || hasOption(tokens, '--ssh')
-      || optionValues(tokens, '--security-opt').some(securityRelaxed)) {
+    if (
+      hasOption(tokens, '--privileged') ||
+      hasOption(tokens, '--cap-add') ||
+      hasOption(tokens, '--device') ||
+      hasOption(tokens, '--ssh') ||
+      optionValues(tokens, '--security-opt').some(securityRelaxed)
+    ) {
       return CONTAINER_RISKS.privilege
     }
 
-    for (const flag of ['--network', '--net', '--pid', '--ipc', '--uts', '--userns', '--cgroupns']) {
+    for (const flag of [
+      '--network',
+      '--net',
+      '--pid',
+      '--ipc',
+      '--uts',
+      '--userns',
+      '--cgroupns',
+    ]) {
       if (optionValues(tokens, flag).some(isHostTarget)) return CONTAINER_RISKS.namespace
     }
 

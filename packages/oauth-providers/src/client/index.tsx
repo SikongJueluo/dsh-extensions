@@ -30,7 +30,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string
 const en: Record<string, string> = {
   nav: 'OAuth Providers',
   title: 'OAuth Providers',
-  intro: 'Use your model subscriptions — sign in with each provider\'s account, no API keys.',
+  intro: "Use your model subscriptions — sign in with each provider's account, no API keys.",
   statusLoading: 'Checking…',
   statusOk: 'Signed in · checked {when}',
   checkedJustNow: 'just now',
@@ -148,7 +148,12 @@ interface Classification {
 type Status =
   | { kind: 'loading' }
   | { kind: 'ok'; checkedAt: number }
-  | { kind: 'red' | 'error' | 'yellow'; key?: string; params?: Record<string, unknown>; raw?: string }
+  | {
+      kind: 'red' | 'error' | 'yellow'
+      key?: string
+      params?: Record<string, unknown>
+      raw?: string
+    }
 
 interface RpcResult<T> {
   ok: boolean
@@ -158,9 +163,12 @@ interface RpcResult<T> {
 
 function classify(message: unknown): Classification {
   const m = String(message || '')
-  if (/no sign-in stored|not signed in|AUTH_MISSING|AUTH_INVALID/i.test(m)) return { key: 'statusNotSignedIn' }
-  if (/refresh failed|invalid_refresh_token|re-authenticate|sign in again/i.test(m)) return { key: 'statusRefreshFailed', params: { detail: shorten(m) } }
-  if (/unreachable|ECONNREFUSED|timeout|fetch failed|non-JSON/i.test(m)) return { key: 'statusUnreachable', params: { detail: shorten(m) } }
+  if (/no sign-in stored|not signed in|AUTH_MISSING|AUTH_INVALID/i.test(m))
+    return { key: 'statusNotSignedIn' }
+  if (/refresh failed|invalid_refresh_token|re-authenticate|sign in again/i.test(m))
+    return { key: 'statusRefreshFailed', params: { detail: shorten(m) } }
+  if (/unreachable|ECONNREFUSED|timeout|fetch failed|non-JSON/i.test(m))
+    return { key: 'statusUnreachable', params: { detail: shorten(m) } }
   if (/HTTP \d{3}/.test(m)) return { key: 'statusHttpError', params: { detail: m } }
   return { raw: m }
 }
@@ -248,7 +256,9 @@ function Section({ operations, t }: SectionProps) {
 
   return (
     <Root className="dshx:flex dshx:max-w-[720px] dshx:flex-col dshx:px-6 dshx:pb-6 dshx:pt-1">
-      <h2 className="dshx:text-base dshx:font-semibold dshx:leading-[22px] dshx:text-fg">{t('title')}</h2>
+      <h2 className="dshx:text-base dshx:font-semibold dshx:leading-[22px] dshx:text-fg">
+        {t('title')}
+      </h2>
       <p className="dshx:mb-4 dshx:mt-1 dshx:text-sm dshx:text-fg-muted">{t('intro')}</p>
       <div className="dshx:flex dshx:flex-col dshx:gap-3.5">
         {providers.map((provider) => (
@@ -281,7 +291,11 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
       .modelCatalog()
       .then((result) => {
         if (!result.ok) {
-          setStatus({ kind: 'yellow', key: 'statusModelsError', params: { detail: result.error ? result.error.message : '' } })
+          setStatus({
+            kind: 'yellow',
+            key: 'statusModelsError',
+            params: { detail: result.error ? result.error.message : '' },
+          })
           return
         }
         const groups = result.value?.groups ?? []
@@ -301,7 +315,11 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
         }
       })
       .catch((err: unknown) => {
-        setStatus({ kind: 'yellow', key: 'statusCheckError', params: { detail: err instanceof Error && err.message ? err.message : String(err) } })
+        setStatus({
+          kind: 'yellow',
+          key: 'statusCheckError',
+          params: { detail: err instanceof Error && err.message ? err.message : String(err) },
+        })
       })
   }
 
@@ -369,7 +387,11 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
         }
       })
       .catch((err: unknown) => {
-        setStatus({ kind: 'yellow', key: 'statusCheckError', params: { detail: err instanceof Error && err.message ? err.message : String(err) } })
+        setStatus({
+          kind: 'yellow',
+          key: 'statusCheckError',
+          params: { detail: err instanceof Error && err.message ? err.message : String(err) },
+        })
       })
   }
 
@@ -447,7 +469,9 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
 
       <div className="dshx:mb-3 dshx:flex dshx:items-center dshx:gap-2">
         <span className={cn('dshx:size-2.5 dshx:shrink-0 dshx:rounded-full', dotClass)} />
-        <span className="dshx:flex-1 dshx:text-sm dshx:text-fg-secondary">{statusText(t, status)}</span>
+        <span className="dshx:flex-1 dshx:text-sm dshx:text-fg-secondary">
+          {statusText(t, status)}
+        </span>
         {provider.signedIn ? (
           <Button size="sm" variant="secondary" onClick={signOut}>
             {t('signOut')}
@@ -459,7 +483,9 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
 
       {running ? (
         <Card className="dshx:mb-3 dshx:px-3 dshx:py-2.5">
-          <div className="dshx:mb-1.5 dshx:text-sm dshx:font-semibold dshx:text-fg">{t('signinTitle')}</div>
+          <div className="dshx:mb-1.5 dshx:text-sm dshx:font-semibold dshx:text-fg">
+            {t('signinTitle')}
+          </div>
           {notice ? (
             <div className="dshx:mb-1.5 dshx:text-sm dshx:text-fg-secondary">
               {notice.message ?? ''}

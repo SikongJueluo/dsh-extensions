@@ -85,10 +85,13 @@ export function cancellableSleep(delayMs: number, signal: AbortSignal): Promise<
         finish(true)
         return
       }
-      timer = setTimeout(() => {
-        remaining -= SLEEP_CHUNK_MS
-        tick()
-      }, Math.min(remaining, SLEEP_CHUNK_MS))
+      timer = setTimeout(
+        () => {
+          remaining -= SLEEP_CHUNK_MS
+          tick()
+        },
+        Math.min(remaining, SLEEP_CHUNK_MS),
+      )
     }
     function onAbort(): void {
       finish(false)
@@ -155,7 +158,9 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
 
       const wait = await plan(provider, state)
       if (wait.kind === 'give-up') {
-        ctx.logger.warn(`auto-continue: giving up on ${failure.code} from "${provider}" — ${wait.reason}`)
+        ctx.logger.warn(
+          `auto-continue: giving up on ${failure.code} from "${provider}" — ${wait.reason}`,
+        )
         dropState(agent.session.id, turn)
         await spool?.delete(agent.session.id)
         return next()
@@ -188,7 +193,9 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
         provider,
         state.attempts,
         Math.round(wait.delayMs / 60000),
-        wait.retryAt === undefined ? ' (probe)' : ` (until ${new Date(wait.retryAt).toISOString()})`,
+        wait.retryAt === undefined
+          ? ' (probe)'
+          : ` (until ${new Date(wait.retryAt).toISOString()})`,
       )
 
       // Persist before sleeping: a process restart (or plugin update) during
@@ -227,7 +234,12 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
         return undefined
       }
       await spool?.delete(agent.session.id)
-      agent.session.append('llm/retry-started', { retryId: chain.retryId, turn, step, retry: chain.attempts })
+      agent.session.append('llm/retry-started', {
+        retryId: chain.retryId,
+        turn,
+        step,
+        retry: chain.attempts,
+      })
       return { kind: 'retry' as const }
     })()
     active.add(operation)
@@ -235,9 +247,12 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
     return operation
   })
 
-  ctx.effect(() => async () => {
-    disposeListener()
-    lifetime.abort(new Error('auto-continue plugin disposed'))
-    await Promise.allSettled([...active])
-  }, 'auto-continue: abort and drain active recovery')
+  ctx.effect(
+    () => async () => {
+      disposeListener()
+      lifetime.abort(new Error('auto-continue plugin disposed'))
+      await Promise.allSettled([...active])
+    },
+    'auto-continue: abort and drain active recovery',
+  )
 }

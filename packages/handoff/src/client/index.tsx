@@ -220,8 +220,20 @@ function Entry({ label, description, badge, busy, muted, onPick }: EntryProps) {
     <button
       type="button"
       disabled={busy || muted === true}
-      onMouseEnter={COARSE ? undefined : () => { setHovered(true) }}
-      onMouseLeave={COARSE ? undefined : () => { setHovered(false) }}
+      onMouseEnter={
+        COARSE
+          ? undefined
+          : () => {
+              setHovered(true)
+            }
+      }
+      onMouseLeave={
+        COARSE
+          ? undefined
+          : () => {
+              setHovered(false)
+            }
+      }
       onClick={onPick}
       className={cn(
         'dshx:flex dshx:min-h-11 dshx:w-full dshx:cursor-pointer dshx:flex-col dshx:items-stretch',
@@ -316,8 +328,8 @@ function Picker({ request, operations, onSettled }: PickerProps) {
   const presetBlock = request.preset ?? null
 
   const effectiveChoice = choice ?? request.defaultChoice ?? { kind: 'inherit' }
-  const effectivePreset =
-    presetPick ?? (presetBlock ? presetBlock.default : null) ?? { kind: 'inherit' }
+  const effectivePreset = presetPick ??
+    (presetBlock ? presetBlock.default : null) ?? { kind: 'inherit' }
 
   // Escape collapses an expanded selector first and only cancels at the
   // summary card; a backdrop press or the close button cancels from any view.
@@ -463,15 +475,11 @@ function Picker({ request, operations, onSettled }: PickerProps) {
   // A host-resolved default that cannot run as-is demands a reselect; once
   // the operator picks a replacement the issue clears.
   const modelIssue =
-    !modelFixed && choice === null && request.defaultChoiceIssue
-      ? request.defaultChoiceIssue
-      : null
+    !modelFixed && choice === null && request.defaultChoiceIssue ? request.defaultChoiceIssue : null
   const selectedPresetRow =
     effectivePreset.kind === 'preset' ? presetOption(effectivePreset.id) : null
   const presetIssue =
-    presetBlock && presetPick === null && presetBlock.defaultIssue
-      ? presetBlock.defaultIssue
-      : null
+    presetBlock && presetPick === null && presetBlock.defaultIssue ? presetBlock.defaultIssue : null
   const issueText = [modelIssue, presetIssue].filter(Boolean).join('；') || null
 
   /** Send the final verdict to the host: model choice, preset, workspace, review. */
@@ -529,10 +537,13 @@ function Picker({ request, operations, onSettled }: PickerProps) {
   const effortEntryCard = effortRouteCard
     ? catalogModel(effortRouteCard.provider, effortRouteCard.model)
     : null
-  const hasEfforts = !!(effortEntryCard?.reasoning?.efforts && effortEntryCard.reasoning.efforts.length > 0)
+  const hasEfforts = !!(
+    effortEntryCard?.reasoning?.efforts && effortEntryCard.reasoning.efforts.length > 0
+  )
   const effortValue =
     effortRouteCard && effortRouteCard.reasoningEffort
-      ? '强度 ' + effortText(effortRouteCard.provider, effortRouteCard.model, effortRouteCard.reasoningEffort)
+      ? '强度 ' +
+        effortText(effortRouteCard.provider, effortRouteCard.model, effortRouteCard.reasoningEffort)
       : '模型默认强度'
 
   let presetValue: string | null = null
@@ -667,7 +678,8 @@ function Picker({ request, operations, onSettled }: PickerProps) {
     const groups: CatalogGroup[] = []
     for (const group of catalog?.groups ?? []) {
       const kept = group.models.filter((model) => {
-        const haystack = `${model.name} ${model.id} ${model.description ?? ''} ${group.name}`.toLowerCase()
+        const haystack =
+          `${model.name} ${model.id} ${model.description ?? ''} ${group.name}`.toLowerCase()
         return needle.length === 0 || haystack.includes(needle)
       })
       if (kept.length > 0) groups.push({ id: group.id, name: group.name, models: kept })
@@ -746,7 +758,9 @@ function Picker({ request, operations, onSettled }: PickerProps) {
                       key={'m:' + group.id + '/' + model.id}
                       label={model.name}
                       description={description.join(' · ') || undefined}
-                      badge={isCurrentModel('model', group.id, model.id) ? CURRENT_BADGE : undefined}
+                      badge={
+                        isCurrentModel('model', group.id, model.id) ? CURRENT_BADGE : undefined
+                      }
                       busy={busy}
                       onPick={() => {
                         // A model without efforts commits directly; one with
@@ -995,7 +1009,7 @@ function Overlay({ operations }: { operations: Operations }) {
         .then((result) => {
           if (!alive) return
           const list = result && result.requests ? result.requests : []
-          setRequest(list.length > 0 ? list[0] ?? null : null)
+          setRequest(list.length > 0 ? (list[0] ?? null) : null)
         })
         .catch(() => {
           /* offline or channel absent: keep the previous state */

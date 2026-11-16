@@ -28,7 +28,11 @@ function fireTime(retryAt: number): string {
 }
 
 /** `/ac-cancel` — stand the current session's auto-continue wait down. */
-function cancelDefinition(adopter: ResumeHandle, spool: WaitSpool, cancelled: Set<string>): CommandDefinition {
+function cancelDefinition(
+  adopter: ResumeHandle,
+  spool: WaitSpool,
+  cancelled: Set<string>,
+): CommandDefinition {
   return {
     name: CANCEL_COMMAND,
     description: '取消当前会话等待中的 auto-continue 自动续跑',
@@ -39,7 +43,9 @@ function cancelDefinition(adopter: ResumeHandle, spool: WaitSpool, cancelled: Se
       if (entry === undefined && !dropped) return fail('当前会话没有等待中的 auto-continue。')
       // Also disarm an in-flight in-process recovery sleep (open-turn wait).
       cancelled.add(sessionId)
-      return ok(`已取消：${entry?.provider ?? 'provider'} 的等待已解除，到达重置时间后不再自动续跑。`)
+      return ok(
+        `已取消：${entry?.provider ?? 'provider'} 的等待已解除，到达重置时间后不再自动续跑。`,
+      )
     },
   }
 }

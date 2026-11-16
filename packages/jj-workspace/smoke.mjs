@@ -3,7 +3,15 @@
  * bookmark, record, cwd) and the Git arm (stock service on its private
  * realm) against temporary repositories. */
 import { execFileSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile, lstat, readFile as readTextFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+  lstat,
+  readFile as readTextFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -26,7 +34,10 @@ const xdg = join(root, 'xdg')
 await mkdir(home)
 await mkdir(xdg)
 const jjConfig = join(root, 'jj-config.toml')
-await writeFile(jjConfig, 'ui.color = "never"\nuser.name = "Test"\nuser.email = "test@example.com"\n')
+await writeFile(
+  jjConfig,
+  'ui.color = "never"\nuser.name = "Test"\nuser.email = "test@example.com"\n',
+)
 process.env.HOME = home
 process.env.XDG_CONFIG_HOME = xdg
 process.env.JJ_CONFIG = jjConfig
@@ -89,7 +100,13 @@ const fsStub = {
     try {
       const info = await lstat(path)
       return {
-        type: info.isDirectory() ? 'directory' : info.isFile() ? 'file' : info.isSymbolicLink() ? 'symlink' : 'other',
+        type: info.isDirectory()
+          ? 'directory'
+          : info.isFile()
+            ? 'file'
+            : info.isSymbolicLink()
+              ? 'symlink'
+              : 'other',
         version: 'v1',
       }
     } catch (error) {
@@ -101,7 +118,8 @@ const fsStub = {
     try {
       return await readTextFile(entry.key, 'utf8')
     } catch (error) {
-      if (error.code === 'ENOENT') throw new FsError(`missing ${entry.key}`, 'FS_NOT_FOUND', { cause: error })
+      if (error.code === 'ENOENT')
+        throw new FsError(`missing ${entry.key}`, 'FS_NOT_FOUND', { cause: error })
       throw error
     }
   },
@@ -146,108 +164,235 @@ const agent = { session: { id: 'session-1' } }
 // ── jj arm ──────────────────────────────────────────────────────────────────
 const jjRepo = join(root, 'jj-repo')
 await mkdir(jjRepo)
-execFileSync('jj', ['--no-pager', '--color=never', 'git', 'init', '--no-colocate'], { cwd: jjRepo, env: process.env })
+execFileSync('jj', ['--no-pager', '--color=never', 'git', 'init', '--no-colocate'], {
+  cwd: jjRepo,
+  env: process.env,
+})
 await writeFile(join(jjRepo, 'a.txt'), 'one\n')
-execFileSync('jj', ['--no-pager', '--color=never', 'describe', '-m', 'base'], { cwd: jjRepo, env: process.env })
-execFileSync('jj', ['--no-pager', '--color=never', 'bookmark', 'create', 'base-bm', '-r', '@'], { cwd: jjRepo, env: process.env })
+execFileSync('jj', ['--no-pager', '--color=never', 'describe', '-m', 'base'], {
+  cwd: jjRepo,
+  env: process.env,
+})
+execFileSync('jj', ['--no-pager', '--color=never', 'bookmark', 'create', 'base-bm', '-r', '@'], {
+  cwd: jjRepo,
+  env: process.env,
+})
 execFileSync('jj', ['--no-pager', '--color=never', 'new'], { cwd: jjRepo, env: process.env })
 await writeFile(join(jjRepo, 'a.txt'), 'one\ntwo\n')
-execFileSync('jj', ['--no-pager', '--color=never', 'describe', '-m', 'wip'], { cwd: jjRepo, env: process.env })
+execFileSync('jj', ['--no-pager', '--color=never', 'describe', '-m', 'wip'], {
+  cwd: jjRepo,
+  env: process.env,
+})
 
 cwd = jjRepo
 const created = await service.create(agent, { name: 'task', origin: 'tool' })
 check('jj create reports vcs jj', created.vcs === 'jj')
-check('jj create returns the bookmark as branch', created.branch === 'task' && created.bookmark === 'task')
+check(
+  'jj create returns the bookmark as branch',
+  created.branch === 'task' && created.bookmark === 'task',
+)
 check('jj create enters the workspace', cwd === created.path)
 const jjWorkspace = join(jjRepo, '.agents/workspaces/task')
 check('jj workspace directory exists', (await lstat(jjWorkspace)).isDirectory())
-check('jj workspace has no Git checkout', (await fsStub.lstat(join(jjWorkspace, '.git'))) === undefined)
-check('jj workspace has the snapshotted file', (await readFile(join(jjWorkspace, 'a.txt'), 'utf8')) === 'one\ntwo\n')
-check('pool is self-ignoring', (await readFile(join(jjRepo, '.agents/workspaces/.gitignore'), 'utf8')) === '*\n')
+check(
+  'jj workspace has no Git checkout',
+  (await fsStub.lstat(join(jjWorkspace, '.git'))) === undefined,
+)
+check(
+  'jj workspace has the snapshotted file',
+  (await readFile(join(jjWorkspace, 'a.txt'), 'utf8')) === 'one\ntwo\n',
+)
+check(
+  'pool is self-ignoring',
+  (await readFile(join(jjRepo, '.agents/workspaces/.gitignore'), 'utf8')) === '*\n',
+)
 const recordPath = join(jjRepo, '.agents/workspaces/.dsh-jj-workspace-records.jsonl')
-const records = (await readFile(recordPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
-check('jj create appends one task record', records.length === 1 && records[0].workspace === 'task' && records[0].origin === 'tool')
-check('jj record has the bookmark and pinned base', records[0].bookmark === 'task' && typeof records[0].baseChange === 'string' && records[0].baseChange.length > 0)
+const records = (await readFile(recordPath, 'utf8'))
+  .trim()
+  .split('\n')
+  .map((line) => JSON.parse(line))
+check(
+  'jj create appends one task record',
+  records.length === 1 && records[0].workspace === 'task' && records[0].origin === 'tool',
+)
+check(
+  'jj record has the bookmark and pinned base',
+  records[0].bookmark === 'task' &&
+    typeof records[0].baseChange === 'string' &&
+    records[0].baseChange.length > 0,
+)
 const status = await service.status('session-1')
-check('status classifies the non-colocated jj project', status.kind === 'jj' && status.hasGit === false)
+check(
+  'status classifies the non-colocated jj project',
+  status.kind === 'jj' && status.hasGit === false,
+)
 check('status reports no blocker under full access', status.blocker === null)
-check('status lists local bookmarks for the base menu', Array.isArray(status.bookmarks) && status.bookmarks.includes('task') && status.bookmarks.includes('base-bm'))
+check(
+  'status lists local bookmarks for the base menu',
+  Array.isArray(status.bookmarks) &&
+    status.bookmarks.includes('task') &&
+    status.bookmarks.includes('base-bm'),
+)
 check('tasks reads the durable association', (await service.tasks(jjRepo)).length === 1)
 const savedPolicy = sandboxPolicy.resolve
 sandboxPolicy.resolve = () => ({ mode: 'read-only', workspaceRoot: cwd })
-check('status reports a read-only blocker', (await service.status('session-1')).blocker === 'read-only')
+check(
+  'status reports a read-only blocker',
+  (await service.status('session-1')).blocker === 'read-only',
+)
 const otherWritable = join(root, 'other-writable')
 await mkdir(otherWritable)
 sandboxPolicy.resolve = () => ({ mode: 'workspace-write', workspaceRoot: otherWritable })
-check('status reports an outside-writable-root blocker', (await service.status('session-1')).blocker === 'outside-writable-root')
+check(
+  'status reports an outside-writable-root blocker',
+  (await service.status('session-1')).blocker === 'outside-writable-root',
+)
 sandboxPolicy.resolve = savedPolicy
 
 const initialStates = await service.taskStates('session-1')
-check('taskStates observes the created workspace and bookmark', initialStates.length === 1 && initialStates[0].state === 'ok')
+check(
+  'taskStates observes the created workspace and bookmark',
+  initialStates.length === 1 && initialStates[0].state === 'ok',
+)
 
 // restore is refused for a recorded jj workspace.
 await checkAsync(
   'jj restore is refused',
-  service.restore(agent, { path: created.path, branch: created.branch, baseCommit: created.baseCommit, repositoryRoot: created.repositoryRoot }).then(
-    () => false,
-    (error) => /not supported/.test(String(error)),
-  ),
+  service
+    .restore(agent, {
+      path: created.path,
+      branch: created.branch,
+      baseCommit: created.baseCommit,
+      repositoryRoot: created.repositoryRoot,
+    })
+    .then(
+      () => false,
+      (error) => /not supported/.test(String(error)),
+    ),
 )
 
 // ── tool plugin: registration, schema, and execution through the service ─────
 let toolDefinition
 applyTool({
-  tools: { register(definition) { toolDefinition = definition; return () => {} } },
+  tools: {
+    register(definition) {
+      toolDefinition = definition
+      return () => {}
+    },
+  },
   worktrees: service,
 })
 check('tool registers create_worktree', toolDefinition.name === 'create_worktree')
-check('tool output requires vcs', toolDefinition.output.schema.required.includes('vcs') && toolDefinition.output.schema.properties.vcs.enum.join(',') === 'git,jj')
-check('tool parameters stay name/from', Object.keys(toolDefinition.parameters.properties).sort().join(',') === 'from,name')
+check(
+  'tool output requires vcs',
+  toolDefinition.output.schema.required.includes('vcs') &&
+    toolDefinition.output.schema.properties.vcs.enum.join(',') === 'git,jj',
+)
+check(
+  'tool parameters stay name/from',
+  Object.keys(toolDefinition.parameters.properties).sort().join(',') === 'from,name',
+)
 cwd = jjRepo
-const toolResult = await toolDefinition.execute({ name: 'tool-task' }, { agent, signal: new AbortController().signal })
-check('tool execution returns the jj workspace', toolResult.vcs === 'jj' && toolResult.bookmark === 'tool-task' && toolResult.branch === 'tool-task')
+const toolResult = await toolDefinition.execute(
+  { name: 'tool-task' },
+  { agent, signal: new AbortController().signal },
+)
+check(
+  'tool execution returns the jj workspace',
+  toolResult.vcs === 'jj' &&
+    toolResult.bookmark === 'tool-task' &&
+    toolResult.branch === 'tool-task',
+)
 check('tool execution enters the workspace', cwd === toolResult.path)
 check('tool execution appends its own record', (await service.tasks(jjRepo)).length === 2)
 
 // ── unified task state: UI-created task, live bookmark changes, restart ─────
 cwd = toolResult.path
 const uiResult = await service.create(agent, { name: 'ui-task', origin: 'ui' })
-check('UI-origin creation uses the same provider', uiResult.vcs === 'jj' && uiResult.workspace === 'ui-task')
+check(
+  'UI-origin creation uses the same provider',
+  uiResult.vcs === 'jj' && uiResult.workspace === 'ui-task',
+)
 check('UI-origin creation appends its own record', (await service.tasks(jjRepo)).length === 3)
 const uiRecords = (await service.tasks(jjRepo)).filter((record) => record.workspace === 'ui-task')
 check('UI-origin record is marked as ui', uiRecords.length === 1 && uiRecords[0].origin === 'ui')
 
 const before = await service.taskStates('session-1')
-check('taskStates unifies both creation entries', before.length === 3 && before.every((task) => task.state === 'ok'))
+check(
+  'taskStates unifies both creation entries',
+  before.length === 3 && before.every((task) => task.state === 'ok'),
+)
 
 // A tracked remote row must not stand in for a local bookmark after a move or
 // delete. Push at the recorded target, then move and delete locally.
 const remoteRepo = join(root, 'remote.git')
 git(root, ['init', '--bare', '-q', remoteRepo])
-execFileSync('jj', ['--no-pager', '--color=never', 'git', 'remote', 'add', 'origin', remoteRepo], { cwd: jjRepo, env: process.env })
-execFileSync('jj', ['--no-pager', '--color=never', 'describe', '-m', 'task'], { cwd: toolResult.path, env: process.env })
-execFileSync('jj', ['--no-pager', '--color=never', 'git', 'push', '-b', 'tool-task'], { cwd: toolResult.path, env: process.env })
+execFileSync('jj', ['--no-pager', '--color=never', 'git', 'remote', 'add', 'origin', remoteRepo], {
+  cwd: jjRepo,
+  env: process.env,
+})
+execFileSync('jj', ['--no-pager', '--color=never', 'describe', '-m', 'task'], {
+  cwd: toolResult.path,
+  env: process.env,
+})
+execFileSync('jj', ['--no-pager', '--color=never', 'git', 'push', '-b', 'tool-task'], {
+  cwd: toolResult.path,
+  env: process.env,
+})
 
-execFileSync('jj', ['--no-pager', '--color=never', 'new', '-m', 'tip'], { cwd: toolResult.path, env: process.env })
-execFileSync('jj', ['--no-pager', '--color=never', 'bookmark', 'move', 'tool-task', '--to', '@'], { cwd: toolResult.path, env: process.env })
-execFileSync('jj', ['--no-pager', '--color=never', 'bookmark', 'delete', 'ui-task'], { cwd: uiResult.path, env: process.env })
+execFileSync('jj', ['--no-pager', '--color=never', 'new', '-m', 'tip'], {
+  cwd: toolResult.path,
+  env: process.env,
+})
+execFileSync('jj', ['--no-pager', '--color=never', 'bookmark', 'move', 'tool-task', '--to', '@'], {
+  cwd: toolResult.path,
+  env: process.env,
+})
+execFileSync('jj', ['--no-pager', '--color=never', 'bookmark', 'delete', 'ui-task'], {
+  cwd: uiResult.path,
+  env: process.env,
+})
 const changed = await service.taskStates('session-1')
 const moved = changed.find((task) => task.workspace === 'tool-task')
 const missing = changed.find((task) => task.workspace === 'ui-task')
-check('taskStates reports a moved bookmark without moving it back', moved && moved.state === 'moved' && moved.currentChangeId !== undefined && moved.currentChangeId !== moved.changeId)
-check('taskStates reports a deleted bookmark as missing', missing && missing.state === 'bookmark-missing')
-check('taskStates leaves the untouched task ok', changed.find((task) => task.workspace === 'task')?.state === 'ok')
+check(
+  'taskStates reports a moved bookmark without moving it back',
+  moved &&
+    moved.state === 'moved' &&
+    moved.currentChangeId !== undefined &&
+    moved.currentChangeId !== moved.changeId,
+)
+check(
+  'taskStates reports a deleted bookmark as missing',
+  missing && missing.state === 'bookmark-missing',
+)
+check(
+  'taskStates leaves the untouched task ok',
+  changed.find((task) => task.workspace === 'task')?.state === 'ok',
+)
 
-execFileSync('jj', ['--no-pager', '--color=never', 'bookmark', 'delete', 'tool-task'], { cwd: toolResult.path, env: process.env })
+execFileSync('jj', ['--no-pager', '--color=never', 'bookmark', 'delete', 'tool-task'], {
+  cwd: toolResult.path,
+  env: process.env,
+})
 const afterDelete = await service.taskStates('session-1')
-check('taskStates reports a local delete even with a tracked remote', afterDelete.find((task) => task.workspace === 'tool-task')?.state === 'bookmark-missing')
+check(
+  'taskStates reports a local delete even with a tracked remote',
+  afterDelete.find((task) => task.workspace === 'tool-task')?.state === 'bookmark-missing',
+)
 const statusAfterDelete = await service.status('session-1')
-check('status base menu keeps only local present bookmarks', Array.isArray(statusAfterDelete.bookmarks) && !statusAfterDelete.bookmarks.includes('tool-task'))
+check(
+  'status base menu keeps only local present bookmarks',
+  Array.isArray(statusAfterDelete.bookmarks) && !statusAfterDelete.bookmarks.includes('tool-task'),
+)
 
 // Remove one workspace directory while its registration and bookmark remain.
 await rm(join(jjRepo, '.agents/workspaces/task'), { recursive: true, force: true })
 const afterRemoval = await service.taskStates('session-1')
-check('taskStates checks the workspace directory, not only registration', afterRemoval.find((task) => task.workspace === 'task')?.state === 'workspace-missing')
+check(
+  'taskStates checks the workspace directory, not only registration',
+  afterRemoval.find((task) => task.workspace === 'task')?.state === 'workspace-missing',
+)
 
 const ctx2 = new Context()
 ctx2.provide('workingDirectory', workingDirectory)
@@ -258,7 +403,13 @@ ctx2.provide('sandboxPolicy', sandboxPolicy)
 ctx2.provide('sessions', sessions)
 const restarted = new JjWorktreeService(ctx2, Config({}))
 const restartedStates = await restarted.taskStates('session-1')
-check('restart reads the same durable task states', restartedStates.length === 3 && restartedStates.find((task) => task.workspace === 'tool-task')?.state === 'bookmark-missing' && restartedStates.find((task) => task.workspace === 'ui-task')?.state === 'bookmark-missing' && restartedStates.find((task) => task.workspace === 'task')?.state === 'workspace-missing')
+check(
+  'restart reads the same durable task states',
+  restartedStates.length === 3 &&
+    restartedStates.find((task) => task.workspace === 'tool-task')?.state === 'bookmark-missing' &&
+    restartedStates.find((task) => task.workspace === 'ui-task')?.state === 'bookmark-missing' &&
+    restartedStates.find((task) => task.workspace === 'task')?.state === 'workspace-missing',
+)
 
 // ── Git arm through the stock service on its private realm ──────────────────
 const gitRepo = join(root, 'git-repo')
@@ -272,9 +423,15 @@ git(gitRepo, ['commit', '-qm', 'base'])
 
 cwd = gitRepo
 const gitCreated = await service.create(agent, { name: 'gittask' })
-check('Git create keeps the stock result', gitCreated.vcs === 'git' && gitCreated.branch === 'gittask')
+check(
+  'Git create keeps the stock result',
+  gitCreated.vcs === 'git' && gitCreated.branch === 'gittask',
+)
 check('Git create enters the checkout', cwd === gitCreated.path)
-check('Git checkout is a real worktree', git(gitCreated.path, ['rev-parse', '--show-toplevel']).trim() === gitCreated.path)
+check(
+  'Git checkout is a real worktree',
+  git(gitCreated.path, ['rev-parse', '--show-toplevel']).trim() === gitCreated.path,
+)
 check('Git create wrote no jj record', (await service.tasks(gitRepo)).length === 0)
 
 cwd = gitRepo

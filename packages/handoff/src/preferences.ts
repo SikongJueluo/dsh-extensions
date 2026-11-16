@@ -120,9 +120,11 @@ export function createPreferenceStore(ctx: Context): PreferenceStore {
 
   const ensure = (): Promise<OpenedDomain | undefined> => {
     opening ??= open().catch((error: unknown) => {
-      ctx.logger(PACKAGE_NAME).warn('handoff preference domain unavailable; continuing without remembered model', {
-        error: String(error),
-      })
+      ctx
+        .logger(PACKAGE_NAME)
+        .warn('handoff preference domain unavailable; continuing without remembered model', {
+          error: String(error),
+        })
       // A transient open failure (backend not ready yet) may heal; retry next use.
       opening = undefined
       return undefined

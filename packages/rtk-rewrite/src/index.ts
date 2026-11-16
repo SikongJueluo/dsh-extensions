@@ -74,15 +74,24 @@ export interface Config extends AutoEnvConfig {
 // loader checks `static Config` against.
 export const Config = Schema.object({
   ...configFields,
-  rewrite: Schema.boolean().default(true).volatile().description(
-    'Rewrite supported commands to their rtk equivalents before execution (host-side `rtk rewrite`; stdout decides, exit codes are ignored).',
-  ),
-  rtkPath: Schema.string().default(RTK_DEFAULTS.rtkPath).description(
-    'rtk executable: absolute path or bare PATH name resolved in the harness environment, never inside the model sandbox.',
-  ),
-  rewriteTimeoutMs: Schema.number().step(100).min(500).default(RTK_DEFAULTS.rewriteTimeoutMs).description(
-    'Budget for one `rtk rewrite` query (ms); a timeout or spawn failure runs the original command untouched.',
-  ),
+  rewrite: Schema.boolean()
+    .default(true)
+    .volatile()
+    .description(
+      'Rewrite supported commands to their rtk equivalents before execution (host-side `rtk rewrite`; stdout decides, exit codes are ignored).',
+    ),
+  rtkPath: Schema.string()
+    .default(RTK_DEFAULTS.rtkPath)
+    .description(
+      'rtk executable: absolute path or bare PATH name resolved in the harness environment, never inside the model sandbox.',
+    ),
+  rewriteTimeoutMs: Schema.number()
+    .step(100)
+    .min(500)
+    .default(RTK_DEFAULTS.rewriteTimeoutMs)
+    .description(
+      'Budget for one `rtk rewrite` query (ms); a timeout or spawn failure runs the original command untouched.',
+    ),
 })
 
 /** Options for the host-side rewrite-query helper. */

@@ -75,7 +75,9 @@ export function parseRpcBody(contentType: string, text: string): JsonRpcResponse
 }
 
 /** True when a plain (non-RPC) body reports a broker-level failure. */
-function isPlainError(parsed: unknown): parsed is { code?: number; msg?: string; message?: string } {
+function isPlainError(
+  parsed: unknown,
+): parsed is { code?: number; msg?: string; message?: string } {
   if (typeof parsed !== 'object' || parsed === null) return false
   const record = parsed as Record<string, unknown>
   return record.jsonrpc === undefined && (record.code !== undefined || record.msg !== undefined)
@@ -112,7 +114,10 @@ export async function mcpCallTool(
   let nextId = 1
 
   const send = async (payload: unknown, session?: string): Promise<Exchange> => {
-    const headers = { ...baseHeaders, ...(session === undefined ? {} : { 'mcp-session-id': session }) }
+    const headers = {
+      ...baseHeaders,
+      ...(session === undefined ? {} : { 'mcp-session-id': session }),
+    }
     const response = await post(url, JSON.stringify(payload), headers, signal)
     if (response.text.trim() === '') {
       // Notifications legally settle as 202 with an empty body.
@@ -140,7 +145,11 @@ export async function mcpCallTool(
     jsonrpc: '2.0',
     id: nextId++,
     method: 'initialize',
-    params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'dsh-search-integrator', version: '1' } },
+    params: {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'dsh-search-integrator', version: '1' },
+    },
   })
   requireResult(init, 'initialize')
   const sessionId = init.headers['mcp-session-id'] ?? init.headers['Mcp-Session-Id']
@@ -152,24 +161,31 @@ export async function mcpCallTool(
   let toolName = knownTools.get(url) ?? tool
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     // 4. tools/call.
-    const call = await send({
-      jsonrpc: '2.0',
-      id: nextId++,
-      method: 'tools/call',
-      params: { name: toolName, arguments: args },
-    }, sessionId)
+    const call = await send(
+      {
+        jsonrpc: '2.0',
+        id: nextId++,
+        method: 'tools/call',
+        params: { name: toolName, arguments: args },
+      },
+      sessionId,
+    )
     const error = call.parsed.error
-    const unknownTool = error !== undefined
-      && (error.code === -32602 || error.code === -32601
-        || /unknown.*tool|tool.*not/i.test(error.message ?? ''))
+    const unknownTool =
+      error !== undefined &&
+      (error.code === -32602 ||
+        error.code === -32601 ||
+        /unknown.*tool|tool.*not/i.test(error.message ?? ''))
     if (unknownTool && attempt === 1) {
       // Unknown tool: discover the real name once, then retry.
       const listed = await send({ jsonrpc: '2.0', id: nextId++, method: 'tools/list' }, sessionId)
       const result = requireResult(listed, 'tools/list') as { tools?: { name?: unknown }[] }
-      const names = (result?.tools ?? []).map((entry) => entry?.name)
+      const names = (result?.tools ?? [])
+        .map((entry) => entry?.name)
         .filter((name): name is string => typeof name === 'string')
-      const found = names.find((name) => name === tool)
-        ?? names.find((name) => name.toLowerCase().includes('search'))
+      const found =
+        names.find((name) => name === tool) ??
+        names.find((name) => name.toLowerCase().includes('search'))
       if (found === undefined) {
         throw new McpRpcFailure('tools/list', `no search tool (has: ${names.join(', ') || 'none'})`)
       }
@@ -184,7 +200,9 @@ export async function mcpCallTool(
       isError?: boolean
     }
     if (result?.isError === true) {
-      const text = (result.content ?? []).map((block) => (typeof block.text === 'string' ? block.text : '')).join('\n')
+      const text = (result.content ?? [])
+        .map((block) => (typeof block.text === 'string' ? block.text : ''))
+        .join('\n')
       throw new McpRpcFailure('tools/call', text.slice(0, 300) || 'tool reported an error')
     }
     const text = (result?.content ?? [])

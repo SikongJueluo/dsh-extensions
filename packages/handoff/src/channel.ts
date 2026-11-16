@@ -17,7 +17,12 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { PACKAGE_NAME, RPC_CHANNEL } from './identity.js'
-import { coerceModelChoice, coercePresetChoice, type ModelChoice, type PresetChoice } from './brief.js'
+import {
+  coerceModelChoice,
+  coercePresetChoice,
+  type ModelChoice,
+  type PresetChoice,
+} from './brief.js'
 
 /** One endpoint segment of the channel (same grammar as connection RPC). */
 const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
@@ -129,12 +134,12 @@ export interface ReviewPick {
 /** The user's verdict on one pending pick. */
 export type ChoiceOutcome =
   | {
-    kind: 'choice'
-    choice: ModelChoice
-    workspace: WorkspacePick
-    preset?: PresetChoice
-    review?: ReviewPick
-  }
+      kind: 'choice'
+      choice: ModelChoice
+      workspace: WorkspacePick
+      preset?: PresetChoice
+      review?: ReviewPick
+    }
   | { kind: 'cancel' }
 
 interface PendingChoice extends ChoiceRequestWire {
@@ -146,7 +151,10 @@ export interface HandoffChannel {
    * Publish one pending pick and await the browser's answer.
    * @returns the outcome, or `undefined` when nobody answered in time.
    */
-  request(input: Omit<ChoiceRequestWire, 'id'>, timeoutMs: number): Promise<ChoiceOutcome | undefined>
+  request(
+    input: Omit<ChoiceRequestWire, 'id'>,
+    timeoutMs: number,
+  ): Promise<ChoiceOutcome | undefined>
   /** Whether a browser has polled recently enough to be worth waiting for. */
   clientAttached(): boolean
 }
@@ -161,10 +169,16 @@ function parseModelChoice(record: Record<string, unknown>): ModelChoice | undefi
  * already treated an absent field as "no opinion"; an explicit id here must
  * be one the host actually offered.
  */
-function parsePresetChoice(value: unknown, block: PresetRequestWire | undefined): PresetChoice | undefined {
+function parsePresetChoice(
+  value: unknown,
+  block: PresetRequestWire | undefined,
+): PresetChoice | undefined {
   const parsed = coercePresetChoice(value)
   if (parsed === undefined) return undefined
-  if (parsed.kind === 'preset' && (block === undefined || !block.options.some(option => option.id === parsed.id))) {
+  if (
+    parsed.kind === 'preset' &&
+    (block === undefined || !block.options.some((option) => option.id === parsed.id))
+  ) {
     return undefined
   }
   return parsed
@@ -179,7 +193,8 @@ function parseReview(value: unknown, defaultRounds: number): ReviewPick | undefi
   const record = value as Record<string, unknown>
   if (typeof record.enabled !== 'boolean') return undefined
   const rounds = record.rounds === undefined ? defaultRounds : record.rounds
-  if (typeof rounds !== 'number' || !Number.isInteger(rounds) || rounds < 1 || rounds > 50) return undefined
+  if (typeof rounds !== 'number' || !Number.isInteger(rounds) || rounds < 1 || rounds > 50)
+    return undefined
   return { enabled: record.enabled, rounds }
 }
 
@@ -192,7 +207,9 @@ function parseChoice(
   value: unknown,
   defaultReviewRounds: number | undefined,
   presetBlock: PresetRequestWire | undefined,
-): { choice: ModelChoice; workspace: WorkspacePick; preset?: PresetChoice; review?: ReviewPick } | undefined {
+):
+  | { choice: ModelChoice; workspace: WorkspacePick; preset?: PresetChoice; review?: ReviewPick }
+  | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const record = value as Record<string, unknown>
   const choice = parseModelChoice(record)
@@ -207,10 +224,12 @@ function parseChoice(
   }
   const raw = record.workspace
   if (raw !== undefined && (typeof raw !== 'string' || raw.length === 0)) return undefined
-  const review = record.review === undefined || defaultReviewRounds === undefined
-    ? undefined
-    : parseReview(record.review, defaultReviewRounds)
-  if (record.review !== undefined && defaultReviewRounds !== undefined && review === undefined) return undefined
+  const review =
+    record.review === undefined || defaultReviewRounds === undefined
+      ? undefined
+      : parseReview(record.review, defaultReviewRounds)
+  if (record.review !== undefined && defaultReviewRounds !== undefined && review === undefined)
+    return undefined
   return {
     choice,
     workspace: raw === undefined ? 'origin' : raw,
@@ -243,14 +262,16 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
     lastPollAt = Date.now()
     switch (endpoint) {
       case 'pending': {
-        const requests: ChoiceRequestWire[] = [...pending.values()].map(entry => ({
+        const requests: ChoiceRequestWire[] = [...pending.values()].map((entry) => ({
           id: entry.id,
           sessionId: entry.sessionId,
           task: entry.task,
           ...(entry.inherited === undefined ? {} : { inherited: entry.inherited }),
           ...(entry.fallback === undefined ? {} : { fallback: entry.fallback }),
           ...(entry.defaultChoice === undefined ? {} : { defaultChoice: entry.defaultChoice }),
-          ...(entry.defaultChoiceIssue === undefined ? {} : { defaultChoiceIssue: entry.defaultChoiceIssue }),
+          ...(entry.defaultChoiceIssue === undefined
+            ? {}
+            : { defaultChoiceIssue: entry.defaultChoiceIssue }),
           ...(entry.preset === undefined ? {} : { preset: entry.preset }),
           ...(entry.origin === undefined ? {} : { origin: entry.origin }),
           ...(entry.workspaces === undefined ? {} : { workspaces: entry.workspaces }),
@@ -294,7 +315,11 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
    * envelope the connection RPC carriers use, on this package's own
    * web-server prefix route.
    */
-  const serve = async (svcCtx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const serve = async (
+    svcCtx: Context,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> => {
     const rejection = svcCtx.connection.requestRejection(req)
     if (rejection !== undefined) {
       res.writeHead(rejection)
@@ -311,7 +336,10 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
       respond(404, '{}')
       return
     }
-    if ((req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
+    if (
+      (req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !==
+      'application/json'
+    ) {
       respond(415, '{}')
       return
     }
@@ -334,8 +362,12 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
       return
     }
     if (
-      envelope.type !== 'client-request' || typeof envelope.rpcId !== 'string' || envelope.rpcId.length === 0 ||
-      envelope.method !== endpoint || typeof envelope.payload !== 'object' || envelope.payload === null
+      envelope.type !== 'client-request' ||
+      typeof envelope.rpcId !== 'string' ||
+      envelope.rpcId.length === 0 ||
+      envelope.method !== endpoint ||
+      typeof envelope.payload !== 'object' ||
+      envelope.payload === null
     ) {
       respond(400, '{}')
       return
@@ -345,11 +377,15 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
   }
 
   ctx.inject(['connection', 'webServer'], (svcCtx) => {
-    svcCtx.effect(() => svcCtx.webServer.register({
-      kind: 'prefix',
-      path: RPC_CHANNEL,
-      handler: (req, res) => serve(svcCtx, req, res),
-    }), `${RPC_CHANNEL} handoff channel`)
+    svcCtx.effect(
+      () =>
+        svcCtx.webServer.register({
+          kind: 'prefix',
+          path: RPC_CHANNEL,
+          handler: (req, res) => serve(svcCtx, req, res),
+        }),
+      `${RPC_CHANNEL} handoff channel`,
+    )
   })
 
   return {
@@ -358,10 +394,12 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
     },
     request(input, timeoutMs): Promise<ChoiceOutcome | undefined> {
       const id = crypto.randomUUID()
-      return new Promise<ChoiceOutcome | undefined>(resolve => {
+      return new Promise<ChoiceOutcome | undefined>((resolve) => {
         const timer = setTimeout(() => {
           pending.delete(id)
-          ctx.logger(PACKAGE_NAME).warn('model pick timed out; no browser answer', { requestId: id })
+          ctx
+            .logger(PACKAGE_NAME)
+            .warn('model pick timed out; no browser answer', { requestId: id })
           resolve(undefined)
         }, timeoutMs)
         pending.set(id, {

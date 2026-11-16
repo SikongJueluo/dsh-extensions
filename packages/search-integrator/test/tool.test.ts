@@ -70,7 +70,12 @@ function fakeHost(overrides: Partial<ToolHost> = {}): ToolHost {
     resolveCredential: async () => 'test-key',
     llmFor: () => ({
       async call() {
-        return { ok: true, text: integration, finishKind: 'stop', usage: { inputTokens: 1, outputTokens: 1 } }
+        return {
+          ok: true,
+          text: integration,
+          finishKind: 'stop',
+          usage: { inputTokens: 1, outputTokens: 1 },
+        }
       },
     }),
     auditFor: () => ({
@@ -111,7 +116,10 @@ describe('makeResearchTool', () => {
     const tool = makeResearchTool(fakeHost(), { name: 'web_research', timeoutMs: 5000 })
     expect(tool.name).toBe('web_research')
     expect(tool.timeoutMs).toBe(5000)
-    const value = await tool.execute({ question: 'the question', queries: ['q'] }, execStub()) as Record<string, unknown>
+    const value = (await tool.execute(
+      { question: 'the question', queries: ['q'] },
+      execStub(),
+    )) as Record<string, unknown>
     expect(value.status).toBe('ok')
     expect(value.summary).toBe('Tool-level answer.')
     const sources = value.sources as { id: number; url: string; snippet?: string }[]
@@ -130,7 +138,7 @@ describe('makeResearchTool', () => {
       },
     })
     const tool = makeResearchTool(host, { name: 'web_research', timeoutMs: 5000 })
-    const value = await tool.execute({ question: 'q' }, execStub()) as Record<string, unknown>
+    const value = (await tool.execute({ question: 'q' }, execStub())) as Record<string, unknown>
     expect(value.status).toBe('failed')
     expect(String(value.summary)).toContain('no search sources available')
   })
@@ -142,7 +150,7 @@ describe('makeResearchTool', () => {
       },
     })
     const tool = makeResearchTool(host, { name: 'web_research', timeoutMs: 5000 })
-    const value = await tool.execute({ question: 'q' }, execStub()) as Record<string, unknown>
+    const value = (await tool.execute({ question: 'q' }, execStub())) as Record<string, unknown>
     expect(value.status).toBe('failed')
     expect(String(value.summary)).toContain('research run crashed')
   })
@@ -156,7 +164,10 @@ describe('makeResearchTool', () => {
 
   it('renders a compact text block and presentation meta from the value', async () => {
     const tool = makeResearchTool(fakeHost(), { name: 'web_research', timeoutMs: 5000 })
-    const value = await tool.execute({ question: 'the question', queries: ['q'] }, execStub()) as never
+    const value = (await tool.execute(
+      { question: 'the question', queries: ['q'] },
+      execStub(),
+    )) as never
     const blocks = tool.output.render({ question: 'the question' } as never, value)
     expect(blocks).toHaveLength(1)
     expect(blocks[0]?.type).toBe('text')
@@ -164,7 +175,10 @@ describe('makeResearchTool', () => {
     expect(text).toContain('Tool-level answer.')
     expect(text).toContain('Sources:')
     expect(text).toContain('untrusted data')
-    const meta = tool.output.presentationMeta?.({ question: 'x' } as never, value) as Record<string, unknown>
+    const meta = tool.output.presentationMeta?.({ question: 'x' } as never, value) as Record<
+      string,
+      unknown
+    >
     expect(meta.status).toBe('ok')
     expect(meta.searched).toEqual(['tavily'])
   })
@@ -174,15 +188,24 @@ describe('makeResearchTool', () => {
       readSettings: () => settings({ auditEnabled: true }),
       auditFor: () => ({
         async save() {
-          return { locator: '/tmp/dsh-spill-x/session-1/audit.txt', retrievalHint: 'Use read with offset/limit, or grep this path to search within it.', bytes: 1234 }
+          return {
+            locator: '/tmp/dsh-spill-x/session-1/audit.txt',
+            retrievalHint: 'Use read with offset/limit, or grep this path to search within it.',
+            bytes: 1234,
+          }
         },
       }),
     })
     const tool = makeResearchTool(host, { name: 'web_research', timeoutMs: 5000 })
-    const value = await tool.execute({ question: 'the question', queries: ['q'] }, execStub()) as never
+    const value = (await tool.execute(
+      { question: 'the question', queries: ['q'] },
+      execStub(),
+    )) as never
     const text = (tool.output.render({ question: 'x' } as never, value)[0] as { text: string }).text
     expect(text).toContain('Audit: /tmp/dsh-spill-x/session-1/audit.txt')
-    const meta = tool.output.presentationMeta?.({ question: 'x' } as never, value) as { audit?: { locator: string } }
+    const meta = tool.output.presentationMeta?.({ question: 'x' } as never, value) as {
+      audit?: { locator: string }
+    }
     expect(meta.audit?.locator).toBe('/tmp/dsh-spill-x/session-1/audit.txt')
   })
 
@@ -192,7 +215,10 @@ describe('makeResearchTool', () => {
       llmFor: () => undefined,
     })
     const tool = makeResearchTool(host, { name: 'web_research', timeoutMs: 5000 })
-    const value = await tool.execute({ question: 'q', queries: ['q'] }, execStub()) as Record<string, unknown>
+    const value = (await tool.execute({ question: 'q', queries: ['q'] }, execStub())) as Record<
+      string,
+      unknown
+    >
     expect(value.status).toBe('degraded')
     expect(String(value.degradedReason)).toContain('integrator model not configured')
   })
@@ -200,7 +226,7 @@ describe('makeResearchTool', () => {
   it('does not run when no source credential resolves', async () => {
     const host = fakeHost({ resolveCredential: async () => undefined })
     const tool = makeResearchTool(host, { name: 'web_research', timeoutMs: 5000 })
-    const value = await tool.execute({ question: 'q' }, execStub()) as Record<string, unknown>
+    const value = (await tool.execute({ question: 'q' }, execStub())) as Record<string, unknown>
     expect(value.status).toBe('failed')
     expect(String(value.summary)).toContain('no search sources available')
   })

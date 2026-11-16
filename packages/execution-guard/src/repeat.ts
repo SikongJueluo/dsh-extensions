@@ -75,6 +75,11 @@ export interface PendingHints {
  * @param decision - the preflight deny for the current batch.
  * @param counts - occurrence counts keyed by callId (from {@link RepeatTracker}).
  */
-export function hintableCalls(decision: Extract<PreflightDecision, { kind: 'deny' }>, counts: ReadonlyMap<string, number>): string[] {
-  return decision.invalid.filter((entry) => (counts.get(entry.callId) ?? 0) >= 2).map((entry) => entry.callId)
+export function hintableCalls(
+  decision: Extract<PreflightDecision, { kind: 'deny' }>,
+  counts: ReadonlyMap<string, number>,
+): string[] {
+  return decision.invalid
+    .filter((entry) => (counts.get(entry.callId) ?? 0) >= 2)
+    .map((entry) => entry.callId)
 }

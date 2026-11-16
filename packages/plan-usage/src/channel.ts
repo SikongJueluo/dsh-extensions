@@ -30,7 +30,10 @@ export interface ProviderQuotaView {
 }
 
 /** Serve one `quota` request; routes without a resolvable key are omitted. */
-async function quotaView(service: PlanUsageService, refresh: boolean): Promise<{ providers: ProviderQuotaView[] }> {
+async function quotaView(
+  service: PlanUsageService,
+  refresh: boolean,
+): Promise<{ providers: ProviderQuotaView[] }> {
   const monitored = service.providers().filter((provider) => service.monitored(provider))
   const views = await Promise.all(
     monitored.map(async (provider): Promise<ProviderQuotaView> => {
@@ -39,9 +42,10 @@ async function quotaView(service: PlanUsageService, refresh: boolean): Promise<{
       const sourceId = service.sourceId(provider)
       return {
         provider,
-        error: sourceId === 'openai-codex'
-          ? 'no signed-in ChatGPT token, or the usage fetch failed (see host logs)'
-          : 'quota fetch failed (see host logs)',
+        error:
+          sourceId === 'openai-codex'
+            ? 'no signed-in ChatGPT token, or the usage fetch failed (see host logs)'
+            : 'quota fetch failed (see host logs)',
       }
     }),
   )
@@ -56,15 +60,25 @@ export function registerChannel(ctx: Context, service: PlanUsageService): void {
   const handler = async (
     endpoint: string,
     payload: unknown,
-  ): Promise<{ ok: true; value: unknown } | { ok: false; error: { code: string; message: string; details: object } }> => {
+  ): Promise<
+    | { ok: true; value: unknown }
+    | { ok: false; error: { code: string; message: string; details: object } }
+  > => {
     if (endpoint === 'quota') {
       const refresh = (payload as { refresh?: unknown } | null | undefined)?.refresh === true
       return { ok: true, value: await quotaView(service, refresh) }
     }
-    return { ok: false, error: { code: 'UNKNOWN_ENDPOINT', message: `Unknown endpoint "${endpoint}"`, details: {} } }
+    return {
+      ok: false,
+      error: { code: 'UNKNOWN_ENDPOINT', message: `Unknown endpoint "${endpoint}"`, details: {} },
+    }
   }
 
-  const serve = async (svcCtx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const serve = async (
+    svcCtx: Context,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> => {
     const rejection = svcCtx.connection.requestRejection(req)
     if (rejection !== undefined) {
       res.writeHead(rejection)
@@ -81,7 +95,10 @@ export function registerChannel(ctx: Context, service: PlanUsageService): void {
       respond(404, '{}')
       return
     }
-    if ((req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
+    if (
+      (req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !==
+      'application/json'
+    ) {
       respond(415, '{}')
       return
     }
@@ -104,8 +121,12 @@ export function registerChannel(ctx: Context, service: PlanUsageService): void {
       return
     }
     if (
-      envelope.type !== 'client-request' || typeof envelope.rpcId !== 'string' || envelope.rpcId.length === 0 ||
-      envelope.method !== endpoint || typeof envelope.payload !== 'object' || envelope.payload === null
+      envelope.type !== 'client-request' ||
+      typeof envelope.rpcId !== 'string' ||
+      envelope.rpcId.length === 0 ||
+      envelope.method !== endpoint ||
+      typeof envelope.payload !== 'object' ||
+      envelope.payload === null
     ) {
       respond(400, '{}')
       return
@@ -115,10 +136,14 @@ export function registerChannel(ctx: Context, service: PlanUsageService): void {
   }
 
   ctx.inject(['connection', 'webServer'], (svcCtx) => {
-    svcCtx.effect(() => svcCtx.webServer.register({
-      kind: 'prefix',
-      path: RPC_CHANNEL,
-      handler: (req, res) => serve(svcCtx, req, res),
-    }), `${RPC_CHANNEL} quota channel`)
+    svcCtx.effect(
+      () =>
+        svcCtx.webServer.register({
+          kind: 'prefix',
+          path: RPC_CHANNEL,
+          handler: (req, res) => serve(svcCtx, req, res),
+        }),
+      `${RPC_CHANNEL} quota channel`,
+    )
   })
 }

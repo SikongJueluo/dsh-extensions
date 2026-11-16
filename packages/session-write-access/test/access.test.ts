@@ -48,12 +48,16 @@ function fixtureSessions(): {
 } {
   const sessions = new Map<string, SessionFacts>()
   return {
-    lookup: async sessionId => sessions.get(sessionId),
-    add: facts => { sessions.set(facts.sessionId, facts) },
+    lookup: async (sessionId) => sessions.get(sessionId),
+    add: (facts) => {
+      sessions.set(facts.sessionId, facts)
+    },
   }
 }
 
-function makeStore(overrides: { protectedRoots?: string[]; workspace?: string; workspaceFallback?: string } = {}) {
+function makeStore(
+  overrides: { protectedRoots?: string[]; workspace?: string; workspaceFallback?: string } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), 'dsh-swa-'))
   const workspace = overrides.workspace ?? join(root, 'workspace')
   const protectedRoot = join(root, 'protected')
@@ -99,7 +103,12 @@ describe('AccessStore attribution', () => {
     const elsewhere = join(root, 'elsewhere')
     mkdirSync(elsewhere)
     await store.ensureRootSession({ sessionId: 'root', cwd: workspace })
-    await store.ensureChildSession({ sessionId: 'child', parentSessionId: 'root', cwd: elsewhere, origin: 'subagent' })
+    await store.ensureChildSession({
+      sessionId: 'child',
+      parentSessionId: 'root',
+      cwd: elsewhere,
+      origin: 'subagent',
+    })
     expect(store.status('child').groupId).toBe('root')
     expect(store.status('child').workspaceRoot).toBe(workspace)
   })
@@ -107,8 +116,17 @@ describe('AccessStore attribution', () => {
   it('reconstructs a cold child group from persisted parent headers', async () => {
     const { workspace, sessions, store } = makeStore()
     sessions.add({ sessionId: 'root', cwd: workspace })
-    sessions.add({ sessionId: 'child', cwd: workspace, parentSessionId: 'root', origin: 'subagent' })
-    await store.ensureChildSession({ sessionId: 'child', parentSessionId: 'root', origin: 'subagent' })
+    sessions.add({
+      sessionId: 'child',
+      cwd: workspace,
+      parentSessionId: 'root',
+      origin: 'subagent',
+    })
+    await store.ensureChildSession({
+      sessionId: 'child',
+      parentSessionId: 'root',
+      origin: 'subagent',
+    })
     expect(store.status('child').groupId).toBe('root')
     expect(store.member('root')?.role).toBe('root')
   })
@@ -120,7 +138,9 @@ describe('AccessStore attribution', () => {
 
   it('refuses the filesystem root as a workspace or grant', async () => {
     const { store } = makeStore()
-    await expect(store.ensureRootSession({ sessionId: 'root', cwd: '/' })).rejects.toThrow(/overlaps/)
+    await expect(store.ensureRootSession({ sessionId: 'root', cwd: '/' })).rejects.toThrow(
+      /overlaps/,
+    )
     // A group created from a normal workspace still cannot grant '/'.
     const workspace = mkdtempSync(join(tmpdir(), 'dsh-swa-root-'))
     const other = new AccessStore(tables(), {
@@ -149,18 +169,26 @@ describe('AccessStore attribution', () => {
 
   it('refuses a workspace that overlaps protected data', async () => {
     const { root, protectedRoot, store } = makeStore()
-    await expect(store.ensureRootSession({ sessionId: 'root', cwd: root })).rejects.toThrow(/overlaps protected/)
-    await expect(store.ensureRootSession({ sessionId: 'other', cwd: protectedRoot })).rejects.toThrow(/overlaps protected/)
+    await expect(store.ensureRootSession({ sessionId: 'root', cwd: root })).rejects.toThrow(
+      /overlaps protected/,
+    )
+    await expect(
+      store.ensureRootSession({ sessionId: 'other', cwd: protectedRoot }),
+    ).rejects.toThrow(/overlaps protected/)
   })
 
   it('refuses a session without a cwd when the deployment states no fallback', async () => {
     const { root, store } = makeStore({ workspaceFallback: undefined })
-    const failure = await store.ensureRootSession({ sessionId: 'root' }).catch((error: unknown) => error)
+    const failure = await store
+      .ensureRootSession({ sessionId: 'root' })
+      .catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(AccessError)
     expect((failure as AccessError).code).toBe('NO_WORKSPACE')
     expect((failure as AccessError).message).toMatch(/no workspaceRoot/)
     // A stated cwd still works: only the derived fallback is gone.
-    await expect(store.ensureRootSession({ sessionId: 'with-cwd', cwd: join(root, 'workspace') })).resolves.toBeDefined()
+    await expect(
+      store.ensureRootSession({ sessionId: 'with-cwd', cwd: join(root, 'workspace') }),
+    ).resolves.toBeDefined()
   })
 })
 
@@ -170,10 +198,14 @@ describe('AccessStore grants', () => {
     const shared = join(root, 'shared')
     mkdirSync(shared)
     await store.ensureRootSession({ sessionId: 'root', cwd: workspace })
-    await store.ensureChildSession({ sessionId: 'child', parentSessionId: 'root', origin: 'subagent' })
+    await store.ensureChildSession({
+      sessionId: 'child',
+      parentSessionId: 'root',
+      origin: 'subagent',
+    })
     const added = await store.addGrant('child', shared)
-    expect(added.group.grants.map(grant => grant.path)).toEqual([shared])
-    expect(store.status('root').grants.map(grant => grant.path)).toEqual([shared])
+    expect(added.group.grants.map((grant) => grant.path)).toEqual([shared])
+    expect(store.status('root').grants.map((grant) => grant.path)).toEqual([shared])
     const removed = await store.removeGrant('root', shared)
     expect(removed.removed).toBe(true)
     expect(store.status('child').grants).toEqual([])
@@ -200,7 +232,7 @@ describe('AccessStore grants', () => {
     await store.addGrant('root', child)
     await store.addGrant('root', parent)
     const view = store.status('root')
-    expect(view.grants.find(grant => grant.path === child)?.coveredBy).toBe(parent)
+    expect(view.grants.find((grant) => grant.path === child)?.coveredBy).toBe(parent)
   })
 
   it('refuses a grant overlapping protected data', async () => {
@@ -218,7 +250,9 @@ describe('AccessStore grants', () => {
     symlinkSync(real, link)
     await store.ensureRootSession({ sessionId: 'linked', cwd: link })
     expect(store.status('linked').workspaceRoot).toBe(real)
-    await expect(store.addGrant('linked', link)).rejects.toThrow(/symlinked grants are not supported/)
+    await expect(store.addGrant('linked', link)).rejects.toThrow(
+      /symlinked grants are not supported/,
+    )
   })
 })
 
@@ -262,10 +296,12 @@ describe('AccessStore requests', () => {
     const requested = await store.request('root', wanted, 'needed')
     if (requested.kind !== 'pending') throw new Error('unreachable')
     const requestId = requested.request.requestId
-    await expect(store.decide('root', requestId, 'allow', 9)).rejects.toMatchObject({ code: 'STALE_REVISION' })
+    await expect(store.decide('root', requestId, 'allow', 9)).rejects.toMatchObject({
+      code: 'STALE_REVISION',
+    })
     const allowed = await store.decide('root', requestId, 'allow', 1)
     expect(allowed.changed).toBe(true)
-    expect(store.status('root').grants.map(grant => grant.path)).toEqual([wanted])
+    expect(store.status('root').grants.map((grant) => grant.path)).toEqual([wanted])
     const again = await store.decide('root', requestId, 'allow', 1)
     expect(again.changed).toBe(false)
   })
@@ -304,7 +340,9 @@ describe('AccessStore requests', () => {
     await store.ensureRootSession({ sessionId: 'other', cwd: workspace })
     const requested = await store.request('root', wanted, 'needed')
     if (requested.kind !== 'pending') throw new Error('unreachable')
-    await expect(store.decide('other', requested.request.requestId, 'allow', 1)).rejects.toMatchObject({ code: 'REQUEST_MISSING' })
+    await expect(
+      store.decide('other', requested.request.requestId, 'allow', 1),
+    ).rejects.toMatchObject({ code: 'REQUEST_MISSING' })
   })
 })
 
@@ -318,10 +356,10 @@ describe('AccessStore fork', () => {
     const fork = await store.beginFork('root')
     await store.commitFork(fork.forkId, 'forked')
     expect(store.status('forked').workspaceRoot).toBe(workspace)
-    expect(store.status('forked').grants.map(grant => grant.path)).toEqual([shared])
+    expect(store.status('forked').grants.map((grant) => grant.path)).toEqual([shared])
     await store.removeGrant('root', shared)
-    expect(store.status('forked').grants.map(grant => grant.path)).toEqual([shared])
-    expect(store.forks().find(record => record.forkId === fork.forkId)?.stage).toBe('committed')
+    expect(store.status('forked').grants.map((grant) => grant.path)).toEqual([shared])
+    expect(store.forks().find((record) => record.forkId === fork.forkId)?.stage).toBe('committed')
   })
 
   it('marks a pending record without a target as failed on reconcile', async () => {
@@ -329,7 +367,7 @@ describe('AccessStore fork', () => {
     await store.ensureRootSession({ sessionId: 'root', cwd: workspace })
     const fork = await store.beginFork('root')
     await store.reconcileForks()
-    expect(store.forks().find(record => record.forkId === fork.forkId)?.stage).toBe('failed')
+    expect(store.forks().find((record) => record.forkId === fork.forkId)?.stage).toBe('failed')
   })
 })
 
@@ -347,11 +385,11 @@ describe('AccessStore fork commit recovery', () => {
       return put(key, value)
     }
     await expect(store.commitFork(fork.forkId, 'forked')).rejects.toThrow('marker write failed')
-    expect(store.status('forked').grants.map(grant => grant.path)).toEqual([shared])
-    expect(store.forks().find(record => record.forkId === fork.forkId)?.stage).toBe('committing')
+    expect(store.status('forked').grants.map((grant) => grant.path)).toEqual([shared])
+    expect(store.forks().find((record) => record.forkId === fork.forkId)?.stage).toBe('committing')
     tableSet.forks.put = put
     await store.reconcileForks()
-    const record = store.forks().find(candidate => candidate.forkId === fork.forkId)
+    const record = store.forks().find((candidate) => candidate.forkId === fork.forkId)
     expect(record?.stage).toBe('committed')
     expect(record?.targetSessionId).toBe('forked')
   })
@@ -372,7 +410,7 @@ describe('AccessStore fork commit recovery', () => {
     expect(store.member('forked')).toBeUndefined()
     tableSet.groups.put = put
     await store.reconcileForks()
-    expect(store.status('forked').grants.map(grant => grant.path)).toEqual([shared])
+    expect(store.status('forked').grants.map((grant) => grant.path)).toEqual([shared])
   })
 
   it('rebuilds a missing member after a failed member write, including after reopen', async () => {
@@ -397,7 +435,7 @@ describe('AccessStore fork commit recovery', () => {
       lookup: async () => undefined,
     })
     await reopened.reconcileForks()
-    expect(reopened.status('forked').grants.map(grant => grant.path)).toEqual([shared])
+    expect(reopened.status('forked').grants.map((grant) => grant.path)).toEqual([shared])
   })
 
   it('aborts a partial commit and does not revive it after reopen', async () => {
@@ -417,7 +455,7 @@ describe('AccessStore fork commit recovery', () => {
     await store.abortFork(fork.forkId, 'forked')
     expect(store.member('forked')).toBeUndefined()
     expect(store.group('forked')).toBeUndefined()
-    const record = store.forks().find(candidate => candidate.forkId === fork.forkId)
+    const record = store.forks().find((candidate) => candidate.forkId === fork.forkId)
     expect(record?.stage).toBe('failed')
     expect(record?.targetSessionId).toBe('forked')
     const reopened = new AccessStore(tableSet, {
@@ -450,7 +488,7 @@ describe('AccessStore fork commit recovery', () => {
       { sessionId: 'forked', cwd: workspace },
       { workspaceRoot: workspace, grants: [shared], forkSourceSessionId: 'root' },
     )
-    expect(store.status('forked').grants.map(grant => grant.path)).toEqual([shared])
+    expect(store.status('forked').grants.map((grant) => grant.path)).toEqual([shared])
   })
 })
 

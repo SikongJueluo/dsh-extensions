@@ -59,14 +59,22 @@ export type SignalResult =
 export type TurnEndResult =
   | { readonly kind: 'ignored' }
   | { readonly kind: 'aborted'; readonly run: RunRecord }
-  | { readonly kind: 'advance'; readonly run: RunRecord; readonly intents: readonly DeliveryIntent[] }
+  | {
+      readonly kind: 'advance'
+      readonly run: RunRecord
+      readonly intents: readonly DeliveryIntent[]
+    }
 
 export type ControlErrorCode = 'run-not-pausable' | 'run-not-resumable'
 
 /** History append with the bounded tail. */
 function withHistory(run: RunRecord, entry: RunHistoryEntry): RunRecord {
   const history = [...run.history, entry]
-  return { ...run, history: history.length > HISTORY_LIMIT ? history.slice(history.length - HISTORY_LIMIT) : history }
+  return {
+    ...run,
+    history:
+      history.length > HISTORY_LIMIT ? history.slice(history.length - HISTORY_LIMIT) : history,
+  }
 }
 
 /** Outcomes each role may signal, by the phase the run must be in. */
@@ -88,7 +96,11 @@ export function roleOf(run: RunRecord, callerSession: string): 'executor' | 'par
  * nothing: only the submitting session's own `turn/end` may commit (or abort)
  * its signal. Legacy records without `session` accept either bound side.
  */
-export function signalBelongsTo(pending: PendingSignal, run: RunRecord, sessionId: string): boolean {
+export function signalBelongsTo(
+  pending: PendingSignal,
+  run: RunRecord,
+  sessionId: string,
+): boolean {
   if (pending.session !== undefined) return pending.session === sessionId
   return run.executor === sessionId || run.parent === sessionId
 }
@@ -177,7 +189,10 @@ export function submitSignal(
   return {
     ok: true,
     duplicate: false,
-    run: { ...accepted, pendingSignal: { outcome, summary, session: callerSession, turn, at: now } },
+    run: {
+      ...accepted,
+      pendingSignal: { outcome, summary, session: callerSession, turn, at: now },
+    },
   }
 }
 
@@ -187,7 +202,13 @@ export function submitSignal(
  * commits; anything else with a pending signal parks the run in `paused-error`
  * instead of guessing.
  */
-export function commitTurnEnd(run: RunRecord, sessionId: string, turn: number, reasonKind: string, now: number): TurnEndResult {
+export function commitTurnEnd(
+  run: RunRecord,
+  sessionId: string,
+  turn: number,
+  reasonKind: string,
+  now: number,
+): TurnEndResult {
   const pending = run.pendingSignal
   if (pending === undefined || pending.turn !== turn) return { kind: 'ignored' }
   if (!signalBelongsTo(pending, run, sessionId)) return { kind: 'ignored' }
@@ -196,7 +217,11 @@ export function commitTurnEnd(run: RunRecord, sessionId: string, turn: number, r
     return {
       kind: 'aborted',
       run: withHistory(
-        { ...base, status: 'paused-error', endNote: `信号所在回合以 ${reasonKind} 结束，未按正常交接推进` },
+        {
+          ...base,
+          status: 'paused-error',
+          endNote: `信号所在回合以 ${reasonKind} 结束，未按正常交接推进`,
+        },
         { at: now, kind: 'pause', detail: `signal turn ended ${reasonKind}` },
       ),
     }
@@ -229,7 +254,11 @@ export function commitTurnEnd(run: RunRecord, sessionId: string, turn: number, r
       return {
         kind: 'advance',
         run: withHistory(
-          { ...base, status: 'paused-budget', pendingRework: { summary: pending.summary, round: run.round } },
+          {
+            ...base,
+            status: 'paused-budget',
+            pendingRework: { summary: pending.summary, round: run.round },
+          },
           { at: now, kind: 'pause', detail: 'rework at round budget' },
         ),
         intents: [],
@@ -254,7 +283,12 @@ export function commitTurnEnd(run: RunRecord, sessionId: string, turn: number, r
           { at: now, kind: 'pause', detail: `needs_user by ${pausedBy}` },
         ),
         intents: [
-          { runId: run.id, round: run.round, to: pausedBy === 'executor' ? run.parent : run.executor, kind: 'notice' },
+          {
+            runId: run.id,
+            round: run.round,
+            to: pausedBy === 'executor' ? run.parent : run.executor,
+            kind: 'notice',
+          },
         ],
       }
     }
@@ -288,7 +322,10 @@ export function autoDeliver(
     detail: `executor:deliver (auto, turn ${turn})`,
   })
   return commitTurnEnd(
-    { ...staged, pendingSignal: { outcome: 'deliver', summary, session: sessionId, turn, at: now, auto: true } },
+    {
+      ...staged,
+      pendingSignal: { outcome: 'deliver', summary, session: sessionId, turn, at: now, auto: true },
+    },
     sessionId,
     turn,
     'completed',
@@ -319,9 +356,10 @@ export function dueNudge(
     if (run.phase !== 'awaiting-review') return { ok: false }
     if (run.nudgeState?.review === run.round) return { ok: false }
   }
-  const nudgeState: NudgeState = kind === 'deliver'
-    ? { ...run.nudgeState, deliver: run.round }
-    : { ...run.nudgeState, review: run.round }
+  const nudgeState: NudgeState =
+    kind === 'deliver'
+      ? { ...run.nudgeState, deliver: run.round }
+      : { ...run.nudgeState, review: run.round }
   const nudged: RunRecord = withHistory(
     { ...run, nudgeState },
     { at: now, kind: 'nudge', detail: `${kind} reminder round ${run.round}` },
@@ -329,13 +367,22 @@ export function dueNudge(
   return {
     ok: true,
     run: nudged,
-    intent: { runId: run.id, round: run.round, to: kind === 'deliver' ? run.executor : run.parent, kind: 'nudge' },
+    intent: {
+      runId: run.id,
+      round: run.round,
+      to: kind === 'deliver' ? run.executor : run.parent,
+      kind: 'nudge',
+    },
   }
 }
 
 /** Manually pause an active run (the waiting side keeps waiting; nothing is cancelled). */
-export function pauseRun(run: RunRecord, now: number): { ok: true; run: RunRecord } | { ok: false; message: string } {
-  if (run.status !== 'active') return { ok: false, message: `运行已处于 ${statusLabel(run.status)} 状态。` }
+export function pauseRun(
+  run: RunRecord,
+  now: number,
+): { ok: true; run: RunRecord } | { ok: false; message: string } {
+  if (run.status !== 'active')
+    return { ok: false, message: `运行已处于 ${statusLabel(run.status)} 状态。` }
   const pausedBy: RunRecord['pausedBy'] = run.phase === 'awaiting-delivery' ? 'executor' : 'parent'
   return {
     ok: true,
@@ -347,14 +394,24 @@ export function pauseRun(run: RunRecord, now: number): { ok: true; run: RunRecor
 }
 
 /** Cancel a run permanently (any non-terminal status). */
-export function cancelRun(run: RunRecord, now: number): { ok: true; run: RunRecord } | { ok: false; message: string } {
+export function cancelRun(
+  run: RunRecord,
+  now: number,
+): { ok: true; run: RunRecord } | { ok: false; message: string } {
   if (run.status === 'completed' || run.status === 'cancelled') {
     return { ok: false, message: '运行已结束，无需取消。' }
   }
   return {
     ok: true,
     run: withHistory(
-      { ...run, status: 'cancelled', endedAt: now, endNote: '手动取消', pendingSignal: undefined, pendingRework: undefined },
+      {
+        ...run,
+        status: 'cancelled',
+        endedAt: now,
+        endNote: '手动取消',
+        pendingSignal: undefined,
+        pendingRework: undefined,
+      },
       { at: now, kind: 'end', detail: 'cancelled' },
     ),
   }
@@ -377,8 +434,11 @@ export function resumeRun(
   run: RunRecord,
   options: ResumeOptions,
   now: number,
-): { ok: true; run: RunRecord; intents: readonly DeliveryIntent[] } | { ok: false; code: ControlErrorCode; message: string } {
-  if (run.status === 'active') return { ok: false, code: 'run-not-resumable', message: '运行仍在进行中。' }
+):
+  | { ok: true; run: RunRecord; intents: readonly DeliveryIntent[] }
+  | { ok: false; code: ControlErrorCode; message: string } {
+  if (run.status === 'active')
+    return { ok: false, code: 'run-not-resumable', message: '运行仍在进行中。' }
   if (run.status === 'completed' || run.status === 'cancelled') {
     return { ok: false, code: 'run-not-resumable', message: '运行已结束，不能恢复。' }
   }
@@ -398,13 +458,18 @@ export function resumeRun(
         endNote: undefined,
         pausedBy: undefined,
       },
-      { at: now, kind: 'resume', detail: `budget ${run.maxRounds} → ${target}, round ${run.round + 1}` },
+      {
+        at: now,
+        kind: 'resume',
+        detail: `budget ${run.maxRounds} → ${target}, round ${run.round + 1}`,
+      },
     )
     // With a deferred rework held, resuming releases it; otherwise the user
     // paused mid-budget without a verdict and the executor just continues.
-    const intents: DeliveryIntent[] = pending !== undefined
-      ? [{ runId: run.id, round: run.round + 1, to: run.executor, kind: 'rework' }]
-      : []
+    const intents: DeliveryIntent[] =
+      pending !== undefined
+        ? [{ runId: run.id, round: run.round + 1, to: run.executor, kind: 'rework' }]
+        : []
     return { ok: true, run: resumed, intents }
   }
   // `pausedBy` records the ROLE that asked; map it back to its session id
@@ -414,7 +479,8 @@ export function resumeRun(
     { ...run, status: 'active', endNote: undefined, pausedBy: undefined },
     { at: now, kind: 'resume' },
   )
-  if (options.message === undefined || options.message.length === 0) return { ok: true, run: resumed, intents: [] }
+  if (options.message === undefined || options.message.length === 0)
+    return { ok: true, run: resumed, intents: [] }
   const to = pausedByRole === 'executor' ? run.executor : run.parent
   return {
     ok: true,
@@ -426,23 +492,34 @@ export function resumeRun(
 /** Raise the budget of a still-running or paused run without touching anything else. */
 export function extendBudget(run: RunRecord, newMaxRounds: number, now: number): RunRecord {
   if (newMaxRounds <= run.maxRounds) return run
-  return withHistory({ ...run, maxRounds: newMaxRounds }, { at: now, kind: 'note', detail: `budget → ${newMaxRounds}` })
+  return withHistory(
+    { ...run, maxRounds: newMaxRounds },
+    { at: now, kind: 'note', detail: `budget → ${newMaxRounds}` },
+  )
 }
 
 /** Replace `{{key}}` slots in a template body; unknown keys stay visible. */
 export function renderTemplate(body: string, vars: Readonly<Record<string, string>>): string {
-  return body.replace(/\{\{(\w+)\}\}/g, (whole, key: string) => (Object.hasOwn(vars, key) ? vars[key]! : whole))
+  return body.replace(/\{\{(\w+)\}\}/g, (whole, key: string) =>
+    Object.hasOwn(vars, key) ? vars[key]! : whole,
+  )
 }
 
 /** Human labels (UI copy shares them). */
 export function statusLabel(status: RunStatus): string {
   switch (status) {
-    case 'active': return '进行中'
-    case 'paused-user': return '等待用户'
-    case 'paused-budget': return '轮次用尽待续'
-    case 'paused-error': return '异常暂停'
-    case 'completed': return '已完成'
-    case 'cancelled': return '已取消'
+    case 'active':
+      return '进行中'
+    case 'paused-user':
+      return '等待用户'
+    case 'paused-budget':
+      return '轮次用尽待续'
+    case 'paused-error':
+      return '异常暂停'
+    case 'completed':
+      return '已完成'
+    case 'cancelled':
+      return '已取消'
   }
 }
 
@@ -454,12 +531,19 @@ export function phaseLabel(phase: RunPhase): string {
 /** Human label of a delivery kind (error copy shares it). */
 export function kindLabel(kind: string): string {
   switch (kind) {
-    case 'start': return '开工'
-    case 'review': return '送审'
-    case 'rework': return '返工'
-    case 'notice': return '通知'
-    case 'resume': return '恢复'
-    case 'nudge': return '提醒'
-    default: return kind
+    case 'start':
+      return '开工'
+    case 'review':
+      return '送审'
+    case 'rework':
+      return '返工'
+    case 'notice':
+      return '通知'
+    case 'resume':
+      return '恢复'
+    case 'nudge':
+      return '提醒'
+    default:
+      return kind
   }
 }

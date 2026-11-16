@@ -139,7 +139,10 @@ function windowOf(raw: unknown): QuotaWindow | undefined {
 }
 
 /** Merge the top-level and nested (inside `credits`) window-limit locations. */
-function windowLimitsOf(body: unknown, root: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+function windowLimitsOf(
+  body: unknown,
+  root: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
   const credits = asRecord(root?.credits) ?? asRecord(asRecord(body)?.credits)
   const top = asRecord(root?.windowLimits) ?? asRecord(asRecord(body)?.windowLimits)
   const nested = asRecord(credits?.windowLimits)
@@ -147,7 +150,10 @@ function windowLimitsOf(body: unknown, root: Record<string, unknown> | undefined
   return nested ?? top
 }
 
-function planIdOf(credits: Record<string, unknown> | undefined, root: Record<string, unknown> | undefined): string | undefined {
+function planIdOf(
+  credits: Record<string, unknown> | undefined,
+  root: Record<string, unknown> | undefined,
+): string | undefined {
   return stringValue(credits?.planId) ?? stringValue(root?.planId)
 }
 
@@ -163,9 +169,10 @@ function monthlyOf(
 ): QuotaWindow | undefined {
   const remaining = finite(credits?.monthlyCredits)
   if (remaining === undefined) return undefined
-  const granted = finite(credits?.monthlyCreditsGranted)
-    ?? finite(root?.monthlyCreditsGranted)
-    ?? (planId !== undefined ? PLANS[planId]?.[1] : undefined)
+  const granted =
+    finite(credits?.monthlyCreditsGranted) ??
+    finite(root?.monthlyCreditsGranted) ??
+    (planId !== undefined ? PLANS[planId]?.[1] : undefined)
   if (granted === undefined || granted <= 0) return { remaining: round2(remaining), unit: 'usd' }
   const used = round2(Math.max(0, granted - remaining))
   return {
@@ -207,7 +214,11 @@ export function parseCommandCodeCredits(
   }
   if (planId !== undefined) parsed.level = PLANS[planId]?.[0] ?? planId
 
-  if (parsed.fiveHour === undefined && parsed.weekly === undefined && parsed.monthly === undefined) {
+  if (
+    parsed.fiveHour === undefined &&
+    parsed.weekly === undefined &&
+    parsed.monthly === undefined
+  ) {
     return { error: 'command-code: credits response carried no usable windows' }
   }
   return parsed
@@ -272,7 +283,11 @@ export class CommandCodeSource {
     return this.apiKeyOf(route) !== undefined
   }
 
-  private async getJson(path: string, apiKey: string, timeoutMs: number): Promise<JsonResult | undefined> {
+  private async getJson(
+    path: string,
+    apiKey: string,
+    timeoutMs: number,
+  ): Promise<JsonResult | undefined> {
     try {
       const response = await this.fetchImpl(`${this.baseURL}${path}`, {
         headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
@@ -293,7 +308,11 @@ export class CommandCodeSource {
   async get(route: string): Promise<QuotaSnapshot | undefined> {
     const apiKey = this.apiKeyOf(route)
     if (apiKey === undefined) {
-      this.logger?.warn('plan-usage: no Command Code API key for "%s" (tried env: %s)', route, ENV_KEYS.join(', '))
+      this.logger?.warn(
+        'plan-usage: no Command Code API key for "%s" (tried env: %s)',
+        route,
+        ENV_KEYS.join(', '),
+      )
       return undefined
     }
 
@@ -309,7 +328,11 @@ export class CommandCodeSource {
 
     const parsed = parseCommandCodeCredits(credits.body, subscriptions?.body)
     if ('error' in parsed) {
-      this.logger?.warn('plan-usage: command-code payload for "%s" unusable — %s', route, parsed.error)
+      this.logger?.warn(
+        'plan-usage: command-code payload for "%s" unusable — %s',
+        route,
+        parsed.error,
+      )
       return undefined
     }
     return { provider: route, fetchedAt: Date.now(), source: 'command-code:credits', ...parsed }

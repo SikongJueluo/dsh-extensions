@@ -71,13 +71,29 @@ function host(): JjWorkspaceHost {
 
 /** Read one template field of one revision. */
 async function revisionValue(cwd: string, revision: string, field: string): Promise<string> {
-  return (await run(cwd, ['--ignore-working-copy', 'log', '-r', revision, '--no-graph', '-T', `${field} ++ "\\n"`])).trim()
+  return (
+    await run(cwd, [
+      '--ignore-working-copy',
+      'log',
+      '-r',
+      revision,
+      '--no-graph',
+      '-T',
+      `${field} ++ "\\n"`,
+    ])
+  ).trim()
 }
 
 /** Read the change id a local bookmark points at, or undefined. */
 async function bookmarkTarget(cwd: string, name: string): Promise<string | undefined> {
   const lines = (
-    await run(cwd, ['--ignore-working-copy', 'bookmark', 'list', '-T', 'name ++ " " ++ normal_target.change_id() ++ "\\n"'])
+    await run(cwd, [
+      '--ignore-working-copy',
+      'bookmark',
+      'list',
+      '-T',
+      'name ++ " " ++ normal_target.change_id() ++ "\\n"',
+    ])
   )
     .split('\n')
     .filter((line) => line.length > 0)
@@ -143,7 +159,9 @@ describe('createJjWorkspace', () => {
     expect(parent).toBe(sourceAt)
     expect(created.baseCommit).toBe(await revisionValue(fixture.repo, '@', 'commit_id'))
     expect(await bookmarkTarget(created.path, 'task')).toBe(newAt)
-    expect(await bookmarkTarget(fixture.repo, 'base-bm')).toBe(await revisionValue(fixture.repo, '@-', 'change_id'))
+    expect(await bookmarkTarget(fixture.repo, 'base-bm')).toBe(
+      await revisionValue(fixture.repo, '@-', 'change_id'),
+    )
 
     const record = jjTaskRecord(created, 'session-1', 'tool')
     expect(record).toMatchObject({
@@ -166,14 +184,26 @@ describe('createJjWorkspace', () => {
   it('defaults to the current change in a colocated repo even with Git HEAD attached', async () => {
     const repo = join(fixture.root, 'colocated')
     await mkdir(repo)
-    execFileSync('jj', ['--no-pager', '--color=never', 'git', 'init', '--colocate'], { cwd: repo, env: fixture.env })
+    execFileSync('jj', ['--no-pager', '--color=never', 'git', 'init', '--colocate'], {
+      cwd: repo,
+      env: fixture.env,
+    })
     await writeFile(join(repo, 'a.txt'), 'one\n')
-    execFileSync('jj', ['--no-pager', '--color=never', 'describe', '-m', 'base'], { cwd: repo, env: fixture.env })
-    execFileSync('jj', ['--no-pager', '--color=never', 'bookmark', 'create', 'main', '-r', '@'], { cwd: repo, env: fixture.env })
+    execFileSync('jj', ['--no-pager', '--color=never', 'describe', '-m', 'base'], {
+      cwd: repo,
+      env: fixture.env,
+    })
+    execFileSync('jj', ['--no-pager', '--color=never', 'bookmark', 'create', 'main', '-r', '@'], {
+      cwd: repo,
+      env: fixture.env,
+    })
     execFileSync('jj', ['--no-pager', '--color=never', 'new'], { cwd: repo, env: fixture.env })
     await writeFile(join(repo, 'a.txt'), 'one\ncurrent\n')
     // The reviewer's fixture: Git HEAD names the base branch, not a detached commit.
-    execFileSync('git', ['--no-pager', 'symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: repo, env: fixture.env })
+    execFileSync('git', ['--no-pager', 'symbolic-ref', 'HEAD', 'refs/heads/main'], {
+      cwd: repo,
+      env: fixture.env,
+    })
 
     const sourceAt = await revisionValue(repo, '@', 'change_id')
     const created = await createJjWorkspace(host(), {
@@ -186,7 +216,10 @@ describe('createJjWorkspace', () => {
     expect(created.baseChange).toBe(sourceAt)
     expect(created.baseCommit).toBe(await revisionValue(repo, '@', 'commit_id'))
     expect(await readFile(join(created.path, 'a.txt'), 'utf8')).toBe('one\ncurrent\n')
-    expect((await stat(join(created.path, '.git'))).isFile() || (await stat(join(created.path, '.git'))).isDirectory()).toBe(true)
+    expect(
+      (await stat(join(created.path, '.git'))).isFile() ||
+        (await stat(join(created.path, '.git'))).isDirectory(),
+    ).toBe(true)
   })
 
   it('pins an explicit bookmark base without moving the source change', async () => {
@@ -248,7 +281,9 @@ describe('createJjWorkspace', () => {
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow(/bookmark already exists/)
-    await expect(stat(join(fixture.repo, '.agents/workspaces/base-bm'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(join(fixture.repo, '.agents/workspaces/base-bm'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })
 
@@ -301,7 +336,21 @@ describe('validateWorkspaceName', () => {
   })
 
   it('rejects path traversal, empty segments, and unsafe characters', () => {
-    for (const name of ['', '-task', 'a//b', 'a/../b', '.', '..', 'a b', 'a\\b', 'a:b', '/abs', 'a..b', 'a.', 'a.lock']) {
+    for (const name of [
+      '',
+      '-task',
+      'a//b',
+      'a/../b',
+      '.',
+      '..',
+      'a b',
+      'a\\b',
+      'a:b',
+      '/abs',
+      'a..b',
+      'a.',
+      'a.lock',
+    ]) {
       expect(validateWorkspaceName(name), name).toBeTypeOf('string')
     }
   })

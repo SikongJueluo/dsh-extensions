@@ -23,15 +23,17 @@ function cite(numbers: readonly number[]): string {
 }
 
 function pointLine(point: ResearchResult['points'][number]): string {
-  const label = point.citationFailed === true
-    ? ' (citation check failed — model cited unknown sources)'
-    : point.sources.length > 0 && point.status !== 'supported'
-      ? ` (${STATUS_LABEL[point.status] ?? point.status})`
-      : ''
+  const label =
+    point.citationFailed === true
+      ? ' (citation check failed — model cited unknown sources)'
+      : point.sources.length > 0 && point.status !== 'supported'
+        ? ` (${STATUS_LABEL[point.status] ?? point.status})`
+        : ''
   // Attributed conflict sides render per side; the flat tail cites every side.
-  const sides = point.sides !== undefined && point.sides.length > 1
-    ? ` ${point.sides.map((side) => `${side.text} ${cite(side.sources)}`).join('; ')}`
-    : ''
+  const sides =
+    point.sides !== undefined && point.sides.length > 1
+      ? ` ${point.sides.map((side) => `${side.text} ${cite(side.sources)}`).join('; ')}`
+      : ''
   const tail = sides === '' && point.sources.length > 0 ? ` ${cite(point.sources)}` : ''
   return `- ${point.text}${sides}${tail}${label}`
 }
@@ -41,7 +43,9 @@ function sourceLine(source: ResearchResult['sources'][number]): string {
     source.title ?? '',
     source.publishedAt === undefined ? '' : String(source.publishedAt),
     source.providers.join('+'),
-  ].filter((part) => part !== '').join(' — ')
+  ]
+    .filter((part) => part !== '')
+    .join(' — ')
   return `[${source.id}] ${source.url}${meta === '' ? '' : ` — ${meta}`}`
 }
 
@@ -109,7 +113,9 @@ export function renderResearch(result: ResearchResult, maxChars: number): string
 
   if (result.status === 'degraded') {
     push(UNTRUSTED_NOTE)
-    push('UNINTEGRATED RESULTS — no model synthesis is available; the entries below are deterministically deduplicated search hits, NOT verified or synthesized.')
+    push(
+      'UNINTEGRATED RESULTS — no model synthesis is available; the entries below are deterministically deduplicated search hits, NOT verified or synthesized.',
+    )
     push(result.summary)
     push('')
     // Evidence digest: keep snippets while budget allows.
@@ -133,7 +139,10 @@ export function renderResearch(result: ResearchResult, maxChars: number): string
   const pointLines = result.points.map(pointLine)
   if (pointLines.length > 0) {
     push('Points:')
-    const { kept, dropped } = takeWhile(pointLines, Math.max(200, Math.floor((maxChars - used) * 0.55)))
+    const { kept, dropped } = takeWhile(
+      pointLines,
+      Math.max(200, Math.floor((maxChars - used) * 0.55)),
+    )
     for (const line of kept) push(line)
     if (dropped > 0) push(`(+${dropped} points omitted — render budget; see audit)`)
     push('')
@@ -186,8 +195,10 @@ export function researchMeta(result: ResearchResult): ResearchMeta {
     resultsFound: result.coverage.resultsFound,
     evidenceCount: result.coverage.evidenceCount,
     unknowns: result.unknowns.length,
-    ...(result.audit === undefined ? {} : {
-      audit: { locator: result.audit.locator, bytes: result.audit.bytes },
-    }),
+    ...(result.audit === undefined
+      ? {}
+      : {
+          audit: { locator: result.audit.locator, bytes: result.audit.bytes },
+        }),
   }
 }

@@ -42,9 +42,7 @@ interface Entry {
 
 type SettingsPatch = Record<string, string | boolean | null>
 
-type ReadResult =
-  | { ok: true; value: Entry }
-  | { ok: false; message: string }
+type ReadResult = { ok: true; value: Entry } | { ok: false; message: string }
 
 interface CatalogResult {
   ok: boolean
@@ -75,7 +73,11 @@ interface MutateEnvelope {
 }
 
 /** The catalog entry of one model, or null when absent/not loaded. */
-function catalogModel(catalog: Catalog | null, provider: string, model: string): CatalogModel | null {
+function catalogModel(
+  catalog: Catalog | null,
+  provider: string,
+  model: string,
+): CatalogModel | null {
   for (const group of catalog?.groups ?? []) {
     if (group.id !== provider) continue
     for (const entry of group.models) if (entry.id === model) return entry
@@ -90,8 +92,7 @@ function entryOf(view: { value?: Record<string, unknown>; revision?: number } | 
     enabled: value.enabled !== false,
     provider: typeof value.provider === 'string' ? value.provider : '',
     model: typeof value.model === 'string' ? value.model : '',
-    reasoningEffort:
-      typeof value.reasoningEffort === 'string' ? value.reasoningEffort : undefined,
+    reasoningEffort: typeof value.reasoningEffort === 'string' ? value.reasoningEffort : undefined,
     revision: view?.revision,
   }
 }
@@ -171,9 +172,7 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
   const modelGroups: SelectGroup[] = [
     {
       label: 'Status',
-      options: [
-        { value: '__none__', label: 'Not configured — auto-permit stays inactive' },
-      ],
+      options: [{ value: '__none__', label: 'Not configured — auto-permit stays inactive' }],
     },
     ...(catalog?.groups ?? []).map((group) => ({
       label: group.name,
@@ -195,9 +194,7 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
     // Switching models keeps the effort only when the new model has it.
     if (entry?.reasoningEffort) {
       const next = catalogModel(catalog, provider, model)
-      const kept = next?.reasoning?.efforts?.some(
-        (effort) => effort.id === entry.reasoningEffort,
-      )
+      const kept = next?.reasoning?.efforts?.some((effort) => effort.id === entry.reasoningEffort)
       if (!kept) {
         write({ provider, model, reasoningEffort: null })
         return
@@ -211,9 +208,9 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
       <p className="dshx:text-xs dshx:leading-[20px] dshx:text-fg-muted">
         Before a bash sandbox escalation reaches the approval dialog, a judge model checks it
         against this session's user prompts and previously approved commands; anything it cannot
-        ground falls back to the human dialog. Irreversible shapes (rm -rf ~, git clean -xfd,
-        reset --hard, push --force, sudo, curl|sh…) always go to the human. The judge model must be
-        picked explicitly — it never follows the session model.
+        ground falls back to the human dialog. Irreversible shapes (rm -rf ~, git clean -xfd, reset
+        --hard, push --force, sudo, curl|sh…) always go to the human. The judge model must be picked
+        explicitly — it never follows the session model.
       </p>
 
       <div className="dshx:flex dshx:items-center dshx:justify-between dshx:gap-3">
@@ -243,7 +240,9 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
             value={effortValid && entry.reasoningEffort ? entry.reasoningEffort : '__default__'}
             onValueChange={(value) =>
               // A null clears the field (settings update path-op semantics).
-              write(value === '__default__' ? { reasoningEffort: null } : { reasoningEffort: value })
+              write(
+                value === '__default__' ? { reasoningEffort: null } : { reasoningEffort: value },
+              )
             }
             disabled={busy}
             aria-label="Reasoning effort"
@@ -261,8 +260,8 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
       {managed ? (
         <Alert variant="info">
           This row is contributed by a home patch / command-line overlay (e.g. your NixOS plugin
-          declaration). Edit its config there and rebuild; the Web form cannot override the
-          defining layer.
+          declaration). Edit its config there and rebuild; the Web form cannot override the defining
+          layer.
         </Alert>
       ) : null}
       {error !== null ? <Alert variant="error">{error}</Alert> : null}
@@ -303,8 +302,7 @@ function apply(ctx: DshClientContext) {
         if (!envelope || envelope.ok !== true) {
           return {
             ok: false as const,
-            message:
-              envelope?.error?.message ?? 'Save failed.',
+            message: envelope?.error?.message ?? 'Save failed.',
           }
         }
         return { ok: true as const, value: entryOf(envelope.value) }

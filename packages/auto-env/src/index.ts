@@ -49,7 +49,13 @@ import type {} from '@deepseek-ai/dsh-tools'
 import { DirenvLoader, type EnvOverlay } from './direnv.js'
 
 export { DirenvLoader, findEnvrcDir, sanitizeDirenvDump } from './direnv.js'
-export type { DirenvFacts, DirenvOptions, DirenvStatus, DirenvStatusInfo, EnvOverlay } from './direnv.js'
+export type {
+  DirenvFacts,
+  DirenvOptions,
+  DirenvStatus,
+  DirenvStatusInfo,
+  EnvOverlay,
+} from './direnv.js'
 
 /** The direnv knobs this plugin adds, in one place for schema and fallback. */
 const DIRENV_DEFAULTS = {
@@ -91,17 +97,69 @@ export interface Config extends LocalBashConfig {
 // `configFields` is the plain field map so subclassing executors (see
 // dsh-rtk-rewrite) can extend the schema without restating these entries.
 export const configFields = {
-  cwd: Schema.string().volatile().description('Default working directory for commands (default: process.cwd()).'),
-  timeoutMs: Schema.number().step(1).min(1_000).default(120_000).volatile().description('Default per-command timeout (ms).'),
-  maxTimeoutMs: Schema.number().step(1).min(1_000).default(600_000).volatile().description('Upper bound a caller may raise the per-command timeout to (ms).'),
-  maxOutputBytes: Schema.number().step(1).min(1_024).default(64_000).volatile().description('Default stdout/stderr capture budget per stream (bytes).'),
-  maxSpillBytes: Schema.number().step(1).min(65_536).default(67_108_864).volatile().description('Per-stream spill-file cap (bytes).'),
-  graceMs: Schema.number().step(1).min(100).max(2_147_483_647).default(3_000).volatile().description('SIGTERM→SIGKILL grace period (ms).'),
-  direnvPath: Schema.string().default(DIRENV_DEFAULTS.direnvPath).description('Direnv executable: absolute path or bare PATH name resolved in the harness environment.'),
-  direnvTimeoutMs: Schema.number().step(1).min(1_000).default(DIRENV_DEFAULTS.direnvTimeoutMs).description('Budget for one `direnv export json` evaluation; a cold devenv/nix evaluation can take tens of seconds (ms).'),
-  direnvRevalidateMs: Schema.number().step(1).min(0).default(DIRENV_DEFAULTS.direnvRevalidateMs).description('Re-evaluate direnv when the cached overlay is older than this; direnv’s own cache keeps repeat runs near 20 ms (ms).'),
-  direnvStdoutMaxBytes: Schema.number().step(1).min(4_096).default(DIRENV_DEFAULTS.direnvStdoutMaxBytes).description('stdout budget for one direnv evaluation (bytes).'),
-  direnvWatch: Schema.boolean().default(true).description('Drop cached overlays the moment an .envrc or devenv.nix/yaml/lock changes (and when the direnv allow list changes), instead of waiting for direnvRevalidateMs. Private watch_file targets still rely on the TTL.'),
+  cwd: Schema.string()
+    .volatile()
+    .description('Default working directory for commands (default: process.cwd()).'),
+  timeoutMs: Schema.number()
+    .step(1)
+    .min(1_000)
+    .default(120_000)
+    .volatile()
+    .description('Default per-command timeout (ms).'),
+  maxTimeoutMs: Schema.number()
+    .step(1)
+    .min(1_000)
+    .default(600_000)
+    .volatile()
+    .description('Upper bound a caller may raise the per-command timeout to (ms).'),
+  maxOutputBytes: Schema.number()
+    .step(1)
+    .min(1_024)
+    .default(64_000)
+    .volatile()
+    .description('Default stdout/stderr capture budget per stream (bytes).'),
+  maxSpillBytes: Schema.number()
+    .step(1)
+    .min(65_536)
+    .default(67_108_864)
+    .volatile()
+    .description('Per-stream spill-file cap (bytes).'),
+  graceMs: Schema.number()
+    .step(1)
+    .min(100)
+    .max(2_147_483_647)
+    .default(3_000)
+    .volatile()
+    .description('SIGTERM→SIGKILL grace period (ms).'),
+  direnvPath: Schema.string()
+    .default(DIRENV_DEFAULTS.direnvPath)
+    .description(
+      'Direnv executable: absolute path or bare PATH name resolved in the harness environment.',
+    ),
+  direnvTimeoutMs: Schema.number()
+    .step(1)
+    .min(1_000)
+    .default(DIRENV_DEFAULTS.direnvTimeoutMs)
+    .description(
+      'Budget for one `direnv export json` evaluation; a cold devenv/nix evaluation can take tens of seconds (ms).',
+    ),
+  direnvRevalidateMs: Schema.number()
+    .step(1)
+    .min(0)
+    .default(DIRENV_DEFAULTS.direnvRevalidateMs)
+    .description(
+      'Re-evaluate direnv when the cached overlay is older than this; direnv’s own cache keeps repeat runs near 20 ms (ms).',
+    ),
+  direnvStdoutMaxBytes: Schema.number()
+    .step(1)
+    .min(4_096)
+    .default(DIRENV_DEFAULTS.direnvStdoutMaxBytes)
+    .description('stdout budget for one direnv evaluation (bytes).'),
+  direnvWatch: Schema.boolean()
+    .default(true)
+    .description(
+      'Drop cached overlays the moment an .envrc or devenv.nix/yaml/lock changes (and when the direnv allow list changes), instead of waiting for direnvRevalidateMs. Private watch_file targets still rely on the TTL.',
+    ),
 }
 
 export const Config = Schema.object({ ...configFields })
@@ -208,10 +266,12 @@ function wireExecutor(ctx: Context, executor: AutoEnvBashExecutor): void {
     name: 'auto-env',
     variables: {
       DSH_DIRENV: {
-        description: 'auto-env status for the session directory: active, none, pending, blocked, timeout, error, or missing',
+        description:
+          'auto-env status for the session directory: active, none, pending, blocked, timeout, error, or missing',
       },
       DSH_DIRENV_RC: {
-        description: 'directory holding the .envrc backing the loaded environment (set when active)',
+        description:
+          'directory holding the .envrc backing the loaded environment (set when active)',
       },
     },
     resolve: (execution) => {

@@ -91,10 +91,13 @@ describe('pending-call recovery', () => {
   })
 
   it('recovers a pending PTC bash sub-call from its start event alone (no completion yet)', () => {
-    const evidence = collectEvidence(sessionOf([
-      directCall(1, 'root', 'run_code', { code: 'bash("uv sync")' }),
-      ptcStart(2, 'root:ptc:1', UV_ARGS),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        directCall(1, 'root', 'run_code', { code: 'bash("uv sync")' }),
+        ptcStart(2, 'root:ptc:1', UV_ARGS),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.call).toEqual({
       command: 'uv sync',
       description: 'Install project dependencies',
@@ -110,101 +113,136 @@ describe('pending-call recovery', () => {
   })
 
   it('leaves a call unrecoverable when its id appears twice with different content', () => {
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', { command: 'uv sync' }),
-      ptcStart(2, 'root:ptc:1', { command: 'rm -rf /' }),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        ptcStart(1, 'root:ptc:1', { command: 'uv sync' }),
+        ptcStart(2, 'root:ptc:1', { command: 'rm -rf /' }),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.call).toBeUndefined()
   })
 
   it('invalidates evidence when the second record under an id is a malformed bash payload', () => {
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-      ptcStart(2, 'root:ptc:1', { command: 42 }),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+        ptcStart(2, 'root:ptc:1', { command: 42 }),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.call).toBeUndefined()
   })
 
   it('invalidates evidence when the second record under an id names another tool', () => {
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-      ptcStart(2, 'root:ptc:1', { file_path: 'a.txt' }, { name: 'read' }),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+        ptcStart(2, 'root:ptc:1', { file_path: 'a.txt' }, { name: 'read' }),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.call).toBeUndefined()
   })
 
   it('invalidates evidence when a malformed record claimed the id first', () => {
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', { command: 42 }),
-      ptcStart(2, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        ptcStart(1, 'root:ptc:1', { command: 42 }),
+        ptcStart(2, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.call).toBeUndefined()
   })
 
   it('invalidates evidence when another tool claimed the id first', () => {
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', { file_path: 'a.txt' }, { name: 'read' }),
-      ptcStart(2, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        ptcStart(1, 'root:ptc:1', { file_path: 'a.txt' }, { name: 'read' }),
+        ptcStart(2, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.call).toBeUndefined()
   })
 
   it('keeps an idempotent replay of the identical record recoverable', () => {
     const args = { command: 'uv sync', sandbox_permissions: 'workspace-write' }
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', args),
-      ptcStart(2, 'root:ptc:1', { ...args }),
-      directCall(3, 'root:ptc:1', 'bash', args),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        ptcStart(1, 'root:ptc:1', args),
+        ptcStart(2, 'root:ptc:1', { ...args }),
+        directCall(3, 'root:ptc:1', 'bash', args),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.call?.command).toBe('uv sync')
   })
 
   it('keeps unrelated non-bash calls from tainting their own ids only', () => {
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', { file_path: 'a.txt' }, { name: 'read' }),
-      ptcStart(2, 'root:ptc:2', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-    ]), 'root:ptc:2')
+    const evidence = collectEvidence(
+      sessionOf([
+        ptcStart(1, 'root:ptc:1', { file_path: 'a.txt' }, { name: 'read' }),
+        ptcStart(2, 'root:ptc:2', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+      ]),
+      'root:ptc:2',
+    )
     expect(evidence.call?.command).toBe('uv sync')
   })
 
   it('leaves malformed PTC arguments unrecoverable, never guessed', () => {
-    for (const bad of [
-      {},
-      { command: 42 },
-      [],
-      null,
-      'uv sync',
-      7,
-    ]) {
+    for (const bad of [{}, { command: 42 }, [], null, 'uv sync', 7]) {
       const evidence = collectEvidence(sessionOf([ptcStart(1, 'root:ptc:1', bad)]), 'root:ptc:1')
       expect(evidence.call).toBeUndefined()
     }
   })
 
   it('ignores PTC start events for other tools', () => {
-    const evidence = collectEvidence(sessionOf([{
-      type: 'tool/ptc-dispatch-start',
-      seq: 1,
-      data: { rootCallId: 'root', parentCallId: 'root', subCallId: 'root:ptc:1', name: 'read', arguments: { file_path: 'a' } },
-    }]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        {
+          type: 'tool/ptc-dispatch-start',
+          seq: 1,
+          data: {
+            rootCallId: 'root',
+            parentCallId: 'root',
+            subCallId: 'root:ptc:1',
+            name: 'read',
+            arguments: { file_path: 'a' },
+          },
+        },
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.call).toBeUndefined()
   })
 
   it('never recovers evidence from a bare tool/ptc-dispatch completion (old hosts)', () => {
-    const evidence = collectEvidence(sessionOf([{
-      type: 'tool/ptc-dispatch',
-      seq: 1,
-      data: { rootCallId: 'root', subCallId: 'root:ptc:1', name: 'bash', arguments: UV_ARGS },
-    }]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        {
+          type: 'tool/ptc-dispatch',
+          seq: 1,
+          data: { rootCallId: 'root', subCallId: 'root:ptc:1', name: 'bash', arguments: UV_ARGS },
+        },
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.call).toBeUndefined()
   })
 
   it('still rejects malformed direct JSON arguments', () => {
-    const evidence = collectEvidence(sessionOf([{
-      type: 'tool/call',
-      seq: 1,
-      data: { callId: 'c1', name: 'bash', arguments: '{"command": "x"' },
-    }]), 'c1')
+    const evidence = collectEvidence(
+      sessionOf([
+        {
+          type: 'tool/call',
+          seq: 1,
+          data: { callId: 'c1', name: 'bash', arguments: '{"command": "x"' },
+        },
+      ]),
+      'c1',
+    )
     expect(evidence.call).toBeUndefined()
   })
 })
@@ -235,7 +273,13 @@ describe('sub-call isolation', () => {
       {
         type: 'tool/ptc-dispatch-start',
         seq: 1,
-        data: { rootCallId: 'root', parentCallId: 'root', subCallId: 'root:ptc:1', name: 'run_code', arguments: { code: '…' } },
+        data: {
+          rootCallId: 'root',
+          parentCallId: 'root',
+          subCallId: 'root:ptc:1',
+          name: 'run_code',
+          arguments: { code: '…' },
+        },
       },
       ptcStart(2, 'root:ptc:1:ptc:1', UV_ARGS, { rootCallId: 'root', parentCallId: 'root:ptc:1' }),
     ])
@@ -245,32 +289,44 @@ describe('sub-call isolation', () => {
 
 describe('approval history across both paths', () => {
   it('counts a prior PTC approval in the approved history for a pending direct call', () => {
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-      asked(2, 'a1', 'root:ptc:1'),
-      decided(3, 'a1', 'allowed-once'),
-      directCall(4, 'd1', 'bash', { command: 'uv lock', sandbox_permissions: 'workspace-write' }),
-    ]), 'd1')
+    const evidence = collectEvidence(
+      sessionOf([
+        ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+        asked(2, 'a1', 'root:ptc:1'),
+        decided(3, 'a1', 'allowed-once'),
+        directCall(4, 'd1', 'bash', { command: 'uv lock', sandbox_permissions: 'workspace-write' }),
+      ]),
+      'd1',
+    )
     expect(evidence.approved).toEqual(['uv sync'])
   })
 
   it('counts a prior direct approval in the approved history for a pending PTC call', () => {
-    const evidence = collectEvidence(sessionOf([
-      directCall(1, 'd1', 'bash', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-      asked(2, 'a1', 'd1'),
-      decided(3, 'a1', 'allowed-once'),
-      ptcStart(4, 'root:ptc:1', { command: 'uv lock', sandbox_permissions: 'workspace-write' }),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        directCall(1, 'd1', 'bash', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+        asked(2, 'a1', 'd1'),
+        decided(3, 'a1', 'allowed-once'),
+        ptcStart(4, 'root:ptc:1', { command: 'uv lock', sandbox_permissions: 'workspace-write' }),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.approved).toEqual(['uv sync'])
   })
 
   it('approving one sibling does not make the other an exact repeat', () => {
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-      ptcStart(2, 'root:ptc:2', { command: 'cargo build', sandbox_permissions: 'workspace-write' }),
-      asked(3, 'a1', 'root:ptc:1'),
-      decided(4, 'a1', 'allowed-once'),
-    ]), 'root:ptc:2')
+    const evidence = collectEvidence(
+      sessionOf([
+        ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+        ptcStart(2, 'root:ptc:2', {
+          command: 'cargo build',
+          sandbox_permissions: 'workspace-write',
+        }),
+        asked(3, 'a1', 'root:ptc:1'),
+        decided(4, 'a1', 'allowed-once'),
+      ]),
+      'root:ptc:2',
+    )
     // The approved list is session-wide memory (the judge may see it), but a
     // DIFFERENT command must never become an exact repeat of its sibling.
     expect(evidence.approved).toEqual(['uv sync'])
@@ -280,32 +336,44 @@ describe('approval history across both paths', () => {
 
 describe('exact-repeat memory across both paths', () => {
   it('approved PTC sub-call makes a direct repeat exact', () => {
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-      asked(2, 'a1', 'root:ptc:1'),
-      decided(3, 'a1', 'allowed-once'),
-      directCall(4, 'd1', 'bash', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-    ]), 'd1')
+    const evidence = collectEvidence(
+      sessionOf([
+        ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+        asked(2, 'a1', 'root:ptc:1'),
+        decided(3, 'a1', 'allowed-once'),
+        directCall(4, 'd1', 'bash', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+      ]),
+      'd1',
+    )
     expect(evidence.exactRepeat).toBe(true)
   })
 
   it('approved direct call makes a PTC repeat exact', () => {
-    const evidence = collectEvidence(sessionOf([
-      directCall(1, 'd1', 'bash', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-      asked(2, 'a1', 'd1'),
-      decided(3, 'a1', 'allowed-once'),
-      ptcStart(4, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        directCall(1, 'd1', 'bash', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+        asked(2, 'a1', 'd1'),
+        decided(3, 'a1', 'allowed-once'),
+        ptcStart(4, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.exactRepeat).toBe(true)
   })
 
   it('a different escalation mode is not an exact repeat', () => {
-    const evidence = collectEvidence(sessionOf([
-      directCall(1, 'd1', 'bash', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-      asked(2, 'a1', 'd1'),
-      decided(3, 'a1', 'allowed-once'),
-      ptcStart(4, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'danger-full-access' }),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        directCall(1, 'd1', 'bash', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+        asked(2, 'a1', 'd1'),
+        decided(3, 'a1', 'allowed-once'),
+        ptcStart(4, 'root:ptc:1', {
+          command: 'uv sync',
+          sandbox_permissions: 'danger-full-access',
+        }),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.exactRepeat).toBe(false)
   })
 
@@ -316,7 +384,9 @@ describe('exact-repeat memory across both paths', () => {
         asked(2, 'a1', 'd1'),
       ]
       if (outcome !== undefined) events.push(decided(3, 'a1', outcome))
-      events.push(ptcStart(4, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }))
+      events.push(
+        ptcStart(4, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+      )
       const evidence = collectEvidence(sessionOf(events), 'root:ptc:1')
       expect(evidence.approved).toEqual([])
       expect(evidence.exactRepeat).toBe(false)
@@ -324,10 +394,13 @@ describe('exact-repeat memory across both paths', () => {
   })
 
   it('the pending ask itself is excluded from the repeat check', () => {
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
-      asked(2, 'a1', 'root:ptc:1'),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        ptcStart(1, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }),
+        asked(2, 'a1', 'root:ptc:1'),
+      ]),
+      'root:ptc:1',
+    )
     // No decision yet: neither approved history nor exact repeat.
     expect(evidence.approved).toEqual([])
     expect(evidence.exactRepeat).toBe(false)
@@ -348,58 +421,91 @@ describe('execution context: workdir, effective cwd, and session workspace', () 
   })
 
   it('taints an id whose workdir disagrees between records', () => {
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', { command: 'podman build .', workdir: '/home/u/app' }),
-      ptcStart(2, 'root:ptc:1', { command: 'podman build .', workdir: '/etc' }),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        ptcStart(1, 'root:ptc:1', { command: 'podman build .', workdir: '/home/u/app' }),
+        ptcStart(2, 'root:ptc:1', { command: 'podman build .', workdir: '/etc' }),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.call).toBeUndefined()
   })
 
   it('keeps the immutable workspace and the recorded effective cwd distinct', () => {
-    const evidence = collectEvidence(sessionOf([
-      changeCwd(1, '/home/u/other-project'),
-      ptcStart(2, 'root:ptc:1', { command: 'podman build .' }),
-    ], { cwd: '/home/u/project' }), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf(
+        [
+          changeCwd(1, '/home/u/other-project'),
+          ptcStart(2, 'root:ptc:1', { command: 'podman build .' }),
+        ],
+        { cwd: '/home/u/project' },
+      ),
+      'root:ptc:1',
+    )
     expect(evidence.workspace).toBe('/home/u/project')
     expect(evidence.effectiveCwd).toBe('/home/u/other-project')
   })
 
   it('resolves an omitted workdir to the effective cwd, not the header', () => {
-    const evidence = collectEvidence(sessionOf([
-      changeCwd(1, '/home/u/other-project'),
-      ptcStart(2, 'root:ptc:1', { command: 'podman run --rm alpine true' }),
-    ], { cwd: '/home/u/project' }), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf(
+        [
+          changeCwd(1, '/home/u/other-project'),
+          ptcStart(2, 'root:ptc:1', { command: 'podman run --rm alpine true' }),
+        ],
+        { cwd: '/home/u/project' },
+      ),
+      'root:ptc:1',
+    )
     expect(evidence.resolvedWorkdir).toBe('/home/u/other-project')
   })
 
   it('resolves a relative workdir against the effective cwd like the host', () => {
-    const evidence = collectEvidence(sessionOf([
-      changeCwd(1, '/home/u/other-project'),
-      ptcStart(2, 'root:ptc:1', { command: 'podman build .', workdir: 'src' }),
-    ], { cwd: '/home/u/project' }), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf(
+        [
+          changeCwd(1, '/home/u/other-project'),
+          ptcStart(2, 'root:ptc:1', { command: 'podman build .', workdir: 'src' }),
+        ],
+        { cwd: '/home/u/project' },
+      ),
+      'root:ptc:1',
+    )
     expect(evidence.resolvedWorkdir).toBe('/home/u/other-project/src')
   })
 
   it('uses an absolute workdir as-is', () => {
-    const evidence = collectEvidence(sessionOf([
-      changeCwd(1, '/home/u/other-project'),
-      ptcStart(2, 'root:ptc:1', { command: 'podman build .', workdir: '/tmp/build' }),
-    ], { cwd: '/home/u/project' }), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf(
+        [
+          changeCwd(1, '/home/u/other-project'),
+          ptcStart(2, 'root:ptc:1', { command: 'podman build .', workdir: '/tmp/build' }),
+        ],
+        { cwd: '/home/u/project' },
+      ),
+      'root:ptc:1',
+    )
     expect(evidence.resolvedWorkdir).toBe('/tmp/build')
   })
 
   it('prefers the host service value over the log and the header', () => {
-    const evidence = collectEvidence(sessionOf([
-      changeCwd(1, '/stale/from-log'),
-      ptcStart(2, 'root:ptc:1', { command: 'podman build .' }),
-    ], { cwd: '/home/u/project' }), 'root:ptc:1', '/live/from-service')
+    const evidence = collectEvidence(
+      sessionOf(
+        [changeCwd(1, '/stale/from-log'), ptcStart(2, 'root:ptc:1', { command: 'podman build .' })],
+        { cwd: '/home/u/project' },
+      ),
+      'root:ptc:1',
+      '/live/from-service',
+    )
     expect(evidence.effectiveCwd).toBe('/live/from-service')
     expect(evidence.resolvedWorkdir).toBe('/live/from-service')
   })
 
   it('falls back to the header when no change and no service value exist', () => {
     const evidence = collectEvidence(
-      sessionOf([ptcStart(1, 'root:ptc:1', { command: 'podman build .' })], { cwd: '/home/u/Projects/app' }),
+      sessionOf([ptcStart(1, 'root:ptc:1', { command: 'podman build .' })], {
+        cwd: '/home/u/Projects/app',
+      }),
       'root:ptc:1',
     )
     expect(evidence.workspace).toBe('/home/u/Projects/app')
@@ -408,7 +514,10 @@ describe('execution context: workdir, effective cwd, and session workspace', () 
   })
 
   it('reports no workspace and no resolved directory when nothing records one', () => {
-    const evidence = collectEvidence(sessionOf([ptcStart(1, 'root:ptc:1', { command: 'podman build .' })]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([ptcStart(1, 'root:ptc:1', { command: 'podman build .' })]),
+      'root:ptc:1',
+    )
     expect(evidence.workspace).toBeUndefined()
     expect(evidence.effectiveCwd).toBeUndefined()
     expect(evidence.resolvedWorkdir).toBeUndefined()
@@ -416,9 +525,12 @@ describe('execution context: workdir, effective cwd, and session workspace', () 
 
   it('treats an over-long workdir as unresolved and clips it for display', () => {
     const workdir = '/' + 'x'.repeat(MAX_PATH_CHARS * 2)
-    const evidence = collectEvidence(sessionOf([
-      ptcStart(1, 'root:ptc:1', { command: 'podman build .', workdir }),
-    ], { cwd: '/home/u/app' }), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([ptcStart(1, 'root:ptc:1', { command: 'podman build .', workdir })], {
+        cwd: '/home/u/app',
+      }),
+      'root:ptc:1',
+    )
     expect(evidence.call?.workdir?.endsWith('…[truncated]')).toBe(true)
     expect(evidence.resolvedWorkdir).toBeUndefined()
   })
@@ -426,29 +538,42 @@ describe('execution context: workdir, effective cwd, and session workspace', () 
 
 describe('unchanged policy around the fold', () => {
   it('gathers prompts only from human user messages', () => {
-    const evidence = collectEvidence(sessionOf([
-      userPrompt(1, 'please run the suite'),
-      {
-        type: 'user/message',
-        seq: 2,
-        data: { source: { kind: 'tool' }, content: [{ type: 'text', text: 'tool output' }] },
-      },
-      ptcStart(3, 'root:ptc:1', UV_ARGS),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        userPrompt(1, 'please run the suite'),
+        {
+          type: 'user/message',
+          seq: 2,
+          data: { source: { kind: 'tool' }, content: [{ type: 'text', text: 'tool output' }] },
+        },
+        ptcStart(3, 'root:ptc:1', UV_ARGS),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.prompts).toEqual(['please run the suite'])
   })
 
   it('ignores unknown event types', () => {
-    const evidence = collectEvidence(sessionOf([
-      { type: 'mystery/event', seq: 1, data: { subCallId: 'root:ptc:1', name: 'bash', arguments: UV_ARGS } },
-      ptcStart(2, 'root:ptc:1', UV_ARGS),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        {
+          type: 'mystery/event',
+          seq: 1,
+          data: { subCallId: 'root:ptc:1', name: 'bash', arguments: UV_ARGS },
+        },
+        ptcStart(2, 'root:ptc:1', UV_ARGS),
+      ]),
+      'root:ptc:1',
+    )
     expect(evidence.call?.command).toBe('uv sync')
   })
 
   it('never clips the complete command: hard rules and the allowlist must see all of it', () => {
     const long = 'uv sync ' + 'x'.repeat(MAX_COMMAND_CHARS)
-    const evidence = collectEvidence(sessionOf([ptcStart(1, 'root:ptc:1', { command: long })]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([ptcStart(1, 'root:ptc:1', { command: long })]),
+      'root:ptc:1',
+    )
     expect(evidence.call?.command).toBe(long)
     expect(evidence.call?.command.endsWith('…[truncated]')).toBe(false)
   })
@@ -479,11 +604,14 @@ describe('long human prompts', () => {
   it('feeds the bounded prompt through collectEvidence without losing the Task', () => {
     const task = '## Task\nRun the RealSense wire test with podman.\n'
     const text = `${'a'.repeat(12800)}${task}${'z'.repeat(300)}`
-    const evidence = collectEvidence(sessionOf([
-      userPrompt(1, text),
-      userPrompt(2, 'newest authorization: only build, do not install'),
-      ptcStart(3, 'root:ptc:1', UV_ARGS),
-    ]), 'root:ptc:1')
+    const evidence = collectEvidence(
+      sessionOf([
+        userPrompt(1, text),
+        userPrompt(2, 'newest authorization: only build, do not install'),
+        ptcStart(3, 'root:ptc:1', UV_ARGS),
+      ]),
+      'root:ptc:1',
+    )
     const joined = evidence.prompts.join('\n')
     expect(joined).toContain('Run the RealSense wire test')
     expect(joined).toContain('newest authorization')

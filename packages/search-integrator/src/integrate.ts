@@ -24,7 +24,7 @@ const PLANNER_SYSTEM = [
   'You plan web-search queries for a research pipeline.',
   'Given one question, output ONLY a JSON object: {"queries": ["...", "..."]}',
   'Rules: 1-3 queries; each self-contained (no pronouns referring to the question);',
-  'together covering the question\'s distinct aspects; in the language most likely',
+  "together covering the question's distinct aspects; in the language most likely",
   'to retrieve good results for that question; no commentary.',
 ].join('\n')
 
@@ -40,7 +40,7 @@ const INTEGRATOR_SYSTEM = [
   `Output ONLY one JSON object (prompt version ${PROMPT_VERSION}):`,
   '{"summary": string, "points": [{"text": string, "status": "supported"|"conflict"|"insufficient", "sources": number[], "sides": [{"text": string, "sources": number[]}], "quote": string}], "unknowns": string[], "followup": {"needed": boolean, "queries": string[]}}',
   'Field rules:',
-  '- summary: at most ~80 words, in the question\'s language. Answer directly in the first sentence — no preamble about dates or evidence. State time-sensitivity per fact inside points, not as one blanket cutoff. The summary may only summarize the kept points and must never be more certain than they are.',
+  "- summary: at most ~80 words, in the question's language. Answer directly in the first sentence — no preamble about dates or evidence. State time-sensitivity per fact inside points, not as one blanket cutoff. The summary may only summarize the kept points and must never be more certain than they are.",
   '- points: the distinct claims behind the answer. status: "supported" = the CITED CONTENT explicitly backs the claim with its qualifiers (one directly applicable official document can be enough; ten copies of the same article are still one source). "conflict" = under comparable conditions the evidence gives incompatible statements — first check they are not just different scopes/versions; attribute each side separately. "insufficient" = only a title, bare URL, or vague fragment without the needed qualifiers.',
   '- sources: evidence numbers [n] the claim rests on; at least one valid number per point; never invent numbers.',
   '- sides (conflict points, preferred over packing both into text): one entry per position, each with its own sources.',
@@ -81,19 +81,19 @@ function toUnverifiedUnknown(text: string): string {
 /** Settled integration round. */
 export type IntegrationOutcome =
   | {
-    readonly kind: 'ok'
-    readonly integration: RawIntegration
-    readonly attempts: number
-    readonly usage: LlmUsage
-    readonly rawOutputs: readonly string[]
-  }
+      readonly kind: 'ok'
+      readonly integration: RawIntegration
+      readonly attempts: number
+      readonly usage: LlmUsage
+      readonly rawOutputs: readonly string[]
+    }
   | {
-    readonly kind: 'failed'
-    readonly reason: string
-    readonly attempts: number
-    readonly usage: LlmUsage
-    readonly rawOutputs: readonly string[]
-  }
+      readonly kind: 'failed'
+      readonly reason: string
+      readonly attempts: number
+      readonly usage: LlmUsage
+      readonly rawOutputs: readonly string[]
+    }
 
 const EMPTY_USAGE: LlmUsage = { inputTokens: 0, outputTokens: 0 }
 
@@ -178,7 +178,9 @@ export function parseIntegration(
     // Citation validation: an id is valid only if the numbered source exists.
     const validIds = new Set(Array.from({ length: sourceCount }, (_, i) => i + 1))
     const cited = Array.isArray(point.sources)
-      ? point.sources.filter((id): id is number => Number.isInteger(id) && id >= 1 && id <= sourceCount)
+      ? point.sources.filter(
+          (id): id is number => Number.isInteger(id) && id >= 1 && id <= sourceCount,
+        )
       : []
     const unique = [...new Set(cited)]
     const rawCount = Array.isArray(point.sources) ? point.sources.length : 0
@@ -187,14 +189,20 @@ export function parseIntegration(
     if (Array.isArray(point.sides)) {
       for (const side of point.sides) {
         if (typeof side !== 'object' || side === null) continue
-        const sideText = typeof (side as Record<string, unknown>).text === 'string'
-          ? ((side as Record<string, unknown>).text as string).trim()
-          : ''
+        const sideText =
+          typeof (side as Record<string, unknown>).text === 'string'
+            ? ((side as Record<string, unknown>).text as string).trim()
+            : ''
         if (sideText === '') continue
         const sideSources = Array.isArray((side as Record<string, unknown>).sources)
-          ? [...new Set(((side as Record<string, unknown>).sources as unknown[]).filter(
-              (id): id is number => typeof id === 'number' && Number.isInteger(id) && validIds.has(id),
-            ))]
+          ? [
+              ...new Set(
+                ((side as Record<string, unknown>).sources as unknown[]).filter(
+                  (id): id is number =>
+                    typeof id === 'number' && Number.isInteger(id) && validIds.has(id),
+                ),
+              ),
+            ]
           : []
         if (sideSources.length === 0) continue
         sides.push({ text: scrubInvalidCitations(sideText, sourceCount), sources: sideSources })
@@ -228,9 +236,10 @@ export function parseIntegration(
     })
   }
   if (points.length === 0) return undefined
-  const followup = typeof root.followup === 'object' && root.followup !== null
-    ? root.followup as Record<string, unknown>
-    : {}
+  const followup =
+    typeof root.followup === 'object' && root.followup !== null
+      ? (root.followup as Record<string, unknown>)
+      : {}
   const followupQueries = cleanStrings(followup.queries, MAX_QUERIES)
   return {
     summary: scrubInvalidCitations(summary, sourceCount),
@@ -299,7 +308,8 @@ export async function runIntegration(
   let usage = EMPTY_USAGE
   let user = integrationUserMessage(question, digest, sourceCount)
   if (options.finalRound === true) {
-    user += '\n\nThis is the FINAL round: no follow-up search is available. Put anything you cannot resolve into "unknowns" instead of requesting more evidence.'
+    user +=
+      '\n\nThis is the FINAL round: no follow-up search is available. Put anything you cannot resolve into "unknowns" instead of requesting more evidence.'
   }
   let repairNote = ''
   for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -308,7 +318,10 @@ export async function runIntegration(
       outcome = await llm.call(
         {
           system: INTEGRATOR_SYSTEM,
-          user: attempt === 1 ? user : `${user}\n\nYour previous answer was rejected: ${repairNote}\nReturn the corrected JSON object only.`,
+          user:
+            attempt === 1
+              ? user
+              : `${user}\n\nYour previous answer was rejected: ${repairNote}\nReturn the corrected JSON object only.`,
           maxTokens: options.maxTokens ?? 2048,
         },
         signal,
@@ -333,7 +346,13 @@ export async function runIntegration(
         repairNote = outcome.error ?? 'model call failed'
         continue
       }
-      return { kind: 'failed', reason: outcome.error ?? 'model call failed', attempts: attempt, usage, rawOutputs }
+      return {
+        kind: 'failed',
+        reason: outcome.error ?? 'model call failed',
+        attempts: attempt,
+        usage,
+        rawOutputs,
+      }
     }
     const json = extractJsonObject(outcome.text)
     if (json === undefined) {
@@ -357,5 +376,11 @@ export async function runIntegration(
     }
     return { kind: 'ok', integration, attempts: attempt, usage, rawOutputs }
   }
-  return { kind: 'failed', reason: 'integration exhausted its attempts', attempts: 2, usage, rawOutputs }
+  return {
+    kind: 'failed',
+    reason: 'integration exhausted its attempts',
+    attempts: 2,
+    usage,
+    rawOutputs,
+  }
 }

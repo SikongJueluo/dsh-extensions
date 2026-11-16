@@ -263,7 +263,11 @@ export type PathRefusal = 'floor-path' | 'credential-segment'
  * over a credential tree (`$XDG_CONFIG_HOME/.config` included) is exactly
  * what makes semgrep's state private, so only the system floors apply there.
  */
-export function pathFloorRefusal(path: string, env: GrantEnv, canonicalHome: string): PathRefusal | undefined {
+export function pathFloorRefusal(
+  path: string,
+  env: GrantEnv,
+  canonicalHome: string,
+): PathRefusal | undefined {
   if (FLOOR_PREFIXES.some((floor) => pathCovers(floor, path))) return 'floor-path'
   if (exactFloors(env, canonicalHome).includes(path)) return 'floor-path'
   return undefined
@@ -275,10 +279,15 @@ export function pathFloorRefusal(path: string, env: GrantEnv, canonicalHome: str
  * implementation so the two rule sets can never drift apart. `path` is
  * canonical (post-realpath); `canonicalHome` is the realpath'd HOME.
  */
-export function pathRefusal(path: string, env: GrantEnv, canonicalHome: string): PathRefusal | undefined {
+export function pathRefusal(
+  path: string,
+  env: GrantEnv,
+  canonicalHome: string,
+): PathRefusal | undefined {
   const floor = pathFloorRefusal(path, env, canonicalHome)
   if (floor !== undefined) return floor
-  if (path.split(sep).some((segment) => CREDENTIAL_SEGMENTS.has(segment))) return 'credential-segment'
+  if (path.split(sep).some((segment) => CREDENTIAL_SEGMENTS.has(segment)))
+    return 'credential-segment'
   return undefined
 }
 
@@ -299,7 +308,12 @@ function canonicalHomeOf(env: GrantEnv, fs: GrantFs): string {
  * resolved ancestor plus the still-missing segments. Returns true when
  * creation must NOT happen.
  */
-function preflightRejects(path: string, env: GrantEnv, fs: GrantFs, mode: 'grant' | 'mount-point' = 'grant'): boolean {
+function preflightRejects(
+  path: string,
+  env: GrantEnv,
+  fs: GrantFs,
+  mode: 'grant' | 'mount-point' = 'grant',
+): boolean {
   let ancestor = path
   const missing: string[] = []
   let resolved: string | undefined
@@ -313,12 +327,14 @@ function preflightRejects(path: string, env: GrantEnv, fs: GrantFs, mode: 'grant
       ancestor = index === 0 ? '/' : ancestor.slice(0, index)
     }
   }
-  const effective = missing.length === 0
-    ? resolved!
-    : `${resolved === '/' ? '' : resolved}${sep}${missing.join(sep)}`
-  const refusal = mode === 'mount-point'
-    ? pathFloorRefusal(effective, env, canonicalHomeOf(env, fs))
-    : pathRefusal(effective, env, canonicalHomeOf(env, fs))
+  const effective =
+    missing.length === 0
+      ? resolved!
+      : `${resolved === '/' ? '' : resolved}${sep}${missing.join(sep)}`
+  const refusal =
+    mode === 'mount-point'
+      ? pathFloorRefusal(effective, env, canonicalHomeOf(env, fs))
+      : pathRefusal(effective, env, canonicalHomeOf(env, fs))
   return refusal !== undefined
 }
 
@@ -380,9 +396,10 @@ interface NamedPath {
  *   existing directory, else `~/.cache`.
  */
 function semgrepDataDir(env: GrantEnv, fs: GrantFs): string {
-  const base = env.xdgConfigHome !== undefined && isExistingDirectory(fs, env.xdgConfigHome)
-    ? env.xdgConfigHome
-    : env.home
+  const base =
+    env.xdgConfigHome !== undefined && isExistingDirectory(fs, env.xdgConfigHome)
+      ? env.xdgConfigHome
+      : env.home
   return joinDir(base, '.semgrep')
 }
 
@@ -403,7 +420,10 @@ function isExistingDirectory(fs: GrantFs, path: string): boolean {
 }
 
 /** First non-empty anchor: the row's paths override wins over the exported env var. */
-function pickAnchor(override: string | undefined, envValue: string | undefined): string | undefined {
+function pickAnchor(
+  override: string | undefined,
+  envValue: string | undefined,
+): string | undefined {
   if (override !== undefined && override !== '') return override
   if (envValue !== undefined && envValue !== '') return envValue
   return undefined
@@ -452,13 +472,15 @@ function derivePaths(
         break
       }
       case 'cargo-cache': {
-        const cargoHome = overrides.cargoHome !== undefined && overrides.cargoHome !== ''
-          ? overrides.cargoHome
-          : env.cargoHome !== undefined && env.cargoHome !== ''
-            ? env.cargoHome
-            : joinDir(env.home, '.cargo')
-        const explicitHome = overrides.cargoHome !== undefined && overrides.cargoHome !== ''
-          || env.cargoHome !== undefined && env.cargoHome !== ''
+        const cargoHome =
+          overrides.cargoHome !== undefined && overrides.cargoHome !== ''
+            ? overrides.cargoHome
+            : env.cargoHome !== undefined && env.cargoHome !== ''
+              ? env.cargoHome
+              : joinDir(env.home, '.cargo')
+        const explicitHome =
+          (overrides.cargoHome !== undefined && overrides.cargoHome !== '') ||
+          (env.cargoHome !== undefined && env.cargoHome !== '')
         for (const [segment, kind] of [
           ['registry', 'cache-dir'],
           ['git', 'cache-dir'],
@@ -474,7 +496,13 @@ function derivePaths(
           ['.package-cache-mutate', 'lock-file'],
           ['.global-cache', 'lock-file'],
         ] as const) {
-          push(preset, joinDir(cargoHome, segment), explicitHome, cargoHome, explicitHome ? 'none' : kind)
+          push(
+            preset,
+            joinDir(cargoHome, segment),
+            explicitHome,
+            cargoHome,
+            explicitHome ? 'none' : kind,
+          )
         }
         break
       }
@@ -483,7 +511,13 @@ function derivePaths(
         if (override !== undefined && override !== '') push(preset, override, true, '', 'none')
         else {
           const envPnpmHome = env.pnpmHome !== undefined && env.pnpmHome !== ''
-          push(preset, joinDir(pnpmHomeBase, 'store'), envPnpmHome, pnpmHomeBase, envPnpmHome ? 'none' : 'cache-dir')
+          push(
+            preset,
+            joinDir(pnpmHomeBase, 'store'),
+            envPnpmHome,
+            pnpmHomeBase,
+            envPnpmHome ? 'none' : 'cache-dir',
+          )
         }
         break
       }
@@ -499,7 +533,13 @@ function derivePaths(
           push(preset, override, true, '', 'none')
         } else if (env.xdgRuntimeDir !== undefined && env.xdgRuntimeDir !== '') {
           // pnpm's secure_user_lock_dir(): $XDG_RUNTIME_DIR + name + "-<uid>".
-          push(preset, joinDir(env.xdgRuntimeDir, `pnpm-store-operation-locks-${env.uid}`), false, env.xdgRuntimeDir, 'lock-dir')
+          push(
+            preset,
+            joinDir(env.xdgRuntimeDir, `pnpm-store-operation-locks-${env.uid}`),
+            false,
+            env.xdgRuntimeDir,
+            'lock-dir',
+          )
         }
         // XDG unset: resolveGrants rejects the preset below (an explicit
         // override cannot help — pnpm would still lock /tmp).
@@ -529,10 +569,26 @@ function derivePaths(
         // itself stays read-only on purpose: gradle.properties there is
         // often credential-bearing (signing passwords, repo tokens) and on
         // this host is a home-manager/Nix store symlink.
-        const gradleHome = pickAnchor(overrides.gradleUserHome, env.gradleUserHome) ?? joinDir(env.home, '.gradle')
+        const gradleHome =
+          pickAnchor(overrides.gradleUserHome, env.gradleUserHome) ?? joinDir(env.home, '.gradle')
         const explicitHome = hasAnchor(overrides.gradleUserHome, env.gradleUserHome)
-        for (const segment of ['caches', 'wrapper', 'daemon', 'native', 'workers', 'notifications', 'kotlin-dsl', '.tmp']) {
-          push(preset, joinDir(gradleHome, segment), explicitHome, gradleHome, explicitHome ? 'none' : 'cache-dir')
+        for (const segment of [
+          'caches',
+          'wrapper',
+          'daemon',
+          'native',
+          'workers',
+          'notifications',
+          'kotlin-dsl',
+          '.tmp',
+        ]) {
+          push(
+            preset,
+            joinDir(gradleHome, segment),
+            explicitHome,
+            gradleHome,
+            explicitHome ? 'none' : 'cache-dir',
+          )
         }
         break
       }
@@ -540,9 +596,16 @@ function derivePaths(
         // Gradle's auto-provisioned toolchain JDKs (<gradle home>/jdks):
         // EXECUTABLE content, so it is its own preset — the same separate
         // trust decision as pnpm-engine — and never part of gradle-cache.
-        const gradleHome = pickAnchor(overrides.gradleUserHome, env.gradleUserHome) ?? joinDir(env.home, '.gradle')
+        const gradleHome =
+          pickAnchor(overrides.gradleUserHome, env.gradleUserHome) ?? joinDir(env.home, '.gradle')
         const explicitHome = hasAnchor(overrides.gradleUserHome, env.gradleUserHome)
-        push(preset, joinDir(gradleHome, 'jdks'), explicitHome, gradleHome, explicitHome ? 'none' : 'cache-dir')
+        push(
+          preset,
+          joinDir(gradleHome, 'jdks'),
+          explicitHome,
+          gradleHome,
+          explicitHome ? 'none' : 'cache-dir',
+        )
         break
       }
       case 'maven-cache': {
@@ -553,12 +616,19 @@ function derivePaths(
         // env var for the user home, so only the paths override can move it
         // (settings.xml <localRepository> relocations must be configured
         // here explicitly).
-        const mavenHome = overrides.mavenHome !== undefined && overrides.mavenHome !== ''
-          ? overrides.mavenHome
-          : joinDir(env.home, '.m2')
+        const mavenHome =
+          overrides.mavenHome !== undefined && overrides.mavenHome !== ''
+            ? overrides.mavenHome
+            : joinDir(env.home, '.m2')
         const explicitHome = overrides.mavenHome !== undefined && overrides.mavenHome !== ''
         for (const segment of ['repository', 'wrapper']) {
-          push(preset, joinDir(mavenHome, segment), explicitHome, mavenHome, explicitHome ? 'none' : 'cache-dir')
+          push(
+            preset,
+            joinDir(mavenHome, segment),
+            explicitHome,
+            mavenHome,
+            explicitHome ? 'none' : 'cache-dir',
+          )
         }
         break
       }
@@ -595,8 +665,11 @@ function derivePaths(
         // the operator's exact file as a plain grant (logs carry no
         // credentials). A log inside the data folder is covered by the
         // shadow and needs no separate bind.
-        if (env.semgrepLogFile !== undefined && env.semgrepLogFile !== ''
-          && !pathCovers(dataDir, env.semgrepLogFile)) {
+        if (
+          env.semgrepLogFile !== undefined &&
+          env.semgrepLogFile !== '' &&
+          !pathCovers(dataDir, env.semgrepLogFile)
+        ) {
           push(preset, env.semgrepLogFile, true, '', 'none')
         }
         // Version cache: row override > $SEMGREP_VERSION_CACHE_PATH > default.
@@ -634,11 +707,15 @@ function resolveShadowDestination(input: {
   canonicalHome: string
 }): { destination: string } | { issue: GrantIssue } {
   const { preset, destination, prepareDestination, env, fs, prepare, canonicalHome } = input
-  const issue = (reason: GrantIssue['reason'], message: string): { issue: GrantIssue } =>
-    ({ issue: { preset, path: destination, reason, message } })
+  const issue = (reason: GrantIssue['reason'], message: string): { issue: GrantIssue } => ({
+    issue: { preset, path: destination, reason, message },
+  })
 
   if (!isAbsolute(destination)) {
-    return issue('outside-default-bases', `${preset}: private-state mount point must be absolute: ${destination}`)
+    return issue(
+      'outside-default-bases',
+      `${preset}: private-state mount point must be absolute: ${destination}`,
+    )
   }
   let canonical: string
   try {
@@ -646,11 +723,15 @@ function resolveShadowDestination(input: {
   } catch {
     const rejected = preflightRejects(destination, env, fs, 'mount-point')
     const kind = prepareDestination
-    const guarded = prepare === true && kind !== undefined && fs.ensure !== undefined && rejected === false
+    const guarded =
+      prepare === true && kind !== undefined && fs.ensure !== undefined && rejected === false
     if (!guarded || kind === undefined) {
-      return issue(rejected ? 'floor-path' : 'missing', rejected
-        ? `${preset}: private-state mount point ${destination} resolves into a system tree — refusing to create or mount it`
-        : `${preset}: private-state mount point ${destination} does not exist on the host — bwrap cannot create it under its read-only root, so the private state directory has nowhere to mount; prepare it (see the package README) or disable the preset`)
+      return issue(
+        rejected ? 'floor-path' : 'missing',
+        rejected
+          ? `${preset}: private-state mount point ${destination} resolves into a system tree — refusing to create or mount it`
+          : `${preset}: private-state mount point ${destination} does not exist on the host — bwrap cannot create it under its read-only root, so the private state directory has nowhere to mount; prepare it (see the package README) or disable the preset`,
+      )
     }
     try {
       fs.ensure?.(destination, kind)
@@ -660,20 +741,32 @@ function resolveShadowDestination(input: {
     try {
       canonical = fs.realpath(destination)
     } catch {
-      return issue('missing', `${preset}: private-state mount point ${destination} still missing after controlled preparation`)
+      return issue(
+        'missing',
+        `${preset}: private-state mount point ${destination} still missing after controlled preparation`,
+      )
     }
   }
   let stat: GrantStat
   try {
     stat = fs.stat(canonical)
   } catch {
-    return issue('missing', `${preset}: private-state mount point ${destination} disappeared between resolution and stat`)
+    return issue(
+      'missing',
+      `${preset}: private-state mount point ${destination} disappeared between resolution and stat`,
+    )
   }
   if (!stat.isDirectory) {
-    return issue('not-a-directory', `${preset}: private-state mount point ${destination} is not a directory — refusals keep bwrap from mounting a directory source over a file`)
+    return issue(
+      'not-a-directory',
+      `${preset}: private-state mount point ${destination} is not a directory — refusals keep bwrap from mounting a directory source over a file`,
+    )
   }
   if (pathFloorRefusal(canonical, env, canonicalHome) !== undefined) {
-    return issue('floor-path', `${preset}: private-state mount point ${destination} resolves to ${canonical}, a system or session root — refusing to mount there`)
+    return issue(
+      'floor-path',
+      `${preset}: private-state mount point ${destination} resolves to ${canonical}, a system or session root — refusing to mount there`,
+    )
   }
   return { destination: canonical }
 }
@@ -710,16 +803,30 @@ export function resolveGrants(input: {
   const env: GrantEnv = {
     ...input.env,
     home: stripSlashes(input.env.home),
-    ...(input.env.xdgCacheHome === undefined ? {} : { xdgCacheHome: stripSlashes(input.env.xdgCacheHome) }),
-    ...(input.env.xdgDataHome === undefined ? {} : { xdgDataHome: stripSlashes(input.env.xdgDataHome) }),
-    ...(input.env.xdgRuntimeDir === undefined ? {} : { xdgRuntimeDir: stripSlashes(input.env.xdgRuntimeDir) }),
-    ...(input.env.xdgConfigHome === undefined ? {} : { xdgConfigHome: stripSlashes(input.env.xdgConfigHome) }),
+    ...(input.env.xdgCacheHome === undefined
+      ? {}
+      : { xdgCacheHome: stripSlashes(input.env.xdgCacheHome) }),
+    ...(input.env.xdgDataHome === undefined
+      ? {}
+      : { xdgDataHome: stripSlashes(input.env.xdgDataHome) }),
+    ...(input.env.xdgRuntimeDir === undefined
+      ? {}
+      : { xdgRuntimeDir: stripSlashes(input.env.xdgRuntimeDir) }),
+    ...(input.env.xdgConfigHome === undefined
+      ? {}
+      : { xdgConfigHome: stripSlashes(input.env.xdgConfigHome) }),
     ...(input.env.cargoHome === undefined ? {} : { cargoHome: stripSlashes(input.env.cargoHome) }),
     ...(input.env.pnpmHome === undefined ? {} : { pnpmHome: stripSlashes(input.env.pnpmHome) }),
     ...(input.env.uvCache === undefined ? {} : { uvCache: stripSlashes(input.env.uvCache) }),
-    ...(input.env.gradleUserHome === undefined ? {} : { gradleUserHome: stripSlashes(input.env.gradleUserHome) }),
-    ...(input.env.semgrepLogFile === undefined ? {} : { semgrepLogFile: stripSlashes(input.env.semgrepLogFile) }),
-    ...(input.env.semgrepVersionCache === undefined ? {} : { semgrepVersionCache: stripSlashes(input.env.semgrepVersionCache) }),
+    ...(input.env.gradleUserHome === undefined
+      ? {}
+      : { gradleUserHome: stripSlashes(input.env.gradleUserHome) }),
+    ...(input.env.semgrepLogFile === undefined
+      ? {}
+      : { semgrepLogFile: stripSlashes(input.env.semgrepLogFile) }),
+    ...(input.env.semgrepVersionCache === undefined
+      ? {}
+      : { semgrepVersionCache: stripSlashes(input.env.semgrepVersionCache) }),
   }
   const { named, issues } = derivePaths(presets, overrides, env, fs)
   const notes: GrantNote[] = []
@@ -747,7 +854,8 @@ export function resolveGrants(input: {
         preset: 'pnpm-runtime-locks',
         path: '<unset>',
         reason: 'runtime-dir-unset',
-        message: 'pnpm-runtime-locks needs a valid XDG_RUNTIME_DIR on the host: pnpm otherwise locks /tmp, which inside the sandbox is a private per-call tmpfs (split lock domain). Setting paths.pnpmRuntimeLocks cannot redirect pnpm — fix the runtime dir instead.',
+        message:
+          'pnpm-runtime-locks needs a valid XDG_RUNTIME_DIR on the host: pnpm otherwise locks /tmp, which inside the sandbox is a private per-call tmpfs (split lock domain). Setting paths.pnpmRuntimeLocks cannot redirect pnpm — fix the runtime dir instead.',
       })
     } else {
       try {
@@ -758,10 +866,11 @@ export function resolveGrants(input: {
         // Anything less and pnpm falls back to /tmp — a grant would cover
         // a lock domain pnpm never uses (verified: a 0775 runtime dir is
         // refused by pnpm even when the lock directory inside it exists).
-        const pnpmUsable = runtimeStat.isDirectory
-          && runtimeStat.uid === env.uid
-          && (runtimeStat.mode & 0o300) === 0o300
-          && (runtimeStat.mode & 0o022) === 0
+        const pnpmUsable =
+          runtimeStat.isDirectory &&
+          runtimeStat.uid === env.uid &&
+          (runtimeStat.mode & 0o300) === 0o300 &&
+          (runtimeStat.mode & 0o022) === 0
         if (!pnpmUsable) {
           runtimeDirBroken = true
           issues.push({
@@ -846,22 +955,28 @@ export function resolveGrants(input: {
       // is rejected without ever writing into the never-grantable target.
       const preflight = preflightRejects(entry.path, env, fs)
       const kind = entry.prepare === 'none' ? undefined : entry.prepare
-      const guarded = prepare === true && !entry.explicit && kind !== undefined && fs.ensure !== undefined
-        && preflight === false
+      const guarded =
+        prepare === true &&
+        !entry.explicit &&
+        kind !== undefined &&
+        fs.ensure !== undefined &&
+        preflight === false
       if (!guarded || kind === undefined) {
-        issues.push(preflight === true
-          ? {
-              preset: entry.preset,
-              path: entry.path,
-              reason: 'floor-path',
-              message: `${entry.preset}: ${entry.path} resolves into a system or credential tree — refusing to create or grant it`,
-            }
-          : {
-              preset: entry.preset,
-              path: entry.path,
-              reason: 'missing',
-              message: `${entry.preset}: ${entry.path} does not exist on the host — prepare it (see the package README's host-prep section) or disable the preset; the sandbox will not run with a configured grant it cannot honor`,
-            })
+        issues.push(
+          preflight === true
+            ? {
+                preset: entry.preset,
+                path: entry.path,
+                reason: 'floor-path',
+                message: `${entry.preset}: ${entry.path} resolves into a system or credential tree — refusing to create or grant it`,
+              }
+            : {
+                preset: entry.preset,
+                path: entry.path,
+                reason: 'missing',
+                message: `${entry.preset}: ${entry.path} does not exist on the host — prepare it (see the package README's host-prep section) or disable the preset; the sandbox will not run with a configured grant it cannot honor`,
+              },
+        )
         continue
       }
       try {
@@ -913,7 +1028,11 @@ export function resolveGrants(input: {
     // may re-spell that path but never relocate it — a grant over any other
     // directory would cover a lock domain pnpm ignores while the real locks
     // land in a private sandbox /tmp.
-    if (entry.preset === 'pnpm-runtime-locks' && pnpmLockCanonical !== undefined && canonical !== pnpmLockCanonical) {
+    if (
+      entry.preset === 'pnpm-runtime-locks' &&
+      pnpmLockCanonical !== undefined &&
+      canonical !== pnpmLockCanonical
+    ) {
       issues.push({
         preset: entry.preset,
         path: entry.path,
@@ -1001,8 +1120,9 @@ export function resolveGrants(input: {
       const spelled = defaultBaseTrees(env)
       const canonicalBases = spelled.map(canonicalOf)
       const homeBase = canonicalOf(env.home)
-      const base = canonicalBases.find((candidate) => pathCovers(candidate, canonical))
-        ?? spelled.find((candidate) => pathCovers(candidate, canonical))
+      const base =
+        canonicalBases.find((candidate) => pathCovers(candidate, canonical)) ??
+        spelled.find((candidate) => pathCovers(candidate, canonical))
       if (base === undefined) {
         issues.push({
           preset: entry.preset,
@@ -1015,7 +1135,10 @@ export function resolveGrants(input: {
       // Segments below the matched base: an XDG base needs one (the base
       // itself is not grantable); HOME needs two (so `~/.cache` or `~/.cargo`
       // as a whole stay out, `~/.cache/uv` and `~/.cargo/registry` pass).
-      const depth = canonical.slice(base.length + 1).split(sep).filter((part) => part !== '').length
+      const depth = canonical
+        .slice(base.length + 1)
+        .split(sep)
+        .filter((part) => part !== '').length
       const isHomeBase = base === homeBase || base === env.home
       if (isHomeBase ? depth < 2 : depth < 1) {
         issues.push({
@@ -1046,7 +1169,12 @@ export function resolveGrants(input: {
         issues.push(destination.issue)
         continue
       }
-      shadows.push({ ...entry, canonical, destination: entry.destination, destinationCanonical: destination.destination })
+      shadows.push({
+        ...entry,
+        canonical,
+        destination: entry.destination,
+        destinationCanonical: destination.destination,
+      })
       continue
     }
     resolved.push({ ...entry, canonical })
@@ -1079,7 +1207,11 @@ export function resolveGrants(input: {
   }
   const binds: GrantBind[] = kept
     .filter((entry) => keptCanonical.has(entry.canonical))
-    .map((entry) => ({ source: entry.canonical, destination: entry.canonical, preset: entry.preset }))
+    .map((entry) => ({
+      source: entry.canonical,
+      destination: entry.canonical,
+      preset: entry.preset,
+    }))
 
   // Private-state shadows are about the sandbox VIEW, not new host write
   // capability: the same host directory may already be writable through
@@ -1096,13 +1228,19 @@ export function resolveGrants(input: {
       notes.push({ preset: entry.preset, path: entry.path, covered: 'workspace' })
       continue
     }
-    if (shadowDestinations.has(entry.destinationCanonical)
-      || binds.some((bind) => pathCovers(bind.destination, entry.destinationCanonical))) {
+    if (
+      shadowDestinations.has(entry.destinationCanonical) ||
+      binds.some((bind) => pathCovers(bind.destination, entry.destinationCanonical))
+    ) {
       notes.push({ preset: entry.preset, path: entry.path, covered: 'another-grant' })
       continue
     }
     shadowDestinations.add(entry.destinationCanonical)
-    shadowBinds.push({ source: entry.canonical, destination: entry.destinationCanonical, preset: entry.preset })
+    shadowBinds.push({
+      source: entry.canonical,
+      destination: entry.destinationCanonical,
+      preset: entry.preset,
+    })
   }
   const allBinds = [...binds, ...shadowBinds]
 

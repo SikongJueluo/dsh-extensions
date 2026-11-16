@@ -2,7 +2,12 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { Config, assertDeploymentRootsSafe, resolveConfiguredWorkspaceRoot, resolveProtectedRoots } from '../src/config.js'
+import {
+  Config,
+  assertDeploymentRootsSafe,
+  resolveConfiguredWorkspaceRoot,
+  resolveProtectedRoots,
+} from '../src/config.js'
 import {
   InvalidWriteRootError,
   ProtectedWriteRootError,
@@ -103,36 +108,41 @@ describe('configuration', () => {
 
   it('refuses the filesystem root as a grant or deployment workspace', () => {
     expect(() => admitWriteRoot('/', ['/home/u/.dsh'])).toThrow(ProtectedWriteRootError)
-    expect(() => assertDeploymentRootsSafe(
-      Config({ workspaceRoot: '/', additionalWritableRoots: [] }),
-      ['/home/u/.dsh'],
-    )).toThrow(/overlaps protected/)
+    expect(() =>
+      assertDeploymentRootsSafe(Config({ workspaceRoot: '/', additionalWritableRoots: [] }), [
+        '/home/u/.dsh',
+      ]),
+    ).toThrow(/overlaps protected/)
   })
 
   it('refuses a deployment root overlapping protected data at load', () => {
     const root = tempDir()
     const protectedDir = join(root, 'protected')
     mkdirSync(protectedDir)
-    expect(() => assertDeploymentRootsSafe(
-      Config({ workspaceRoot: root, additionalWritableRoots: [] }),
-      [protectedDir],
-    )).toThrow(/overlaps protected/)
+    expect(() =>
+      assertDeploymentRootsSafe(Config({ workspaceRoot: root, additionalWritableRoots: [] }), [
+        protectedDir,
+      ]),
+    ).toThrow(/overlaps protected/)
     const workspace = join(root, 'workspace')
     mkdirSync(workspace)
-    expect(() => assertDeploymentRootsSafe(
-      Config({ workspaceRoot: workspace, additionalWritableRoots: [] }),
-      [protectedDir],
-    )).not.toThrow()
+    expect(() =>
+      assertDeploymentRootsSafe(Config({ workspaceRoot: workspace, additionalWritableRoots: [] }), [
+        protectedDir,
+      ]),
+    ).not.toThrow()
   })
 
   it('derives no deployment root from the process cwd', () => {
     // Nothing stated: the load check has no candidate, so a host started inside
     // a protected path (a service manager unit runs in $HOME) cannot refuse it.
     expect(resolveConfiguredWorkspaceRoot(Config({}))).toBeUndefined()
-    expect(() => assertDeploymentRootsSafe(Config({ additionalWritableRoots: [] }), [process.cwd()]))
-      .not.toThrow()
+    expect(() =>
+      assertDeploymentRootsSafe(Config({ additionalWritableRoots: [] }), [process.cwd()]),
+    ).not.toThrow()
     // A stated root is still checked.
-    expect(() => assertDeploymentRootsSafe(Config({ workspaceRoot: process.cwd() }), [process.cwd()]))
-      .toThrow(/overlaps protected/)
+    expect(() =>
+      assertDeploymentRootsSafe(Config({ workspaceRoot: process.cwd() }), [process.cwd()]),
+    ).toThrow(/overlaps protected/)
   })
 })

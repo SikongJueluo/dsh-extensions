@@ -93,7 +93,10 @@ function splitFrontmatter(raw: string): Frontmatter | undefined {
 }
 
 /** Locate a `---` fence line at or after `start`. */
-function findClosingFence(raw: string, start: number): { start: number; bodyStart: number } | undefined {
+function findClosingFence(
+  raw: string,
+  start: number,
+): { start: number; bodyStart: number } | undefined {
   let lineStart = start
   while (lineStart <= raw.length) {
     const nextNewline = raw.indexOf('\n', lineStart)
@@ -112,7 +115,9 @@ function stringField(data: Record<string, unknown>, key: string): string | undef
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
-function optionalMetadata(data: Record<string, unknown>): Readonly<Record<string, unknown>> | undefined {
+function optionalMetadata(
+  data: Record<string, unknown>,
+): Readonly<Record<string, unknown>> | undefined {
   const value = data.metadata
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
     return value as Readonly<Record<string, unknown>>

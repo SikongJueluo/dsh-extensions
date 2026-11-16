@@ -48,7 +48,11 @@ function inheritAgentOptions(ctx: Context, agent: Agent): AgentOptions | undefin
 }
 
 /** Resolve the agent options for the fresh session per the confirmed choice. */
-function resolveAgentOptions(ctx: Context, agent: Agent, choice: PendingHandoff['choice']): AgentOptions | undefined {
+function resolveAgentOptions(
+  ctx: Context,
+  agent: Agent,
+  choice: PendingHandoff['choice'],
+): AgentOptions | undefined {
   if (choice.kind === 'model') {
     // An explicit route switches the brain. The effort is whatever the picker
     // chose; without one the target model's own default applies, and the
@@ -82,8 +86,14 @@ async function rememberModel(rt: HandoffRuntime, pending: PendingHandoff): Promi
       rt.ctx.logger(PACKAGE_NAME).info('no storage domain; handoff model preference not remembered')
     }
   } catch (error) {
-    rt.ctx.logger(PACKAGE_NAME).warn('handoff model preference write failed', { error: String(error) })
-    notifyOrigin(rt, pending, '[handoff] 本次选择未记住（偏好写入失败）。下次交接仍使用之前记住的模型。')
+    rt.ctx
+      .logger(PACKAGE_NAME)
+      .warn('handoff model preference write failed', { error: String(error) })
+    notifyOrigin(
+      rt,
+      pending,
+      '[handoff] 本次选择未记住（偏好写入失败）。下次交接仍使用之前记住的模型。',
+    )
   }
 }
 
@@ -100,7 +110,11 @@ function titleFor(task: string): string {
  * the session stays ungrouped exactly like its origin). An attach failure only
  * downgrades grouping, never the handoff.
  */
-async function attachToWorkspace(rt: HandoffRuntime, pending: PendingHandoff, sessionId: SessionId): Promise<void> {
+async function attachToWorkspace(
+  rt: HandoffRuntime,
+  pending: PendingHandoff,
+  sessionId: SessionId,
+): Promise<void> {
   const registry = rt.ctx.get('workspaceRegistry')
   if (registry === undefined) return
   try {
@@ -113,7 +127,9 @@ async function attachToWorkspace(rt: HandoffRuntime, pending: PendingHandoff, se
     if (workspace === undefined) return
     await workspace.attachSession(sessionId)
   } catch (error) {
-    rt.ctx.logger(PACKAGE_NAME).warn('workspace attach failed; session stays ungrouped', { error: String(error) })
+    rt.ctx
+      .logger(PACKAGE_NAME)
+      .warn('workspace attach failed; session stays ungrouped', { error: String(error) })
   }
 }
 
@@ -130,7 +146,7 @@ async function preflightTarget(rt: HandoffRuntime, pending: PendingHandoff): Pro
   if (workspace === undefined) {
     throw new Error(`目标工作区已不在注册表中：${pending.target.title} (${pending.target.path})`)
   }
-  if (await workspace.status() !== 'ok') {
+  if ((await workspace.status()) !== 'ok') {
     throw new Error(`目标工作区目录已不存在：${pending.target.title} (${pending.target.path})`)
   }
 }
@@ -141,7 +157,11 @@ async function preflightTarget(rt: HandoffRuntime, pending: PendingHandoff): Pro
  * origin side may be a per-branch workspace directory that gets cleaned up.
  * Failures degrade to referencing the origin file, which stays readable.
  */
-async function copyBriefToTarget(rt: HandoffRuntime, pending: PendingHandoff, full: string): Promise<string | undefined> {
+async function copyBriefToTarget(
+  rt: HandoffRuntime,
+  pending: PendingHandoff,
+  full: string,
+): Promise<string | undefined> {
   if (!pending.crossWorkspace) return undefined
   const dir = targetBriefDir(rt.config.dir, pending.target)
   const path = `${dir}/${basename(pending.briefPath)}`
@@ -150,10 +170,12 @@ async function copyBriefToTarget(rt: HandoffRuntime, pending: PendingHandoff, fu
     await writeFile(path, `${full}\n`, 'utf8')
     return path
   } catch (error) {
-    rt.ctx.logger(PACKAGE_NAME).warn('cross-workspace brief copy failed; referencing the origin file', {
-      error: String(error),
-      path,
-    })
+    rt.ctx
+      .logger(PACKAGE_NAME)
+      .warn('cross-workspace brief copy failed; referencing the origin file', {
+        error: String(error),
+        path,
+      })
     return undefined
   }
 }
@@ -174,8 +196,14 @@ async function bindReview(
   const maxRounds = pending.review?.maxRounds ?? 5
   if (pending.review === undefined) return undefined
   if (triggers === undefined) {
-    rt.ctx.logger(PACKAGE_NAME).warn('auto-review requested but dsh-triggers is not mounted; spawning a plain handoff')
-    notifyOrigin(rt, pending, '[handoff] 已按普通交接执行：请求了自动审核，但未挂载 dsh-triggers 插件。')
+    rt.ctx
+      .logger(PACKAGE_NAME)
+      .warn('auto-review requested but dsh-triggers is not mounted; spawning a plain handoff')
+    notifyOrigin(
+      rt,
+      pending,
+      '[handoff] 已按普通交接执行：请求了自动审核，但未挂载 dsh-triggers 插件。',
+    )
     return undefined
   }
   try {
@@ -188,7 +216,11 @@ async function bindReview(
       // delivery (the reviewer still verdicts through the tool).
       autoDeliver: true,
     })
-    await writeReviewBound(metaPathFor(pending.briefPath), { bindingId: bound.bindingId, runId: bound.runId, maxRounds })
+    await writeReviewBound(metaPathFor(pending.briefPath), {
+      bindingId: bound.bindingId,
+      runId: bound.runId,
+      maxRounds,
+    })
     rt.ctx.logger(PACKAGE_NAME).info('auto-review loop bound', {
       bindingId: bound.bindingId,
       runId: bound.runId,
@@ -198,8 +230,14 @@ async function bindReview(
     })
     return { runId: bound.runId, maxRounds }
   } catch (error) {
-    rt.ctx.logger(PACKAGE_NAME).warn('auto-review bind failed; spawning a plain handoff', { error: String(error) })
-    notifyOrigin(rt, pending, `[handoff] 自动审核绑定失败（${String(error)}），本次按普通交接执行。`)
+    rt.ctx
+      .logger(PACKAGE_NAME)
+      .warn('auto-review bind failed; spawning a plain handoff', { error: String(error) })
+    notifyOrigin(
+      rt,
+      pending,
+      `[handoff] 自动审核绑定失败（${String(error)}），本次按普通交接执行。`,
+    )
     return undefined
   }
 }
@@ -223,7 +261,11 @@ function notifyOrigin(rt: HandoffRuntime, pending: PendingHandoff, text: string)
  *
  * @returns the new session id.
  */
-export async function spawnHandoff(rt: HandoffRuntime, pending: PendingHandoff, rawBrief: string): Promise<SessionId> {
+export async function spawnHandoff(
+  rt: HandoffRuntime,
+  pending: PendingHandoff,
+  rawBrief: string,
+): Promise<SessionId> {
   const { ctx } = rt
   await preflightTarget(rt, pending)
   const stripped = rawBrief.split(COMPLETE_MARKER)[0] ?? rawBrief
@@ -232,9 +274,10 @@ export async function spawnHandoff(rt: HandoffRuntime, pending: PendingHandoff, 
   // The truncation notice must name a path the successor can read: the copied
   // target-side brief first, the origin file second (reads are never fenced).
   const briefRef = copiedPath ?? pending.briefPath
-  const brief = full.length <= rt.maxBriefChars
-    ? full
-    : `${full.slice(0, rt.maxBriefChars)}\n\n[handoff] 简报超长，已截断至 ${rt.maxBriefChars} 字符；完整内容见 ${briefRef}`
+  const brief =
+    full.length <= rt.maxBriefChars
+      ? full
+      : `${full.slice(0, rt.maxBriefChars)}\n\n[handoff] 简报超长，已截断至 ${rt.maxBriefChars} 字符；完整内容见 ${briefRef}`
 
   const sessionId = mintSessionId()
   const agentOptions = resolveAgentOptions(ctx, pending.agent, pending.choice)

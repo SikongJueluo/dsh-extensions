@@ -16,8 +16,7 @@ export const buttonVariants = cva(
         secondary:
           'dshx:border dshx:border-border dshx:bg-surface-2 dshx:text-fg dshx:hover:bg-brand/10',
         ghost: 'dshx:text-fg-secondary dshx:hover:bg-surface-2 dshx:hover:text-fg',
-        danger:
-          'dshx:border dshx:border-danger/40 dshx:text-danger dshx:hover:bg-danger/10',
+        danger: 'dshx:border dshx:border-danger/40 dshx:text-danger dshx:hover:bg-danger/10',
         link: 'dshx:text-brand dshx:underline-offset-4 dshx:hover:underline',
       },
       size: {
@@ -31,8 +30,7 @@ export const buttonVariants = cva(
 )
 
 export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {}
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {}
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, type = 'button', ...props }, ref) => (

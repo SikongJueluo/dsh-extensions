@@ -42,7 +42,10 @@ export interface PlanUsageSnapshot {
 
 /** Minimal `ctx.planUsage` surface consumed by recovery planning. */
 export interface PlanUsageServiceShim {
-  get(provider: string, options?: { maxAgeMs?: number; force?: boolean }): Promise<PlanUsageSnapshot | undefined>
+  get(
+    provider: string,
+    options?: { maxAgeMs?: number; force?: boolean },
+  ): Promise<PlanUsageSnapshot | undefined>
 }
 
 /** Durable record of one auto-continue-scheduled retry wait. */

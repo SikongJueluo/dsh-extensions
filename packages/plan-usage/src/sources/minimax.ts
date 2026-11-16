@@ -51,7 +51,9 @@ function finite(value: unknown): number | undefined {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }
 
 /** Consumed percent from MiniMax's remaining percent, clamped into 0-100. */
@@ -115,13 +117,15 @@ export function parseMiniMaxRemains(body: unknown): MiniMaxWindows | MiniMaxErro
     }
   }
   const rows = Array.isArray(envelope.model_remains) ? envelope.model_remains : []
-  const general = rows
-    .map((row): Record<string, unknown> | null => asRecord(row))
-    .find((row) => row !== null && row.model_name === 'general')
-    ?? rows
+  const general =
+    rows
+      .map((row): Record<string, unknown> | null => asRecord(row))
+      .find((row) => row !== null && row.model_name === 'general') ??
+    rows
       .map((row): Record<string, unknown> | null => asRecord(row))
       .find((row) => row !== null && row.model_name !== 'video')
-  if (general === undefined || general === null) return { error: 'minimax: response carried no usable model bucket' } as MiniMaxError
+  if (general === undefined || general === null)
+    return { error: 'minimax: response carried no usable model bucket' } as MiniMaxError
 
   const parsed: MiniMaxWindows = {}
   const intervalRemaining = general.current_interval_remaining_percent
@@ -177,7 +181,10 @@ export class MiniMaxSource {
   }
 
   /** The route's host + resolved API key, when both are known. */
-  private endpointOf(route: string, hostOverride?: string): { url: string; host: string; apiKey: string } | undefined {
+  private endpointOf(
+    route: string,
+    hostOverride?: string,
+  ): { url: string; host: string; apiKey: string } | undefined {
     const envName = ENV_KEYS[route]
     if (HOSTS[route] === undefined || envName === undefined) return undefined
     const external = this.getKey?.(route)?.trim()
@@ -206,16 +213,25 @@ export class MiniMaxSource {
   }
 
   /** One attempt against the route's current host. */
-  private async attempt(route: string): Promise<{ snapshot?: QuotaSnapshot; retryOtherRegion: boolean }> {
+  private async attempt(
+    route: string,
+  ): Promise<{ snapshot?: QuotaSnapshot; retryOtherRegion: boolean }> {
     const endpoint = this.endpointOf(route)
     if (endpoint === undefined) {
-      this.logger?.warn('plan-usage: no MiniMax API key for "%s" (tried env: %s)', route, ENV_KEYS[route] ?? '?')
+      this.logger?.warn(
+        'plan-usage: no MiniMax API key for "%s" (tried env: %s)',
+        route,
+        ENV_KEYS[route] ?? '?',
+      )
       return { retryOtherRegion: false }
     }
     const parsed = await this.fetchAndParse(route, endpoint)
     if (!('error' in parsed)) {
       if (endpoint.host !== HOSTS[route]) this.hostOverrides.set(route, endpoint.host)
-      return { snapshot: { provider: route, fetchedAt: Date.now(), source: 'minimax:remains', ...parsed }, retryOtherRegion: false }
+      return {
+        snapshot: { provider: route, fetchedAt: Date.now(), source: 'minimax:remains', ...parsed },
+        retryOtherRegion: false,
+      }
     }
     // A wrong-region key (2049) means the OTHER region's host serves this
     // account: remember it and retry there once.
@@ -223,7 +239,11 @@ export class MiniMaxSource {
       const other = this.fallbackHost(route, endpoint.host)
       if (other !== undefined) {
         this.hostOverrides.set(route, other)
-        this.logger?.warn('plan-usage: minimax key for "%s" belongs to %s — switching regions', route, other)
+        this.logger?.warn(
+          'plan-usage: minimax key for "%s" belongs to %s — switching regions',
+          route,
+          other,
+        )
         return { retryOtherRegion: true }
       }
     }
@@ -231,7 +251,10 @@ export class MiniMaxSource {
     return { retryOtherRegion: false }
   }
 
-  private async fetchAndParse(route: string, endpoint: { url: string; apiKey: string }): Promise<MiniMaxWindows | MiniMaxError> {
+  private async fetchAndParse(
+    route: string,
+    endpoint: { url: string; apiKey: string },
+  ): Promise<MiniMaxWindows | MiniMaxError> {
     let response: Response
     try {
       response = await this.fetchImpl(endpoint.url, {

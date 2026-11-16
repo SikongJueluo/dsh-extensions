@@ -12,7 +12,12 @@
  */
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { coerceModelChoice, coercePresetChoice, type ModelChoice, type PresetChoice } from './brief.js'
+import {
+  coerceModelChoice,
+  coercePresetChoice,
+  type ModelChoice,
+  type PresetChoice,
+} from './brief.js'
 import type { HandoffTarget } from './workspace.js'
 
 /** The durable record of one handoff attempt. */
@@ -78,7 +83,12 @@ export async function writeMeta(metaPath: string, meta: HandoffMeta): Promise<vo
 function coerceReview(value: unknown): HandoffReviewMeta | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const record = value as Record<string, unknown>
-  if (typeof record.maxRounds !== 'number' || !Number.isInteger(record.maxRounds) || record.maxRounds < 1) return undefined
+  if (
+    typeof record.maxRounds !== 'number' ||
+    !Number.isInteger(record.maxRounds) ||
+    record.maxRounds < 1
+  )
+    return undefined
   const bindingId = record.bindingId
   const runId = record.runId
   const boundAt = record.boundAt
@@ -99,7 +109,8 @@ function coerceMeta(value: unknown): HandoffMeta | undefined {
   const record = value as Record<string, unknown>
   if (record.version !== 1) return undefined
   if (typeof record.task !== 'string' || record.task.length === 0) return undefined
-  if (typeof record.originSession !== 'string' || record.originSession.length === 0) return undefined
+  if (typeof record.originSession !== 'string' || record.originSession.length === 0)
+    return undefined
   const target = record.target
   if (typeof target !== 'object' || target === null) return undefined
   const targetRecord = target as Record<string, unknown>
@@ -111,9 +122,10 @@ function coerceMeta(value: unknown): HandoffMeta | undefined {
   if (choice === undefined) return undefined
   // Pre-preset records (and records with a corrupt preset field) inherit the
   // origin's live preset, which is exactly the old behavior.
-  const preset = record.preset === undefined
-    ? { kind: 'inherit' as const }
-    : (coercePresetChoice(record.preset) ?? { kind: 'inherit' as const })
+  const preset =
+    record.preset === undefined
+      ? { kind: 'inherit' as const }
+      : (coercePresetChoice(record.preset) ?? { kind: 'inherit' as const })
   if (typeof record.createdAt !== 'number') return undefined
   const spawnedAt = record.spawnedAt
   if (spawnedAt !== undefined && typeof spawnedAt !== 'number') return undefined
@@ -149,7 +161,10 @@ export async function findLatestUnspawned(dir: string): Promise<RecoveredHandoff
   } catch {
     return undefined
   }
-  const sorted = names.filter(name => name.endsWith(META_SUFFIX)).sort().reverse()
+  const sorted = names
+    .filter((name) => name.endsWith(META_SUFFIX))
+    .sort()
+    .reverse()
   for (const name of sorted) {
     const metaPath = `${dir.replace(/\/+$/, '')}/${name}`
     try {
@@ -173,7 +188,11 @@ export async function markSpawned(metaPath: string): Promise<boolean> {
   try {
     const meta = coerceMeta(JSON.parse(await readFile(metaPath, 'utf8')))
     if (meta === undefined || meta.spawnedAt !== undefined) return false
-    await writeFile(metaPath, `${JSON.stringify({ ...meta, spawnedAt: Date.now() }, null, 2)}\n`, 'utf8')
+    await writeFile(
+      metaPath,
+      `${JSON.stringify({ ...meta, spawnedAt: Date.now() }, null, 2)}\n`,
+      'utf8',
+    )
     return true
   } catch {
     return false
@@ -185,11 +204,18 @@ export async function markSpawned(metaPath: string): Promise<boolean> {
  * the truth about an auto-review handoff even if dsh dies right after. Never
  * throws: the loop itself is already live, this only costs inspectability.
  */
-export async function writeReviewBound(metaPath: string, review: { bindingId: string; runId: string; maxRounds: number }): Promise<void> {
+export async function writeReviewBound(
+  metaPath: string,
+  review: { bindingId: string; runId: string; maxRounds: number },
+): Promise<void> {
   try {
     const meta = coerceMeta(JSON.parse(await readFile(metaPath, 'utf8')))
     if (meta === undefined) return
-    await writeFile(metaPath, `${JSON.stringify({ ...meta, review: { ...review, boundAt: Date.now() } }, null, 2)}\n`, 'utf8')
+    await writeFile(
+      metaPath,
+      `${JSON.stringify({ ...meta, review: { ...review, boundAt: Date.now() } }, null, 2)}\n`,
+      'utf8',
+    )
   } catch {
     // Cosmetic durability: the binding is live on the triggers side already.
   }

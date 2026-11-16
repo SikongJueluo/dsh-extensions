@@ -11,10 +11,14 @@
  */
 import type { DeliveryKind, RunRecord } from './model.js'
 import { renderTemplate } from './engine.js'
-import { BUILTIN_REVIEW_TEMPLATE, BUILTIN_REWORK_TEMPLATE, BUILTIN_START_TEMPLATE } from './identity.js'
+import {
+  BUILTIN_REVIEW_TEMPLATE,
+  BUILTIN_REWORK_TEMPLATE,
+  BUILTIN_START_TEMPLATE,
+} from './identity.js'
 
 /** The seeded template bodies (zh; edits affect future runs only). */
-export const BUILTIN_TEMPLATE_BODIES: Readonly<Record<string, { name: string, body: string }>> = {
+export const BUILTIN_TEMPLATE_BODIES: Readonly<Record<string, { name: string; body: string }>> = {
   [BUILTIN_START_TEMPLATE]: {
     name: '内置 · 循环开工',
     body: [
@@ -48,7 +52,7 @@ export const BUILTIN_TEMPLATE_BODIES: Readonly<Record<string, { name: string, bo
 }
 
 /** Template variables every body may use; the UI offers them as insertable tags. */
-export const TEMPLATE_VARIABLES: readonly { readonly key: string, readonly label: string }[] = [
+export const TEMPLATE_VARIABLES: readonly { readonly key: string; readonly label: string }[] = [
   { key: 'summary', label: '对方提交的 summary' },
   { key: 'task', label: '任务描述' },
   { key: 'round', label: '当前轮次' },
@@ -59,14 +63,16 @@ export const TEMPLATE_VARIABLES: readonly { readonly key: string, readonly label
 function signalInstructions(run: RunRecord, role: 'executor' | 'parent'): string {
   const round = String(run.round)
   const maxRounds = String(run.maxRounds)
-  const roleLine = role === 'executor'
-    ? (run.autoDeliver === true
-      ? '你是执行者：完成实现与自查（含测试/构建验证）后，直接以最终回复交付——写明改了什么、如何验证、证据在哪里，正常结束回合即自动送审，无需调用工具。需要用户决定时必须调用 trigger_signal 提交 needs_user 并说明所需决定，此时不要正常收尾（正常结束会被当作交付）。'
-      : '你是执行者：只可提交 deliver（交付）或 needs_user（需要用户决定）。')
-    : '你是审核者：只可提交 rework（返工，仅阻塞项）、pass（通过）或 needs_user（需要用户决定）。'
-  const toolLine = run.autoDeliver === true && role === 'executor'
-    ? '正常结束回合即视为交付；需要用户决定时务必改用 trigger_signal 提交 needs_user，不要用普通回复提问。'
-    : '结论必须在收尾时调用 trigger_signal 工具提交（runId 如上）；提交后本回合即结束，等待对方结果，不要继续输出。未调用工具的普通回复不会推进流程。'
+  const roleLine =
+    role === 'executor'
+      ? run.autoDeliver === true
+        ? '你是执行者：完成实现与自查（含测试/构建验证）后，直接以最终回复交付——写明改了什么、如何验证、证据在哪里，正常结束回合即自动送审，无需调用工具。需要用户决定时必须调用 trigger_signal 提交 needs_user 并说明所需决定，此时不要正常收尾（正常结束会被当作交付）。'
+        : '你是执行者：只可提交 deliver（交付）或 needs_user（需要用户决定）。'
+      : '你是审核者：只可提交 rework（返工，仅阻塞项）、pass（通过）或 needs_user（需要用户决定）。'
+  const toolLine =
+    run.autoDeliver === true && role === 'executor'
+      ? '正常结束回合即视为交付；需要用户决定时务必改用 trigger_signal 提交 needs_user，不要用普通回复提问。'
+      : '结论必须在收尾时调用 trigger_signal 工具提交（runId 如上）；提交后本回合即结束，等待对方结果，不要继续输出。未调用工具的普通回复不会推进流程。'
   return [
     `[triggers] 执行—审核循环 runId=${run.id}（第 ${round}/${maxRounds} 轮）。`,
     roleLine,
@@ -83,7 +89,10 @@ function signalInstructions(run: RunRecord, role: 'executor' | 'parent'): string
  * opposite of what an attribution-ambiguous turn needs, so that flavor carries
  * its own complete instructions instead.
  */
-export function nudgeLine(run: RunRecord, kind: 'deliver-missing-signal' | 'deliver-empty' | 'deliver-ambiguous' | 'review'): string {
+export function nudgeLine(
+  run: RunRecord,
+  kind: 'deliver-missing-signal' | 'deliver-empty' | 'deliver-ambiguous' | 'review',
+): string {
   switch (kind) {
     case 'deliver-missing-signal':
       return `[triggers] runId=${run.id}：第 ${run.round}/${run.maxRounds} 轮回合已正常结束，但未收到交付信号。本轮工作完成时请调用 trigger_signal 提交 deliver（summary 写明改动、验证与证据）；需要用户决定请提交 needs_user；仍在进行中则继续工作。`
@@ -118,7 +127,7 @@ function noticeText(run: RunRecord, summary: string): string {
  * for nudge flavors whose own instructions must not be contradicted by it.
  */
 export function composeDeliveryPrompt(
-  intent: { readonly kind: DeliveryKind, readonly round: number },
+  intent: { readonly kind: DeliveryKind; readonly round: number },
   run: RunRecord,
   summary: string | undefined,
   standalone = false,

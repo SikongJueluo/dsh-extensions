@@ -29,28 +29,50 @@ check('providers default empty', Object.keys(config.providers).length === 0)
 check('command-code monitor defaults empty', Object.keys(config.commandCode).length === 0)
 
 // ── GLM monitor resolution ───────────────────────────────────────────────────
-check('zai-coding-cn builtin monitor', resolveMonitor('zai-coding-cn')?.monitorBaseUrl === 'https://open.bigmodel.cn')
+check(
+  'zai-coding-cn builtin monitor',
+  resolveMonitor('zai-coding-cn')?.monitorBaseUrl === 'https://open.bigmodel.cn',
+)
 check('zai builtin monitor', resolveMonitor('zai')?.monitorBaseUrl === 'https://api.z.ai')
 check('unknown provider has no monitor', resolveMonitor('unknown') === undefined)
 check(
   'user override wins',
-  resolveMonitor('zai-coding-cn', { 'zai-coding-cn': { monitorBaseUrl: 'https://proxy.example' } })?.monitorBaseUrl === 'https://proxy.example',
+  resolveMonitor('zai-coding-cn', { 'zai-coding-cn': { monitorBaseUrl: 'https://proxy.example' } })
+    ?.monitorBaseUrl === 'https://proxy.example',
 )
-check('monitoredProviders merges builtins and config', monitoredProviders({ extra: { monitorBaseUrl: 'https://x' } }).includes('extra'))
+check(
+  'monitoredProviders merges builtins and config',
+  monitoredProviders({ extra: { monitorBaseUrl: 'https://x' } }).includes('extra'),
+)
 
 // ── GLM payload parsing (live-response vectors) ──────────────────────────────
 const v2Limits = parseQuotaBody({
   success: true,
   data: {
     limits: [
-      { type: 'TIME_LIMIT', unit: 5, number: 1, usage: 4000, currentValue: 0, remaining: 4000, percentage: 0, nextResetTime: 1788073095998, usageDetails: [] },
+      {
+        type: 'TIME_LIMIT',
+        unit: 5,
+        number: 1,
+        usage: 4000,
+        currentValue: 0,
+        remaining: 4000,
+        percentage: 0,
+        nextResetTime: 1788073095998,
+        usageDetails: [],
+      },
       { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 100, nextResetTime: 1787056863927 },
       { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 20, nextResetTime: 1787641095989 },
     ],
     level: 'max',
   },
 })
-check('glm v2: 5h 100% + reset + windowMinutes', v2Limits?.fiveHour?.percent === 100 && v2Limits?.fiveHour?.resetAt === 1787056863927 && v2Limits?.fiveHour?.windowMinutes === 300)
+check(
+  'glm v2: 5h 100% + reset + windowMinutes',
+  v2Limits?.fiveHour?.percent === 100 &&
+    v2Limits?.fiveHour?.resetAt === 1787056863927 &&
+    v2Limits?.fiveHour?.windowMinutes === 300,
+)
 check('glm v2: weekly 20%', v2Limits?.weekly?.percent === 20)
 check('glm v2: monthly MCP present', v2Limits?.monthlyMcp?.percent === 0)
 check('glm v2: level', v2Limits?.level === 'max')
@@ -59,16 +81,41 @@ const creditLimits = parseQuotaBody({
   success: true,
   data: {
     limits: [
-      { type: 'CREDIT_LIMIT', unit: 3, number: 5, percentage: 20, currentValue: 200, usage: 1000, nextResetTime: 1789000000000 },
-      { type: 'TOKENS_LIMIT', unit: 6, number: 1, currentValue: 156, usage: 300, nextResetTime: 1789600000000 },
+      {
+        type: 'CREDIT_LIMIT',
+        unit: 3,
+        number: 5,
+        percentage: 20,
+        currentValue: 200,
+        usage: 1000,
+        nextResetTime: 1789000000000,
+      },
+      {
+        type: 'TOKENS_LIMIT',
+        unit: 6,
+        number: 1,
+        currentValue: 156,
+        usage: 300,
+        nextResetTime: 1789600000000,
+      },
     ],
   },
 })
 check('glm CREDIT_LIMIT alias parsed as 5h', creditLimits?.fiveHour?.percent === 20)
 check('glm weekly percentage derived from used/total', creditLimits?.weekly?.percent === 52)
-check('glm empty limits array does not fall back', parseQuotaBody({ success: true, data: { limits: [], fiveHourPercent: 40 } }) === null)
-check('glm legacy flat fields parsed', parseQuotaBody({ success: true, data: { fiveHourPercent: 40.5, weeklyPercent: 52 } })?.source === 'glm:legacy')
-check('glm success:false rejected', parseQuotaBody({ success: false, data: { limits: [] } }) === null)
+check(
+  'glm empty limits array does not fall back',
+  parseQuotaBody({ success: true, data: { limits: [], fiveHourPercent: 40 } }) === null,
+)
+check(
+  'glm legacy flat fields parsed',
+  parseQuotaBody({ success: true, data: { fiveHourPercent: 40.5, weeklyPercent: 52 } })?.source ===
+    'glm:legacy',
+)
+check(
+  'glm success:false rejected',
+  parseQuotaBody({ success: false, data: { limits: [] } }) === null,
+)
 
 // ── OpenAI Codex usage parsing (headroom's live capture) ─────────────────────
 const codexBody = {
@@ -85,11 +132,21 @@ const codex = parseCodexUsage(codexBody)
 check('codex: primary window mapped to fiveHour', codex?.fiveHour?.percent === 42.5)
 check('codex: reset_at seconds converted to ms', codex?.fiveHour?.resetAt === 1787056863000)
 check('codex: window minutes derived', codex?.fiveHour?.windowMinutes === 300)
-check('codex: secondary window mapped to weekly', codex?.weekly?.percent === 10 && codex?.weekly?.resetAt === 1787641095000 && codex?.weekly?.windowMinutes === 10080)
+check(
+  'codex: secondary window mapped to weekly',
+  codex?.weekly?.percent === 10 &&
+    codex?.weekly?.resetAt === 1787641095000 &&
+    codex?.weekly?.windowMinutes === 10080,
+)
 check('codex: plan_type as level', codex?.level === 'plus')
 
-const codexNoSecondary = parseCodexUsage({ rate_limit: { primary_window: { used_percent: 5, reset_at: 1787056863 } } })
-check('codex: missing secondary tolerated', codexNoSecondary?.fiveHour?.percent === 5 && codexNoSecondary?.weekly === undefined)
+const codexNoSecondary = parseCodexUsage({
+  rate_limit: { primary_window: { used_percent: 5, reset_at: 1787056863 } },
+})
+check(
+  'codex: missing secondary tolerated',
+  codexNoSecondary?.fiveHour?.percent === 5 && codexNoSecondary?.weekly === undefined,
+)
 check('codex: no rate_limit rejected', parseCodexUsage({ plan_type: 'plus' }) === undefined)
 
 // OpenAI source: token missing → undefined; token present → fetched snapshot.
@@ -97,35 +154,59 @@ const openaiFetches = []
 const openai = new OpenAiUsageSource({
   getToken: async () => undefined,
   fetchImpl: async (url, init) => {
-    openaiFetches.push({ url, auth: init?.headers?.authorization, account: init?.headers?.['chatgpt-account-id'] })
-    return new Response(JSON.stringify(codexBody), { status: 200, headers: { 'content-type': 'application/json' } })
+    openaiFetches.push({
+      url,
+      auth: init?.headers?.authorization,
+      account: init?.headers?.['chatgpt-account-id'],
+    })
+    return new Response(JSON.stringify(codexBody), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
   },
   logger: { warn() {} },
 })
-check('openai: missing token resolves undefined without fetching', (await openai.get('chatgpt')) === undefined && openaiFetches.length === 0)
+check(
+  'openai: missing token resolves undefined without fetching',
+  (await openai.get('chatgpt')) === undefined && openaiFetches.length === 0,
+)
 const signedIn = new OpenAiUsageSource({
   getToken: async () => ({ access: 'tok-1', accountId: 'acc-9' }),
   fetchImpl: openai.fetchImpl,
   logger: { warn() {} },
 })
 const codexSnapshot = await signedIn.get('chatgpt')
-check('openai: authenticated fetch parses', codexSnapshot?.provider === 'chatgpt' && codexSnapshot?.fiveHour?.percent === 42.5 && codexSnapshot?.source === 'openai:usage')
-check('openai: codex headers sent', openaiFetches[0]?.auth === 'Bearer tok-1' && openaiFetches[0]?.account === 'acc-9' && String(openaiFetches[0]?.url).endsWith('/backend-api/wham/usage'))
+check(
+  'openai: authenticated fetch parses',
+  codexSnapshot?.provider === 'chatgpt' &&
+    codexSnapshot?.fiveHour?.percent === 42.5 &&
+    codexSnapshot?.source === 'openai:usage',
+)
+check(
+  'openai: codex headers sent',
+  openaiFetches[0]?.auth === 'Bearer tok-1' &&
+    openaiFetches[0]?.account === 'acc-9' &&
+    String(openaiFetches[0]?.url).endsWith('/backend-api/wham/usage'),
+)
 
 // ── MiniMax token_plan parsing (ai-usagebar's live capture) ──────────────────
 const minimaxLive = {
   model_remains: [
     {
-      start_time: 1785164400000, end_time: 1785182400000,
+      start_time: 1785164400000,
+      end_time: 1785182400000,
       model_name: 'general',
-      weekly_start_time: 1785110400000, weekly_end_time: 1785715200000,
+      weekly_start_time: 1785110400000,
+      weekly_end_time: 1785715200000,
       current_interval_remaining_percent: 99,
       current_weekly_remaining_percent: 99,
     },
     {
-      start_time: 1785110400000, end_time: 1785196800000,
+      start_time: 1785110400000,
+      end_time: 1785196800000,
       model_name: 'video',
-      weekly_start_time: 1785110400000, weekly_end_time: 1785715200000,
+      weekly_start_time: 1785110400000,
+      weekly_end_time: 1785715200000,
       current_interval_remaining_percent: 100,
       current_weekly_remaining_percent: 100,
     },
@@ -133,17 +214,65 @@ const minimaxLive = {
   base_resp: { status_code: 0, status_msg: 'success' },
 }
 const minimax = parseMiniMaxRemains(minimaxLive)
-check('minimax: remaining inverted to consumed', minimax.fiveHour?.percent === 1 && minimax.weekly?.percent === 1)
+check(
+  'minimax: remaining inverted to consumed',
+  minimax.fiveHour?.percent === 1 && minimax.weekly?.percent === 1,
+)
 check('minimax: interval reset from end_time ms', minimax.fiveHour?.resetAt === 1785182400000)
 check('minimax: interval window derived per bucket (5h)', minimax.fiveHour?.windowMinutes === 300)
 check('minimax: weekly window 7d', minimax.weekly?.windowMinutes === 10080)
-check('minimax: consumed clamps out-of-range', consumedFromRemaining(150) === 0 && consumedFromRemaining(-5) === 100)
-check('minimax: in-band auth failure rejected', 'error' in parseMiniMaxRemains({ base_resp: { status_code: 2049, status_msg: 'invalid api key' } }))
-check('minimax: video-only bucket is an error', 'error' in parseMiniMaxRemains({ model_remains: [{ model_name: 'video', start_time: 1, end_time: 2, current_interval_remaining_percent: 100, weekly_start_time: 1, weekly_end_time: 2, current_weekly_remaining_percent: 100 }], base_resp: { status_code: 0 } }))
-check('minimax: degenerate bounds drop reset but keep percent', (() => {
-  const parsed = parseMiniMaxRemains({ model_remains: [{ model_name: 'general', start_time: 0, end_time: 0, current_interval_remaining_percent: 40, weekly_start_time: 0, weekly_end_time: 0, current_weekly_remaining_percent: 55 }], base_resp: { status_code: 0 } })
-  return !('error' in parsed) && parsed.fiveHour?.percent === 60 && parsed.fiveHour?.resetAt === undefined && parsed.weekly?.percent === 45
-})())
+check(
+  'minimax: consumed clamps out-of-range',
+  consumedFromRemaining(150) === 0 && consumedFromRemaining(-5) === 100,
+)
+check(
+  'minimax: in-band auth failure rejected',
+  'error' in
+    parseMiniMaxRemains({ base_resp: { status_code: 2049, status_msg: 'invalid api key' } }),
+)
+check(
+  'minimax: video-only bucket is an error',
+  'error' in
+    parseMiniMaxRemains({
+      model_remains: [
+        {
+          model_name: 'video',
+          start_time: 1,
+          end_time: 2,
+          current_interval_remaining_percent: 100,
+          weekly_start_time: 1,
+          weekly_end_time: 2,
+          current_weekly_remaining_percent: 100,
+        },
+      ],
+      base_resp: { status_code: 0 },
+    }),
+)
+check(
+  'minimax: degenerate bounds drop reset but keep percent',
+  (() => {
+    const parsed = parseMiniMaxRemains({
+      model_remains: [
+        {
+          model_name: 'general',
+          start_time: 0,
+          end_time: 0,
+          current_interval_remaining_percent: 40,
+          weekly_start_time: 0,
+          weekly_end_time: 0,
+          current_weekly_remaining_percent: 55,
+        },
+      ],
+      base_resp: { status_code: 0 },
+    })
+    return (
+      !('error' in parsed) &&
+      parsed.fiveHour?.percent === 60 &&
+      parsed.fiveHour?.resetAt === undefined &&
+      parsed.weekly?.percent === 45
+    )
+  })(),
+)
 
 const minimaxCalls = []
 const minimaxEnv = { MINIMAX_API_KEY: 'mm-key' }
@@ -151,14 +280,28 @@ const minimaxSource = new MiniMaxSource({
   env: minimaxEnv,
   fetchImpl: async (url, init) => {
     minimaxCalls.push({ url, auth: init?.headers?.authorization })
-    return new Response(JSON.stringify(minimaxLive), { status: 200, headers: { 'content-type': 'application/json' } })
+    return new Response(JSON.stringify(minimaxLive), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
   },
   logger: { warn() {} },
 })
-check('minimax: unkeyed route not ready', minimaxSource.ready('minimax-cn') === false && minimaxSource.ready('minimax') === true)
+check(
+  'minimax: unkeyed route not ready',
+  minimaxSource.ready('minimax-cn') === false && minimaxSource.ready('minimax') === true,
+)
 const minimaxSnapshot = await minimaxSource.get('minimax')
-check('minimax: keyed route fetches global host', minimaxSnapshot?.provider === 'minimax' && minimaxCalls[0]?.auth === 'Bearer mm-key' && String(minimaxCalls[0]?.url).startsWith('https://api.minimax.io/'))
-check('minimax: unkeyed route resolves undefined', (await minimaxSource.get('minimax-cn')) === undefined && minimaxCalls.length === 1)
+check(
+  'minimax: keyed route fetches global host',
+  minimaxSnapshot?.provider === 'minimax' &&
+    minimaxCalls[0]?.auth === 'Bearer mm-key' &&
+    String(minimaxCalls[0]?.url).startsWith('https://api.minimax.io/'),
+)
+check(
+  'minimax: unkeyed route resolves undefined',
+  (await minimaxSource.get('minimax-cn')) === undefined && minimaxCalls.length === 1,
+)
 
 // Region fallback: a CN key behind the global route flips hosts and remembers.
 const regionCalls = []
@@ -167,16 +310,31 @@ const regionSource = new MiniMaxSource({
   fetchImpl: async (url, init) => {
     regionCalls.push(String(url))
     if (url.startsWith('https://api.minimax.io/')) {
-      return new Response(JSON.stringify({ base_resp: { status_code: 2049, status_msg: 'invalid api key' } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      return new Response(
+        JSON.stringify({ base_resp: { status_code: 2049, status_msg: 'invalid api key' } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
     }
-    return new Response(JSON.stringify(minimaxLive), { status: 200, headers: { 'content-type': 'application/json' } })
+    return new Response(JSON.stringify(minimaxLive), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
   },
   logger: { warn() {} },
 })
 const flipped = await regionSource.get('minimax')
-check('minimax: wrong-region key flips to the other host', flipped?.fiveHour?.percent === 1 && regionCalls.length === 2 && regionCalls[0].includes('minimax.io') && regionCalls[1].includes('minimaxi.com'))
+check(
+  'minimax: wrong-region key flips to the other host',
+  flipped?.fiveHour?.percent === 1 &&
+    regionCalls.length === 2 &&
+    regionCalls[0].includes('minimax.io') &&
+    regionCalls[1].includes('minimaxi.com'),
+)
 const flippedAgain = await regionSource.get('minimax')
-check('minimax: region choice is remembered', flippedAgain !== undefined && regionCalls.length === 3 && regionCalls[2].includes('minimaxi.com'))
+check(
+  'minimax: region choice is remembered',
+  flippedAgain !== undefined && regionCalls.length === 3 && regionCalls[2].includes('minimaxi.com'),
+)
 
 // ── OpenCode Go usage parsing (live capture of 2026-10-13) ───────────────────
 const opencodeLive = {
@@ -187,62 +345,143 @@ const opencodeLive = {
   },
 }
 const opencode = parseOpenCodeGoUsage(opencodeLive)
-check('opencode: rolling→fiveHour with epoch-ms reset', opencode.fiveHour?.percent === 0 && opencode.fiveHour?.resetAt === Date.parse('2026-10-13T11:32:35.000Z'))
-check('opencode: weekly reset epoch ms', opencode.weekly?.percent === 0 && opencode.weekly?.resetAt === Date.parse('2026-10-19T00:00:00.000Z'))
-check('opencode: monthly window parsed', opencode.monthly?.percent === 0 && opencode.monthly?.resetAt === Date.parse('2026-11-13T06:06:43.000Z'))
-check('opencode: percent clamps into 0-100', parseOpenCodeGoUsage({ usage: { rolling: { status: 'ok', percent: 150, resetsAt: '2026-10-13T11:32:35.000Z' } } }).fiveHour?.percent === 100)
-check('opencode: rate-limited reports 100 even when the number lags', (() => {
-  const parsed = parseOpenCodeGoUsage({ usage: { rolling: { status: 'rate-limited', percent: 37, resetsAt: '2026-10-13T12:00:00.000Z' } } })
-  return parsed.fiveHour?.percent === 100 && parsed.fiveHour?.resetAt === Date.parse('2026-10-13T12:00:00.000Z')
-})())
+check(
+  'opencode: rolling→fiveHour with epoch-ms reset',
+  opencode.fiveHour?.percent === 0 &&
+    opencode.fiveHour?.resetAt === Date.parse('2026-10-13T11:32:35.000Z'),
+)
+check(
+  'opencode: weekly reset epoch ms',
+  opencode.weekly?.percent === 0 &&
+    opencode.weekly?.resetAt === Date.parse('2026-10-19T00:00:00.000Z'),
+)
+check(
+  'opencode: monthly window parsed',
+  opencode.monthly?.percent === 0 &&
+    opencode.monthly?.resetAt === Date.parse('2026-11-13T06:06:43.000Z'),
+)
+check(
+  'opencode: percent clamps into 0-100',
+  parseOpenCodeGoUsage({
+    usage: { rolling: { status: 'ok', percent: 150, resetsAt: '2026-10-13T11:32:35.000Z' } },
+  }).fiveHour?.percent === 100,
+)
+check(
+  'opencode: rate-limited reports 100 even when the number lags',
+  (() => {
+    const parsed = parseOpenCodeGoUsage({
+      usage: {
+        rolling: { status: 'rate-limited', percent: 37, resetsAt: '2026-10-13T12:00:00.000Z' },
+      },
+    })
+    return (
+      parsed.fiveHour?.percent === 100 &&
+      parsed.fiveHour?.resetAt === Date.parse('2026-10-13T12:00:00.000Z')
+    )
+  })(),
+)
 check('opencode: missing usage degrades to an error', 'error' in parseOpenCodeGoUsage({}))
 check('opencode: non-object body degrades to an error', 'error' in parseOpenCodeGoUsage('nope'))
-check('opencode: bogus resetsAt dropped, percent kept', (() => {
-  const parsed = parseOpenCodeGoUsage({ usage: { weekly: { status: 'ok', percent: 12, resetsAt: 'not-a-date' } } })
-  return !('error' in parsed) && parsed.weekly?.percent === 12 && parsed.weekly?.resetAt === undefined
-})())
-check('opencode: absurd resetsAt dropped', parseOpenCodeGoUsage({ usage: { rolling: { status: 'ok', percent: 5, resetsAt: '1970-01-01T00:00:00.000Z' } } }).fiveHour?.resetAt === undefined)
+check(
+  'opencode: bogus resetsAt dropped, percent kept',
+  (() => {
+    const parsed = parseOpenCodeGoUsage({
+      usage: { weekly: { status: 'ok', percent: 12, resetsAt: 'not-a-date' } },
+    })
+    return (
+      !('error' in parsed) && parsed.weekly?.percent === 12 && parsed.weekly?.resetAt === undefined
+    )
+  })(),
+)
+check(
+  'opencode: absurd resetsAt dropped',
+  parseOpenCodeGoUsage({
+    usage: { rolling: { status: 'ok', percent: 5, resetsAt: '1970-01-01T00:00:00.000Z' } },
+  }).fiveHour?.resetAt === undefined,
+)
 
 // OpenCode source: no env key → not ready; keyed → fetches and maps; failures → undefined.
 const opencodeCalls = []
 const opencodeFetch = async (url, init) => {
   opencodeCalls.push({ url: String(url), auth: init?.headers?.authorization })
-  return new Response(JSON.stringify(opencodeLive), { status: 200, headers: { 'content-type': 'application/json' } })
+  return new Response(JSON.stringify(opencodeLive), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
 }
-const opencodeUnkeyed = new OpenCodeGoSource({ env: {}, fetchImpl: opencodeFetch, logger: { warn() {} } })
-check('opencode: no env key → not ready, undefined, no fetch', opencodeUnkeyed.ready('opencode-go') === false && (await opencodeUnkeyed.get('opencode-go')) === undefined && opencodeCalls.length === 0)
-const opencodeSource = new OpenCodeGoSource({ env: { OPENCODE_API_KEY: 'oc-key' }, fetchImpl: opencodeFetch, logger: { warn() {} } })
-check('opencode: env key → ready, unknown route never', opencodeSource.ready('opencode-go') === true && opencodeSource.ready('opencode') === false)
+const opencodeUnkeyed = new OpenCodeGoSource({
+  env: {},
+  fetchImpl: opencodeFetch,
+  logger: { warn() {} },
+})
+check(
+  'opencode: no env key → not ready, undefined, no fetch',
+  opencodeUnkeyed.ready('opencode-go') === false &&
+    (await opencodeUnkeyed.get('opencode-go')) === undefined &&
+    opencodeCalls.length === 0,
+)
+const opencodeSource = new OpenCodeGoSource({
+  env: { OPENCODE_API_KEY: 'oc-key' },
+  fetchImpl: opencodeFetch,
+  logger: { warn() {} },
+})
+check(
+  'opencode: env key → ready, unknown route never',
+  opencodeSource.ready('opencode-go') === true && opencodeSource.ready('opencode') === false,
+)
 const opencodeSnapshot = await opencodeSource.get('opencode-go')
-check('opencode: 200 maps into a snapshot with monthly', opencodeSnapshot?.provider === 'opencode-go' && opencodeSnapshot?.source === 'opencode-go:usage' && opencodeSnapshot?.fiveHour?.resetAt === Date.parse('2026-10-13T11:32:35.000Z') && opencodeSnapshot?.monthly?.resetAt === Date.parse('2026-11-13T06:06:43.000Z'))
-check('opencode: bearer key + zen/go endpoint', opencodeCalls[0]?.auth === 'Bearer oc-key' && opencodeCalls[0]?.url === 'https://opencode.ai/zen/go/v1/usage')
+check(
+  'opencode: 200 maps into a snapshot with monthly',
+  opencodeSnapshot?.provider === 'opencode-go' &&
+    opencodeSnapshot?.source === 'opencode-go:usage' &&
+    opencodeSnapshot?.fiveHour?.resetAt === Date.parse('2026-10-13T11:32:35.000Z') &&
+    opencodeSnapshot?.monthly?.resetAt === Date.parse('2026-11-13T06:06:43.000Z'),
+)
+check(
+  'opencode: bearer key + zen/go endpoint',
+  opencodeCalls[0]?.auth === 'Bearer oc-key' &&
+    opencodeCalls[0]?.url === 'https://opencode.ai/zen/go/v1/usage',
+)
 const opencodeForbidden = new OpenCodeGoSource({
   env: { OPENCODE_API_KEY: 'oc-key' },
   fetchImpl: async () => new Response('{"error":"forbidden"}', { status: 403 }),
   logger: { warn() {} },
 })
-check('opencode: 403 (no Go subscription) resolves undefined', (await opencodeForbidden.get('opencode-go')) === undefined)
+check(
+  'opencode: 403 (no Go subscription) resolves undefined',
+  (await opencodeForbidden.get('opencode-go')) === undefined,
+)
 const opencodeBadJson = new OpenCodeGoSource({
   env: { OPENCODE_API_KEY: 'oc-key' },
-  fetchImpl: async () => new Response('not json', { status: 200, headers: { 'content-type': 'application/json' } }),
+  fetchImpl: async () =>
+    new Response('not json', { status: 200, headers: { 'content-type': 'application/json' } }),
   logger: { warn() {} },
 })
-check('opencode: invalid JSON resolves undefined', (await opencodeBadJson.get('opencode-go')) === undefined)
+check(
+  'opencode: invalid JSON resolves undefined',
+  (await opencodeBadJson.get('opencode-go')) === undefined,
+)
 
 // The optional providerKeys service wins over env; absent service keeps env behavior.
 const keyedCalls = []
 const keyedSource = new OpenCodeGoSource({
   env: {},
-  getKey: (route) => route === 'opencode-go' ? 'service-key' : undefined,
+  getKey: (route) => (route === 'opencode-go' ? 'service-key' : undefined),
   fetchImpl: async (url, init) => {
     keyedCalls.push({ url: String(url), auth: init?.headers?.authorization })
-    return new Response(JSON.stringify(opencodeLive), { status: 200, headers: { 'content-type': 'application/json' } })
+    return new Response(JSON.stringify(opencodeLive), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
   },
   logger: { warn() {} },
 })
 check('opencode: providerKeys makes a keyless env ready', keyedSource.ready('opencode-go') === true)
 const keyedSnapshot = await keyedSource.get('opencode-go')
-check('opencode: providerKeys key is used', keyedSnapshot !== undefined && keyedCalls[0]?.auth === 'Bearer service-key')
+check(
+  'opencode: providerKeys key is used',
+  keyedSnapshot !== undefined && keyedCalls[0]?.auth === 'Bearer service-key',
+)
 
 // ── Command Code credits parsing (alpha billing routes, 2026-11) ────────────
 const commandCodeCredits = {
@@ -257,32 +496,106 @@ const commandCodeSubscription = {
   data: { planId: 'individual-goat', currentPeriodEnd: '2026-12-01T00:00:00.000Z' },
 }
 const cc = parseCommandCodeCredits(commandCodeCredits, commandCodeSubscription)
-check('command-code: fiveHour used/cap', cc.fiveHour?.percent === 40 && cc.fiveHour?.used === 40 && cc.fiveHour?.total === 100)
-check('command-code: ISO reset becomes epoch ms', cc.fiveHour?.resetAt === Date.parse('2026-11-14T20:00:00.000Z'))
-check('command-code: weekly stays epoch ms', cc.weekly?.percent === 5 && cc.weekly?.resetAt === 1795000000000)
-check('command-code: monthly credits use the reported grant', cc.monthly?.percent === 17.7 && cc.monthly?.used === 12.4 && cc.monthly?.total === 70 && cc.monthly?.remaining === 57.6 && cc.monthly?.unit === 'usd')
-check('command-code: period end resets the monthly window', cc.monthly?.resetAt === Date.parse('2026-12-01T00:00:00.000Z'))
+check(
+  'command-code: fiveHour used/cap',
+  cc.fiveHour?.percent === 40 && cc.fiveHour?.used === 40 && cc.fiveHour?.total === 100,
+)
+check(
+  'command-code: ISO reset becomes epoch ms',
+  cc.fiveHour?.resetAt === Date.parse('2026-11-14T20:00:00.000Z'),
+)
+check(
+  'command-code: weekly stays epoch ms',
+  cc.weekly?.percent === 5 && cc.weekly?.resetAt === 1795000000000,
+)
+check(
+  'command-code: monthly credits use the reported grant',
+  cc.monthly?.percent === 17.7 &&
+    cc.monthly?.used === 12.4 &&
+    cc.monthly?.total === 70 &&
+    cc.monthly?.remaining === 57.6 &&
+    cc.monthly?.unit === 'usd',
+)
+check(
+  'command-code: period end resets the monthly window',
+  cc.monthly?.resetAt === Date.parse('2026-12-01T00:00:00.000Z'),
+)
 check('command-code: plan id becomes level', cc.level === 'GOAT')
-check('command-code: limited:false hides rolling windows', (() => {
-  const parsed = parseCommandCodeCredits({ credits: { monthlyCredits: 50, monthlyCreditsGranted: 70 }, windowLimits: { limited: false } })
-  return !('error' in parsed) && parsed.fiveHour === undefined && parsed.weekly === undefined && parsed.monthly?.remaining === 50
-})())
-check('command-code: windowLimits nested inside credits', (() => {
-  const parsed = parseCommandCodeCredits({ data: { credits: { monthlyCredits: 60, monthlyCreditsGranted: 70, windowLimits: { fiveHour: { cap: 10, used: 10 } } } } })
-  return !('error' in parsed) && parsed.fiveHour?.percent === 100
-})())
-check('command-code: exceeded forces 100 even when used lags', parseCommandCodeCredits({ windowLimits: { fiveHour: { cap: 100, used: 1, exceeded: true } } }).fiveHour?.percent === 100)
-check('command-code: used above cap clamps to 100', parseCommandCodeCredits({ windowLimits: { weekly: { cap: 10, used: 50 } } }).weekly?.percent === 100)
-check('command-code: unknown grant keeps the balance', (() => {
-  const parsed = parseCommandCodeCredits({ credits: { monthlyCredits: 12.34 } })
-  return !('error' in parsed) && parsed.monthly?.remaining === 12.34 && parsed.monthly?.percent === undefined && parsed.monthly?.total === undefined && parsed.monthly?.unit === 'usd'
-})())
-check('command-code: plan table sizes an unstated grant', (() => {
-  const parsed = parseCommandCodeCredits({ credits: { monthlyCredits: 8, planId: 'individual-go' } })
-  return !('error' in parsed) && parsed.monthly?.total === 10 && parsed.monthly?.percent === 20 && parsed.level === 'Go'
-})())
-check('command-code: no usable window degrades to an error', 'error' in parseCommandCodeCredits({ credits: {} }))
-check('command-code: non-object body degrades to an error', 'error' in parseCommandCodeCredits('nope'))
+check(
+  'command-code: limited:false hides rolling windows',
+  (() => {
+    const parsed = parseCommandCodeCredits({
+      credits: { monthlyCredits: 50, monthlyCreditsGranted: 70 },
+      windowLimits: { limited: false },
+    })
+    return (
+      !('error' in parsed) &&
+      parsed.fiveHour === undefined &&
+      parsed.weekly === undefined &&
+      parsed.monthly?.remaining === 50
+    )
+  })(),
+)
+check(
+  'command-code: windowLimits nested inside credits',
+  (() => {
+    const parsed = parseCommandCodeCredits({
+      data: {
+        credits: {
+          monthlyCredits: 60,
+          monthlyCreditsGranted: 70,
+          windowLimits: { fiveHour: { cap: 10, used: 10 } },
+        },
+      },
+    })
+    return !('error' in parsed) && parsed.fiveHour?.percent === 100
+  })(),
+)
+check(
+  'command-code: exceeded forces 100 even when used lags',
+  parseCommandCodeCredits({ windowLimits: { fiveHour: { cap: 100, used: 1, exceeded: true } } })
+    .fiveHour?.percent === 100,
+)
+check(
+  'command-code: used above cap clamps to 100',
+  parseCommandCodeCredits({ windowLimits: { weekly: { cap: 10, used: 50 } } }).weekly?.percent ===
+    100,
+)
+check(
+  'command-code: unknown grant keeps the balance',
+  (() => {
+    const parsed = parseCommandCodeCredits({ credits: { monthlyCredits: 12.34 } })
+    return (
+      !('error' in parsed) &&
+      parsed.monthly?.remaining === 12.34 &&
+      parsed.monthly?.percent === undefined &&
+      parsed.monthly?.total === undefined &&
+      parsed.monthly?.unit === 'usd'
+    )
+  })(),
+)
+check(
+  'command-code: plan table sizes an unstated grant',
+  (() => {
+    const parsed = parseCommandCodeCredits({
+      credits: { monthlyCredits: 8, planId: 'individual-go' },
+    })
+    return (
+      !('error' in parsed) &&
+      parsed.monthly?.total === 10 &&
+      parsed.monthly?.percent === 20 &&
+      parsed.level === 'Go'
+    )
+  })(),
+)
+check(
+  'command-code: no usable window degrades to an error',
+  'error' in parseCommandCodeCredits({ credits: {} }),
+)
+check(
+  'command-code: non-object body degrades to an error',
+  'error' in parseCommandCodeCredits('nope'),
+)
 
 // Command Code source: no env key → not ready; keyed → whoami + credits + subscriptions; failures → undefined.
 const commandCodeCalls = []
@@ -290,21 +603,63 @@ const commandCodeFetch = async (url, init) => {
   const target = String(url)
   commandCodeCalls.push({ url: target, auth: init?.headers?.authorization })
   if (target.includes('/alpha/whoami')) {
-    return new Response(JSON.stringify({ org: { id: 'org-1' } }), { status: 200, headers: { 'content-type': 'application/json' } })
+    return new Response(JSON.stringify({ org: { id: 'org-1' } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
   }
   if (target.includes('/alpha/billing/subscriptions')) {
-    return new Response(JSON.stringify(commandCodeSubscription), { status: 200, headers: { 'content-type': 'application/json' } })
+    return new Response(JSON.stringify(commandCodeSubscription), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
   }
-  return new Response(JSON.stringify(commandCodeCredits), { status: 200, headers: { 'content-type': 'application/json' } })
+  return new Response(JSON.stringify(commandCodeCredits), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
 }
-const commandCodeUnkeyed = new CommandCodeSource({ env: {}, fetchImpl: commandCodeFetch, logger: { warn() {} } })
-check('command-code: no env key → not ready, undefined, no fetch', commandCodeUnkeyed.ready('command-code') === false && (await commandCodeUnkeyed.get('command-code')) === undefined && commandCodeCalls.length === 0)
-const commandCodeSource = new CommandCodeSource({ env: { CMD_API_KEY: 'cc-key' }, fetchImpl: commandCodeFetch, logger: { warn() {} } })
-check('command-code: env key → ready, unknown route never', commandCodeSource.ready('command-code') === true && commandCodeSource.ready('commandcode') === false)
+const commandCodeUnkeyed = new CommandCodeSource({
+  env: {},
+  fetchImpl: commandCodeFetch,
+  logger: { warn() {} },
+})
+check(
+  'command-code: no env key → not ready, undefined, no fetch',
+  commandCodeUnkeyed.ready('command-code') === false &&
+    (await commandCodeUnkeyed.get('command-code')) === undefined &&
+    commandCodeCalls.length === 0,
+)
+const commandCodeSource = new CommandCodeSource({
+  env: { CMD_API_KEY: 'cc-key' },
+  fetchImpl: commandCodeFetch,
+  logger: { warn() {} },
+})
+check(
+  'command-code: env key → ready, unknown route never',
+  commandCodeSource.ready('command-code') === true &&
+    commandCodeSource.ready('commandcode') === false,
+)
 const commandCodeSnapshot = await commandCodeSource.get('command-code')
-check('command-code: snapshot carries all three windows', commandCodeSnapshot?.provider === 'command-code' && commandCodeSnapshot?.source === 'command-code:credits' && commandCodeSnapshot?.fiveHour?.percent === 40 && commandCodeSnapshot?.weekly?.percent === 5 && commandCodeSnapshot?.monthly?.remaining === 57.6 && commandCodeSnapshot?.level === 'GOAT')
-check('command-code: whoami org scopes the billing calls', commandCodeCalls[1]?.url === 'https://api.commandcode.ai/alpha/billing/credits?orgId=org-1' && commandCodeCalls[2]?.url === 'https://api.commandcode.ai/alpha/billing/subscriptions?orgId=org-1')
-check('command-code: bearer key on every call', commandCodeCalls.every((call) => call.auth === 'Bearer cc-key'))
+check(
+  'command-code: snapshot carries all three windows',
+  commandCodeSnapshot?.provider === 'command-code' &&
+    commandCodeSnapshot?.source === 'command-code:credits' &&
+    commandCodeSnapshot?.fiveHour?.percent === 40 &&
+    commandCodeSnapshot?.weekly?.percent === 5 &&
+    commandCodeSnapshot?.monthly?.remaining === 57.6 &&
+    commandCodeSnapshot?.level === 'GOAT',
+)
+check(
+  'command-code: whoami org scopes the billing calls',
+  commandCodeCalls[1]?.url === 'https://api.commandcode.ai/alpha/billing/credits?orgId=org-1' &&
+    commandCodeCalls[2]?.url ===
+      'https://api.commandcode.ai/alpha/billing/subscriptions?orgId=org-1',
+)
+check(
+  'command-code: bearer key on every call',
+  commandCodeCalls.every((call) => call.auth === 'Bearer cc-key'),
+)
 const customCalls = []
 const customSource = new CommandCodeSource({
   env: { CC_KEY: 'custom-key' },
@@ -323,42 +678,80 @@ const commandCodeUnauthorized = new CommandCodeSource({
   fetchImpl: async () => new Response('unauthorized', { status: 401 }),
   logger: { warn() {} },
 })
-check('command-code: 401 resolves undefined', (await commandCodeUnauthorized.get('command-code')) === undefined)
+check(
+  'command-code: 401 resolves undefined',
+  (await commandCodeUnauthorized.get('command-code')) === undefined,
+)
 const commandCodeCreditsDown = new CommandCodeSource({
   env: { CMD_API_KEY: 'cc-key' },
-  fetchImpl: async (url) => String(url).includes('/alpha/whoami')
-    ? new Response(JSON.stringify({ org: { id: 'o' } }), { status: 200, headers: { 'content-type': 'application/json' } })
-    : new Response('down', { status: 503 }),
+  fetchImpl: async (url) =>
+    String(url).includes('/alpha/whoami')
+      ? new Response(JSON.stringify({ org: { id: 'o' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      : new Response('down', { status: 503 }),
   logger: { warn() {} },
 })
-check('command-code: credits failure resolves undefined', (await commandCodeCreditsDown.get('command-code')) === undefined)
+check(
+  'command-code: credits failure resolves undefined',
+  (await commandCodeCreditsDown.get('command-code')) === undefined,
+)
 
 // ── GLM QuotaMonitor providerKeys resolver ─────────────────────────────────
 const serviceKeyCalls = []
 const serviceMonitor = new QuotaMonitor({
-  resolveKey: (provider) => provider === 'zai-coding-cn' ? 'service-glm-key' : undefined,
+  resolveKey: (provider) => (provider === 'zai-coding-cn' ? 'service-glm-key' : undefined),
   fetchImpl: async (url, init) => {
     serviceKeyCalls.push(init?.headers?.authorization)
-    return new Response(JSON.stringify({
-      success: true,
-      data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 9, nextResetTime: 1790003600000 }] },
-    }), { status: 200, headers: { 'content-type': 'application/json' } })
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: {
+          limits: [
+            {
+              type: 'TOKENS_LIMIT',
+              unit: 3,
+              number: 5,
+              percentage: 9,
+              nextResetTime: 1790003600000,
+            },
+          ],
+        },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
   },
   logger: { warn() {} },
 })
-const serviceGlm = await serviceMonitor.get('zai-coding-cn', { monitorBaseUrl: 'https://open.bigmodel.cn', apiKeyEnv: ['MISSING_ENV'] }, { force: true })
-check('glm: providerKeys resolver supplies the key', serviceGlm?.fiveHour?.percent === 9 && serviceKeyCalls[0] === 'Bearer service-glm-key')
+const serviceGlm = await serviceMonitor.get(
+  'zai-coding-cn',
+  { monitorBaseUrl: 'https://open.bigmodel.cn', apiKeyEnv: ['MISSING_ENV'] },
+  { force: true },
+)
+check(
+  'glm: providerKeys resolver supplies the key',
+  serviceGlm?.fiveHour?.percent === 9 && serviceKeyCalls[0] === 'Bearer service-glm-key',
+)
 
 // ── GLM QuotaMonitor with a stub fetch (shared-monitor dedupe) ───────────────
 let fetchCalls = 0
 const stubFetch = async (url, init) => {
   fetchCalls += 1
-  if (!String(url).includes('/api/monitor/usage/quota/limit')) return new Response('{}', { status: 404 })
+  if (!String(url).includes('/api/monitor/usage/quota/limit'))
+    return new Response('{}', { status: 404 })
   if (init?.headers?.authorization !== 'Bearer k-1') return new Response('{}', { status: 401 })
-  return new Response(JSON.stringify({
-    success: true,
-    data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 7, nextResetTime: 1790003600000 }] },
-  }), { status: 200, headers: { 'content-type': 'application/json' } })
+  return new Response(
+    JSON.stringify({
+      success: true,
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 7, nextResetTime: 1790003600000 },
+        ],
+      },
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  )
 }
 process.env.SMOKE_QUOTA_KEY = 'k-1'
 const mon = new QuotaMonitor({ fetchImpl: stubFetch, logger: { warn() {} } })
@@ -368,7 +761,10 @@ check('glm monitor fetch parses', s1?.fiveHour?.percent === 7)
 await mon.get('zai-coding-cn', cfg)
 check('glm monitor caches within TTL', fetchCalls === 1)
 const alias = await mon.get('glm', cfg)
-check('glm providers sharing a monitor share the upstream call', alias?.provider === 'glm' && fetchCalls === 1)
+check(
+  'glm providers sharing a monitor share the upstream call',
+  alias?.provider === 'glm' && fetchCalls === 1,
+)
 
 // ── service on a real Cordis context: registration + live-route filter ──────
 const root = new Context()
@@ -378,20 +774,50 @@ check('apply registers the planUsage service', service instanceof PlanUsageServi
 
 // Without an llm service every known source route is listed.
 const unfiltered = service.providers()
-check('no llm service → all source routes listed', unfiltered.includes('zai-coding-cn') && unfiltered.includes('chatgpt') && unfiltered.includes('minimax-cn') && unfiltered.includes('opencode-go') && unfiltered.includes('command-code'))
+check(
+  'no llm service → all source routes listed',
+  unfiltered.includes('zai-coding-cn') &&
+    unfiltered.includes('chatgpt') &&
+    unfiltered.includes('minimax-cn') &&
+    unfiltered.includes('opencode-go') &&
+    unfiltered.includes('command-code'),
+)
 
 // A stub llm service narrows the list to routes actually registered.
 class StubLlm extends Service {
-  constructor(ctx) { super(ctx, 'llm') }
-  listProviders() { return [{ id: 'zai-coding-cn', name: 'Z.AI Coding CN' }, { id: 'chatgpt', name: 'ChatGPT' }, { id: 'opencode-go', name: 'OpenCode Go' }] }
+  constructor(ctx) {
+    super(ctx, 'llm')
+  }
+  listProviders() {
+    return [
+      { id: 'zai-coding-cn', name: 'Z.AI Coding CN' },
+      { id: 'chatgpt', name: 'ChatGPT' },
+      { id: 'opencode-go', name: 'OpenCode Go' },
+    ]
+  }
 }
 const stubLlm = new StubLlm(root)
 root.emit('llm/adapters-updated')
 const filtered = service.providers()
-check('live registry collapses the GLM alias family', JSON.stringify(filtered) === JSON.stringify(['chatgpt', 'opencode-go', 'zai-coding-cn']))
-check('unmonitored provider resolves undefined', (await service.get('unknown-provider')) === undefined)
-check('monitored() reflects key resolution', service.monitored('zai-coding-cn') === (process.env.ZAI_CODING_CN_API_KEY !== undefined || process.env.GLM_API_KEY !== undefined))
-check('monitored() reflects opencode env key', service.monitored('opencode-go') === (typeof process.env.OPENCODE_API_KEY === 'string' && process.env.OPENCODE_API_KEY.trim() !== ''))
+check(
+  'live registry collapses the GLM alias family',
+  JSON.stringify(filtered) === JSON.stringify(['chatgpt', 'opencode-go', 'zai-coding-cn']),
+)
+check(
+  'unmonitored provider resolves undefined',
+  (await service.get('unknown-provider')) === undefined,
+)
+check(
+  'monitored() reflects key resolution',
+  service.monitored('zai-coding-cn') ===
+    (process.env.ZAI_CODING_CN_API_KEY !== undefined || process.env.GLM_API_KEY !== undefined),
+)
+check(
+  'monitored() reflects opencode env key',
+  service.monitored('opencode-go') ===
+    (typeof process.env.OPENCODE_API_KEY === 'string' &&
+      process.env.OPENCODE_API_KEY.trim() !== ''),
+)
 void stubLlm
 
 if (failures > 0) {

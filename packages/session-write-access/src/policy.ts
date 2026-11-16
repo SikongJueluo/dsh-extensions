@@ -23,10 +23,13 @@ export function applyGroupPolicy(
   group: Pick<GroupRecord, 'workspaceRoot' | 'grants'>,
 ): SandboxExecutionPolicy {
   if (base.mode !== 'workspace-write') return base
-  const merged = mergeWritableRoots(base.additionalWritableRoots, group.grants.map(grant => grant.path))
+  const merged = mergeWritableRoots(
+    base.additionalWritableRoots,
+    group.grants.map((grant) => grant.path),
+  )
   return {
     ...base,
     workspaceRoot: group.workspaceRoot,
-    ...merged === undefined ? {} : { additionalWritableRoots: merged },
+    ...(merged === undefined ? {} : { additionalWritableRoots: merged }),
   }
 }

@@ -17,5 +17,5 @@
       name: dsh-auto-permit
       config:
         enabled: true
-        provider: ""
-        model: ""
+        provider: ''
+        model: ''

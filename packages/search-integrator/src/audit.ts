@@ -62,7 +62,10 @@ export function createAuditPort(ctx: Context, owner: AuditOwner): AuditPort {
           bytes: ref.bytes,
         }
       } catch (error) {
-        ctx.logger.warn('search-integrator: audit save failed (continuing without audit): %o', error)
+        ctx.logger.warn(
+          'search-integrator: audit save failed (continuing without audit): %o',
+          error,
+        )
         return undefined
       }
     },

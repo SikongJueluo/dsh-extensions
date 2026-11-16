@@ -48,7 +48,9 @@ for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })
     }
   } catch (error) {
     const stderr = error.stderr ? String(error.stderr).trim() : ''
-    problems.push(`pnpm pack failed${stderr ? `: ${stderr.split('\n').slice(-3).join(' | ')}` : ''}`)
+    problems.push(
+      `pnpm pack failed${stderr ? `: ${stderr.split('\n').slice(-3).join(' | ')}` : ''}`,
+    )
   } finally {
     rmSync(out, { recursive: true, force: true })
   }

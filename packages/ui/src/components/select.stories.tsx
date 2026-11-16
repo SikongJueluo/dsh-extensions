@@ -32,7 +32,10 @@ function InlineSelector() {
           options={[
             { value: '@', label: 'current change (@)' },
             { value: 'main', label: 'main' },
-            { value: 'feature/a-very-long-branch-name-that-expands-the-popup', label: 'feature/a-very-long-branch-name-that-expands-the-popup' },
+            {
+              value: 'feature/a-very-long-branch-name-that-expands-the-popup',
+              label: 'feature/a-very-long-branch-name-that-expands-the-popup',
+            },
           ]}
         />
       </span>

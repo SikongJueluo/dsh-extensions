@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { assertSupportedJsonSchema, validateJsonSchemaValue, type ToolDefinition } from '@deepseek-ai/dsh-tools'
+import {
+  assertSupportedJsonSchema,
+  validateJsonSchemaValue,
+  type ToolDefinition,
+} from '@deepseek-ai/dsh-tools'
 import { apply, type Config } from '../src/index.js'
 import type { ExecFile } from '../src/jj.js'
 
@@ -22,7 +26,13 @@ interface Fixture {
   agent: { id: string; session: unknown }
   storageDir: string
   tempDir: string
-  jj: { changeId: string; parentChangeIds: string[]; workspaceRoot: string; fail?: string; recheckChangeId?: string }
+  jj: {
+    changeId: string
+    parentChangeIds: string[]
+    workspaceRoot: string
+    fail?: string
+    recheckChangeId?: string
+  }
   execCalls: { file: string; args: readonly string[]; cwd: string }[]
   events: unknown[]
   appended: { type: string; data: unknown; opts: unknown }[]
@@ -65,7 +75,12 @@ function makeFixture(): Fixture {
     },
   }
   fixture.ctx = fakeCtx as unknown as Context
-  fixture.jj = { changeId: 'change-AAA', parentChangeIds: ['change-PPP'], workspaceRoot: '', recheckChangeId: undefined }
+  fixture.jj = {
+    changeId: 'change-AAA',
+    parentChangeIds: ['change-PPP'],
+    workspaceRoot: '',
+    recheckChangeId: undefined,
+  }
   return fixture
 }
 
@@ -84,10 +99,18 @@ async function initFixture(fixture: Fixture, overrides: Partial<Config> = {}): P
       return { stdout: `${fixture.jj.workspaceRoot}\n`, stderr: '', code: 0 }
     }
     layerReads += 1
-    const changeId = layerReads === 2 && fixture.jj.recheckChangeId !== undefined ? fixture.jj.recheckChangeId : fixture.jj.changeId
+    const changeId =
+      layerReads === 2 && fixture.jj.recheckChangeId !== undefined
+        ? fixture.jj.recheckChangeId
+        : fixture.jj.changeId
     return { stdout: `${changeId}\n${fixture.jj.parentChangeIds.join(' ')}\n`, stderr: '', code: 0 }
   }
-  const config: Config = { storagePath: fixture.storageDir, jjTimeoutMs: 2000, resumeNotice: true, ...overrides }
+  const config: Config = {
+    storagePath: fixture.storageDir,
+    jjTimeoutMs: 2000,
+    resumeNotice: true,
+    ...overrides,
+  }
   apply(fixture.ctx as Context, config, { exec: fakeExec, jjPath: 'jj-fake' })
 }
 
@@ -103,7 +126,13 @@ function toolOf(fixture: Fixture): ToolDefinition {
 }
 
 function execContext(fixture: Fixture) {
-  return { callId: 'ck1', name: 'checkpoint_task', arguments: {}, agent: fixture.agent, signal: new AbortController().signal } as never
+  return {
+    callId: 'ck1',
+    name: 'checkpoint_task',
+    arguments: {},
+    agent: fixture.agent,
+    signal: new AbortController().signal,
+  } as never
 }
 
 function goalEvent(id: string, revision: number): unknown {
@@ -111,7 +140,15 @@ function goalEvent(id: string, revision: number): unknown {
     type: 'goal/change',
     seq: 1,
     time: 0,
-    data: { kind: 'goal/change', version: 1, operation: 'edit', goal: { id, revision, objective: 'o', phase: 'active', maxGoalRounds: 5 }, roundsStarted: 1, createdAt: 0, updatedAt: 0 },
+    data: {
+      kind: 'goal/change',
+      version: 1,
+      operation: 'edit',
+      goal: { id, revision, objective: 'o', phase: 'active', maxGoalRounds: 5 },
+      roundsStarted: 1,
+      createdAt: 0,
+      updatedAt: 0,
+    },
   }
 }
 
@@ -129,15 +166,32 @@ describe('adapter: checkpoint_task through the real defineTool', () => {
     tempRoots.push(fixture.tempDir)
     fixture.events.push(goalEvent('g1', 4))
     const tool = toolOf(fixture)
-    const result = await tool.execute(
-      { phase: 'implement', ownedFiles: ['src/a.ts'], verification: 'vitest green', goalId: 'g1', goalRevision: 4 },
+    const result = (await tool.execute(
+      {
+        phase: 'implement',
+        ownedFiles: ['src/a.ts'],
+        verification: 'vitest green',
+        goalId: 'g1',
+        goalRevision: 4,
+      },
       execContext(fixture),
-    ) as Record<string, unknown>
+    )) as Record<string, unknown>
     expect(validateJsonSchemaValue(tool.output.schema, result, 'value')).toEqual([])
-    expect(result).toMatchObject({ saved: true, goalId: 'g1', goalRevision: 4, goalProof: 'fold-agrees', parentChangeIds: ['change-PPP'] })
+    expect(result).toMatchObject({
+      saved: true,
+      goalId: 'g1',
+      goalRevision: 4,
+      goalProof: 'fold-agrees',
+      parentChangeIds: ['change-PPP'],
+    })
     expect('note' in result).toBe(false)
     const anchorRaw = await readFile(join(fixture.storageDir, 'anchors', 'sess-it.json'), 'utf8')
-    expect(JSON.parse(anchorRaw)).toMatchObject({ sessionId: 'sess-it', phase: 'implement', vcs: { changeId: 'change-AAA', parentChangeIds: ['change-PPP'] }, goal: { goalId: 'g1', revision: 4, phase: 'active', proof: 'fold-agrees' } })
+    expect(JSON.parse(anchorRaw)).toMatchObject({
+      sessionId: 'sess-it',
+      phase: 'implement',
+      vcs: { changeId: 'change-AAA', parentChangeIds: ['change-PPP'] },
+      goal: { goalId: 'g1', revision: 4, phase: 'active', proof: 'fold-agrees' },
+    })
     const blocks = tool.output.render({ phase: 'implement' } as never, result as never)
     expect(blocks[0]).toMatchObject({ type: 'text' })
     for (const call of fixture.execCalls) {
@@ -151,7 +205,10 @@ describe('adapter: checkpoint_task through the real defineTool', () => {
     await initFixture(fixture)
     tempRoots.push(fixture.tempDir)
     const tool = toolOf(fixture)
-    const result = await tool.execute({ phase: 'p', goalId: 'g9', goalRevision: 1 }, execContext(fixture)) as Record<string, unknown>
+    const result = (await tool.execute(
+      { phase: 'p', goalId: 'g9', goalRevision: 1 },
+      execContext(fixture),
+    )) as Record<string, unknown>
     expect(validateJsonSchemaValue(tool.output.schema, result, 'value')).toEqual([])
     expect(result).toMatchObject({ goalProof: 'args-only-unverified' })
     expect(typeof result.note).toBe('string')
@@ -162,8 +219,9 @@ describe('adapter: checkpoint_task through the real defineTool', () => {
     await initFixture(fixture)
     tempRoots.push(fixture.tempDir)
     fixture.events.push(goalEvent('g1', 7))
-    await expect(toolOf(fixture).execute({ phase: 'p', goalId: 'g1', goalRevision: 6 }, execContext(fixture)))
-      .rejects.toThrow('goal revision mismatch')
+    await expect(
+      toolOf(fixture).execute({ phase: 'p', goalId: 'g1', goalRevision: 6 }, execContext(fixture)),
+    ).rejects.toThrow('goal revision mismatch')
   })
 
   it('fails loudly on a non-jj root without writing an anchor', async () => {
@@ -171,8 +229,9 @@ describe('adapter: checkpoint_task through the real defineTool', () => {
     await initFixture(fixture)
     tempRoots.push(fixture.tempDir)
     fixture.jj.fail = 'Error: Not a jj repo (no .jj directory)'
-    await expect(toolOf(fixture).execute({ phase: 'p' }, execContext(fixture)))
-      .rejects.toThrow('not a jj repository')
+    await expect(toolOf(fixture).execute({ phase: 'p' }, execContext(fixture))).rejects.toThrow(
+      'not a jj repository',
+    )
   })
 
   it('rejects a checkpoint when the working layer drifted mid-read (jj new between the reads)', async () => {
@@ -180,8 +239,9 @@ describe('adapter: checkpoint_task through the real defineTool', () => {
     await initFixture(fixture)
     tempRoots.push(fixture.tempDir)
     fixture.jj.recheckChangeId = 'change-ZZZ'
-    await expect(toolOf(fixture).execute({ phase: 'p' }, execContext(fixture)))
-      .rejects.toThrow('moved while the facts were being read')
+    await expect(toolOf(fixture).execute({ phase: 'p' }, execContext(fixture))).rejects.toThrow(
+      'moved while the facts were being read',
+    )
   })
 
   it('resume notice reports drift after the working change moved', async () => {

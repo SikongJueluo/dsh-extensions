@@ -16,7 +16,13 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-storage-domain'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { BUILTIN_TEMPLATE_BODIES } from './prompts.js'
-import { TRIGGER_DOMAIN, type BindingRecord, type DeliveryRecord, type RunRecord, type TemplateRecord } from './model.js'
+import {
+  TRIGGER_DOMAIN,
+  type BindingRecord,
+  type DeliveryRecord,
+  type RunRecord,
+  type TemplateRecord,
+} from './model.js'
 
 /** The opened trigger domain with its four typed tables. */
 export interface TriggerStore {
@@ -61,7 +67,14 @@ export async function openStore(ctx: Context): Promise<TriggerStore> {
   for (const [id, seed] of Object.entries(BUILTIN_TEMPLATE_BODIES)) {
     if (templates.get(id) !== undefined) continue
     const now = Date.now()
-    await templates.put(id, { id, name: seed.name, body: seed.body, builtin: true, createdAt: now, updatedAt: now })
+    await templates.put(id, {
+      id,
+      name: seed.name,
+      body: seed.body,
+      builtin: true,
+      createdAt: now,
+      updatedAt: now,
+    })
   }
   return { domain, templates, bindings, runs, deliveries, close: () => domain.close() }
 }

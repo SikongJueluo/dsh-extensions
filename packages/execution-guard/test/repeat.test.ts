@@ -9,8 +9,9 @@ describe('fingerprint', () => {
   })
 
   it('keeps distinct field names distinct', () => {
-    expect(fingerprint('write', ['arguments.file_path: required property missing']))
-      .not.toBe(fingerprint('write', ['arguments.content: required property missing']))
+    expect(fingerprint('write', ['arguments.file_path: required property missing'])).not.toBe(
+      fingerprint('write', ['arguments.content: required property missing']),
+    )
   })
 
   it('separates tools', () => {
@@ -54,7 +55,9 @@ describe('RepeatTracker', () => {
       t.noteFailure(`tool${i}`, [`violation ${i}`])
     }
     expect(t.noteFailure('tool0', ['violation 0'])).toBe(1)
-    expect(t.noteFailure(`tool${MAX_FINGERPRINTS + 9}`, [`violation ${MAX_FINGERPRINTS + 9}`])).toBe(2)
+    expect(
+      t.noteFailure(`tool${MAX_FINGERPRINTS + 9}`, [`violation ${MAX_FINGERPRINTS + 9}`]),
+    ).toBe(2)
   })
 })
 
@@ -71,7 +74,15 @@ describe('hintableCalls', () => {
 
   it('selects only calls at their second+ same-shape failure', () => {
     expect(hintableCalls(deny, new Map([['b', 2]]))).toEqual(['b'])
-    expect(hintableCalls(deny, new Map([['a', 1], ['b', 3]]))).toEqual(['b'])
+    expect(
+      hintableCalls(
+        deny,
+        new Map([
+          ['a', 1],
+          ['b', 3],
+        ]),
+      ),
+    ).toEqual(['b'])
     expect(hintableCalls(deny, new Map())).toEqual([])
   })
 })

@@ -19,22 +19,31 @@ describe('judge notices', () => {
   })
 
   it('renders the defer category, reason, and evidence references', () => {
-    const message = buildNoticeMessage('deferred', 'bash scripts/build.sh', 'script calls an unread helper', {
-      category: 'policy',
-      evidence: ['scripts/build.sh:10-20', 'scripts/helper.sh:1-5'],
-    })
+    const message = buildNoticeMessage(
+      'deferred',
+      'bash scripts/build.sh',
+      'script calls an unread helper',
+      {
+        category: 'policy',
+        evidence: ['scripts/build.sh:10-20', 'scripts/helper.sh:1-5'],
+      },
+    )
     const text = textOf(message)
     expect(text).toContain('judge (policy): script calls an unread helper')
     expect(text).toContain('evidence: scripts/build.sh:10-20, scripts/helper.sh:1-5')
   })
 
   it('keeps a category visible even when the model gave no reason', () => {
-    const message = buildNoticeMessage('deferred', 'podman build .', undefined, { category: 'timeout' })
+    const message = buildNoticeMessage('deferred', 'podman build .', undefined, {
+      category: 'timeout',
+    })
     expect(textOf(message)).toContain('judge (timeout): no reason recorded')
   })
 
   it('does not add an empty category for an explicit policy defer without a reason', () => {
-    const message = buildNoticeMessage('deferred', 'podman build .', undefined, { category: 'policy' })
+    const message = buildNoticeMessage('deferred', 'podman build .', undefined, {
+      category: 'policy',
+    })
     expect(textOf(message)).not.toContain('policy')
   })
 })

@@ -98,10 +98,21 @@ export const REMOTE_OUTCOMES = [
 ] as const
 
 /** Kinds of nonce-framed control line the host appends to stderr. */
-export type RemoteControlKind = 'prep-error' | 'cwd-error' | 'env-error' | 'status-unknown' | 'command-start'
+export type RemoteControlKind =
+  | 'prep-error'
+  | 'cwd-error'
+  | 'env-error'
+  | 'status-unknown'
+  | 'command-start'
 
 /** Every control kind, as a readonly tuple for parsing and tests. */
-export const REMOTE_CONTROL_KINDS = ['prep-error', 'cwd-error', 'env-error', 'status-unknown', 'command-start'] as const
+export const REMOTE_CONTROL_KINDS = [
+  'prep-error',
+  'cwd-error',
+  'env-error',
+  'status-unknown',
+  'command-start',
+] as const
 
 /** One parsed final control line plus the stderr content before it. */
 export interface RemoteControl {

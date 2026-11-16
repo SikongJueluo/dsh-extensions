@@ -87,11 +87,15 @@ async function runCommand(
   const timeout = deadline(signal, config.timeoutMs, 'JJ_WORKSPACE_TIMEOUT')
   try {
     timeout.signal.throwIfAborted()
-    const command = [await ctx.subprocess.resolveExecutable(argv[0]!, undefined, timeout.signal), ...argv.slice(1)]
+    const command = [
+      await ctx.subprocess.resolveExecutable(argv[0]!, undefined, timeout.signal),
+      ...argv.slice(1),
+    ]
     const wrapped =
       policy.mode === 'danger-full-access'
         ? command
-        : (await ctx.sandbox.confine(command, { ...policy, mode: policy.mode }, timeout.signal)).argv
+        : (await ctx.sandbox.confine(command, { ...policy, mode: policy.mode }, timeout.signal))
+            .argv
     timeout.signal.throwIfAborted()
     const child = ctx.subprocess.spawn({
       argv: wrapped,
@@ -115,7 +119,9 @@ async function runCommand(
       const stdout = captured.stdout.readFrom(0)
       const stderr = captured.stderr.readFrom(0)
       if (outcome.exitCode === null || outcome.exitCode !== 0) {
-        throw new Error(`workspace command failed (${outcome.signal ?? outcome.exitCode}): ${stderr.text.trim()}`)
+        throw new Error(
+          `workspace command failed (${outcome.signal ?? outcome.exitCode}): ${stderr.text.trim()}`,
+        )
       }
       if (stdout.lossy) throw new Error('workspace command output exceeds maxOutputBytes')
       return stdout.text
@@ -137,7 +143,14 @@ export async function runJj(
   args: readonly string[],
   signal: AbortSignal | undefined,
 ): Promise<string> {
-  return await runCommand(ctx, config, policy, cwd, [config.jjCommand, '--no-pager', '--color=never', ...args], signal)
+  return await runCommand(
+    ctx,
+    config,
+    policy,
+    cwd,
+    [config.jjCommand, '--no-pager', '--color=never', ...args],
+    signal,
+  )
 }
 
 /** Append one JSON line without a read-modify-write round trip. */
@@ -193,11 +206,15 @@ export async function prepareJjDirectory(
 }
 
 /** Validate the two limits this adapter adds beyond the stock configuration. */
-export function validateProcessConfig(config: ProcessConfig & { workspaceDirectory: string }): void {
+export function validateProcessConfig(
+  config: ProcessConfig & { workspaceDirectory: string },
+): void {
   for (const key of ['timeoutMs', 'graceMs', 'maxOutputBytes'] as const) {
     const value = config[key]
     if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_TIMER_DELAY_MS) {
-      throw new Error(`jj-workspace: ${key} must be a positive integer no greater than ${MAX_TIMER_DELAY_MS}`)
+      throw new Error(
+        `jj-workspace: ${key} must be a positive integer no greater than ${MAX_TIMER_DELAY_MS}`,
+      )
     }
   }
   const directory = config.workspaceDirectory
@@ -208,7 +225,10 @@ export function validateProcessConfig(config: ProcessConfig & { workspaceDirecto
     directory.includes(':') ||
     !directory.split('/').every((part) => part.length > 0 && part !== '.' && part !== '..')
   ) {
-    throw new Error('jj-workspace: workspaceDirectory must be a relative directory without dot segments')
+    throw new Error(
+      'jj-workspace: workspaceDirectory must be a relative directory without dot segments',
+    )
   }
-  if (config.jjCommand.trim().length === 0) throw new Error('jj-workspace: jjCommand must not be empty')
+  if (config.jjCommand.trim().length === 0)
+    throw new Error('jj-workspace: jjCommand must not be empty')
 }

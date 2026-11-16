@@ -22,7 +22,11 @@ async function seed(root: string): Promise<void> {
   )
 
   // Nested bundles at depth 2 and 3.
-  await writeSkill(join(root, 'anthropic', 'pdf'), ['name: pdf', 'description: PDF skill'], '# PDF\n')
+  await writeSkill(
+    join(root, 'anthropic', 'pdf'),
+    ['name: pdf', 'description: PDF skill'],
+    '# PDF\n',
+  )
   await writeSkill(join(root, 'anthropic', 'docx'), ['name: docx', 'description: DOCX skill'])
   await writeSkill(join(root, 'deep', 'one', 'two'), ['name: deep-two', 'description: Deep skill'])
 
@@ -113,7 +117,10 @@ describe('recursive discovery', () => {
     const harness = await createHarness({ maxDepth: 2, extraRoots: [extra] })
     try {
       await seed(harness.skillsRoot)
-      await writeSkill(join(extra, 'vendor', 'lib'), ['name: vendor-lib', 'description: Extra root'])
+      await writeSkill(join(extra, 'vendor', 'lib'), [
+        'name: vendor-lib',
+        'description: Extra root',
+      ])
       const skills = await harness.ctx.skills.list()
       const names = skills.map((skill) => skill.name)
       expect(names).toContain('pdf')
@@ -129,13 +136,20 @@ describe('recursive discovery', () => {
     const external = await tempDir()
     const harness = await createHarness()
     try {
-      await writeSkill(join(external, 'linked-skill'), ['name: linked-skill', 'description: Via symlink'])
+      await writeSkill(join(external, 'linked-skill'), [
+        'name: linked-skill',
+        'description: Via symlink',
+      ])
       await writeSkill(join(harness.skillsRoot, 'category', 'real'), [
         'name: real-skill',
         'description: Real directory',
       ])
       await symlink(external, join(harness.skillsRoot, 'category', 'external'), 'dir')
-      await symlink(join(harness.skillsRoot, 'category', 'real'), join(harness.skillsRoot, 'category', 'alias'), 'dir')
+      await symlink(
+        join(harness.skillsRoot, 'category', 'real'),
+        join(harness.skillsRoot, 'category', 'alias'),
+        'dir',
+      )
       await symlink(harness.skillsRoot, join(harness.skillsRoot, 'category', 'loop'), 'dir')
 
       const names = await catalogNames(harness.ctx)
@@ -157,7 +171,11 @@ describe('recursive discovery', () => {
         'description: Real path at depth 3',
       ])
       await mkdir(join(harness.skillsRoot, 'a', 'one'), { recursive: true })
-      await symlink(join(harness.skillsRoot, 'z'), join(harness.skillsRoot, 'a', 'one', 'alias'), 'dir')
+      await symlink(
+        join(harness.skillsRoot, 'z'),
+        join(harness.skillsRoot, 'a', 'one', 'alias'),
+        'dir',
+      )
       expect(await catalogNames(harness.ctx)).toEqual(['pdf'])
     } finally {
       await harness.dispose()

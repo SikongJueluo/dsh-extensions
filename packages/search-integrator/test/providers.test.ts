@@ -50,11 +50,18 @@ function settings(overrides: Partial<SearchIntegratorSettings> = {}): SearchInte
 }
 
 /** Scripted IO: record calls, answer per-kind from queues. */
-function fakeIo(responses: {
-  get?: unknown
-  post?: unknown
-} & Record<string, unknown>) {
-  const calls: { kind: 'get' | 'post'; url: string; body?: unknown; headers: Record<string, string> }[] = []
+function fakeIo(
+  responses: {
+    get?: unknown
+    post?: unknown
+  } & Record<string, unknown>,
+) {
+  const calls: {
+    kind: 'get' | 'post'
+    url: string
+    body?: unknown
+    headers: Record<string, string>
+  }[] = []
   const io = {
     async postJson(url: string, body: unknown, headers: Record<string, string>) {
       calls.push({ kind: 'post', url, body, headers })
@@ -78,21 +85,33 @@ const signal = () => new AbortController().signal
 describe('brave adapter', () => {
   it('maps web.results into hits with extra snippets as content', async () => {
     const { io, calls } = fakeIo({
-      get: { web: { results: [
-        { title: 'Brave Result', url: 'https://b.example/1', description: 'main snippet', age: '2 days ago', extra_snippets: ['extra one', 42, 'extra two'] },
-      ] } },
+      get: {
+        web: {
+          results: [
+            {
+              title: 'Brave Result',
+              url: 'https://b.example/1',
+              description: 'main snippet',
+              age: '2 days ago',
+              extra_snippets: ['extra one', 42, 'extra two'],
+            },
+          ],
+        },
+      },
     })
     const { adapters } = buildAdapters(settings({ braveEnabled: true }), { brave: 'k' }, io)
     const hits = await adapters[0]?.search('q', signal())
-    expect(hits).toEqual([{
-      provider: 'brave',
-      query: 'q',
-      url: 'https://b.example/1',
-      title: 'Brave Result',
-      snippet: 'main snippet',
-      publishedAt: '2 days ago',
-      content: 'extra one\nextra two',
-    }] as RawHit[])
+    expect(hits).toEqual([
+      {
+        provider: 'brave',
+        query: 'q',
+        url: 'https://b.example/1',
+        title: 'Brave Result',
+        snippet: 'main snippet',
+        publishedAt: '2 days ago',
+        content: 'extra one\nextra two',
+      },
+    ] as RawHit[])
     expect(calls[0]?.kind).toBe('get')
     expect(calls[0]?.url).toContain('https://api.search.brave.com/res/v1/web/search?q=q&count=5')
     expect(calls[0]?.headers['x-subscription-token']).toBe('k')
@@ -108,20 +127,38 @@ describe('brave adapter', () => {
 describe('openai adapter', () => {
   it('collects consulted source urls and citation annotations, dropping generated prose', async () => {
     const { io, calls } = fakeIo({
-      post: { output: [
-        { type: 'web_search_call', action: { sources: [
-          { url: 'https://o.example/1', title: 'One' },
-          { url: 'https://o.example/2' }, // no title
-        ] } },
-        { type: 'message', content: [{ annotations: [
-          { type: 'url_citation', url: 'https://o.example/1', title: 'One (dup)' },
-          { type: 'url_citation', url: 'https://o.example/3', title: 'Three' },
-        ] }] },
-      ] },
+      post: {
+        output: [
+          {
+            type: 'web_search_call',
+            action: {
+              sources: [
+                { url: 'https://o.example/1', title: 'One' },
+                { url: 'https://o.example/2' }, // no title
+              ],
+            },
+          },
+          {
+            type: 'message',
+            content: [
+              {
+                annotations: [
+                  { type: 'url_citation', url: 'https://o.example/1', title: 'One (dup)' },
+                  { type: 'url_citation', url: 'https://o.example/3', title: 'Three' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
     })
     const { adapters } = buildAdapters(settings({ openaiEnabled: true }), { openai: 'k' }, io)
     const hits = await adapters[0]?.search('q', signal())
-    expect(hits?.map((hit) => hit.url)).toEqual(['https://o.example/1', 'https://o.example/2', 'https://o.example/3'])
+    expect(hits?.map((hit) => hit.url)).toEqual([
+      'https://o.example/1',
+      'https://o.example/2',
+      'https://o.example/3',
+    ])
     expect(hits?.every((hit) => hit.snippet === '')).toBe(true) // generated text is never evidence
     const body = calls[0]?.body as Record<string, unknown>
     expect(body.model).toBe('gpt-5.5')
@@ -132,16 +169,26 @@ describe('openai adapter', () => {
 
   it('omits the reasoning block when the effort is empty (non-reasoning models)', async () => {
     const { io, calls } = fakeIo({
-      post: { output: [{ type: 'web_search_call', action: { sources: [{ url: 'https://o.example/1' }] } }] },
+      post: {
+        output: [
+          { type: 'web_search_call', action: { sources: [{ url: 'https://o.example/1' }] } },
+        ],
+      },
     })
-    const { adapters } = buildAdapters(settings({ openaiEnabled: true, openaiReasoningEffort: '' }), { openai: 'k' }, io)
+    const { adapters } = buildAdapters(
+      settings({ openaiEnabled: true, openaiReasoningEffort: '' }),
+      { openai: 'k' },
+      io,
+    )
     await adapters[0]?.search('q', signal())
     const body = calls[0]?.body as Record<string, unknown>
     expect('reasoning' in body).toBe(false)
   })
 
   it('fails explicitly when the tool consulted no sources', async () => {
-    const { io } = fakeIo({ post: { output: [{ type: 'message', content: [{ annotations: [] }] }] } })
+    const { io } = fakeIo({
+      post: { output: [{ type: 'message', content: [{ annotations: [] }] }] },
+    })
     const { adapters } = buildAdapters(settings({ openaiEnabled: true }), { openai: 'k' }, io)
     await expect(adapters[0]?.search('q', signal())).rejects.toThrow(/no consultable source URLs/)
   })
@@ -179,18 +226,50 @@ describe('chatgpt codex adapter', () => {
 
   it('extracts open_page urls and url_citation annotations from the SSE stream', async () => {
     const text = sse([
-      { type: 'response.output_item.done', item: { type: 'web_search_call', action: { type: 'search', query: 'q' } } },
-      { type: 'response.output_item.done', item: { type: 'web_search_call', action: { type: 'open_page', url: 'https://c.example/opened' } } },
-      { type: 'response.output_text.annotation.added', annotation: { type: 'url_citation', url: 'https://c.example/cited', title: 'Cited' } },
-      { type: 'response.completed', response: { output: [
-        { type: 'web_search_call', action: { type: 'open_page', url: 'https://c.example/opened' } },
-        { type: 'message', content: [{ annotations: [{ type: 'url_citation', url: 'https://c.example/cited', title: 'Cited' }] }] },
-      ] } },
+      {
+        type: 'response.output_item.done',
+        item: { type: 'web_search_call', action: { type: 'search', query: 'q' } },
+      },
+      {
+        type: 'response.output_item.done',
+        item: {
+          type: 'web_search_call',
+          action: { type: 'open_page', url: 'https://c.example/opened' },
+        },
+      },
+      {
+        type: 'response.output_text.annotation.added',
+        annotation: { type: 'url_citation', url: 'https://c.example/cited', title: 'Cited' },
+      },
+      {
+        type: 'response.completed',
+        response: {
+          output: [
+            {
+              type: 'web_search_call',
+              action: { type: 'open_page', url: 'https://c.example/opened' },
+            },
+            {
+              type: 'message',
+              content: [
+                {
+                  annotations: [
+                    { type: 'url_citation', url: 'https://c.example/cited', title: 'Cited' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
     ])
     const { io, posts } = chatgptIo(text, { access: 'tok-1', accountId: 'acct-9' })
     const { adapters } = buildAdapters(settings({ chatgptEnabled: true }), {}, io)
     const hits = await adapters[0]?.search('q', signal())
-    expect(hits?.map((hit) => hit.url).sort()).toEqual(['https://c.example/cited', 'https://c.example/opened'])
+    expect(hits?.map((hit) => hit.url).sort()).toEqual([
+      'https://c.example/cited',
+      'https://c.example/opened',
+    ])
     expect(hits?.every((hit) => hit.snippet === '')).toBe(true)
     expect(posts[0]?.url).toBe('https://chatgpt.com/backend-api/codex/responses')
     expect(posts[0]?.headers.authorization).toBe('Bearer tok-1')
@@ -203,7 +282,9 @@ describe('chatgpt codex adapter', () => {
   })
 
   it('fails explicitly when no citable sources came back', async () => {
-    const { io } = chatgptIo(sse([{ type: 'response.completed', response: { output: [] } }]), { access: 'tok' })
+    const { io } = chatgptIo(sse([{ type: 'response.completed', response: { output: [] } }]), {
+      access: 'tok',
+    })
     const { adapters } = buildAdapters(settings({ chatgptEnabled: true }), {}, io)
     await expect(adapters[0]?.search('q', signal())).rejects.toThrow(/no citable source/)
   })

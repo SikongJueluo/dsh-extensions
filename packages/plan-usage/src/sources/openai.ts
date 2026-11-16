@@ -45,11 +45,15 @@ function finiteNumber(value: unknown): number | undefined {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }
 
 /** One `rate_limit.{primary,secondary}_window` object → window facts. */
-function windowOf(raw: unknown): { percent: number; resetAt?: number; windowMinutes?: number } | undefined {
+function windowOf(
+  raw: unknown,
+): { percent: number; resetAt?: number; windowMinutes?: number } | undefined {
   const row = asRecord(raw)
   if (row === null) return undefined
   const percent = finiteNumber(row.used_percent)
@@ -59,7 +63,8 @@ function windowOf(raw: unknown): { percent: number; resetAt?: number; windowMinu
   }
   const seconds = finiteNumber(row.reset_at)
   // The payload reports unix SECONDS; the harness vocabulary is epoch ms.
-  if (seconds !== undefined && seconds > 1_577_836_800 && seconds < 4_102_444_800) window.resetAt = Math.round(seconds * 1000)
+  if (seconds !== undefined && seconds > 1_577_836_800 && seconds < 4_102_444_800)
+    window.resetAt = Math.round(seconds * 1000)
   const span = finiteNumber(row.limit_window_seconds)
   if (span !== undefined && span > 0) window.windowMinutes = Math.ceil(span / 60)
   return window
@@ -69,7 +74,9 @@ function windowOf(raw: unknown): { percent: number; resetAt?: number; windowMinu
  * Parse a `GET /wham/usage` JSON body into window facts. Pure; returns
  * `undefined` when the body carries no usable rate-limit data.
  */
-export function parseCodexUsage(body: unknown): Pick<QuotaSnapshot, 'fiveHour' | 'weekly' | 'level'> | undefined {
+export function parseCodexUsage(
+  body: unknown,
+): Pick<QuotaSnapshot, 'fiveHour' | 'weekly' | 'level'> | undefined {
   const payload = asRecord(body)
   if (payload === null) return undefined
   const rateLimit = asRecord(payload.rate_limit)
@@ -80,7 +87,8 @@ export function parseCodexUsage(body: unknown): Pick<QuotaSnapshot, 'fiveHour' |
   const parsed: Pick<QuotaSnapshot, 'fiveHour' | 'weekly' | 'level'> = {}
   if (fiveHour !== undefined) parsed.fiveHour = fiveHour
   if (weekly !== undefined) parsed.weekly = weekly
-  if (typeof payload.plan_type === 'string' && payload.plan_type !== '') parsed.level = payload.plan_type
+  if (typeof payload.plan_type === 'string' && payload.plan_type !== '')
+    parsed.level = payload.plan_type
   return parsed
 }
 
@@ -114,7 +122,9 @@ export class OpenAiUsageSource {
   async get(route: string): Promise<QuotaSnapshot | undefined> {
     const token = await this.getToken().catch(() => undefined)
     if (token === undefined) {
-      this.logger?.warn('plan-usage: no ChatGPT token available (not signed in, or dsh-oauth-providers absent)')
+      this.logger?.warn(
+        'plan-usage: no ChatGPT token available (not signed in, or dsh-oauth-providers absent)',
+      )
       return undefined
     }
     let response: Response
@@ -125,7 +135,9 @@ export class OpenAiUsageSource {
           authorization: `Bearer ${token.access}`,
           originator: 'codex',
           'oai-product-sku': 'codex',
-          ...(token.accountId !== undefined && token.accountId !== '' ? { 'chatgpt-account-id': token.accountId } : {}),
+          ...(token.accountId !== undefined && token.accountId !== ''
+            ? { 'chatgpt-account-id': token.accountId }
+            : {}),
         },
         redirect: 'error',
         signal: AbortSignal.timeout(this.timeoutMs),

@@ -33,8 +33,14 @@ export function coerceModelChoice(value: unknown): ModelChoice | undefined {
     if (typeof provider !== 'string' || provider.length === 0) return undefined
     if (typeof model !== 'string' || model.length === 0) return undefined
     const effort = record.reasoningEffort
-    if (effort !== undefined && (typeof effort !== 'string' || effort.length === 0)) return undefined
-    return { kind: 'model', provider, model, ...(effort === undefined ? {} : { reasoningEffort: effort }) }
+    if (effort !== undefined && (typeof effort !== 'string' || effort.length === 0))
+      return undefined
+    return {
+      kind: 'model',
+      provider,
+      model,
+      ...(effort === undefined ? {} : { reasoningEffort: effort }),
+    }
   }
   return undefined
 }
@@ -46,9 +52,7 @@ export function coerceModelChoice(value: unknown): ModelChoice | undefined {
  * live preset — or no preset at all when the origin runs none; it never means
  * the deployment default.
  */
-export type PresetChoice =
-  | { kind: 'inherit' }
-  | { kind: 'preset'; id: string }
+export type PresetChoice = { kind: 'inherit' } | { kind: 'preset'; id: string }
 
 /** Narrow an untrusted value (browser payload, sidecar meta JSON) into a preset choice. */
 export function coercePresetChoice(value: unknown): PresetChoice | undefined {
@@ -167,9 +171,9 @@ function crossNoteFor(cross: { title: string } | undefined): string[] {
   return cross === undefined
     ? []
     : [
-      '',
-      `注意：本次交接目标是另一个工作区（${cross.title}）。后继会话对上文路径只读、且其来源分支工作区日后可能被清理，关键文件内容请直接摘录进简报而非只给路径。`,
-    ]
+        '',
+        `注意：本次交接目标是另一个工作区（${cross.title}）。后继会话对上文路径只读、且其来源分支工作区日后可能被清理，关键文件内容请直接摘录进简报而非只给路径。`,
+      ]
 }
 
 /** The instruction handed to the CURRENT agent: write the brief, then stop. */
@@ -219,7 +223,11 @@ export function reviewBootstrapSection(runId: string, maxRounds: number): string
 }
 
 /** The first prompt of the fresh session: the brief plus bootstrap guidance. */
-export function bootstrapPrompt(pending: PendingHandoff, brief: string, review?: { runId: string; maxRounds: number }): string {
+export function bootstrapPrompt(
+  pending: PendingHandoff,
+  brief: string,
+  review?: { runId: string; maxRounds: number },
+): string {
   const crossNote = pending.crossWorkspace
     ? `本次交接来自另一个工作区（${pending.cwd}）：简报中的原路径对你只读，写入一律在当前工作区进行；简报与当前工作区不符时以当前工作区为准。`
     : ''

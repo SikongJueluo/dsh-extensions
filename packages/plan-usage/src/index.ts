@@ -30,9 +30,17 @@ export { QuotaMonitor, parseQuotaBody, resolveMonitor, monitoredProviders } from
 export { OpenAiUsageSource, parseCodexUsage } from './sources/openai.js'
 export { MiniMaxSource, parseMiniMaxRemains, consumedFromRemaining } from './sources/minimax.js'
 export { OpenCodeGoSource, parseOpenCodeGoUsage } from './sources/opencode.js'
-export { CommandCodeSource, parseCommandCodeCredits, COMMAND_CODE_API_BASE } from './sources/commandcode.js'
+export {
+  CommandCodeSource,
+  parseCommandCodeCredits,
+  COMMAND_CODE_API_BASE,
+} from './sources/commandcode.js'
 export type { OpenCodeGoWindows, OpenCodeGoError } from './sources/opencode.js'
-export type { CommandCodeWindows, CommandCodeError, CommandCodeMonitorSettings } from './sources/commandcode.js'
+export type {
+  CommandCodeWindows,
+  CommandCodeError,
+  CommandCodeMonitorSettings,
+} from './sources/commandcode.js'
 export type { ProviderMonitorSettings, MonitorConfig } from './sources/glm.js'
 export type { QuotaSnapshot, QuotaWindow } from './types.js'
 export { PlanUsageService } from './service.js'
@@ -49,22 +57,34 @@ export interface Config {
 }
 
 export const Config: Schema<Config> = Schema.object({
-  quotaCacheMs: Schema.number().step(1).min(5_000)
+  quotaCacheMs: Schema.number()
+    .step(1)
+    .min(5_000)
     .default(60_000)
     .description('Quota API cache TTL shared by every consumer (ms).'),
-  providers: Schema.dict(Schema.object({
-    monitorBaseUrl: Schema.string()
-      .description('Monitor origin for this provider, e.g. https://open.bigmodel.cn (default: the route\'s built-in).'),
-    apiKeyEnv: Schema.string()
-      .description('Env var holding the API key for the quota endpoint (default: the route\'s built-ins).'),
-  })).default({})
-    .description('Per-provider quota monitors; keys are provider route ids (built-ins cover the GLM coding-plan routes).'),
+  providers: Schema.dict(
+    Schema.object({
+      monitorBaseUrl: Schema.string().description(
+        "Monitor origin for this provider, e.g. https://open.bigmodel.cn (default: the route's built-in).",
+      ),
+      apiKeyEnv: Schema.string().description(
+        "Env var holding the API key for the quota endpoint (default: the route's built-ins).",
+      ),
+    }),
+  )
+    .default({})
+    .description(
+      'Per-provider quota monitors; keys are provider route ids (built-ins cover the GLM coding-plan routes).',
+    ),
   commandCode: Schema.object({
-    apiKeyEnv: Schema.string()
-      .description('Env var holding the Command Code API key; CMD_API_KEY / COMMAND_CODE_API_KEY are still tried after it.'),
-    baseURL: Schema.string()
-      .description('Command Code API origin override (default: https://api.commandcode.ai).'),
-  }).default({})
+    apiKeyEnv: Schema.string().description(
+      'Env var holding the Command Code API key; CMD_API_KEY / COMMAND_CODE_API_KEY are still tried after it.',
+    ),
+    baseURL: Schema.string().description(
+      'Command Code API origin override (default: https://api.commandcode.ai).',
+    ),
+  })
+    .default({})
     .description('Command Code quota monitor overrides.'),
 })
 

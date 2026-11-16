@@ -46,7 +46,9 @@ function finite(value: unknown): number | undefined {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }
 
 /** Epoch-ms reset from an ISO-8601 string; unparseable or absurd instants are dropped. */
@@ -78,7 +80,8 @@ function windowOf(raw: unknown): { percent?: number; resetAt?: number } | undefi
   else {
     // percent is the consumed share, integer 0-100; non-numbers are ignored.
     const percent = finite(row.percent)
-    if (percent !== undefined) window.percent = Math.min(100, Math.max(0, Math.round(percent * 10) / 10))
+    if (percent !== undefined)
+      window.percent = Math.min(100, Math.max(0, Math.round(percent * 10) / 10))
   }
   const resetAt = resetAtMs(row.resetsAt)
   if (resetAt !== undefined) window.resetAt = resetAt
@@ -104,7 +107,11 @@ export function parseOpenCodeGoUsage(body: unknown): OpenCodeGoWindows | OpenCod
   if (weekly !== undefined) parsed.weekly = weekly
   const monthly = windowOf(usage.monthly)
   if (monthly !== undefined) parsed.monthly = monthly
-  if (parsed.fiveHour === undefined && parsed.weekly === undefined && parsed.monthly === undefined) {
+  if (
+    parsed.fiveHour === undefined &&
+    parsed.weekly === undefined &&
+    parsed.monthly === undefined
+  ) {
     return { error: 'opencode: usage carried no usable windows' } as OpenCodeGoError
   }
   return parsed
@@ -178,7 +185,11 @@ export class OpenCodeGoSource {
     }
     const parsed = parseOpenCodeGoUsage(body)
     if ('error' in parsed) {
-      this.logger?.warn('plan-usage: opencode usage payload for "%s" unusable — %s', route, parsed.error)
+      this.logger?.warn(
+        'plan-usage: opencode usage payload for "%s" unusable — %s',
+        route,
+        parsed.error,
+      )
       return undefined
     }
     return { provider: route, fetchedAt: Date.now(), source: 'opencode-go:usage', ...parsed }

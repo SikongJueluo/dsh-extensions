@@ -42,7 +42,6 @@ import { buildNoticeMessage } from './notice.js'
 import { compileRules, decideAllow, MODE_RANK, type SandboxMode } from './rules.js'
 import { Config, registerSettings, type CmdPermitSettings } from './settings.js'
 
-
 export { Config } from './settings.js'
 export {
   compileRules,
@@ -52,13 +51,7 @@ export {
   segmentHead,
   splitSegments,
 } from './rules.js'
-export type {
-  AllowDecision,
-  Compiled,
-  CompiledRules,
-  CompileIssues,
-  SandboxMode,
-} from './rules.js'
+export type { AllowDecision, Compiled, CompiledRules, CompileIssues, SandboxMode } from './rules.js'
 export { buildNoticeMessage } from './notice.js'
 export type { CmdPermitSettings, MaxMode } from './settings.js'
 
@@ -131,15 +124,24 @@ export class CmdPermit extends Service {
   }
 
   /** Warn about invalid regex sources once per distinct set, not per approval. */
-  private warnIssues(ctx: Context, issues: { invalidPatterns: readonly string[]; invalidDenyShapes: readonly string[] }): void {
+  private warnIssues(
+    ctx: Context,
+    issues: { invalidPatterns: readonly string[]; invalidDenyShapes: readonly string[] },
+  ): void {
     const key = JSON.stringify(issues)
     if (key === this.lastIssuesKey) return
     this.lastIssuesKey = key
     if (issues.invalidPatterns.length > 0) {
-      ctx.logger.warn('cmd-permit: ignoring invalid allowPattern regexes: %o', issues.invalidPatterns)
+      ctx.logger.warn(
+        'cmd-permit: ignoring invalid allowPattern regexes: %o',
+        issues.invalidPatterns,
+      )
     }
     if (issues.invalidDenyShapes.length > 0) {
-      ctx.logger.warn('cmd-permit: ignoring invalid denyShape regexes: %o', issues.invalidDenyShapes)
+      ctx.logger.warn(
+        'cmd-permit: ignoring invalid denyShape regexes: %o',
+        issues.invalidDenyShapes,
+      )
     }
   }
 

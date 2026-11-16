@@ -1,11 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import {
-  extractJsonObject, parseIntegration, planQueries, runIntegration,
+  extractJsonObject,
+  parseIntegration,
+  planQueries,
+  runIntegration,
 } from '../src/integrate.js'
 import type { LlmCall, LlmPort } from '../src/llm.js'
 
 /** A scripted LlmPort: pops queued outcomes and records requests. */
-function fakeLlm(outcomes: { ok?: boolean; finishKind?: string; text?: string; error?: string; usage?: { inputTokens: number; outputTokens: number } }[]) {
+function fakeLlm(
+  outcomes: {
+    ok?: boolean
+    finishKind?: string
+    text?: string
+    error?: string
+    usage?: { inputTokens: number; outputTokens: number }
+  }[],
+) {
   const calls: LlmCall[] = []
   const queue = [...outcomes]
   const port: LlmPort = {
@@ -14,7 +25,12 @@ function fakeLlm(outcomes: { ok?: boolean; finishKind?: string; text?: string; e
       const next = queue.shift()
       if (next === undefined) throw new Error('fake llm exhausted')
       if (next.ok === false) {
-        return { ok: false, text: '', finishKind: next.finishKind ?? 'error', error: next.error ?? 'boom' }
+        return {
+          ok: false,
+          text: '',
+          finishKind: next.finishKind ?? 'error',
+          error: next.error ?? 'boom',
+        }
       }
       return {
         ok: true,
@@ -41,7 +57,9 @@ const okIntegration = {
 describe('extractJsonObject', () => {
   it('extracts from fences and surrounding prose', () => {
     expect(extractJsonObject('```json\n{"a":1}\n```')).toBe('{"a":1}')
-    expect(extractJsonObject('Here you go: {"a": {"b": "}"}} hope it helps')).toBe('{"a": {"b": "}"}}')
+    expect(extractJsonObject('Here you go: {"a": {"b": "}"}} hope it helps')).toBe(
+      '{"a": {"b": "}"}}',
+    )
   })
 
   it('returns undefined without a complete object', () => {
@@ -59,13 +77,16 @@ describe('parseIntegration', () => {
   })
 
   it('strips fabricated ids; a point left with none moves to unknowns (v3)', () => {
-    const parsed = parseIntegration({
-      ...okIntegration,
-      points: [
-        { text: 'ok', status: 'supported', sources: [1, 99] },
-        { text: 'all fabricated', status: 'supported', sources: [42] },
-      ],
-    }, 2)
+    const parsed = parseIntegration(
+      {
+        ...okIntegration,
+        points: [
+          { text: 'ok', status: 'supported', sources: [1, 99] },
+          { text: 'all fabricated', status: 'supported', sources: [42] },
+        ],
+      },
+      2,
+    )
     expect(parsed?.points).toHaveLength(1)
     expect(parsed?.points[0]?.sources).toEqual([1])
     expect(parsed?.unknowns.some((text) => text.includes('all fabricated'))).toBe(true)
@@ -135,7 +156,9 @@ describe('runIntegration', () => {
   })
 
   it('fails immediately on max-tokens without burning a repair attempt', async () => {
-    const { port, calls } = fakeLlm([{ ok: false, finishKind: 'max-tokens', error: 'model hit the output token limit' }])
+    const { port, calls } = fakeLlm([
+      { ok: false, finishKind: 'max-tokens', error: 'model hit the output token limit' },
+    ])
     const outcome = await runIntegration(port, 'q', digest, 3, new AbortController().signal)
     expect(outcome.kind).toBe('failed')
     expect(calls).toHaveLength(1)
@@ -146,7 +169,9 @@ describe('runIntegration', () => {
   })
 
   it('fails immediately on abort without retrying', async () => {
-    const { port, calls } = fakeLlm([{ ok: false, finishKind: 'aborted', error: 'model call aborted' }])
+    const { port, calls } = fakeLlm([
+      { ok: false, finishKind: 'aborted', error: 'model call aborted' },
+    ])
     const outcome = await runIntegration(port, 'q', digest, 3, new AbortController().signal)
     expect(outcome.kind).toBe('failed')
     expect(calls).toHaveLength(1)
@@ -177,14 +202,17 @@ describe('parseIntegration v3 hardening', () => {
   const base = { summary: 's', unknowns: [], followup: { needed: false, queries: [] } }
 
   it('moves points with no valid citation into unknowns instead of keeping them', () => {
-    const parsed = parseIntegration({
-      ...base,
-      points: [
-        { text: 'well cited', status: 'supported', sources: [1] },
-        { text: 'uncited claim', status: 'supported' },
-        { text: 'all fabricated', status: 'supported', sources: [42] },
-      ],
-    }, 2)
+    const parsed = parseIntegration(
+      {
+        ...base,
+        points: [
+          { text: 'well cited', status: 'supported', sources: [1] },
+          { text: 'uncited claim', status: 'supported' },
+          { text: 'all fabricated', status: 'supported', sources: [42] },
+        ],
+      },
+      2,
+    )
     expect(parsed?.points).toHaveLength(1)
     expect(parsed?.points[0]?.text).toBe('well cited')
     expect(parsed?.unknowns.some((text) => text.includes('uncited claim'))).toBe(true)
@@ -192,30 +220,40 @@ describe('parseIntegration v3 hardening', () => {
   })
 
   it('scrubs invalid [n] markers from point text and summary', () => {
-    const parsed = parseIntegration({
-      summary: 'answer [9] here',
-      points: [{ text: 'fact [99] with valid [1] and bad [7] refs', status: 'supported', sources: [1] }],
-      unknowns: [],
-      followup: { needed: false, queries: [] },
-    }, 2)
+    const parsed = parseIntegration(
+      {
+        summary: 'answer [9] here',
+        points: [
+          { text: 'fact [99] with valid [1] and bad [7] refs', status: 'supported', sources: [1] },
+        ],
+        unknowns: [],
+        followup: { needed: false, queries: [] },
+      },
+      2,
+    )
     expect(parsed?.summary).toBe('answer here')
     expect(parsed?.points[0]?.text).toBe('fact with valid [1] and bad refs')
   })
 
   it('validates and keeps attributed conflict sides', () => {
-    const parsed = parseIntegration({
-      ...base,
-      points: [{
-        text: 'params differ',
-        status: 'conflict',
-        sources: [1, 2],
-        sides: [
-          { text: 'side A says 300B', sources: [1] },
-          { text: 'side B says 320B', sources: [2, 99] },
-          { text: 'side C no valid ids', sources: [77] },
+    const parsed = parseIntegration(
+      {
+        ...base,
+        points: [
+          {
+            text: 'params differ',
+            status: 'conflict',
+            sources: [1, 2],
+            sides: [
+              { text: 'side A says 300B', sources: [1] },
+              { text: 'side B says 320B', sources: [2, 99] },
+              { text: 'side C no valid ids', sources: [77] },
+            ],
+          },
         ],
-      }],
-    }, 2)
+      },
+      2,
+    )
     const point = parsed?.points[0]
     expect(point?.sides).toHaveLength(2)
     expect(point?.sides?.[1]?.sources).toEqual([2])
@@ -223,26 +261,34 @@ describe('parseIntegration v3 hardening', () => {
   })
 
   it('accepts a sides-only point when the flat list is missing', () => {
-    const parsed = parseIntegration({
-      ...base,
-      points: [{
-        text: 'conflict via sides',
-        status: 'conflict',
-        sides: [
-          { text: 'A', sources: [1] },
-          { text: 'B', sources: [2] },
+    const parsed = parseIntegration(
+      {
+        ...base,
+        points: [
+          {
+            text: 'conflict via sides',
+            status: 'conflict',
+            sides: [
+              { text: 'A', sources: [1] },
+              { text: 'B', sources: [2] },
+            ],
+          },
         ],
-      }],
-    }, 2)
+      },
+      2,
+    )
     expect(parsed?.points).toHaveLength(1)
     expect(parsed?.points[0]?.sources).toEqual([1, 2])
   })
 
   it('keeps a truncated quote for audit', () => {
-    const parsed = parseIntegration({
-      ...base,
-      points: [{ text: 't', status: 'supported', sources: [1], quote: 'x'.repeat(300) }],
-    }, 1)
+    const parsed = parseIntegration(
+      {
+        ...base,
+        points: [{ text: 't', status: 'supported', sources: [1], quote: 'x'.repeat(300) }],
+      },
+      1,
+    )
     expect(parsed?.points[0]?.quote?.length).toBe(120)
   })
 })

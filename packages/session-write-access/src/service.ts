@@ -24,9 +24,20 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { AccessError, AccessStore } from './access.js'
-import type { AccessStatus, DecisionResult, RemoveResult, RequestResult, SessionFacts } from './access.js'
+import type {
+  AccessStatus,
+  DecisionResult,
+  RemoveResult,
+  RequestResult,
+  SessionFacts,
+} from './access.js'
 import { registerWriteAccessChannel } from './channel.js'
-import { Config as ConfigSchema, assertDeploymentRootsSafe, resolveConfiguredWorkspaceRoot, resolveProtectedRoots } from './config.js'
+import {
+  Config as ConfigSchema,
+  assertDeploymentRootsSafe,
+  resolveConfiguredWorkspaceRoot,
+  resolveProtectedRoots,
+} from './config.js'
 import type { Config } from './config.js'
 import { ACCESS_DOMAIN, SESSION_WRITE_ACCESS_DOMAIN } from './domain.js'
 import type { ForkRecord } from './domain.js'
@@ -48,7 +59,10 @@ export interface WriteScopeView extends AccessStatus {
 /** Failure raised when a second plugin Fork starts while one is settling. */
 export class ForkBusyError extends AccessError {
   constructor() {
-    super('FORK_BUSY', 'another Fork is initializing; wait for it to finish before starting another')
+    super(
+      'FORK_BUSY',
+      'another Fork is initializing; wait for it to finish before starting another',
+    )
   }
 }
 
@@ -81,9 +95,10 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
   protected async [Service.init](): Promise<void> {
     const facility = this.ctx.storageDomain
     const existing = facility.get(ACCESS_DOMAIN)
-    const domain = existing === undefined
-      ? await facility.open(SESSION_WRITE_ACCESS_DOMAIN)
-      : existing as unknown as Domain<typeof SESSION_WRITE_ACCESS_DOMAIN>
+    const domain =
+      existing === undefined
+        ? await facility.open(SESSION_WRITE_ACCESS_DOMAIN)
+        : (existing as unknown as Domain<typeof SESSION_WRITE_ACCESS_DOMAIN>)
     this.domain = domain
     this.domainOwned = existing === undefined
     this.access = new AccessStore(
@@ -96,7 +111,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
       {
         protectedRoots: this.protectedRoots,
         workspaceFallback: this.configuredWorkspaceRoot,
-        lookup: sessionId => this.lookupSession(sessionId),
+        lookup: (sessionId) => this.lookupSession(sessionId),
       },
     )
     this.access.auditProtectedState()
@@ -145,10 +160,12 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     this.ctx.inject(['agents'], (scope) => {
       for (const agent of scope.agents.list()) {
         this.attributeSession(agent.session.id, agent.session.header).catch((error: unknown) => {
-          this.ctx.logger('session-write-access').warn('could not attribute an already-live session', {
-            sessionId: agent.session.id,
-            error: String(error),
-          })
+          this.ctx
+            .logger('session-write-access')
+            .warn('could not attribute an already-live session', {
+              sessionId: agent.session.id,
+              error: String(error),
+            })
         })
       }
     })
@@ -169,9 +186,11 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
       const header = observation.header
       return {
         sessionId,
-        ...header.cwd === undefined ? {} : { cwd: header.cwd },
-        ...header.parentSession === undefined ? {} : { parentSessionId: String(header.parentSession) },
-        ...header.origin === undefined ? {} : { origin: header.origin },
+        ...(header.cwd === undefined ? {} : { cwd: header.cwd }),
+        ...(header.parentSession === undefined
+          ? {}
+          : { parentSessionId: String(header.parentSession) }),
+        ...(header.origin === undefined ? {} : { origin: header.origin }),
       }
     } catch {
       return undefined
@@ -187,12 +206,15 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     header: { cwd?: string; parentSession?: unknown; origin?: 'subagent'; isSeeded: boolean },
   ): Promise<void> {
     const access = this.access
-    if (access === undefined) throw new Error('session-write-access: policy store is not initialized')
+    if (access === undefined)
+      throw new Error('session-write-access: policy store is not initialized')
     const facts: SessionFacts = {
       sessionId,
-      ...header.cwd === undefined ? {} : { cwd: header.cwd },
-      ...header.parentSession === undefined ? {} : { parentSessionId: String(header.parentSession) },
-      ...header.origin === undefined ? {} : { origin: header.origin },
+      ...(header.cwd === undefined ? {} : { cwd: header.cwd }),
+      ...(header.parentSession === undefined
+        ? {}
+        : { parentSessionId: String(header.parentSession) }),
+      ...(header.origin === undefined ? {} : { origin: header.origin }),
     }
     try {
       if (header.origin === 'subagent') {
@@ -200,7 +222,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
       } else if (header.isSeeded && this.forkActive && access.member(sessionId) === undefined) {
         // A plugin Fork target: hold its steps until the Fork call returns and
         // the exact new id is committed. Never guess the target from events.
-        this.held.set(sessionId, { ...header.cwd === undefined ? {} : { cwd: header.cwd } })
+        this.held.set(sessionId, { ...(header.cwd === undefined ? {} : { cwd: header.cwd }) })
         return
       } else {
         await access.ensureRootSession(facts)
@@ -224,7 +246,10 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     const access = this.requireAccess()
     if (this.forkActive) throw new ForkBusyError()
     if (access.requireMember(sessionId).member.role !== 'root') {
-      throw new AccessError('NOT_FORKABLE', 'fork a root session; a local subagent shares its family group already')
+      throw new AccessError(
+        'NOT_FORKABLE',
+        'fork a root session; a local subagent shares its family group already',
+      )
     }
     // Claim the one in-process Fork slot synchronously: two concurrent entry
     // clicks must not both pass the check above while beginFork awaits.
@@ -234,10 +259,11 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     try {
       fork = await access.beginFork(sessionId)
       const controller = this.ctx.get('sessionController')
-      if (controller === undefined) throw new Error('session-write-access: sessionController is unavailable; cannot fork')
+      if (controller === undefined)
+        throw new Error('session-write-access: sessionController is unavailable; cannot fork')
       const created = await controller.fork({
         sessionId: SessionId(sessionId),
-        ...atSeq === undefined ? {} : { atSeq },
+        ...(atSeq === undefined ? {} : { atSeq }),
       })
       childId = String(created.sessionId)
       await access.commitFork(fork.forkId, childId)
@@ -281,25 +307,28 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
         }
         if (!aborted) {
           throw new Error(
-            `Fork created session ${reported}; its inherited directories are not confirmed and the Fork record `
-            + `could not be finalized: ${message}. Inspect the write-scope panel before using it.`,
+            `Fork created session ${reported}; its inherited directories are not confirmed and the Fork record ` +
+              `could not be finalized: ${message}. Inspect the write-scope panel before using it.`,
           )
         }
         const stillApplied = this.forkGrantsPresent(reported, fork)
         if (stillApplied) {
           throw new Error(
-            `Fork created session ${reported}; cleanup left its inherited directories applied and the Fork record `
-            + `failed: ${message}. Inspect the write-scope panel before using it.`,
+            `Fork created session ${reported}; cleanup left its inherited directories applied and the Fork record ` +
+              `failed: ${message}. Inspect the write-scope panel before using it.`,
           )
         }
         try {
-          await access.ensureRootSession({ sessionId: reported, ...this.held.get(reported) ?? {} })
+          await access.ensureRootSession({
+            sessionId: reported,
+            ...(this.held.get(reported) ?? {}),
+          })
         } catch {
           // Pre-step retries attribution; no inherited permission is recorded.
         }
         throw new Error(
-          `Fork created session ${reported} but its inherited directories could not be committed: ${message}. `
-          + 'It has the default workspace only.',
+          `Fork created session ${reported} but its inherited directories could not be committed: ${message}. ` +
+            'It has the default workspace only.',
         )
       }
       if (fork !== undefined) {
@@ -313,13 +342,16 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
             // The record stays pending; no permission was published.
           }
           try {
-            await access.ensureRootSession({ sessionId: reported, ...this.held.get(reported) ?? {} })
+            await access.ensureRootSession({
+              sessionId: reported,
+              ...(this.held.get(reported) ?? {}),
+            })
           } catch {
             // Pre-step retries attribution; no inherited permission is recorded.
           }
           throw new Error(
-            `Fork failed after creating session ${reported}: ${message}. It has the default workspace only and `
-            + 'did not inherit the captured grants.',
+            `Fork failed after creating session ${reported}: ${message}. It has the default workspace only and ` +
+              'did not inherit the captured grants.',
           )
         }
         await access.failFork(fork.forkId)
@@ -341,20 +373,21 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
         await this.requireAccess().ensureRootSession({ sessionId, ...facts })
       } catch (error) {
         this.blocked.set(sessionId, error instanceof Error ? error.message : String(error))
-        this.ctx.logger('session-write-access').warn('could not attribute a session created during Fork; its steps stay refused', {
-          sessionId,
-          error: String(error),
-        })
+        this.ctx
+          .logger('session-write-access')
+          .warn('could not attribute a session created during Fork; its steps stay refused', {
+            sessionId,
+            error: String(error),
+          })
       }
     }
   }
 
   private requireAccess(): AccessStore {
-    if (this.access === undefined) throw new Error('session-write-access: policy store is not initialized')
+    if (this.access === undefined)
+      throw new Error('session-write-access: policy store is not initialized')
     return this.access
   }
-
-
 
   /** Whether the target has a group carrying every directory captured by the Fork. */
   private forkGrantsApplied(targetSessionId: string, fork: ForkRecord): boolean {
@@ -367,7 +400,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
   private forkGrantsPresent(targetSessionId: string, fork: ForkRecord): boolean {
     const group = this.access?.group(targetSessionId)
     if (group === undefined) return false
-    return fork.grants.every(path => group.grants.some(grant => grant.path === path))
+    return fork.grants.every((path) => group.grants.some((grant) => grant.path === path))
   }
 
   /**
@@ -384,7 +417,10 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     }
     const live = this.ctx.get('agents')?.get(SessionId(sessionId))
     if (live === undefined) {
-      throw new AccessError('NOT_ATTRIBUTED', `session ${JSON.stringify(sessionId)} is not live and has no write-access group`)
+      throw new AccessError(
+        'NOT_ATTRIBUTED',
+        `session ${JSON.stringify(sessionId)} is not live and has no write-access group`,
+      )
     }
     await this.attributeSession(sessionId, live.session.header)
   }
@@ -402,13 +438,13 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     // deployment states none, a call with no session cwd has no stated root;
     // refuse it instead of granting the directory the host happens to run in.
     if (
-      base.mode === 'workspace-write'
-      && session?.header.cwd === undefined
-      && this.configuredWorkspaceRoot === undefined
+      base.mode === 'workspace-write' &&
+      session?.header.cwd === undefined &&
+      this.configuredWorkspaceRoot === undefined
     ) {
       throw new Error(
-        'session-write-access: this call has no session cwd and the deployment configures no workspaceRoot; '
-        + 'refusing to derive a writable workspace from the process cwd',
+        'session-write-access: this call has no session cwd and the deployment configures no workspaceRoot; ' +
+          'refusing to derive a writable workspace from the process cwd',
       )
     }
     if (session === undefined || this.access === undefined) return base
@@ -419,15 +455,17 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
       // top-level session; pre-step awaits attribution before tools can run.
       if (session.header.origin === 'subagent') {
         throw new Error(
-          `session-write-access: subagent ${JSON.stringify(session.id)} has no committed write-access group yet; `
-          + 'refusing to resolve its cwd as a writable root',
+          `session-write-access: subagent ${JSON.stringify(session.id)} has no committed write-access group yet; ` +
+            'refusing to resolve its cwd as a writable root',
         )
       }
       return base
     }
     const group = this.access.group(member.groupId)
     if (group === undefined) {
-      throw new Error(`session-write-access: group ${JSON.stringify(member.groupId)} is missing; refusing to resolve a partial policy`)
+      throw new Error(
+        `session-write-access: group ${JSON.stringify(member.groupId)} is missing; refusing to resolve a partial policy`,
+      )
     }
     return applyGroupPolicy(base, group)
   }
@@ -437,35 +475,43 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     const access = this.requireAccess()
     const status = access.status(sessionId)
     const live = this.ctx.get('agents')?.get(SessionId(sessionId))
-    const forks = access.forks()
-      .filter(fork => fork.sourceSessionId === sessionId)
+    const forks = access
+      .forks()
+      .filter((fork) => fork.sourceSessionId === sessionId)
       .sort((left, right) => right.createdAt - left.createdAt)
       .slice(0, 5)
     return {
       ...status,
       deploymentRoots: this.additionalWritableRoots ?? [],
       defaultMode: this.defaultMode,
-      effectiveMode: live === undefined ? this.defaultMode : this.resolve({ session: live.session }).mode,
+      effectiveMode:
+        live === undefined ? this.defaultMode : this.resolve({ session: live.session }).mode,
       forks,
     }
   }
 
   /** Add a directory as the user; returns the refreshed view. */
-  async addDirectory(sessionId: string, path: string): Promise<WriteScopeView & { coveredBy?: string }> {
+  async addDirectory(
+    sessionId: string,
+    path: string,
+  ): Promise<WriteScopeView & { coveredBy?: string }> {
     const result = await this.requireAccess().addGrant(sessionId, path)
     return {
       ...this.view(sessionId),
-      ...result.coveredBy === undefined ? {} : { coveredBy: result.coveredBy },
+      ...(result.coveredBy === undefined ? {} : { coveredBy: result.coveredBy }),
     }
   }
 
   /** Revoke one directory as the user; returns the refreshed view. */
-  async removeDirectory(sessionId: string, path: string): Promise<WriteScopeView & { removed: boolean; stillCoveredBy?: string }> {
+  async removeDirectory(
+    sessionId: string,
+    path: string,
+  ): Promise<WriteScopeView & { removed: boolean; stillCoveredBy?: string }> {
     const result: RemoveResult = await this.requireAccess().removeGrant(sessionId, path)
     return {
       ...this.view(sessionId),
       removed: result.removed,
-      ...result.stillCoveredBy === undefined ? {} : { stillCoveredBy: result.stillCoveredBy },
+      ...(result.stillCoveredBy === undefined ? {} : { stillCoveredBy: result.stillCoveredBy }),
     }
   }
 
@@ -481,7 +527,12 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     decision: 'allow' | 'deny',
     expectedRevision: number,
   ): Promise<WriteScopeView & { decision: DecisionResult }> {
-    const result = await this.requireAccess().decide(sessionId, requestId, decision, expectedRevision)
+    const result = await this.requireAccess().decide(
+      sessionId,
+      requestId,
+      decision,
+      expectedRevision,
+    )
     return { ...this.view(sessionId), decision: result }
   }
 }

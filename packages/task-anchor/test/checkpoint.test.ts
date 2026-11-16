@@ -31,27 +31,47 @@ function anchor(overrides: Partial<TaskAnchor> = {}): TaskAnchor {
 
 describe('compareAnchor', () => {
   it('reports every field matching when unchanged', () => {
-    const c = compareAnchor(anchor({ goal: { goalId: 'g', revision: 4, phase: 'active', proof: 'fold-agrees' } }), {
-      repoRoot: '/repo',
-      changeId: 'c1',
-      parentChangeIds: ['p1'],
-      goalId: 'g',
-      goalRevision: 4,
-      goalPhase: 'active',
+    const c = compareAnchor(
+      anchor({ goal: { goalId: 'g', revision: 4, phase: 'active', proof: 'fold-agrees' } }),
+      {
+        repoRoot: '/repo',
+        changeId: 'c1',
+        parentChangeIds: ['p1'],
+        goalId: 'g',
+        goalRevision: 4,
+        goalPhase: 'active',
+      },
+    )
+    expect(c).toEqual({
+      rootMatches: true,
+      changeMatches: true,
+      parentsMatch: true,
+      goalIdMatches: true,
+      goalRevisionMatches: true,
+      goalPhaseMatches: true,
     })
-    expect(c).toEqual({ rootMatches: true, changeMatches: true, parentsMatch: true, goalIdMatches: true, goalRevisionMatches: true, goalPhaseMatches: true })
   })
 
   it('reports mismatch on root / change / parents / goal identity drift', () => {
-    const c = compareAnchor(anchor({ goal: { goalId: 'g', revision: 2, phase: 'blocked', proof: 'fold-agrees' } }), {
-      repoRoot: '/other',
-      changeId: 'c2',
-      parentChangeIds: ['p2'],
-      goalId: 'other',
-      goalRevision: 5,
-      goalPhase: 'active',
+    const c = compareAnchor(
+      anchor({ goal: { goalId: 'g', revision: 2, phase: 'blocked', proof: 'fold-agrees' } }),
+      {
+        repoRoot: '/other',
+        changeId: 'c2',
+        parentChangeIds: ['p2'],
+        goalId: 'other',
+        goalRevision: 5,
+        goalPhase: 'active',
+      },
+    )
+    expect(c).toEqual({
+      rootMatches: false,
+      changeMatches: false,
+      parentsMatch: false,
+      goalIdMatches: false,
+      goalRevisionMatches: false,
+      goalPhaseMatches: false,
     })
-    expect(c).toEqual({ rootMatches: false, changeMatches: false, parentsMatch: false, goalIdMatches: false, goalRevisionMatches: false, goalPhaseMatches: false })
   })
 
   it('parents compare as an ordered list: same set, different order is drift', () => {
@@ -63,22 +83,38 @@ describe('compareAnchor', () => {
 
   it('a completed current goal never matches an active anchor (phase-aware)', () => {
     const a = anchor({ goal: { goalId: 'g', revision: 2, phase: 'active', proof: 'fold-agrees' } })
-    expect(compareAnchor(a, { goalId: 'g', goalRevision: 2, goalPhase: 'complete' }).goalPhaseMatches).toBe(false)
-    expect(compareAnchor(a, { goalId: 'g', goalRevision: 2, goalPhase: 'blocked' }).goalPhaseMatches).toBe(false)
-    expect(compareAnchor(a, { goalId: 'g', goalRevision: 2, goalPhase: 'active' }).goalPhaseMatches).toBe(true)
+    expect(
+      compareAnchor(a, { goalId: 'g', goalRevision: 2, goalPhase: 'complete' }).goalPhaseMatches,
+    ).toBe(false)
+    expect(
+      compareAnchor(a, { goalId: 'g', goalRevision: 2, goalPhase: 'blocked' }).goalPhaseMatches,
+    ).toBe(false)
+    expect(
+      compareAnchor(a, { goalId: 'g', goalRevision: 2, goalPhase: 'active' }).goalPhaseMatches,
+    ).toBe(true)
   })
 
   it('reads absent facts as unknown, never as a match', () => {
     const c = compareAnchor(anchor(), {})
-    expect(c).toEqual({ rootMatches: undefined, changeMatches: undefined, parentsMatch: undefined, goalIdMatches: undefined, goalRevisionMatches: undefined, goalPhaseMatches: undefined })
+    expect(c).toEqual({
+      rootMatches: undefined,
+      changeMatches: undefined,
+      parentsMatch: undefined,
+      goalIdMatches: undefined,
+      goalRevisionMatches: undefined,
+      goalPhaseMatches: undefined,
+    })
   })
 
   it('goal drift alone does not affect vcs fields', () => {
-    const c = compareAnchor(anchor({ goal: { goalId: 'g', revision: 2, proof: 'args-only-unverified' } }), {
-      repoRoot: '/repo',
-      goalId: 'g',
-      goalRevision: 9,
-    })
+    const c = compareAnchor(
+      anchor({ goal: { goalId: 'g', revision: 2, proof: 'args-only-unverified' } }),
+      {
+        repoRoot: '/repo',
+        goalId: 'g',
+        goalRevision: 9,
+      },
+    )
     expect(c.rootMatches).toBe(true)
     expect(c.goalRevisionMatches).toBe(false)
   })
@@ -86,15 +122,27 @@ describe('compareAnchor', () => {
 
 describe('parseAnchor', () => {
   it('round-trips a valid anchor with parents and phase', () => {
-    const a = anchor({ vcs: { tool: 'jj', changeId: 'm', parentChangeIds: ['a', 'b'] }, goal: { goalId: 'g', revision: 1, phase: 'blocked', proof: 'fold-agrees' } })
+    const a = anchor({
+      vcs: { tool: 'jj', changeId: 'm', parentChangeIds: ['a', 'b'] },
+      goal: { goalId: 'g', revision: 1, phase: 'blocked', proof: 'fold-agrees' },
+    })
     expect(parseAnchor(JSON.stringify(a))).toEqual(a)
   })
 
   it('rejects malformed JSON, wrong schemaVersion (v1 single-parent era), bad vcs, and bad phase', () => {
     expect(parseAnchor('{')).toBeUndefined()
     expect(parseAnchor(JSON.stringify(anchor({ schemaVersion: 1 as never })))).toBeUndefined()
-    expect(parseAnchor(JSON.stringify({ ...anchor(), vcs: { tool: 'jj', changeId: 'm' } }))).toBeUndefined()
-    expect(parseAnchor(JSON.stringify({ ...anchor(), goal: { goalId: 'g', revision: 1, phase: 'dormant', proof: 'fold-agrees' } }))).toBeUndefined()
+    expect(
+      parseAnchor(JSON.stringify({ ...anchor(), vcs: { tool: 'jj', changeId: 'm' } })),
+    ).toBeUndefined()
+    expect(
+      parseAnchor(
+        JSON.stringify({
+          ...anchor(),
+          goal: { goalId: 'g', revision: 1, phase: 'dormant', proof: 'fold-agrees' },
+        }),
+      ),
+    ).toBeUndefined()
   })
 })
 

@@ -239,9 +239,12 @@ export async function resolveProxy(
   if (explicit) return explicit
   if (detectedProxy !== undefined) return detectedProxy
   const fromEnv =
-    env.HTTPS_PROXY || env.https_proxy ||
-    env.HTTP_PROXY || env.http_proxy ||
-    env.ALL_PROXY || env.all_proxy
+    env.HTTPS_PROXY ||
+    env.https_proxy ||
+    env.HTTP_PROXY ||
+    env.http_proxy ||
+    env.ALL_PROXY ||
+    env.all_proxy
   detectedProxy = fromEnv ? fromEnv : await detectSystemProxy()
   return detectedProxy
 }
@@ -270,9 +273,12 @@ export async function readJson(response: Response, what: string): Promise<unknow
   const text = await response.text()
   const trimmed = text.trim()
   if (trimmed === '') throw new Error(`${what} returned an empty body`)
-  const looksJson = contentType.includes('json') || trimmed.startsWith('{') || trimmed.startsWith('[')
+  const looksJson =
+    contentType.includes('json') || trimmed.startsWith('{') || trimmed.startsWith('[')
   if (!looksJson) {
-    throw new Error(`${what} returned a non-JSON response (${contentType || 'unknown type'}): ${snippet(trimmed)}`)
+    throw new Error(
+      `${what} returned a non-JSON response (${contentType || 'unknown type'}): ${snippet(trimmed)}`,
+    )
   }
   try {
     return JSON.parse(trimmed)

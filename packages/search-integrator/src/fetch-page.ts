@@ -24,8 +24,20 @@ const BREAK_OPEN = /<br\s*\/?>/gi
 const BLOCK_CLOSE = /<\/(p|div|li|h[1-6]|tr|section|article|blockquote)>/gi
 
 const BASIC_ENTITIES: Record<string, string> = {
-  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', middot: '·',
-  hellip: '…', mdash: '—', ndash: '–', rsquo: '’', lsquo: '‘', ldquo: '“', rdquo: '”',
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+  middot: '·',
+  hellip: '…',
+  mdash: '—',
+  ndash: '–',
+  rsquo: '’',
+  lsquo: '‘',
+  ldquo: '“',
+  rdquo: '”',
 }
 
 function decodeEntities(text: string): string {

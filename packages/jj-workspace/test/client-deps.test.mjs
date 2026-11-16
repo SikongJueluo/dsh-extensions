@@ -131,7 +131,8 @@ async function mount({ withForge }) {
   await tick()
 
   const slots = root.get('slots')
-  const forgeEntry = () => slots.entries.find((entry) => entry.options.id === 'forge-panel.worktree')
+  const forgeEntry = () =>
+    slots.entries.find((entry) => entry.options.id === 'forge-panel.worktree')
   const taskEntry = () => slots.entries.find((entry) => entry.options.id === 'jj-workspace.task')
 
   return {

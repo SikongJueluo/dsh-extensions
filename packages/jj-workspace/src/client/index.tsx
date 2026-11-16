@@ -45,8 +45,7 @@ const en: Record<string, string> = {
   taskWorkspaceMissing: '{name} (workspace missing)',
   taskConflict: '{name} (conflict)',
   taskUnavailable: '{name} (unavailable)',
-  taskDetail:
-    '{workspace} at {path}\nbookmark {bookmark} at {change}\nbase {base}\nstate: {state}',
+  taskDetail: '{workspace} at {path}\nbookmark {bookmark} at {change}\nbase {base}\nstate: {state}',
 }
 
 const zh: Record<string, string> = {
@@ -211,7 +210,16 @@ interface ToggleProps extends ToggleFace {
   useProjection: UseProjection
 }
 
-function Toggle({ sessionId, t, status, follow, branches, request, cancel, useProjection }: ToggleProps) {
+function Toggle({
+  sessionId,
+  t,
+  status,
+  follow,
+  branches,
+  request,
+  cancel,
+  useProjection,
+}: ToggleProps) {
   const permissions = useProjection('permissions') as PermissionSelection | undefined
   const permissionValue = permissions?.currentValue
   const [panel, setPanel] = useState<PanelFrame | null>(null)
@@ -310,7 +318,9 @@ function Toggle({ sessionId, t, status, follow, branches, request, cancel, usePr
       : gitBlocker
   const usable = blocker === null
   const readyCheckout =
-    !jj && panel && panel.checkout && panel.checkout.state === 'ready' ? panel.checkout.checkout ?? null : null
+    !jj && panel && panel.checkout && panel.checkout.state === 'ready'
+      ? (panel.checkout.checkout ?? null)
+      : null
   const currentBranch = readyCheckout && readyCheckout.branch ? readyCheckout.branch : null
   const currentCommit = readyCheckout && readyCheckout.commit ? readyCheckout.commit : null
 
@@ -341,9 +351,11 @@ function Toggle({ sessionId, t, status, follow, branches, request, cancel, usePr
   const held = worktree.creation !== null
   const disabled = held || pending || (!usable && !requested)
   const from: string | null = requested && worktree ? (worktree.request?.from ?? null) : null
-  const baseValue = jj ? (from === null ? '@' : from) : (from === null ? currentBranch : from)
+  const baseValue = jj ? (from === null ? '@' : from) : from === null ? currentBranch : from
   const baseText = jj
-    ? (from === null ? t('baseAt') : from)
+    ? from === null
+      ? t('baseAt')
+      : from
     : from !== null
       ? from
       : requested
@@ -536,14 +548,14 @@ type WorktreeCellOptions = Omit<SlotRegistration, 'inject'> & {
 }
 
 type TaskCellOptions = Omit<SlotRegistration, 'inject'> & {
-  inject: (sessionId: string | undefined) => { t: Translate; tasks: () => Promise<TaskListResult | null> }
+  inject: (sessionId: string | undefined) => {
+    t: Translate
+    tasks: () => Promise<TaskListResult | null>
+  }
 }
 
 function apply(ctx: JjwClientContext) {
-  ctx.effect(
-    () => ctx.locale.register(LOCALE_NS, { en, zh }),
-    'dsh-jj-workspace: locale',
-  )
+  ctx.effect(() => ctx.locale.register(LOCALE_NS, { en, zh }), 'dsh-jj-workspace: locale')
   const t = ctx.locale.bind(LOCALE_NS)
 
   ctx.inject(['remote.forgePanel'], (scope) => {

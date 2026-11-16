@@ -48,7 +48,11 @@ export type PreflightDecision =
       /** Every invalid call with its tool/callId, for the deny report. */
       invalid: readonly { tool: string; callId: string; violations: readonly string[] }[]
       /** Unchecked calls kept for diagnostics; they never cause a deny. */
-      unchecked: readonly { tool: string; callId: string; why: CallVerdict extends never ? never : 'unknown-tool' | 'unsupported-schema' | 'no-schema' }[]
+      unchecked: readonly {
+        tool: string
+        callId: string
+        why: CallVerdict extends never ? never : 'unknown-tool' | 'unsupported-schema' | 'no-schema'
+      }[]
     }
 
 /** Bounded report text so a huge batch cannot balloon the deny reason. */
@@ -125,7 +129,11 @@ export function checkBatch(
   schemaOf: (tool: string) => unknown | undefined,
 ): PreflightDecision {
   const invalid: { tool: string; callId: string; violations: readonly string[] }[] = []
-  const unchecked: { tool: string; callId: string; why: 'unknown-tool' | 'unsupported-schema' | 'no-schema' }[] = []
+  const unchecked: {
+    tool: string
+    callId: string
+    why: 'unknown-tool' | 'unsupported-schema' | 'no-schema'
+  }[] = []
   for (const call of calls) {
     const parameters = schemaOf(call.tool)
     let verdict: CallVerdict
@@ -143,9 +151,10 @@ export function checkBatch(
   if (invalid.length === 0) return { kind: 'allow' }
   const lines = invalid.slice(0, MAX_INVALID_CALLS_IN_REASON).map((entry) => {
     const shown = entry.violations.slice(0, MAX_VIOLATIONS_PER_CALL).join('; ')
-    const more = entry.violations.length > MAX_VIOLATIONS_PER_CALL
-      ? ` (+${entry.violations.length - MAX_VIOLATIONS_PER_CALL} more)`
-      : ''
+    const more =
+      entry.violations.length > MAX_VIOLATIONS_PER_CALL
+        ? ` (+${entry.violations.length - MAX_VIOLATIONS_PER_CALL} more)`
+        : ''
     return `tool "${entry.tool}" (call ${entry.callId}): ${shown}${more}`
   })
   if (invalid.length > MAX_INVALID_CALLS_IN_REASON) {
@@ -178,6 +187,7 @@ export function describeShape(parameters: unknown): string {
     const type = node.type ?? 'json'
     parts.push(required.has(key) ? `${key}: ${type} (required)` : `${key}: ${type} (optional)`)
   }
-  const open = schema.additionalProperties === false ? 'no undeclared keys' : 'undeclared keys allowed'
+  const open =
+    schema.additionalProperties === false ? 'no undeclared keys' : 'undeclared keys allowed'
   return `object — ${parts.length === 0 ? 'no declared properties' : parts.join(', ')}; ${open}`
 }

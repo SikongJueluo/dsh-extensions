@@ -20,8 +20,18 @@
  *
  * @module dsh-openai-oauth/serialize
  */
-import { LlmError, contentHasImage, offloadedImageText, requestImageHandleText } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, GenerateOptions, ImageBlock, RequestMessage } from '@deepseek-ai/dsh-llm'
+import {
+  LlmError,
+  contentHasImage,
+  offloadedImageText,
+  requestImageHandleText,
+} from '@deepseek-ai/dsh-llm'
+import type {
+  ContentBlock,
+  GenerateOptions,
+  ImageBlock,
+  RequestMessage,
+} from '@deepseek-ai/dsh-llm'
 import type { RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 
 /** Prepared request-image versions keyed by attachment id. */
@@ -29,7 +39,10 @@ export type RequestImages = ReadonlyMap<string, RequestImageAttachment>
 
 /** Join the text blocks of a message's content into one string. */
 function flattenText(blocks: readonly ContentBlock[]): string {
-  return blocks.filter((block) => block.type === 'text').map((block) => block.text).join('')
+  return blocks
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('')
 }
 
 /** Reject image content the Responses wire path cannot represent (assistant role). */
@@ -43,7 +56,10 @@ function assertNoUnrepresentableImage(blocks: readonly ContentBlock[]): void {
 }
 
 /** Resolve the prepared request-image version for one live occurrence, or throw. */
-function requestVersion(block: ImageBlock, images: RequestImages | undefined): RequestImageAttachment {
+function requestVersion(
+  block: ImageBlock,
+  images: RequestImages | undefined,
+): RequestImageAttachment {
   const version = images?.get(block.attachment.attachmentId)
   if (version === undefined) {
     throw new LlmError(
@@ -69,7 +85,10 @@ function imagePart(version: RequestImageAttachment): InputItem {
  * live image blocks map block-by-block (`input_text` / `input_image`), while
  * offloaded image occurrences degrade to their placeholder text.
  */
-function userContent(blocks: readonly ContentBlock[], images: RequestImages | undefined): InputItem[] {
+function userContent(
+  blocks: readonly ContentBlock[],
+  images: RequestImages | undefined,
+): InputItem[] {
   if (!blocks.some((block) => block.type === 'image')) {
     return [{ type: 'input_text', text: flattenText(blocks) }]
   }
@@ -97,7 +116,10 @@ function userContent(blocks: readonly ContentBlock[], images: RequestImages | un
  * blocks switch to the content-item array Codex sends for MCP image results,
  * with offloaded occurrences degrading to placeholder text.
  */
-function toolOutput(blocks: readonly ContentBlock[], images: RequestImages | undefined): string | InputItem[] {
+function toolOutput(
+  blocks: readonly ContentBlock[],
+  images: RequestImages | undefined,
+): string | InputItem[] {
   if (!blocks.some((block) => block.type === 'image')) {
     return flattenText(blocks) || '(no output)'
   }
@@ -124,7 +146,10 @@ type InputItem = Record<string, unknown>
  * System messages are skipped — the harness delivers the system prompt
  * separately as `GenerateOptions.system` → `instructions`.
  */
-export function serializeInput(messages: readonly RequestMessage[], images?: RequestImages): InputItem[] {
+export function serializeInput(
+  messages: readonly RequestMessage[],
+  images?: RequestImages,
+): InputItem[] {
   const input: InputItem[] = []
   for (const message of messages) {
     if (message.role === 'system' || message.role === 'developer') continue
@@ -184,7 +209,9 @@ const AFFINITY_KEY_MAX_LENGTH = 64
  */
 export function clampSessionAffinityKey(sessionId: string): string {
   const chars = Array.from(sessionId)
-  return chars.length <= AFFINITY_KEY_MAX_LENGTH ? sessionId : chars.slice(0, AFFINITY_KEY_MAX_LENGTH).join('')
+  return chars.length <= AFFINITY_KEY_MAX_LENGTH
+    ? sessionId
+    : chars.slice(0, AFFINITY_KEY_MAX_LENGTH).join('')
 }
 
 /** Cache-affinity knobs the serializer honors per request. */
@@ -216,9 +243,10 @@ export function serializeRequest(
     parameters: tool.parameters,
   }))
   const reasoning = resolveReasoning(options.reasoningEffort)
-  const promptCacheKey = affinity?.promptCacheKey !== false && options.sessionId !== undefined
-    ? clampSessionAffinityKey(String(options.sessionId))
-    : undefined
+  const promptCacheKey =
+    affinity?.promptCacheKey !== false && options.sessionId !== undefined
+      ? clampSessionAffinityKey(String(options.sessionId))
+      : undefined
   return {
     model: options.model,
     ...(options.system !== undefined && options.system.length > 0

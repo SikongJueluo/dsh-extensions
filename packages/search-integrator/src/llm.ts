@@ -99,12 +99,20 @@ export function createLlmPort(
         }
         const usage = assembler.usage
         const snapshot = {
-          ...(usage === undefined ? {} : {
-            usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens },
-          }),
+          ...(usage === undefined
+            ? {}
+            : {
+                usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens },
+              }),
         }
         if (!sawFinish) {
-          return { ok: false, text: '', finishKind: 'none', ...snapshot, error: 'stream ended without a finish chunk' }
+          return {
+            ok: false,
+            text: '',
+            finishKind: 'none',
+            ...snapshot,
+            error: 'stream ended without a finish chunk',
+          }
         }
         const text: string[] = []
         for (const block of assembler.blocks()) {
@@ -112,7 +120,13 @@ export function createLlmPort(
         }
         const finish = assembler.finish
         if (finish.kind !== 'stop') {
-          return { ok: false, text: '', finishKind: finish.kind, ...snapshot, error: reasonText(finish) }
+          return {
+            ok: false,
+            text: '',
+            finishKind: finish.kind,
+            ...snapshot,
+            error: reasonText(finish),
+          }
         }
         return { ok: true, text: text.join('\n'), finishKind: finish.kind, ...snapshot }
       } catch (error) {

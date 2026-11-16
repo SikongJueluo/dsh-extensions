@@ -26,7 +26,9 @@ const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
 /** Panel payloads are tiny; anything bigger is a misbehaving client. */
 const MAX_BODY_BYTES = 16 * 1024
 
-type RpcResult = { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } }
+type RpcResult =
+  | { ok: true; value: unknown }
+  | { ok: false; error: { code: string; message: string } }
 
 /**
  * Mount the route once connection and a web server exist. The route is an
@@ -35,7 +37,11 @@ type RpcResult = { ok: true; value: unknown } | { ok: false; error: { code: stri
  * @param policy - the policy service whose store the panel manages.
  */
 export function registerWriteAccessChannel(ctx: Context, policy: SessionWriteAccessPolicy): void {
-  const serve = async (svcCtx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const serve = async (
+    svcCtx: Context,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> => {
     const rejection = svcCtx.connection.requestRejection(req)
     if (rejection !== undefined) {
       res.writeHead(rejection)
@@ -51,7 +57,10 @@ export function registerWriteAccessChannel(ctx: Context, policy: SessionWriteAcc
       res.end('method not allowed')
       return
     }
-    if ((req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
+    if (
+      (req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !==
+      'application/json'
+    ) {
       res.writeHead(415)
       res.end('unsupported media type')
       return
@@ -70,7 +79,8 @@ export function registerWriteAccessChannel(ctx: Context, policy: SessionWriteAcc
     let payload: Record<string, unknown>
     try {
       const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('not an object')
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+        throw new Error('not an object')
       payload = parsed as Record<string, unknown>
     } catch {
       res.writeHead(400)
@@ -97,11 +107,12 @@ export function registerWriteAccessChannel(ctx: Context, policy: SessionWriteAcc
 
   ctx.inject(['connection', 'webServer'], (svcCtx) => {
     svcCtx.effect(
-      () => svcCtx.webServer.register({
-        kind: 'prefix',
-        path: RPC_CHANNEL,
-        handler: (req, res) => serve(svcCtx, req, res),
-      }),
+      () =>
+        svcCtx.webServer.register({
+          kind: 'prefix',
+          path: RPC_CHANNEL,
+          handler: (req, res) => serve(svcCtx, req, res),
+        }),
       `${RPC_CHANNEL} write-scope channel`,
     )
   })
@@ -127,7 +138,8 @@ async function dispatch(
       return policy.removeDirectory(sessionId, requireString(payload.path, 'path'))
     case 'decide': {
       const decision = payload.decision
-      if (decision !== 'allow' && decision !== 'deny') throw new Error('decision must be "allow" or "deny"')
+      if (decision !== 'allow' && decision !== 'deny')
+        throw new Error('decision must be "allow" or "deny"')
       return policy.decideRequest(
         sessionId,
         requireString(payload.requestId, 'requestId'),
@@ -136,7 +148,8 @@ async function dispatch(
       )
     }
     case 'fork': {
-      const atSeq = payload.atSeq === undefined ? undefined : requireNonNegativeInteger(payload.atSeq, 'atSeq')
+      const atSeq =
+        payload.atSeq === undefined ? undefined : requireNonNegativeInteger(payload.atSeq, 'atSeq')
       return policy.forkSession(sessionId, atSeq)
     }
     default:

@@ -46,10 +46,12 @@ export function buildWaitNotice(provider: string, code: string, retryAt: number)
   const when = fireTime(retryAt)
   const summary = boundContextSummary(`auto-continue ⏳ ${provider} ${code} → ${when}`)
   return createUserMessage({
-    content: [{
-      type: 'text',
-      text: `[auto-continue] ${provider} ${code} 限额等待中，将于 ${when} 自动重试；/ac-cancel 可取消，/ac-status 查看状态。`,
-    }],
+    content: [
+      {
+        type: 'text',
+        text: `[auto-continue] ${provider} ${code} 限额等待中，将于 ${when} 自动重试；/ac-cancel 可取消，/ac-status 查看状态。`,
+      },
+    ],
     source: { kind: 'auto-continue', form: 'notice', summary },
   })
 }

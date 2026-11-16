@@ -71,16 +71,18 @@ import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { workspaceWritableRoots } from '@deepseek-ai/dsh-sandbox'
 import { GrantArgvError, insertGrantBinds } from './bwrap.js'
 import { PRESET_IDS, resolveGrants } from './grants.js'
-import type { GrantEnv, GrantFs, GrantIssue, GrantOverrides, GrantPlan, PresetId } from './grants.js'
+import type {
+  GrantEnv,
+  GrantFs,
+  GrantIssue,
+  GrantOverrides,
+  GrantPlan,
+  PresetId,
+} from './grants.js'
 
 export { insertGrantBinds, expectedStockProfileArgs, GrantArgvError } from './bwrap.js'
 export type { GrantBindSpec } from './bwrap.js'
-export {
-  PRESET_IDS,
-  defaultBaseTrees,
-  pathCovers,
-  resolveGrants,
-} from './grants.js'
+export { PRESET_IDS, defaultBaseTrees, pathCovers, resolveGrants } from './grants.js'
 export type {
   GrantBind,
   GrantEnv,
@@ -150,31 +152,59 @@ export const DEFAULT_PRESETS = [
  * provider, which revalidates every grant from scratch.
  */
 export const configFields = {
-  runnerCommand: Schema.array(Schema.string()).default([]).description(
-    'Override the runner argv (stock sandbox-local field restated; bwrap-compatible profile arguments are appended). The verdict for directory grants is on the FINAL argv layout: a wrapper whose resulting layout is not the pinned stock bwrap shape fails closed, while one indistinguishable from stock (a bare [bwrap]) is spliced normally.',
-  ),
-  runnerFailureSignatures: Schema.array(Schema.string()).default([]).description(
-    'Case-insensitive stderr substrings for a configured runnerCommand refusing its profile (stock sandbox-local field restated; required with runnerCommand, rejected without it).',
-  ),
-  probeTimeoutMs: Schema.natural().default(5000).description(
-    'Positive timeout in ms for each functional runner probe (stock sandbox-local field restated).',
-  ),
-  presets: Schema.array(Schema.union([...PRESET_IDS])).default([...DEFAULT_PRESETS]).description(
-    'Enabled writable-directory presets; the per-preset grant paths are in the package README. Omitted: the seven ordinary cache/state presets default on (uv-cache, cargo-cache, pnpm-store, pnpm-runtime-locks, gradle-cache, maven-cache, semgrep-state). presets: [] turns every preset off (stock sandbox); a non-empty list replaces the default exactly. pnpm-engine and gradle-jdks are whole toolchain installs and stay opt-in only, never default. Each enabled preset makes its exact directories writable for EVERY process in the sandbox under workspace-write, never a parent tree; semgrep-state instead mounts a private writable state directory over semgrep\'s data folder, so its credential-bearing settings.yml never becomes writable. A preset that cannot be honored (missing/invalid path, missing/invalid XDG_RUNTIME_DIR, non-stock backend) fails the confined command with a reason instead of being silently skipped.',
-  ),
+  runnerCommand: Schema.array(Schema.string())
+    .default([])
+    .description(
+      'Override the runner argv (stock sandbox-local field restated; bwrap-compatible profile arguments are appended). The verdict for directory grants is on the FINAL argv layout: a wrapper whose resulting layout is not the pinned stock bwrap shape fails closed, while one indistinguishable from stock (a bare [bwrap]) is spliced normally.',
+    ),
+  runnerFailureSignatures: Schema.array(Schema.string())
+    .default([])
+    .description(
+      'Case-insensitive stderr substrings for a configured runnerCommand refusing its profile (stock sandbox-local field restated; required with runnerCommand, rejected without it).',
+    ),
+  probeTimeoutMs: Schema.natural()
+    .default(5000)
+    .description(
+      'Positive timeout in ms for each functional runner probe (stock sandbox-local field restated).',
+    ),
+  presets: Schema.array(Schema.union([...PRESET_IDS]))
+    .default([...DEFAULT_PRESETS])
+    .description(
+      "Enabled writable-directory presets; the per-preset grant paths are in the package README. Omitted: the seven ordinary cache/state presets default on (uv-cache, cargo-cache, pnpm-store, pnpm-runtime-locks, gradle-cache, maven-cache, semgrep-state). presets: [] turns every preset off (stock sandbox); a non-empty list replaces the default exactly. pnpm-engine and gradle-jdks are whole toolchain installs and stay opt-in only, never default. Each enabled preset makes its exact directories writable for EVERY process in the sandbox under workspace-write, never a parent tree; semgrep-state instead mounts a private writable state directory over semgrep's data folder, so its credential-bearing settings.yml never becomes writable. A preset that cannot be honored (missing/invalid path, missing/invalid XDG_RUNTIME_DIR, non-stock backend) fails the confined command with a reason instead of being silently skipped.",
+    ),
   paths: Schema.object({
-    uvCache: Schema.string().description('Explicit uv cache directory (default: paths from UV_CACHE_DIR, else <XDG_CACHE_HOME|~/.cache>/uv).'),
-    cargoHome: Schema.string().description('Explicit CARGO_HOME anchor for cargo-cache (default: $CARGO_HOME, else ~/.cargo).'),
-    pnpmHome: Schema.string().description('Explicit pnpm home anchor for pnpm-store/pnpm-engine (default: $PNPM_HOME, else <XDG_DATA_HOME|~/.local/share>/pnpm).'),
-    pnpmStore: Schema.string().description('Explicit package-store directory for pnpm-store (default: <pnpm home>/store).'),
-    pnpmRuntimeLocks: Schema.string().description('Explicit spelling of pnpm\'s shared operation-lock directory (default: $XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>). pnpm derives this from XDG_RUNTIME_DIR and cannot be redirected: an override may re-spell the same directory (e.g. via symlink) but is refused if it points anywhere else, and it never bypasses the runtime-root validation.'),
-    gradleUserHome: Schema.string().description('Explicit GRADLE_USER_HOME anchor for gradle-cache/gradle-jdks (default: $GRADLE_USER_HOME or ~/.gradle). Only its cache/lock subdirectories become writable; gradle.properties and init scripts at the root stay read-only.'),
-    mavenHome: Schema.string().description('Explicit Maven user-home anchor for maven-cache (default ~/.m2, covering repository/ + wrapper/). Maven has no standard env var for it; a settings.xml <localRepository> relocation must be configured here explicitly. settings.xml stays read-only.'),
-    semgrepState: Schema.string().description('Explicit host directory mounted over semgrep\'s data folder (default: <XDG_CACHE_HOME|~/.cache>/semgrep-state). It holds the sandbox-private settings.yml/semgrep.log; the host data folder (default ~/.semgrep) is never made writable.'),
-    semgrepVersionCache: Schema.string().description('Explicit semgrep version-check cache file (default: <XDG_CACHE_HOME|~/.cache>/semgrep_version; $SEMGREP_VERSION_CACHE_PATH is honored when set).'),
-  }).default({}).description(
-    'Explicit grant paths. Every entry must be an absolute path to an existing, user-owned directory (or lock file) that is not group-writable; a preset whose path is missing or refuses validation fails closed.',
-  ),
+    uvCache: Schema.string().description(
+      'Explicit uv cache directory (default: paths from UV_CACHE_DIR, else <XDG_CACHE_HOME|~/.cache>/uv).',
+    ),
+    cargoHome: Schema.string().description(
+      'Explicit CARGO_HOME anchor for cargo-cache (default: $CARGO_HOME, else ~/.cargo).',
+    ),
+    pnpmHome: Schema.string().description(
+      'Explicit pnpm home anchor for pnpm-store/pnpm-engine (default: $PNPM_HOME, else <XDG_DATA_HOME|~/.local/share>/pnpm).',
+    ),
+    pnpmStore: Schema.string().description(
+      'Explicit package-store directory for pnpm-store (default: <pnpm home>/store).',
+    ),
+    pnpmRuntimeLocks: Schema.string().description(
+      "Explicit spelling of pnpm's shared operation-lock directory (default: $XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>). pnpm derives this from XDG_RUNTIME_DIR and cannot be redirected: an override may re-spell the same directory (e.g. via symlink) but is refused if it points anywhere else, and it never bypasses the runtime-root validation.",
+    ),
+    gradleUserHome: Schema.string().description(
+      'Explicit GRADLE_USER_HOME anchor for gradle-cache/gradle-jdks (default: $GRADLE_USER_HOME or ~/.gradle). Only its cache/lock subdirectories become writable; gradle.properties and init scripts at the root stay read-only.',
+    ),
+    mavenHome: Schema.string().description(
+      'Explicit Maven user-home anchor for maven-cache (default ~/.m2, covering repository/ + wrapper/). Maven has no standard env var for it; a settings.xml <localRepository> relocation must be configured here explicitly. settings.xml stays read-only.',
+    ),
+    semgrepState: Schema.string().description(
+      "Explicit host directory mounted over semgrep's data folder (default: <XDG_CACHE_HOME|~/.cache>/semgrep-state). It holds the sandbox-private settings.yml/semgrep.log; the host data folder (default ~/.semgrep) is never made writable.",
+    ),
+    semgrepVersionCache: Schema.string().description(
+      'Explicit semgrep version-check cache file (default: <XDG_CACHE_HOME|~/.cache>/semgrep_version; $SEMGREP_VERSION_CACHE_PATH is honored when set).',
+    ),
+  })
+    .default({})
+    .description(
+      'Explicit grant paths. Every entry must be an absolute path to an existing, user-owned directory (or lock file) that is not group-writable; a preset whose path is missing or refuses validation fails closed.',
+    ),
 }
 
 // No `Schema<Config>` annotation on this object (see Config's doc comment);
@@ -187,7 +217,11 @@ export const Config = Schema.object({ ...configFields })
  * the per-session direnv overlay (auto-env's), which is agent-workspace
  * state and must never widen grants.
  */
-export function grantEnvFrom(home: string, uid: number, env: Record<string, string | undefined>): GrantEnv {
+export function grantEnvFrom(
+  home: string,
+  uid: number,
+  env: Record<string, string | undefined>,
+): GrantEnv {
   const absolute = (value: string | undefined): string | undefined =>
     value !== undefined && value !== '' && value.startsWith('/') ? value : undefined
   return {
@@ -329,7 +363,11 @@ export class ToolchainAccessSandboxProvider extends LocalSandboxProvider {
     policy: SandboxPolicy,
     signal?: AbortSignal,
   ): Promise<ConfinedArgv> {
-    if (this.grantPresets.length > 0 && policy.mode === 'workspace-write' && process.platform !== 'linux') {
+    if (
+      this.grantPresets.length > 0 &&
+      policy.mode === 'workspace-write' &&
+      process.platform !== 'linux'
+    ) {
       // Refuse BEFORE super.confine(): another platform's rung (windows-acl)
       // materializes its own side effects (ACEs, temp dirs) inside confine,
       // and this package only ever edits the pinned Linux bwrap layout.

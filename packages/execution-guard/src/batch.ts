@@ -52,9 +52,18 @@ export function currentStepCalls(events: readonly SessionEvent[]): StepToolCall[
     const calls: StepToolCall[] = []
     for (const block of content) {
       if (typeof block !== 'object' || block === null) continue
-      const candidate = block as { type?: unknown; id?: unknown; name?: unknown; arguments?: unknown }
+      const candidate = block as {
+        type?: unknown
+        id?: unknown
+        name?: unknown
+        arguments?: unknown
+      }
       if (candidate.type !== 'tool-call') continue
-      if (typeof candidate.id !== 'string' || typeof candidate.name !== 'string' || typeof candidate.arguments !== 'string') {
+      if (
+        typeof candidate.id !== 'string' ||
+        typeof candidate.name !== 'string' ||
+        typeof candidate.arguments !== 'string'
+      ) {
         continue
       }
       calls.push({ callId: candidate.id, tool: candidate.name, argsRaw: candidate.arguments })

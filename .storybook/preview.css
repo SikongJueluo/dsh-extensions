@@ -1,7 +1,7 @@
 @layer theme, base, components, utilities;
-@import "tailwindcss/theme.css" layer(theme) prefix(dshx);
-@import "tailwindcss/utilities.css" layer(utilities) prefix(dshx);
-@import "../packages/ui/src/theme.css";
+@import 'tailwindcss/theme.css' layer(theme) prefix(dshx);
+@import 'tailwindcss/utilities.css' layer(utilities) prefix(dshx);
+@import '../packages/ui/src/theme.css';
 
 @source "../packages/ui/src/**/*.tsx";
 @source "./**/*.tsx";
@@ -12,7 +12,7 @@
  * pinned DSH 0.2.2-rc.1 theme package so stories render on the real palette.
  * Production CSS never defines these; it reads the live body variables.
  */
-.storybook-canvas[data-theme="light"] {
+.storybook-canvas[data-theme='light'] {
   --dsw-alias-bg-base: #ffffff;
   --dsw-alias-bg-layer-1: #ffffff;
   --dsw-alias-bg-layer-2: #ffffff;
@@ -39,16 +39,19 @@
   --dsw-menu-surface-fill: #fcfdfeb3;
   --dsw-menu-backdrop-filter: blur(40px) saturate(150%);
   --dsw-elevation-stroke: 0 0 0 0.5px var(--dsw-elevation-stroke-color, #0000000a);
-  --dsw-elevation-prominent: var(--dsw-elevation-stroke), 0 3px 8px 0 #0000000a, 0 0 20px 0 #0000000d;
+  --dsw-elevation-prominent:
+    var(--dsw-elevation-stroke), 0 3px 8px 0 #0000000a, 0 0 20px 0 #0000000d;
   --dsw-radius-sm: 8px;
   --dsw-radius-md: 12px;
   --dsw-radius-lg: 16px;
   --dsw-focus-ring-width: 2px;
   --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-  --ds-font-family-code: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei";
+  --ds-font-family-code:
+    'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier,
+    'PingFang SC', 'Microsoft YaHei';
 }
 
-.storybook-canvas[data-theme="dark"] {
+.storybook-canvas[data-theme='dark'] {
   --dsw-alias-bg-base: #151517;
   --dsw-alias-bg-layer-1: #232324;
   --dsw-alias-bg-layer-2: #2c2c2e;
@@ -75,7 +78,8 @@
   --dsw-menu-surface-fill: #303136a3;
   --dsw-menu-backdrop-filter: blur(40px) saturate(150%);
   --dsw-elevation-stroke: 0 0 0 0.5px var(--dsw-elevation-stroke-color, #ffffff1f);
-  --dsw-elevation-prominent: var(--dsw-elevation-stroke), 0 3px 8px 0 #0000000a, 0 0 20px 0 #0000000d;
+  --dsw-elevation-prominent:
+    var(--dsw-elevation-stroke), 0 3px 8px 0 #0000000a, 0 0 20px 0 #0000000d;
   --dsw-radius-sm: 8px;
   --dsw-radius-md: 12px;
   --dsw-radius-lg: 16px;
@@ -88,6 +92,5 @@
   padding: 24px;
   background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-label-primary);
-  font-family:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }

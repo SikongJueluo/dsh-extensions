@@ -19,7 +19,10 @@
 import type { QuotaSnapshot, QuotaWindow } from '../types.js'
 
 /** Window facts parsed from one GLM monitor response (no provider/fetch time). */
-export interface GlmWindows extends Pick<QuotaSnapshot, 'fiveHour' | 'weekly' | 'monthlyMcp' | 'level'> {
+export interface GlmWindows extends Pick<
+  QuotaSnapshot,
+  'fiveHour' | 'weekly' | 'monthlyMcp' | 'level'
+> {
   source: 'glm:limits' | 'glm:legacy'
 }
 
@@ -92,7 +95,9 @@ export function resolveMonitor(
 }
 
 /** Every provider route this package knows a monitor for (built-ins + user config). */
-export function monitoredProviders(settings: Record<string, ProviderMonitorSettings> = {}): string[] {
+export function monitoredProviders(
+  settings: Record<string, ProviderMonitorSettings> = {},
+): string[] {
   return [...new Set([...Object.keys(BUILTIN_MONITORS), ...Object.keys(settings)])].sort()
 }
 
@@ -117,7 +122,9 @@ export function normalizeResetAt(value: unknown): number | undefined {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }
 
 /** Read one `limits`-array row into a QuotaWindow. */
@@ -175,7 +182,12 @@ export function parseQuotaBody(body: unknown): GlmWindows | null {
     if (usable(fiveHour)) parsed.fiveHour = fiveHour
     if (usable(weekly)) parsed.weekly = weekly
     if (usable(monthlyMcp)) parsed.monthlyMcp = monthlyMcp
-    if (parsed.fiveHour === undefined && parsed.weekly === undefined && parsed.monthlyMcp === undefined) return null
+    if (
+      parsed.fiveHour === undefined &&
+      parsed.weekly === undefined &&
+      parsed.monthlyMcp === undefined
+    )
+      return null
     if (level !== undefined) parsed.level = level
     return parsed
   }
@@ -183,14 +195,21 @@ export function parseQuotaBody(body: unknown): GlmWindows | null {
   const nested = asRecord(data.quota)
   const percentAt = (key: string): number | undefined =>
     normalizePercent(data[key]) ?? (nested === null ? undefined : normalizePercent(nested[key]))
-  const fiveHourPercent = percentAt('fiveHourPercent') ?? percentAt('fiveHourUsage') ?? percentAt('fiveHourUsed')
-  const weeklyPercent = percentAt('weeklyPercent') ?? percentAt('weeklyUsage') ?? percentAt('weeklyUsed')
+  const fiveHourPercent =
+    percentAt('fiveHourPercent') ?? percentAt('fiveHourUsage') ?? percentAt('fiveHourUsed')
+  const weeklyPercent =
+    percentAt('weeklyPercent') ?? percentAt('weeklyUsage') ?? percentAt('weeklyUsed')
   const monthlyPercent = percentAt('monthlyMCPUsage') ?? percentAt('monthlyMcpUsage')
   const parsed: GlmWindows = { source: 'glm:legacy' }
   if (fiveHourPercent !== undefined) parsed.fiveHour = { percent: fiveHourPercent }
   if (weeklyPercent !== undefined) parsed.weekly = { percent: weeklyPercent }
   if (monthlyPercent !== undefined) parsed.monthlyMcp = { percent: monthlyPercent }
-  if (parsed.fiveHour === undefined && parsed.weekly === undefined && parsed.monthlyMcp === undefined) return null
+  if (
+    parsed.fiveHour === undefined &&
+    parsed.weekly === undefined &&
+    parsed.monthlyMcp === undefined
+  )
+    return null
   if (level !== undefined) parsed.level = level
   return parsed
 }
@@ -234,7 +253,9 @@ export class QuotaMonitor {
   private readonly now: () => number
   private readonly logger: QuotaLogger | undefined
   private readonly timeoutMs: number
-  private readonly resolveKey: ((provider: string, monitor: MonitorConfig) => string | undefined) | undefined
+  private readonly resolveKey:
+    | ((provider: string, monitor: MonitorConfig) => string | undefined)
+    | undefined
   private readonly cache = new Map<string, CacheEntry>()
   private readonly inflight = new Map<string, Promise<CacheEntry | undefined>>()
 
@@ -285,10 +306,11 @@ export class QuotaMonitor {
       return { provider, fetchedAt: cached.fetchedAt, ...cached.windows }
     }
     const pending = this.inflight.get(key)
-    const entry = pending !== undefined
-      ? await pending
-      : await this.fetchEntry(key, provider, monitor, apiKey)
-    return entry === undefined ? undefined : { provider, fetchedAt: entry.fetchedAt, ...entry.windows }
+    const entry =
+      pending !== undefined ? await pending : await this.fetchEntry(key, provider, monitor, apiKey)
+    return entry === undefined
+      ? undefined
+      : { provider, fetchedAt: entry.fetchedAt, ...entry.windows }
   }
 
   /** One upstream quota call, cached under the monitor identity. */
@@ -300,7 +322,8 @@ export class QuotaMonitor {
   ): Promise<CacheEntry | undefined> {
     const attempt = this.fetchWindows(provider, monitor, apiKey)
       .then((windows) => {
-        const entry: CacheEntry | undefined = windows === undefined ? undefined : { windows, fetchedAt: this.now() }
+        const entry: CacheEntry | undefined =
+          windows === undefined ? undefined : { windows, fetchedAt: this.now() }
         if (entry !== undefined) this.cache.set(key, entry)
         return entry
       })
@@ -330,14 +353,22 @@ export class QuotaMonitor {
       return undefined
     }
     if (!response.ok) {
-      this.logger?.warn('auto-continue: quota fetch for "%s" returned HTTP %s', provider, response.status)
+      this.logger?.warn(
+        'auto-continue: quota fetch for "%s" returned HTTP %s',
+        provider,
+        response.status,
+      )
       return undefined
     }
     let body: unknown
     try {
       body = await response.json()
     } catch (error) {
-      this.logger?.warn('auto-continue: quota fetch for "%s" returned invalid JSON: %o', provider, error)
+      this.logger?.warn(
+        'auto-continue: quota fetch for "%s" returned invalid JSON: %o',
+        provider,
+        error,
+      )
       return undefined
     }
     const parsed = parseQuotaBody(body)

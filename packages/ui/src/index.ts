@@ -3,7 +3,14 @@ export { Root } from './components/root'
 export { Button, buttonVariants, type ButtonProps } from './components/button'
 export { Input, Textarea, type InputProps, type TextareaProps } from './components/input'
 export { Field, type FieldProps } from './components/field'
-export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from './components/card'
+export {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from './components/card'
 export { Badge, type BadgeProps } from './components/badge'
 export { Alert, type AlertProps } from './components/alert'
 export { Progress, type ProgressProps } from './components/progress'

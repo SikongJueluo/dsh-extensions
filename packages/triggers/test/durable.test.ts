@@ -44,13 +44,19 @@ async function writeAtomic(path: string, data: string): Promise<void> {
 
 /** A minimal single-layout file unit: one JSON document per unit, atomic rewrite per write. */
 class FileUnit {
-  constructor(private readonly file: string, private readonly descriptor: KvUnitDescriptor) {}
+  constructor(
+    private readonly file: string,
+    private readonly descriptor: KvUnitDescriptor,
+  ) {}
 
-  private async load(): Promise<{ version: number, tables: Record<string, Record<string, unknown>> }> {
+  private async load(): Promise<{
+    version: number
+    tables: Record<string, Record<string, unknown>>
+  }> {
     try {
       const parsed = JSON.parse(await readFileSync(this.file, 'utf8')) as { version?: number }
       if (parsed.version !== this.descriptor.version) throw new Error('version-mismatch')
-      return parsed as { version: number, tables: Record<string, Record<string, unknown>> }
+      return parsed as { version: number; tables: Record<string, Record<string, unknown>> }
     } catch (failure) {
       if ((failure as NodeJS.ErrnoException).code === 'ENOENT') {
         return { version: this.descriptor.version, tables: {} }
@@ -59,7 +65,7 @@ class FileUnit {
     }
   }
 
-  async loadAll(): Promise<{ tables: Record<string, Record<string, unknown>>, global: unknown }> {
+  async loadAll(): Promise<{ tables: Record<string, Record<string, unknown>>; global: unknown }> {
     const doc = await this.load()
     const tables: Record<string, Record<string, unknown>> = {}
     for (const name of this.descriptor.tables) tables[name] = doc.tables[name] ?? {}
@@ -115,22 +121,35 @@ const fileBackendPlugin = {
   },
 }
 
-interface FakePromptCall { requestId: string, sessionId: string, text: string }
+interface FakePromptCall {
+  requestId: string
+  sessionId: string
+  text: string
+}
 
 /** Boot the FULL plugin stack over a durable directory; returns the seams a test needs. */
 async function boot(root: string, options: { queueFails?: boolean } = {}) {
   const prompts: FakePromptCall[] = []
   const admitted = new Set<string>()
   const queue = { fail: options.queueFails ?? false }
-  const logs = new Map<string, { type: string, data: unknown }[]>()
+  const logs = new Map<string, { type: string; data: unknown }[]>()
   const ctx = new Context()
   ctx.provide('tools', { register: () => () => {} })
   ctx.provide('sessionController', {
-    prompt: async (request: { requestId: string, sessionId: string, mode: string, content: { text: string }[] }) => {
+    prompt: async (request: {
+      requestId: string
+      sessionId: string
+      mode: string
+      content: { text: string }[]
+    }) => {
       if (queue.fail) throw new Error('queue refused (durable drill)')
       if (!admitted.has(request.requestId)) {
         admitted.add(request.requestId)
-        prompts.push({ requestId: request.requestId, sessionId: request.sessionId, text: request.content[0]?.text ?? '' })
+        prompts.push({
+          requestId: request.requestId,
+          sessionId: request.sessionId,
+          text: request.content[0]?.text ?? '',
+        })
       }
       return { accepted: true as const }
     },
@@ -141,7 +160,11 @@ async function boot(root: string, options: { queueFails?: boolean } = {}) {
     readSession: async (sessionId: string) => ({
       session: { id: sessionId },
       inheritedEventCount: 0,
-      events: [...(logs.get(sessionId) ?? [])].map((event, seq) => ({ ...event, seq, time: Date.now() })),
+      events: [...(logs.get(sessionId) ?? [])].map((event, seq) => ({
+        ...event,
+        seq,
+        time: Date.now(),
+      })),
     }),
   })
   await ctx.plugin(Storage as never, {} as never)
@@ -155,7 +178,7 @@ async function boot(root: string, options: { queueFails?: boolean } = {}) {
     queue,
     logs,
     domain: ctx.storage.domain as unknown as { open(spec: unknown): Promise<Domain<never>> },
-    emit: (sessionId: string, event: { type: string, data: unknown }) => {
+    emit: (sessionId: string, event: { type: string; data: unknown }) => {
       const rows = logs.get(sessionId) ?? []
       rows.push(event)
       logs.set(sessionId, rows)
@@ -166,7 +189,7 @@ async function boot(root: string, options: { queueFails?: boolean } = {}) {
 
 /** Settle queued promise chains (bounded), like the cordis tests' `until`. */
 async function settle(): Promise<void> {
-  for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 5))
+  for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 5))
 }
 
 const DIRS: string[] = []
@@ -183,7 +206,9 @@ function freshDir(): string {
 
 /** Parse the triggers unit file off disk (the medium's own view). */
 function readUnit(dir: string): { tables: Record<string, Record<string, unknown>> } {
-  return JSON.parse(readFileSync(join(dir, 'triggers.json'), 'utf8')) as { tables: Record<string, Record<string, unknown>> }
+  return JSON.parse(readFileSync(join(dir, 'triggers.json'), 'utf8')) as {
+    tables: Record<string, Record<string, unknown>>
+  }
 }
 
 const EXECUTOR = 'sess-exec'
@@ -196,7 +221,12 @@ describe('atomic commit over the real domain + file medium', () => {
     // Handoff-style bind WITH the start prompt: run creation + owed start in
     // one commit. The send fails (queue drill): the owed prompt must survive.
     first.queue.fail = true
-    const bound = await first.svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT, deliverStart: true })
+    const bound = await first.svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+      deliverStart: true,
+    })
     await settle()
 
     // THE atomicity evidence, from the medium itself: the run record and its
@@ -228,9 +258,17 @@ describe('atomic commit over the real domain + file medium', () => {
   it('a full loop round-trips through the medium: reopen sees the reviewed state and re-sends nothing', async () => {
     const dir = freshDir()
     const first = await boot(dir)
-    const bound = await first.svc.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
+    const bound = await first.svc.bindReviewLoop({
+      task: 't',
+      executorSession: EXECUTOR,
+      parentSession: PARENT,
+    })
     first.emit(EXECUTOR, { type: 'turn/start', data: { turn: 1 } })
-    await first.svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: '实现完成' })
+    await first.svc.signal(EXECUTOR, {
+      runId: bound.runId,
+      outcome: 'deliver',
+      summary: '实现完成',
+    })
     first.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await settle()
     expect(first.prompts).toHaveLength(1)

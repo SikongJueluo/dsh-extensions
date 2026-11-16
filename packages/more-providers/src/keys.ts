@@ -11,9 +11,7 @@ import { Service } from '@deepseek-ai/cordis'
 import { readFileSync, statSync } from 'node:fs'
 
 /** One provider's key source. */
-export type KeySource =
-  | { kind: 'file'; path: string }
-  | { kind: 'env'; name: string }
+export type KeySource = { kind: 'file'; path: string } | { kind: 'env'; name: string }
 
 /** Read a key source once, without the service cache. */
 export function readKey(source: KeySource): string | undefined {

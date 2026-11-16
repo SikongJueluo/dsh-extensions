@@ -50,7 +50,8 @@ export interface SearchAdapter {
 }
 
 function requireString(value: unknown, where: string): string {
-  if (typeof value !== 'string' || value === '') throw new Error(`${where}: expected a non-empty string`)
+  if (typeof value !== 'string' || value === '')
+    throw new Error(`${where}: expected a non-empty string`)
   return value
 }
 
@@ -109,22 +110,27 @@ function zhipuHitsFromToolResult(result: McpToolResult, query: string): RawHit[]
   throw new Error('zhipu mcp: tool result carried no search hits array')
 }
 
-async function zhipuSearchMcp(config: AdapterConfig, query: string, signal: AbortSignal): Promise<RawHit[]> {
+async function zhipuSearchMcp(
+  config: AdapterConfig,
+  query: string,
+  signal: AbortSignal,
+): Promise<RawHit[]> {
   const { settings } = config
   // One retry on a transport-level network failure; auth/quota errors
   // (McpTransportError with a broker code) fail fast to the source-failure path.
-  const attempt = (): Promise<McpToolResult> => mcpCallTool(
-    config.io.rawPost,
-    settings.zhipuMcpUrl,
-    config.apiKey,
-    settings.zhipuMcpTool,
-    {
-      search_query: query,
-      search_engine: settings.zhipuEngine,
-      count: settings.perSourceResults,
-    },
-    signal,
-  )
+  const attempt = (): Promise<McpToolResult> =>
+    mcpCallTool(
+      config.io.rawPost,
+      settings.zhipuMcpUrl,
+      config.apiKey,
+      settings.zhipuMcpTool,
+      {
+        search_query: query,
+        search_engine: settings.zhipuEngine,
+        count: settings.perSourceResults,
+      },
+      signal,
+    )
   let result: McpToolResult
   try {
     result = await attempt()
@@ -145,21 +151,27 @@ function createZhipuAdapter(config: AdapterConfig): SearchAdapter {
     async search(query, signal) {
       if (settings.zhipuTransport === 'mcp') return zhipuSearchMcp(config, query, signal)
       const body = await withRetry(
-        () => io.postJson(
-          `${settings.zhipuApiBase.replace(/\/$/, '')}/web_search`,
-          {
-            search_query: query.slice(0, 70 * 4), // the docs advise short queries; hard cap defensively
-            search_engine: settings.zhipuEngine,
-            search_intent: false,
-            count: settings.perSourceResults,
-            content_size: 'high',
-          },
-          { authorization: `Bearer ${config.apiKey}` },
-          signal,
-        ).then((raw) => raw as ZhipuResponse),
+        () =>
+          io
+            .postJson(
+              `${settings.zhipuApiBase.replace(/\/$/, '')}/web_search`,
+              {
+                search_query: query.slice(0, 70 * 4), // the docs advise short queries; hard cap defensively
+                search_engine: settings.zhipuEngine,
+                search_intent: false,
+                count: settings.perSourceResults,
+                content_size: 'high',
+              },
+              { authorization: `Bearer ${config.apiKey}` },
+              signal,
+            )
+            .then((raw) => raw as ZhipuResponse),
         { signal, retries: 1 },
       )
-      return zhipuHitsFrom(Array.isArray(body?.search_result) ? body.search_result : undefined, query)
+      return zhipuHitsFrom(
+        Array.isArray(body?.search_result) ? body.search_result : undefined,
+        query,
+      )
     },
   }
 }
@@ -184,18 +196,21 @@ function createTavilyAdapter(config: AdapterConfig): SearchAdapter {
     id: 'tavily',
     async search(query, signal) {
       const body = await withRetry(
-        () => io.postJson(
-          `${settings.tavilyApiBase.replace(/\/$/, '')}/search`,
-          {
-            query,
-            max_results: settings.perSourceResults,
-            search_depth: settings.tavilySearchDepth,
-            include_answer: false,
-            ...(settings.tavilyIncludeRaw ? { include_raw_content: true } : {}),
-          },
-          { authorization: `Bearer ${config.apiKey}` },
-          signal,
-        ).then((raw) => raw as TavilyResponse),
+        () =>
+          io
+            .postJson(
+              `${settings.tavilyApiBase.replace(/\/$/, '')}/search`,
+              {
+                query,
+                max_results: settings.perSourceResults,
+                search_depth: settings.tavilySearchDepth,
+                include_answer: false,
+                ...(settings.tavilyIncludeRaw ? { include_raw_content: true } : {}),
+              },
+              { authorization: `Bearer ${config.apiKey}` },
+              signal,
+            )
+            .then((raw) => raw as TavilyResponse),
         { signal, retries: 1 },
       )
       const results: readonly TavilyHit[] = Array.isArray(body?.results) ? body.results : []
@@ -205,9 +220,7 @@ function createTavilyAdapter(config: AdapterConfig): SearchAdapter {
         url: requireString(entry?.url, `tavily results[${index}].url`),
         title: optionalString(entry?.title),
         snippet: optionalString(entry?.content),
-        ...(settings.tavilyIncludeRaw
-          ? { content: optionalString(entry?.raw_content) }
-          : {}),
+        ...(settings.tavilyIncludeRaw ? { content: optionalString(entry?.raw_content) } : {}),
         publishedAt: optionalString(entry?.published_date),
       }))
     },
@@ -233,17 +246,20 @@ function createExaAdapter(config: AdapterConfig): SearchAdapter {
     id: 'exa',
     async search(query, signal) {
       const body = await withRetry(
-        () => io.postJson(
-          `${settings.exaApiBase.replace(/\/$/, '')}/search`,
-          {
-            query,
-            numResults: settings.perSourceResults,
-            type: 'auto',
-            contents: { text: { maxCharacters: settings.excerptChars * 2 } },
-          },
-          { 'x-api-key': config.apiKey },
-          signal,
-        ).then((raw) => raw as ExaResponse),
+        () =>
+          io
+            .postJson(
+              `${settings.exaApiBase.replace(/\/$/, '')}/search`,
+              {
+                query,
+                numResults: settings.perSourceResults,
+                type: 'auto',
+                contents: { text: { maxCharacters: settings.excerptChars * 2 } },
+              },
+              { 'x-api-key': config.apiKey },
+              signal,
+            )
+            .then((raw) => raw as ExaResponse),
         { signal, retries: 1 },
       )
       const results: readonly ExaHit[] = Array.isArray(body?.results) ? body.results : []
@@ -262,13 +278,15 @@ function createExaAdapter(config: AdapterConfig): SearchAdapter {
 // --- Brave Search API ---
 
 interface BraveResponse {
-  readonly web?: { readonly results?: readonly {
-    title?: unknown
-    url?: unknown
-    description?: unknown
-    age?: unknown
-    extra_snippets?: readonly unknown[]
-  }[] }
+  readonly web?: {
+    readonly results?: readonly {
+      title?: unknown
+      url?: unknown
+      description?: unknown
+      age?: unknown
+      extra_snippets?: readonly unknown[]
+    }[]
+  }
 }
 
 function createBraveAdapter(config: AdapterConfig): SearchAdapter {
@@ -282,10 +300,17 @@ function createBraveAdapter(config: AdapterConfig): SearchAdapter {
         extra_snippets: 'true',
       })}`
       const body = await withRetry(
-        () => io.getJson(url, {
-          accept: 'application/json',
-          'x-subscription-token': config.apiKey,
-        }, signal).then((raw) => raw as BraveResponse),
+        () =>
+          io
+            .getJson(
+              url,
+              {
+                accept: 'application/json',
+                'x-subscription-token': config.apiKey,
+              },
+              signal,
+            )
+            .then((raw) => raw as BraveResponse),
         { signal, retries: 1 },
       )
       const results = Array.isArray(body?.web?.results) ? body.web?.results : []
@@ -297,7 +322,11 @@ function createBraveAdapter(config: AdapterConfig): SearchAdapter {
         snippet: optionalString(entry?.description),
         publishedAt: optionalString(entry?.age),
         ...(Array.isArray(entry?.extra_snippets) && entry.extra_snippets.length > 0
-          ? { content: (entry.extra_snippets as unknown[]).filter((part): part is string => typeof part === 'string').join('\n') }
+          ? {
+              content: (entry.extra_snippets as unknown[])
+                .filter((part): part is string => typeof part === 'string')
+                .join('\n'),
+            }
           : {}),
       }))
     },
@@ -312,7 +341,9 @@ interface OpenAiResponse {
     // web_search_call with the sources included via include[]
     action?: { sources?: readonly { url?: unknown; title?: unknown }[] }
     // assistant message with url_citation annotations
-    content?: readonly { annotations?: readonly { type?: unknown; url?: unknown; title?: unknown }[] }[]
+    content?: readonly {
+      annotations?: readonly { type?: unknown; url?: unknown; title?: unknown }[]
+    }[]
   }[]
 }
 
@@ -327,19 +358,26 @@ function createOpenaiAdapter(config: AdapterConfig): SearchAdapter {
     id: 'openai',
     async search(query, signal) {
       const body = await withRetry(
-        () => io.postJson(
-          `${settings.openaiApiBase.replace(/\/$/, '')}/responses`,
-          {
-            model: settings.openaiModel,
-            tools: [{ type: 'web_search', search_context_size: settings.openaiSearchContextSize }],
-            tool_choice: 'required',
-            include: ['web_search_call.action.sources'],
-            ...(settings.openaiReasoningEffort === '' ? {} : { reasoning: { effort: settings.openaiReasoningEffort } }),
-            input: query,
-          },
-          { authorization: `Bearer ${config.apiKey}` },
-          signal,
-        ).then((raw) => raw as OpenAiResponse),
+        () =>
+          io
+            .postJson(
+              `${settings.openaiApiBase.replace(/\/$/, '')}/responses`,
+              {
+                model: settings.openaiModel,
+                tools: [
+                  { type: 'web_search', search_context_size: settings.openaiSearchContextSize },
+                ],
+                tool_choice: 'required',
+                include: ['web_search_call.action.sources'],
+                ...(settings.openaiReasoningEffort === ''
+                  ? {}
+                  : { reasoning: { effort: settings.openaiReasoningEffort } }),
+                input: query,
+              },
+              { authorization: `Bearer ${config.apiKey}` },
+              signal,
+            )
+            .then((raw) => raw as OpenAiResponse),
         { signal, retries: 1 },
       )
       const byUrl = new Map<string, { url: string; title?: string }>()
@@ -348,7 +386,13 @@ function createOpenaiAdapter(config: AdapterConfig): SearchAdapter {
           for (const source of item.action?.sources ?? []) {
             const url = optionalString(source?.url)
             if (url === undefined) continue
-            if (!byUrl.has(url)) byUrl.set(url, { url, ...(optionalString(source?.title) === undefined ? {} : { title: optionalString(source?.title) }) })
+            if (!byUrl.has(url))
+              byUrl.set(url, {
+                url,
+                ...(optionalString(source?.title) === undefined
+                  ? {}
+                  : { title: optionalString(source?.title) }),
+              })
           }
         }
         if (item?.type === 'message') {
@@ -357,7 +401,12 @@ function createOpenaiAdapter(config: AdapterConfig): SearchAdapter {
               if (annotation?.type !== 'url_citation') continue
               const url = optionalString(annotation?.url)
               if (url === undefined || byUrl.has(url)) continue
-              byUrl.set(url, { url, ...(optionalString(annotation?.title) === undefined ? {} : { title: optionalString(annotation?.title) }) })
+              byUrl.set(url, {
+                url,
+                ...(optionalString(annotation?.title) === undefined
+                  ? {}
+                  : { title: optionalString(annotation?.title) }),
+              })
             }
           }
         }
@@ -407,7 +456,9 @@ export function extractCodexSources(sseText: string): { url: string; title?: str
     }
     // Streamed citation annotations.
     if (record.type === 'response.output_text.annotation.added') {
-      const annotation = record.annotation as { type?: unknown; url?: unknown; title?: unknown } | undefined
+      const annotation = record.annotation as
+        | { type?: unknown; url?: unknown; title?: unknown }
+        | undefined
       if (annotation?.type === 'url_citation') {
         put(annotation.url, annotation.title)
       }
@@ -418,7 +469,8 @@ export function extractCodexSources(sseText: string): { url: string; title?: str
       for (const entry of output) {
         const outputItem = entry as Record<string, unknown>
         if (outputItem?.type === 'message') {
-          for (const block of (outputItem.content as { annotations?: unknown[] }[] | undefined) ?? []) {
+          for (const block of (outputItem.content as { annotations?: unknown[] }[] | undefined) ??
+            []) {
             for (const annotation of block?.annotations ?? []) {
               const citation = annotation as { type?: unknown; url?: unknown; title?: unknown }
               if (citation?.type === 'url_citation') put(citation.url, citation.title)
@@ -438,7 +490,9 @@ function createChatgptAdapter(config: AdapterConfig): SearchAdapter {
     async search(query, signal) {
       const token = await io.chatgptToken?.()
       if (token === undefined) {
-        throw new Error('chatgpt: oauth-providers service unavailable or not signed in (Settings → OAuth Providers)')
+        throw new Error(
+          'chatgpt: oauth-providers service unavailable or not signed in (Settings → OAuth Providers)',
+        )
       }
       const url = `${settings.chatgptApiBase.replace(/\/$/, '')}/responses`
       const body = JSON.stringify({
@@ -449,14 +503,19 @@ function createChatgptAdapter(config: AdapterConfig): SearchAdapter {
         stream: true,
         store: false,
       })
-      const response = await io.rawPost(url, body, {
-        'content-type': 'application/json',
-        accept: 'text/event-stream',
-        originator: 'dsh-search-integrator',
-        authorization: `Bearer ${token.access}`,
-        ...(token.accountId === undefined ? {} : { 'chatgpt-account-id': token.accountId }),
-        'oai-product-sku': 'codex',
-      }, signal)
+      const response = await io.rawPost(
+        url,
+        body,
+        {
+          'content-type': 'application/json',
+          accept: 'text/event-stream',
+          originator: 'dsh-search-integrator',
+          authorization: `Bearer ${token.access}`,
+          ...(token.accountId === undefined ? {} : { 'chatgpt-account-id': token.accountId }),
+          'oai-product-sku': 'codex',
+        },
+        signal,
+      )
       if (response.status !== 200) {
         throw new Error(`chatgpt codex: HTTP ${response.status}: ${response.text.slice(0, 200)}`)
       }
@@ -530,7 +589,10 @@ export function buildAdapters(
   // take 10-30s+, so they get a multiple of the plain-SERP deadline.
   const generativeMs = settings.perRequestTimeoutMs * 4
   const bounded = adapters.map((adapter): SearchAdapter => {
-    const deadlineMs = adapter.id === 'chatgpt' || adapter.id === 'openai' ? generativeMs : settings.perRequestTimeoutMs
+    const deadlineMs =
+      adapter.id === 'chatgpt' || adapter.id === 'openai'
+        ? generativeMs
+        : settings.perRequestTimeoutMs
     return {
       id: adapter.id,
       async search(query, signal) {

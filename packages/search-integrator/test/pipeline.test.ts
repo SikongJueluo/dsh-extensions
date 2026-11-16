@@ -67,7 +67,10 @@ function integrationJson(overrides: Record<string, unknown> = {}): string {
   })
 }
 
-function fakeLlmPort(responses: (string | { error: string })[], usage = { inputTokens: 5, outputTokens: 3 }) {
+function fakeLlmPort(
+  responses: (string | { error: string })[],
+  usage = { inputTokens: 5, outputTokens: 3 },
+) {
   const calls: { system: string; user: string }[] = []
   const queue = [...responses]
   return {
@@ -93,7 +96,11 @@ function recordingAudit() {
     port: {
       async save(payload: string): Promise<AuditRef> {
         payloads.push(payload)
-        return { locator: 'spill://audit-1', retrievalHint: 'read spill://audit-1', bytes: payload.length }
+        return {
+          locator: 'spill://audit-1',
+          retrievalHint: 'read spill://audit-1',
+          bytes: payload.length,
+        }
       },
     } as PipelineDeps['audit'],
   }
@@ -116,7 +123,10 @@ async function run(
   deps: Partial<PipelineDeps> & { adapters: SearchAdapter[] },
   args: { question: string; queries?: string[] },
   signal: AbortSignal = new AbortController().signal,
-): Promise<{ result: Awaited<ReturnType<typeof runResearch>>; audit: ReturnType<typeof recordingAudit> }> {
+): Promise<{
+  result: Awaited<ReturnType<typeof runResearch>>
+  audit: ReturnType<typeof recordingAudit>
+}> {
   const audit = recordingAudit()
   const { audit: _ignored, ...rest } = deps
   void _ignored
@@ -136,12 +146,15 @@ async function run(
 describe('runResearch', () => {
   it('integrates across sources, dedups the shared url, cites merged provenance', async () => {
     const llm = fakeLlmPort([integrationJson()])
-    const { result } = await run({ adapters: twoSources(), llm: llm.port }, { question: 'what is the shared fact?', queries: ['shared fact'] })
+    const { result } = await run(
+      { adapters: twoSources(), llm: llm.port },
+      { question: 'what is the shared fact?', queries: ['shared fact'] },
+    )
     expect(result.status).toBe('ok')
     expect(result.summary).toBe('Integrated answer.')
     const shared = result.sources.find((source) => source.url === 'https://shared.example/one')
     expect(shared).toBeDefined()
-    expect([...shared?.providers ?? []].sort()).toEqual(['exa', 'tavily'])
+    expect([...(shared?.providers ?? [])].sort()).toEqual(['exa', 'tavily'])
     expect([...result.coverage.searched].sort()).toEqual(['exa', 'tavily'])
     expect(result.coverage.failed).toEqual([])
     expect(result.coverage.resultsFound).toBe(4)
@@ -150,7 +163,10 @@ describe('runResearch', () => {
 
   it('saves the audit artifact and returns its retrieval pointer', async () => {
     const llm = fakeLlmPort([integrationJson()])
-    const { result, audit } = await run({ adapters: twoSources(), llm: llm.port }, { question: 'q', queries: ['q'] })
+    const { result, audit } = await run(
+      { adapters: twoSources(), llm: llm.port },
+      { question: 'q', queries: ['q'] },
+    )
     expect(audit.payloads).toHaveLength(1)
     const payload = JSON.parse(audit.payloads[0] ?? '{}')
     expect(payload.question).toBe('q')
@@ -164,27 +180,38 @@ describe('runResearch', () => {
       throw new Error('HTTP 429: rate limited')
     })
     const llm = fakeLlmPort([integrationJson()])
-    const { result } = await run({
-      adapters: [createFakeAdapter('tavily', () => [hit('tavily', 'https://a.example/1', 's')]), failing],
-      llm: llm.port,
-    }, { question: 'q', queries: ['q'] })
+    const { result } = await run(
+      {
+        adapters: [
+          createFakeAdapter('tavily', () => [hit('tavily', 'https://a.example/1', 's')]),
+          failing,
+        ],
+        llm: llm.port,
+      },
+      { question: 'q', queries: ['q'] },
+    )
     expect(result.status).toBe('ok')
-    expect(result.coverage.failed).toEqual([{ source: 'exa', reason: expect.stringContaining('429') }])
+    expect(result.coverage.failed).toEqual([
+      { source: 'exa', reason: expect.stringContaining('429') },
+    ])
     expect(result.coverage.searched).toEqual(['tavily'])
   })
 
   it('fails explicitly when every source fails', async () => {
-    const { result } = await run({
-      adapters: [
-        createFakeAdapter('tavily', () => {
-          throw new Error('HTTP 500: boom')
-        }),
-        createFakeAdapter('exa', () => {
-          throw new Error('network down')
-        }),
-      ],
-      llm: fakeLlmPort([integrationJson()]).port,
-    }, { question: 'q' })
+    const { result } = await run(
+      {
+        adapters: [
+          createFakeAdapter('tavily', () => {
+            throw new Error('HTTP 500: boom')
+          }),
+          createFakeAdapter('exa', () => {
+            throw new Error('network down')
+          }),
+        ],
+        llm: fakeLlmPort([integrationJson()]).port,
+      },
+      { question: 'q' },
+    )
     expect(result.status).toBe('failed')
     expect(result.summary).toContain('no search results')
     expect(result.sources).toEqual([])
@@ -192,30 +219,44 @@ describe('runResearch', () => {
   })
 
   it('fails when sources return nothing', async () => {
-    const { result } = await run({
-      adapters: [createFakeAdapter('tavily', () => [])],
-      llm: fakeLlmPort([integrationJson()]).port,
-    }, { question: 'q' })
+    const { result } = await run(
+      {
+        adapters: [createFakeAdapter('tavily', () => [])],
+        llm: fakeLlmPort([integrationJson()]).port,
+      },
+      { question: 'q' },
+    )
     expect(result.status).toBe('failed')
     expect(result.summary).toContain('no search results')
   })
 
   it('fails when no source is usable at all (config failures)', async () => {
-    const { result } = await run({
-      adapters: [],
-      configFailures: [{ source: 'zhipu', reason: 'API key not configured (credential reference resolves to nothing)' }],
-      llm: fakeLlmPort([integrationJson()]).port,
-    }, { question: 'q' })
+    const { result } = await run(
+      {
+        adapters: [],
+        configFailures: [
+          {
+            source: 'zhipu',
+            reason: 'API key not configured (credential reference resolves to nothing)',
+          },
+        ],
+        llm: fakeLlmPort([integrationJson()]).port,
+      },
+      { question: 'q' },
+    )
     expect(result.status).toBe('failed')
     expect(result.summary).toContain('no search sources available')
     expect(result.coverage.failed[0]?.source).toBe('zhipu')
   })
 
   it('degrades to a labeled digest when no integrator is configured', async () => {
-    const { result } = await run({
-      adapters: twoSources(),
-      llm: undefined,
-    }, { question: 'q' })
+    const { result } = await run(
+      {
+        adapters: twoSources(),
+        llm: undefined,
+      },
+      { question: 'q' },
+    )
     expect(result.status).toBe('degraded')
     expect(result.degradedReason).toContain('integrator model not configured')
     expect(result.points).toEqual([])
@@ -227,7 +268,10 @@ describe('runResearch', () => {
 
   it('degrades (not crashes) when integration fails after its repair attempt', async () => {
     const llm = fakeLlmPort([{ error: 'model adapter error' }, { error: 'model adapter error' }])
-    const { result } = await run({ adapters: twoSources(), llm: llm.port }, { question: 'q', queries: ['q'] })
+    const { result } = await run(
+      { adapters: twoSources(), llm: llm.port },
+      { question: 'q', queries: ['q'] },
+    )
     expect(result.status).toBe('degraded')
     expect(result.degradedReason).toContain('integration failed')
   })
@@ -259,7 +303,10 @@ describe('runResearch', () => {
       { error: 'adapter error' },
       { error: 'adapter error' },
     ])
-    const { result } = await run({ adapters: twoSources(), llm: llm.port }, { question: 'q', queries: ['q'] })
+    const { result } = await run(
+      { adapters: twoSources(), llm: llm.port },
+      { question: 'q', queries: ['q'] },
+    )
     expect(result.status).toBe('ok')
     expect(result.summary).toBe('Integrated answer.')
     expect(result.unknowns.some((text) => text.includes('follow-up round failed'))).toBe(true)
@@ -267,74 +314,103 @@ describe('runResearch', () => {
 
   it('skips the follow-up round when disabled by settings', async () => {
     const llm = fakeLlmPort([integrationJson({ followup: { needed: true, queries: ['gap'] } })])
-    const adapters = [createFakeAdapter('tavily', () => [hit('tavily', 'https://a.example/1', 's')])]
-    const { result } = await run({
-      adapters, llm: llm.port,
-      settings: baseSettings({ followupRounds: 0 }),
-    }, { question: 'q' })
+    const adapters = [
+      createFakeAdapter('tavily', () => [hit('tavily', 'https://a.example/1', 's')]),
+    ]
+    const { result } = await run(
+      {
+        adapters,
+        llm: llm.port,
+        settings: baseSettings({ followupRounds: 0 }),
+      },
+      { question: 'q' },
+    )
     expect(result.coverage.rounds).toBe(1)
   })
 
   it('does not call the planner when the caller supplied queries', async () => {
     const llm = fakeLlmPort([integrationJson()])
-    await run({ adapters: twoSources(), llm: llm.port }, { question: 'the question', queries: ['seed query'] })
+    await run(
+      { adapters: twoSources(), llm: llm.port },
+      { question: 'the question', queries: ['seed query'] },
+    )
     expect(llm.calls).toHaveLength(1)
     expect(llm.calls[0]?.user).toContain('Evidence (')
   })
 
   it('plans queries from the question when none were supplied', async () => {
-    const llm = fakeLlmPort([
-      '{"queries": ["planned one", "planned two"]}',
-      integrationJson(),
-    ])
+    const llm = fakeLlmPort(['{"queries": ["planned one", "planned two"]}', integrationJson()])
     const seen: string[] = []
-    const adapters = [createFakeAdapter('tavily', (query) => {
-      seen.push(query)
-      return [hit('tavily', 'https://a.example/1', 's', query)]
-    })]
+    const adapters = [
+      createFakeAdapter('tavily', (query) => {
+        seen.push(query)
+        return [hit('tavily', 'https://a.example/1', 's', query)]
+      }),
+    ]
     await run({ adapters, llm: llm.port }, { question: 'the question' })
     expect(seen.sort()).toEqual(['planned one', 'planned two'])
   })
 
   it('propagates cancellation from the caller signal', async () => {
     const controller = new AbortController()
-    const adapters = [createFakeAdapter('tavily', (_query, signal) => new Promise<RawHit[]>((_, reject) => {
-      signal.addEventListener('abort', () => reject(new Error('aborted')))
-    }))]
+    const adapters = [
+      createFakeAdapter(
+        'tavily',
+        (_query, signal) =>
+          new Promise<RawHit[]>((_, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('aborted')))
+          }),
+      ),
+    ]
     setTimeout(() => controller.abort(), 10)
-    await expect(run(
-      { adapters, llm: fakeLlmPort([integrationJson()]).port },
-      { question: 'q' },
-      controller.signal,
-    )).rejects.toThrow('aborted')
+    await expect(
+      run(
+        { adapters, llm: fakeLlmPort([integrationJson()]).port },
+        { question: 'q' },
+        controller.signal,
+      ),
+    ).rejects.toThrow('aborted')
   })
 
   it('enforces the shared wall-clock budget', async () => {
-    const adapters = [createFakeAdapter('tavily', (_query, signal) => new Promise<RawHit[]>((_, reject) => {
-      signal.addEventListener('abort', () => reject(new Error('budget aborted')))
-    }))]
-    await expect(run(
-      {
-        adapters,
-        llm: fakeLlmPort([integrationJson()]).port,
-        settings: baseSettings({ totalBudgetMs: 20 }),
-      },
-      { question: 'q', queries: ['q'] },
-    )).rejects.toThrow(/abort/i)
+    const adapters = [
+      createFakeAdapter(
+        'tavily',
+        (_query, signal) =>
+          new Promise<RawHit[]>((_, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('budget aborted')))
+          }),
+      ),
+    ]
+    await expect(
+      run(
+        {
+          adapters,
+          llm: fakeLlmPort([integrationJson()]).port,
+          settings: baseSettings({ totalBudgetMs: 20 }),
+        },
+        { question: 'q', queries: ['q'] },
+      ),
+    ).rejects.toThrow(/abort/i)
   })
 
   it('honors the render budget for large results', async () => {
     const big = integrationJson({
       summary: 'x'.repeat(2000),
       points: Array.from({ length: 20 }, (_, i) => ({
-        text: `point ${i} ${'y'.repeat(200)}`, status: 'supported', sources: [1],
+        text: `point ${i} ${'y'.repeat(200)}`,
+        status: 'supported',
+        sources: [1],
       })),
       unknowns: Array.from({ length: 8 }, (_, i) => `unknown ${i} ${'z'.repeat(100)}`),
     })
-    const { result } = await run({
-      adapters: twoSources(),
-      llm: fakeLlmPort([big]).port,
-    }, { question: 'q', queries: ['q'] })
+    const { result } = await run(
+      {
+        adapters: twoSources(),
+        llm: fakeLlmPort([big]).port,
+      },
+      { question: 'q', queries: ['q'] },
+    )
     const text = renderResearch(result, 3000)
     expect(text.length).toBeLessThanOrEqual(3400) // budget + small tolerance for the tail lines
     expect(text).toContain('Sources:')
@@ -343,16 +419,21 @@ describe('runResearch', () => {
 
 describe('v3 retrieval context and URL-only sources', () => {
   const integration = JSON.stringify({
-    summary: 'ok', points: [{ text: 't', status: 'supported', sources: [1] }],
-    unknowns: [], followup: { needed: false, queries: [] },
+    summary: 'ok',
+    points: [{ text: 't', status: 'supported', sources: [1] }],
+    unknowns: [],
+    followup: { needed: false, queries: [] },
   })
 
   it('feeds the integrator a retrieval-context header (time, queries, failures)', async () => {
     const llm = fakeLlmPort([integration])
-    await run({
-      adapters: [createFakeAdapter('exa', () => [hit('exa', 'https://a.example/1', 's')])],
-      llm: llm.port,
-    }, { question: 'q', queries: ['q1'] })
+    await run(
+      {
+        adapters: [createFakeAdapter('exa', () => [hit('exa', 'https://a.example/1', 's')])],
+        llm: llm.port,
+      },
+      { question: 'q', queries: ['q1'] },
+    )
     const user = llm.calls[0]?.user
     expect(user).toContain('Retrieval context:')
     expect(user).toContain('searched at:')
@@ -364,25 +445,33 @@ describe('v3 retrieval context and URL-only sources', () => {
 
   it('reports a failed source in the retrieval context header', async () => {
     const llm = fakeLlmPort([integration])
-    await run({
-      adapters: [
-        createFakeAdapter('exa', () => [hit('exa', 'https://a.example/1', 's')]),
-        createFakeAdapter('tavily', () => {
-          throw new Error('HTTP 429: limited')
-        }),
-      ],
-      llm: llm.port,
-    }, { question: 'q', queries: ['q'] })
+    await run(
+      {
+        adapters: [
+          createFakeAdapter('exa', () => [hit('exa', 'https://a.example/1', 's')]),
+          createFakeAdapter('tavily', () => {
+            throw new Error('HTTP 429: limited')
+          }),
+        ],
+        llm: llm.port,
+      },
+      { question: 'q', queries: ['q'] },
+    )
     expect(llm.calls[0]?.user).toMatch(/tavily \(.*429/)
   })
 
   it('marks undated sources and keeps URL-only entries resolvable in the digest', async () => {
     const llm = fakeLlmPort([integration])
-    await run({
-      adapters: [createFakeAdapter('zhipu', () => [hit('zhipu', 'https://b.example/2', 'no date here')])],
-      llm: llm.port,
-      settings: baseSettings({ maxEvidence: 1, excerptChars: 4, fetchTopN: 0 }),
-    }, { question: 'q', queries: ['q'] })
+    await run(
+      {
+        adapters: [
+          createFakeAdapter('zhipu', () => [hit('zhipu', 'https://b.example/2', 'no date here')]),
+        ],
+        llm: llm.port,
+        settings: baseSettings({ maxEvidence: 1, excerptChars: 4, fetchTopN: 0 }),
+      },
+      { question: 'q', queries: ['q'] },
+    )
     const user = llm.calls[0]?.user
     expect(user).toContain('date unknown')
     expect(user).toContain('https://b.example/2')

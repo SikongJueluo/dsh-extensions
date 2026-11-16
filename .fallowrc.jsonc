@@ -19,7 +19,7 @@
   "supportEntry": [
     "packages/*/smoke.mjs",
     "packages/*/scripts/smoke-*.mjs",
-    "packages/*/live-check.mjs"
+    "packages/*/live-check.mjs",
   ],
   "usedClassMembers": [
     // Cordis services are reached through `ctx.<name>` proxies whose type is

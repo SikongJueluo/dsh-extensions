@@ -74,15 +74,19 @@ export const ChatGptConfig: Schema<ChatGptConfig> = Schema.object({
   clientVersion: Schema.string().description(
     'Client version reported to the backend (empty = latest published @openai/codex, fetched from npm).',
   ),
-  refreshMarginMs: Schema.number().step(1).min(1).description(
-    'Refresh the OAuth grant when it is this close to expiry (ms).',
-  ),
-  defaultContextWindow: Schema.number().step(1).min(1).description(
-    'Fallback context window for models the backend does not describe.',
-  ),
-  promptCacheKey: Schema.boolean().default(true).description(
-    'Send prompt_cache_key + session-affinity headers derived from the session id, so the backend prompt cache routes this session to one node (A/B toggle: off reproduces the old random routing).',
-  ),
+  refreshMarginMs: Schema.number()
+    .step(1)
+    .min(1)
+    .description('Refresh the OAuth grant when it is this close to expiry (ms).'),
+  defaultContextWindow: Schema.number()
+    .step(1)
+    .min(1)
+    .description('Fallback context window for models the backend does not describe.'),
+  promptCacheKey: Schema.boolean()
+    .default(true)
+    .description(
+      'Send prompt_cache_key + session-affinity headers derived from the session id, so the backend prompt cache routes this session to one node (A/B toggle: off reproduces the old random routing).',
+    ),
 })
 
 /** Fully-resolved connection facts (defaults applied and validated). */
@@ -130,7 +134,10 @@ export interface RegisterChatGptDeps {
 }
 
 /** Wire the ChatGPT provider: LLM route, catalog, token store, settings, sign-in. */
-export function registerChatGpt(ctx: Context, { channel, tokens, config }: RegisterChatGptDeps): void {
+export function registerChatGpt(
+  ctx: Context,
+  { channel, tokens, config }: RegisterChatGptDeps,
+): void {
   const log = ctx.logger(`${PACKAGE_NAME}/chatgpt`)
   const current: () => ResolvedChatGptConfig = config
   let lastRaw: ResolvedChatGptConfig | undefined

@@ -46,7 +46,13 @@ const fixtureEvents = [
     type: 'assistant/message',
     time: now - 50_000,
     data: {
-      usage: { inputTokens: 1_000, cacheReadTokens: 400, cacheWriteTokens: 10, outputTokens: 200, reasoningTokens: 50 },
+      usage: {
+        inputTokens: 1_000,
+        cacheReadTokens: 400,
+        cacheWriteTokens: 10,
+        outputTokens: 200,
+        reasoningTokens: 50,
+      },
       message: { source: { provider: 'fixture-provider', model: 'fixture-model' } },
     },
   },
@@ -69,7 +75,10 @@ const fixtureEvents = [
   { type: 'tool/call', time: now - 10_000, data: { name: 'grep', callId: 'call-grep' } },
 ]
 const fixtureLog = `${fixtureEvents.map((event) => JSON.stringify(event)).join('\n')}\n`
-await writeFile(joinPath(fixtureSessionDir, 'session.v1.jsonl.zstd'), zstdCompressSync(Buffer.from(fixtureLog)))
+await writeFile(
+  joinPath(fixtureSessionDir, 'session.v1.jsonl.zstd'),
+  zstdCompressSync(Buffer.from(fixtureLog)),
+)
 await writeFile(
   joinPath(projcacheDir, `${fixtureSessionId}.json`),
   JSON.stringify({ record: { rows: { title: { val: 'Fixture session' } } } }),
@@ -82,22 +91,52 @@ check('scanned exactly one fixture log', report.scannedSessionFiles === 1)
 const fixtureModel = report.models[0]
 check(
   'usage aggregates by provider/model',
-  report.models.length === 1 && fixtureModel.provider === 'fixture-provider' && fixtureModel.model === 'fixture-model' && fixtureModel.requests === 2,
+  report.models.length === 1 &&
+    fixtureModel.provider === 'fixture-provider' &&
+    fixtureModel.model === 'fixture-model' &&
+    fixtureModel.requests === 2,
 )
-check('token fields stay separate', fixtureModel.uncachedInput === 1_500 && fixtureModel.cacheRead === 500 && fixtureModel.cacheWrite === 10 && fixtureModel.output === 280)
-check('one session spans one route', report.sessions.length === 1 && report.sessions[0].routes.join(',') === 'fixture-provider/fixture-model×2')
-check('session title comes from the projection cache', report.sessions[0].title === 'Fixture session')
+check(
+  'token fields stay separate',
+  fixtureModel.uncachedInput === 1_500 &&
+    fixtureModel.cacheRead === 500 &&
+    fixtureModel.cacheWrite === 10 &&
+    fixtureModel.output === 280,
+)
+check(
+  'one session spans one route',
+  report.sessions.length === 1 &&
+    report.sessions[0].routes.join(',') === 'fixture-provider/fixture-model×2',
+)
+check(
+  'session title comes from the projection cache',
+  report.sessions[0].title === 'Fixture session',
+)
 check('session cwd comes from the header event', report.sessions[0].cwd === '/fake/workspace')
 
 const read = report.tools.find((tool) => tool.name === 'read')
 const bash = report.tools.find((tool) => tool.name === 'bash')
 const grep = report.tools.find((tool) => tool.name === 'grep')
-check('completed call is counted', read !== undefined && read.calls === 1 && read.completed === 1 && read.errors === 0)
-check('error result is counted with its code', bash !== undefined && bash.errors === 1 && bash.completed === 1 && bash.errorCodes[0][0] === 'E_BASH')
-check('call without a result is unfinished', grep !== undefined && grep.unfinished === 1 && grep.completed === 0)
+check(
+  'completed call is counted',
+  read !== undefined && read.calls === 1 && read.completed === 1 && read.errors === 0,
+)
+check(
+  'error result is counted with its code',
+  bash !== undefined &&
+    bash.errors === 1 &&
+    bash.completed === 1 &&
+    bash.errorCodes[0][0] === 'E_BASH',
+)
+check(
+  'call without a result is unfinished',
+  grep !== undefined && grep.unfinished === 1 && grep.completed === 0,
+)
 check(
   'tool totals are internally consistent',
-  report.tools.every((tool) => tool.completed + tool.unfinished === tool.calls && tool.errors <= tool.completed),
+  report.tools.every(
+    (tool) => tool.completed + tool.unfinished === tool.calls && tool.errors <= tool.completed,
+  ),
 )
 const text = formatReport(report)
 check(
@@ -113,12 +152,18 @@ if (process.argv.includes('--real')) {
     console.log(`skip - no sessions root at ${realRoot}`)
   } else {
     const started = Date.now()
-    const real = await collectAudit(realRoot, joinPath(home, 'storages', 'session_projcache', 'sessions'), {
-      days: 2,
-      sessionLimit: 5,
-      now: Date.now(),
-    })
-    console.log(`real logs: scanned ${real.scannedSessionFiles} files in ${Date.now() - started}ms; ${real.sessionsWithUsage} sessions with usage`)
+    const real = await collectAudit(
+      realRoot,
+      joinPath(home, 'storages', 'session_projcache', 'sessions'),
+      {
+        days: 2,
+        sessionLimit: 5,
+        now: Date.now(),
+      },
+    )
+    console.log(
+      `real logs: scanned ${real.scannedSessionFiles} files in ${Date.now() - started}ms; ${real.sessionsWithUsage} sessions with usage`,
+    )
     console.log(`real logs: ${real.models.length} routes, ${real.tools.length} tools`)
   }
 }

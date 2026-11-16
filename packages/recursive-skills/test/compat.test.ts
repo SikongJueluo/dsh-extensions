@@ -19,10 +19,11 @@ describe('parser compatibility with the stock provider', () => {
     const harness = await createHarness()
     try {
       const category = join(harness.skillsRoot, 'anthropic')
-      await writeSkill(join(category, 'plain'), [
-        'name: plain-skill',
-        'description: Plain description',
-      ], '\n# Plain\n\nBody text.\n')
+      await writeSkill(
+        join(category, 'plain'),
+        ['name: plain-skill', 'description: Plain description'],
+        '\n# Plain\n\nBody text.\n',
+      )
       await writeSkill(join(category, 'routing'), [
         'name: routing-skill',
         'description: "Quoted: description"',
@@ -45,7 +46,11 @@ describe('parser compatibility with the stock provider', () => {
       const stock = new FileSystemSkillProvider(
         harness.ctx,
         { signal: new AbortController().signal, invalidate() {} },
-        { includeDefaultRoots: false, customSkillDirs: [category], watch: false } satisfies StockConfig,
+        {
+          includeDefaultRoots: false,
+          customSkillDirs: [category],
+          watch: false,
+        } satisfies StockConfig,
       )
       const recursive = new RecursiveSkillProvider(
         harness.ctx,

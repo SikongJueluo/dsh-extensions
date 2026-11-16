@@ -68,7 +68,11 @@ class GlmSource implements QuotaSource {
   private readonly providersConfig: Record<string, ProviderMonitorSettings>
   private readonly quotaCacheMs: number
 
-  constructor(config: PlanUsageConfig, logger: Context['logger'], getKey?: (provider: string) => string | undefined) {
+  constructor(
+    config: PlanUsageConfig,
+    logger: Context['logger'],
+    getKey?: (provider: string) => string | undefined,
+  ) {
     this.routes = monitoredProviders(config.providers)
     this.providersConfig = config.providers
     this.quotaCacheMs = config.quotaCacheMs
@@ -86,7 +90,10 @@ class GlmSource implements QuotaSource {
   get(route: string, options: { force?: boolean }): Promise<QuotaSnapshot | undefined> {
     const monitorConfig = resolveMonitor(route, this.providersConfig)
     if (monitorConfig === undefined) return Promise.resolve(undefined)
-    return this.monitor.get(route, monitorConfig, { maxAgeMs: this.quotaCacheMs, force: options.force })
+    return this.monitor.get(route, monitorConfig, {
+      maxAgeMs: this.quotaCacheMs,
+      force: options.force,
+    })
   }
 }
 
@@ -149,7 +156,8 @@ export class PlanUsageService extends Service {
   providers(): string[] {
     const known = new Set(this.sources.flatMap((source) => source.routes))
     const live = this.liveRoutes
-    const routes = live === undefined ? [...known] : [...known].filter((route) => live.includes(route))
+    const routes =
+      live === undefined ? [...known] : [...known].filter((route) => live.includes(route))
     return routes.sort()
   }
 
@@ -169,7 +177,10 @@ export class PlanUsageService extends Service {
    * failed. Cached per route (shared by waiting recovery agents and the
    * Settings page); `force` bypasses the cache. Never throws.
    */
-  async get(provider: string, options: PlanUsageGetOptions = {}): Promise<QuotaSnapshot | undefined> {
+  async get(
+    provider: string,
+    options: PlanUsageGetOptions = {},
+  ): Promise<QuotaSnapshot | undefined> {
     const source = this.sourceOf(provider)
     if (source === undefined) return undefined
     const maxAgeMs = options.maxAgeMs ?? 60_000
@@ -182,7 +193,8 @@ export class PlanUsageService extends Service {
       const pending = this.inflight.get(key)
       if (pending !== undefined) return pending
     }
-    const attempt = source.get(provider, { force: options.force })
+    const attempt = source
+      .get(provider, { force: options.force })
       .then((snapshot) => {
         if (snapshot !== undefined) this.cache.set(key, { snapshot, fetchedAt: snapshot.fetchedAt })
         return snapshot

@@ -177,7 +177,8 @@ function parseLog(text: string): ParsedLog {
     if (event.type === 'assistant/message') {
       const usage = data?.usage
       const source = data?.message?.source
-      if (usage === undefined || source?.provider === undefined || source.model === undefined) continue
+      if (usage === undefined || source?.provider === undefined || source.model === undefined)
+        continue
       samples.push({
         time: event.time,
         provider: source.provider,
@@ -194,7 +195,13 @@ function parseLog(text: string): ParsedLog {
       const name = data?.name
       const callId = data?.callId
       if (typeof name !== 'string' || typeof callId !== 'string') continue
-      const sample: ToolSample = { name, callTime: event.time, resultTime: undefined, error: false, errorCode: undefined }
+      const sample: ToolSample = {
+        name,
+        callTime: event.time,
+        resultTime: undefined,
+        error: false,
+        errorCode: undefined,
+      }
       toolSamples.push(sample)
       openCalls.set(callId, sample)
       continue
@@ -286,7 +293,9 @@ export async function collectAudit(
       const sessionDir = join(sessionsRoot, workspaceDir, sessionId)
       let files: string[] = []
       try {
-        files = (await readdir(sessionDir)).filter((name) => /^session\.v\d+\.jsonl\.zstd$/.test(name))
+        files = (await readdir(sessionDir)).filter((name) =>
+          /^session\.v\d+\.jsonl\.zstd$/.test(name),
+        )
       } catch {
         continue
       }
@@ -409,9 +418,11 @@ export async function collectAudit(
     }
   }
   // Titles resolved concurrently after the scan; failures keep `undefined`.
-  await Promise.all(sessionList.map(async (session) => {
-    session.title = await readTitle(projcacheDir, session.id)
-  }))
+  await Promise.all(
+    sessionList.map(async (session) => {
+      session.title = await readTitle(projcacheDir, session.id)
+    }),
+  )
 
   return {
     windowDays: options.days,
@@ -453,7 +464,9 @@ function formatDuration(ms: number): string {
 export function formatReport(report: AuditReport): string {
   const window = report.windowDays === undefined ? '全部历史' : `近 ${report.windowDays} 天`
   const lines: string[] = []
-  lines.push(`context-audit：扫描 ${report.scannedSessionFiles} 个会话日志（${window}），${report.sessionsWithUsage} 个会话有用量。`)
+  lines.push(
+    `context-audit：扫描 ${report.scannedSessionFiles} 个会话日志（${window}），${report.sessionsWithUsage} 个会话有用量。`,
+  )
   lines.push('')
 
   if (report.models.length > 0) {
@@ -476,7 +489,8 @@ export function formatReport(report: AuditReport): string {
     lines.push('| 工具 | 调用 | 失败 | 失败率 | 平均耗时 | 最长 | 会话数 |')
     lines.push('|---|---:|---:|---:|---:|---:|---:|')
     for (const tool of report.tools) {
-      const fail = tool.completed === 0 ? '—' : `${((tool.errors / tool.completed) * 100).toFixed(1)}%`
+      const fail =
+        tool.completed === 0 ? '—' : `${((tool.errors / tool.completed) * 100).toFixed(1)}%`
       const avg = tool.completed === 0 ? '—' : formatDuration(tool.totalDurationMs / tool.completed)
       lines.push(
         `| ${tool.name} | ${tool.calls} | ${tool.errors} | ${fail} | ${avg} | ${tool.maxDurationMs > 0 ? formatDuration(tool.maxDurationMs) : '—'} | ${tool.sessions} |`,
@@ -487,7 +501,9 @@ export function formatReport(report: AuditReport): string {
       lines.push('')
       lines.push('错误码分布：')
       for (const tool of withCodes.slice(0, 8)) {
-        lines.push(`- ${tool.name}: ${tool.errorCodes.map(([code, n]) => `${code}×${n}`).join('、')}`)
+        lines.push(
+          `- ${tool.name}: ${tool.errorCodes.map(([code, n]) => `${code}×${n}`).join('、')}`,
+        )
       }
     }
     lines.push('')
@@ -499,7 +515,8 @@ export function formatReport(report: AuditReport): string {
     lines.push('| 会话 | 时间范围 | 路由 | 请求 | uncached | 命中率 |')
     lines.push('|---|---|---|---:|---:|---:|')
     for (const session of report.sessions) {
-      const title = session.title === undefined ? session.id.slice(0, 12) : session.title.replace(/\|/g, '丨')
+      const title =
+        session.title === undefined ? session.id.slice(0, 12) : session.title.replace(/\|/g, '丨')
       lines.push(
         `| ${title} | ${formatClock(session.first)}→${formatClock(session.last)} | ${session.routes.slice(0, 2).join(' + ')}${session.routes.length > 2 ? ' +…' : ''} | ${session.requests} | ${formatTokens(session.uncachedInput)} | ${hitRate(session.cacheRead, session.uncachedInput)} |`,
       )

@@ -25,51 +25,59 @@ const SIGNAL_TOOL_DESCRIPTION = [
   'A plain reply never submits a verdict.',
 ].join(' ')
 
-const SUMMARY_PARAMETER_DESCRIPTION = 'The counterpart-facing summary. deliver: what changed, how it was verified (which tests/builds ran and their outcomes), and evidence pointers. rework: the blocking findings only, each with concrete evidence or reproduction steps. needs_user: the exact decision you need, with the options. Never paste full logs — reference them.'
+const SUMMARY_PARAMETER_DESCRIPTION =
+  'The counterpart-facing summary. deliver: what changed, how it was verified (which tests/builds ran and their outcomes), and evidence pointers. rework: the blocking findings only, each with concrete evidence or reproduction steps. needs_user: the exact decision you need, with the options. Never paste full logs — reference them.'
 
 /** Install the tool against the trigger service. Returns the disposer. */
 export function registerSignalTool(ctx: Context, service: TriggerService): () => void {
-  return ctx.tools.register(defineTool({
-    name: TOOL_NAME,
-    description: SIGNAL_TOOL_DESCRIPTION,
-    parameters: {
-      runId: {
-        type: 'string',
-        required: true,
-        description: 'The runId from the [triggers] instructions delivered to you.',
-      },
-      outcome: {
-        type: 'string',
-        enum: [...SIGNAL_OUTCOMES],
-        required: true,
-        description: 'deliver (executor: round complete), rework (reviewer: blocking findings), pass (reviewer: accepted), needs_user (either: a user decision is required).',
-      },
-      summary: {
-        type: 'string',
-        required: true,
-        description: SUMMARY_PARAMETER_DESCRIPTION,
-      },
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          kind: { type: 'string', required: true, const: 'accepted' },
-          note: { type: 'string', required: true },
+  return ctx.tools.register(
+    defineTool({
+      name: TOOL_NAME,
+      description: SIGNAL_TOOL_DESCRIPTION,
+      parameters: {
+        runId: {
+          type: 'string',
+          required: true,
+          description: 'The runId from the [triggers] instructions delivered to you.',
         },
-      } as const,
-      render: (_args, value) => [{ type: 'text', text: value.note }],
-    },
-    isConcurrencySafe: () => false,
-    async execute(args, exec) {
-      const agent = exec.agent
-      if (agent === undefined) throw new Error('trigger_signal 需要在会话中调用（缺少执行代理身份）。')
-      const outcome = await service.signal(String(agent.id), args as { runId: unknown, outcome: unknown, summary: unknown })
-      if (!outcome.ok) throw new Error(outcome.error)
-      // The signal is this turn's last word: end it after the result lands.
-      exec.concludeTurn()
-      return { kind: 'accepted' as const, note: outcome.note }
-    },
-  }))
+        outcome: {
+          type: 'string',
+          enum: [...SIGNAL_OUTCOMES],
+          required: true,
+          description:
+            'deliver (executor: round complete), rework (reviewer: blocking findings), pass (reviewer: accepted), needs_user (either: a user decision is required).',
+        },
+        summary: {
+          type: 'string',
+          required: true,
+          description: SUMMARY_PARAMETER_DESCRIPTION,
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            kind: { type: 'string', required: true, const: 'accepted' },
+            note: { type: 'string', required: true },
+          },
+        } as const,
+        render: (_args, value) => [{ type: 'text', text: value.note }],
+      },
+      isConcurrencySafe: () => false,
+      async execute(args, exec) {
+        const agent = exec.agent
+        if (agent === undefined)
+          throw new Error('trigger_signal 需要在会话中调用（缺少执行代理身份）。')
+        const outcome = await service.signal(
+          String(agent.id),
+          args as { runId: unknown; outcome: unknown; summary: unknown },
+        )
+        if (!outcome.ok) throw new Error(outcome.error)
+        // The signal is this turn's last word: end it after the result lands.
+        exec.concludeTurn()
+        return { kind: 'accepted' as const, note: outcome.note }
+      },
+    }),
+  )
 }

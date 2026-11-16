@@ -44,7 +44,12 @@ export const defaultExecFile: ExecFile = (file, args, options) =>
     const child = execFile(
       file,
       [...args],
-      { cwd: options.cwd, timeout: options.timeoutMs, signal: options.signal, maxBuffer: 1024 * 64 },
+      {
+        cwd: options.cwd,
+        timeout: options.timeoutMs,
+        signal: options.signal,
+        maxBuffer: 1024 * 64,
+      },
       (error, stdout, stderr) => {
         if (error !== null) {
           reject(Object.assign(error, { stderr: String(stderr ?? '') }))
@@ -64,7 +69,15 @@ const JJ_GLOBAL = ['--ignore-working-copy', '--no-pager'] as const
  * root commit).
  */
 export function workingLayerArgv(): readonly string[] {
-  return [...JJ_GLOBAL, 'log', '-r', '@', '--no-graph', '-T', 'change_id ++ "\\n" ++ parents.map(|p| p.change_id()).join(" ")']
+  return [
+    ...JJ_GLOBAL,
+    'log',
+    '-r',
+    '@',
+    '--no-graph',
+    '-T',
+    'change_id ++ "\\n" ++ parents.map(|p| p.change_id()).join(" ")',
+  ]
 }
 
 /** Fixed argv for the workspace root (absolute, subdirectory-proof). */
@@ -133,9 +146,11 @@ export async function readJjFacts(
         detail: `empty or malformed jj output (first="${first.stdout.trim().slice(0, 120)}", recheck="${recheck.stdout.trim().slice(0, 120)}", workspaceRoot="${workspaceRoot}")`,
       }
     }
-    if (layer.changeId !== layerAgain.changeId
-      || layer.parentChangeIds.length !== layerAgain.parentChangeIds.length
-      || layer.parentChangeIds.some((id, i) => id !== layerAgain.parentChangeIds[i])) {
+    if (
+      layer.changeId !== layerAgain.changeId ||
+      layer.parentChangeIds.length !== layerAgain.parentChangeIds.length ||
+      layer.parentChangeIds.some((id, i) => id !== layerAgain.parentChangeIds[i])
+    ) {
       return {
         ok: false,
         reason: 'drift',

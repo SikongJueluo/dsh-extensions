@@ -108,14 +108,26 @@ describe('role and phase validation', () => {
   })
 
   it('executor cannot rework or pass; parent cannot deliver', () => {
-    expect(submitSignal(freshRun(), EXECUTOR, 'pass', 'x', 1, 1100)).toMatchObject({ ok: false, code: 'outcome-not-allowed' })
-    expect(submitSignal(freshRun(), PARENT, 'deliver', 'x', 1, 1100)).toMatchObject({ ok: false, code: 'outcome-not-allowed' })
+    expect(submitSignal(freshRun(), EXECUTOR, 'pass', 'x', 1, 1100)).toMatchObject({
+      ok: false,
+      code: 'outcome-not-allowed',
+    })
+    expect(submitSignal(freshRun(), PARENT, 'deliver', 'x', 1, 1100)).toMatchObject({
+      ok: false,
+      code: 'outcome-not-allowed',
+    })
   })
 
   it('rejects the right outcome in the wrong phase', () => {
     const { run } = deliver(freshRun(), 3, 1200)
-    expect(submitSignal(run, EXECUTOR, 'deliver', 'again', 5, 1300)).toMatchObject({ ok: false, code: 'wrong-phase' })
-    expect(submitSignal(freshRun(), PARENT, 'rework', 'early', 1, 1100)).toMatchObject({ ok: false, code: 'wrong-phase' })
+    expect(submitSignal(run, EXECUTOR, 'deliver', 'again', 5, 1300)).toMatchObject({
+      ok: false,
+      code: 'wrong-phase',
+    })
+    expect(submitSignal(freshRun(), PARENT, 'rework', 'early', 1, 1100)).toMatchObject({
+      ok: false,
+      code: 'wrong-phase',
+    })
   })
 })
 
@@ -155,7 +167,10 @@ describe('session-scoped signal ownership', () => {
   it('legacy pending signals without a session still commit from either bound side', () => {
     const accepted = submitSignal(freshRun(), EXECUTOR, 'deliver', 'done', 1, 1100)
     if (!accepted.ok) throw new Error('rejected')
-    const legacy = { ...accepted.run, pendingSignal: { ...accepted.run.pendingSignal!, session: undefined } }
+    const legacy = {
+      ...accepted.run,
+      pendingSignal: { ...accepted.run.pendingSignal!, session: undefined },
+    }
     expect(commitTurnEnd(legacy, PARENT, 1, 'completed', 1200).kind).toBe('advance')
   })
 })
@@ -183,8 +198,14 @@ describe('duplicate and late signals', () => {
   it('an identical repeat is a no-op; a different one is refused', () => {
     const first = submitSignal(freshRun(), EXECUTOR, 'deliver', 'done', 2, 1100)
     if (!first.ok) throw new Error('rejected')
-    expect(submitSignal(first.run, EXECUTOR, 'deliver', 'done', 2, 1150)).toMatchObject({ ok: true, duplicate: true })
-    expect(submitSignal(first.run, EXECUTOR, 'needs_user', 'wait', 2, 1150)).toMatchObject({ ok: false, code: 'turn-already-signaled' })
+    expect(submitSignal(first.run, EXECUTOR, 'deliver', 'done', 2, 1150)).toMatchObject({
+      ok: true,
+      duplicate: true,
+    })
+    expect(submitSignal(first.run, EXECUTOR, 'needs_user', 'wait', 2, 1150)).toMatchObject({
+      ok: false,
+      code: 'turn-already-signaled',
+    })
   })
 
   it('terminal and paused runs refuse every signal', () => {
@@ -193,10 +214,16 @@ describe('duplicate and late signals', () => {
     if (!passed.ok) throw new Error('rejected')
     const ended = commitTurnEnd(passed.run, PARENT, 7, 'completed', 1400)
     if (ended.kind !== 'advance') throw new Error(ended.kind)
-    expect(submitSignal(ended.run, EXECUTOR, 'deliver', 'late', 9, 1500)).toMatchObject({ ok: false, code: 'run-not-active' })
+    expect(submitSignal(ended.run, EXECUTOR, 'deliver', 'late', 9, 1500)).toMatchObject({
+      ok: false,
+      code: 'run-not-active',
+    })
     const paused = pauseRun(freshRun(), 1500)
     if (!paused.ok) throw new Error('pause failed')
-    expect(submitSignal(paused.run, EXECUTOR, 'deliver', 'late', 9, 1500)).toMatchObject({ ok: false, code: 'run-not-active' })
+    expect(submitSignal(paused.run, EXECUTOR, 'deliver', 'late', 9, 1500)).toMatchObject({
+      ok: false,
+      code: 'run-not-active',
+    })
   })
 })
 
@@ -279,7 +306,11 @@ describe('needs_user and manual control', () => {
   })
 
   it('resume clears the pause provenance so stale notes do not linger', () => {
-    const parked: RunRecord = { ...freshRun(), status: 'paused-error', endNote: '投递失败（review → parent）：boom' }
+    const parked: RunRecord = {
+      ...freshRun(),
+      status: 'paused-error',
+      endNote: '投递失败（review → parent）：boom',
+    }
     const resumed = resumeRun(parked, {}, 1700)
     if (!resumed.ok) throw new Error('resume failed')
     expect(resumed.run.status).toBe('active')
@@ -305,18 +336,22 @@ describe('needs_user and manual control', () => {
 
 describe('templates', () => {
   it('substitutes known slots and leaves unknown ones visible', () => {
-    expect(renderTemplate('第 {{round}}/{{maxRounds}} 轮：{{summary}} {{typo}}', {
-      round: '2',
-      maxRounds: '5',
-      summary: '通过',
-    })).toBe('第 2/5 轮：通过 {{typo}}')
+    expect(
+      renderTemplate('第 {{round}}/{{maxRounds}} 轮：{{summary}} {{typo}}', {
+        round: '2',
+        maxRounds: '5',
+        summary: '通过',
+      }),
+    ).toBe('第 2/5 轮：通过 {{typo}}')
   })
 })
 
 describe('turn-end auto-delivery', () => {
   it('snapshots the binding autoDeliver flag at run start', () => {
     expect(startRun(binding(), BODIES, '任务', 'run-1', 1).autoDeliver).toBeUndefined()
-    expect(startRun({ ...binding(), autoDeliver: true }, BODIES, '任务', 'run-1', 1).autoDeliver).toBe(true)
+    expect(
+      startRun({ ...binding(), autoDeliver: true }, BODIES, '任务', 'run-1', 1).autoDeliver,
+    ).toBe(true)
   })
 
   it('submits a completed executor turn with a non-empty reply as a delivery', () => {
@@ -327,7 +362,10 @@ describe('turn-end auto-delivery', () => {
     expect(outcome.run.phase).toBe('awaiting-review')
     expect(outcome.run.pendingSignal).toBeUndefined()
     expect(outcome.intents).toEqual([{ runId: 'run-1', round: 1, to: PARENT, kind: 'review' }])
-    expect(outcome.run.history.at(-2)).toMatchObject({ kind: 'signal', detail: expect.stringContaining('auto') })
+    expect(outcome.run.history.at(-2)).toMatchObject({
+      kind: 'signal',
+      detail: expect.stringContaining('auto'),
+    })
   })
 
   it('refuses anything but a completed executor delivery turn', () => {
@@ -361,7 +399,11 @@ describe('bounded nudges', () => {
   })
 
   it('mints one review nudge per round for the reviewer side, phase-gated', () => {
-    const { run } = deliver(startRun({ ...binding(), autoDeliver: true }, BODIES, '任务', 'run-1', 1000), 3, 1100)
+    const { run } = deliver(
+      startRun({ ...binding(), autoDeliver: true }, BODIES, '任务', 'run-1', 1000),
+      3,
+      1100,
+    )
     expect(dueNudge({ ...run, phase: 'awaiting-delivery' }, 'review', 1200).ok).toBe(false)
     const nudged = dueNudge(run, 'review', 1200)
     expect(nudged).toMatchObject({ ok: true })

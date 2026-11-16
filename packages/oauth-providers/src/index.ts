@@ -59,7 +59,9 @@ export interface Config {
 // into the schema generics, and an annotation would fight the inference the
 // loader validates `Config` against.
 export const Config = Schema.object({
-  chatgpt: ChatGptConfig.volatile().description('ChatGPT provider configuration (the Settings page edits this section live).'),
+  chatgpt: ChatGptConfig.volatile().description(
+    'ChatGPT provider configuration (the Settings page edits this section live).',
+  ),
 })
 
 export function apply(ctx: Context, config: Config): void {

@@ -26,7 +26,14 @@ export { readSettings, integratorConfigured } from './settings.js'
 export { makeResearchTool, createToolHost } from './tool.js'
 export { runResearch } from './pipeline.js'
 export { buildEvidence, buildDigest, urlDedupKey } from './evidence.js'
-export { parseIntegration, extractJsonObject, planQueries, runIntegration, MAX_QUERIES, PROMPT_VERSION } from './integrate.js'
+export {
+  parseIntegration,
+  extractJsonObject,
+  planQueries,
+  runIntegration,
+  MAX_QUERIES,
+  PROMPT_VERSION,
+} from './integrate.js'
 export { createLlmPort } from './llm.js'
 export type { LlmPort, LlmCall, LlmCallOutcome, LlmUsage } from './llm.js'
 export { buildAdapters, createFakeAdapter } from './providers.js'
@@ -69,7 +76,7 @@ export function apply(ctx: Context, config: RowConfig): void {
     // Placed right after the stock web tools block (TOOL_WEB_SEARCH 2000 /
     // TOOL_WEB_FETCH 2100); a raw number is fine for a plugin-owned position.
     order: 2150,
-    text: ({ scope }) => ctx.tools.get(toolName, scope) === undefined ? '' : SECTION_TEXT,
+    text: ({ scope }) => (ctx.tools.get(toolName, scope) === undefined ? '' : SECTION_TEXT),
   })
   ctx.tools.register(makeResearchTool(host, { name: toolName, timeoutMs: config.timeoutMs }))
 }

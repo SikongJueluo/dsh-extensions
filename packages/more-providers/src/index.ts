@@ -17,7 +17,13 @@ import { buildAdapter, buildProviders } from './providers.js'
 import { PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
 
 export { PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
-export { ConfigError, defaultSecretDir, loadConfig, resolveConfig, resolveConfigPath } from './config.js'
+export {
+  ConfigError,
+  defaultSecretDir,
+  loadConfig,
+  resolveConfig,
+  resolveConfigPath,
+} from './config.js'
 export type { ModelConfig, ProviderKind, ResolvedProvider } from './config.js'
 export { ProviderKeys, readKey } from './keys.js'
 export type { KeySource } from './keys.js'
@@ -38,8 +44,9 @@ export interface Config {
 }
 
 export const Config = Schema.object({
-  configFile: Schema.string()
-    .description('YAML provider config path; empty uses $DSH_HOME/more-providers.yaml.'),
+  configFile: Schema.string().description(
+    'YAML provider config path; empty uses $DSH_HOME/more-providers.yaml.',
+  ),
 })
 
 export const name = PLUGIN_NAME

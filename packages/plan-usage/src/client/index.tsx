@@ -55,7 +55,8 @@ const en = {
 const zh = {
   nav: 'Coding 套餐用量',
   title: 'Coding 套餐用量',
-  intro: '所监控各服务商 Coding 套餐的配额窗口与重置倒计时。搭配 dsh-auto-continue 时，限额会话会在重置点自动续跑。',
+  intro:
+    '所监控各服务商 Coding 套餐的配额窗口与重置倒计时。搭配 dsh-auto-continue 时，限额会话会在重置点自动续跑。',
   refresh: '刷新',
   refreshing: '刷新中…',
   fiveHour: '5 小时窗口',
@@ -164,10 +165,12 @@ function callQuota(refresh: boolean): Promise<QuotaResult> {
       method: 'quota',
       payload: { refresh: !!refresh },
     }),
-  }).then((r) => r.json()).then((body: QuotaEnvelope) => {
-    if (body && body.result) return body.result
-    return { ok: false, error: { message: 'unexpected channel response' } }
   })
+    .then((r) => r.json())
+    .then((body: QuotaEnvelope) => {
+      if (body && body.result) return body.result
+      return { ok: false, error: { message: 'unexpected channel response' } }
+    })
 }
 
 interface QuotaEnvelope {
@@ -190,9 +193,7 @@ function windowLabel(t: Translate, base: string, w: QuotaWindow | undefined | nu
 function resetText(t: Translate, w: QuotaWindow, nowTick: number) {
   if (typeof w.resetAt !== 'number') return t('noReset')
   const remaining = w.resetAt - nowTick
-  return remaining > 0
-    ? t('resetsIn', { duration: fmtDuration(remaining) })
-    : t('resetOverdue')
+  return remaining > 0 ? t('resetsIn', { duration: fmtDuration(remaining) }) : t('resetOverdue')
 }
 
 function progressTone(percent: number | null): 'brand' | 'warn' | 'danger' {
@@ -226,7 +227,10 @@ function WindowBar({
     bits.push(resetText(t, w, nowTick))
     meta = bits.join(' · ')
   } else if (typeof w.used === 'number' && typeof w.total === 'number' && w.total > 0) {
-    meta = t('usedOfTotal', { used: fmtCount(w.used), total: fmtCount(w.total) }) + ' · ' + resetText(t, w, nowTick)
+    meta =
+      t('usedOfTotal', { used: fmtCount(w.used), total: fmtCount(w.total) }) +
+      ' · ' +
+      resetText(t, w, nowTick)
   } else {
     const bits: string[] = []
     if (w.unit === 'usd' && typeof w.remaining === 'number') {
@@ -239,7 +243,9 @@ function WindowBar({
   return (
     <div className="dshx:mb-3">
       <div className="dshx:mb-1 dshx:flex dshx:justify-between dshx:gap-3">
-        <span className="dshx:text-sm dshx:font-semibold dshx:leading-[20px] dshx:text-fg">{label}</span>
+        <span className="dshx:text-sm dshx:font-semibold dshx:leading-[20px] dshx:text-fg">
+          {label}
+        </span>
         <span className="dshx:text-xs dshx:leading-[18px] dshx:text-fg-muted">{meta}</span>
       </div>
       <Progress value={percent} tone={progressTone(percent)} label={label} />
@@ -247,21 +253,15 @@ function WindowBar({
   )
 }
 
-function ProviderCard({
-  t,
-  view,
-  nowTick,
-}: {
-  t: Translate
-  view: ProviderView
-  nowTick: number
-}) {
+function ProviderCard({ t, view, nowTick }: { t: Translate; view: ProviderView; nowTick: number }) {
   const snapshot = view.snapshot
 
   return (
     <Card className="dshx:mb-3.5 dshx:p-3.5">
       <div className="dshx:mb-2.5 dshx:flex dshx:items-baseline dshx:gap-2">
-        <h3 className="dshx:text-base dshx:font-semibold dshx:leading-[22px] dshx:text-fg">{view.provider}</h3>
+        <h3 className="dshx:text-base dshx:font-semibold dshx:leading-[22px] dshx:text-fg">
+          {view.provider}
+        </h3>
         {snapshot && snapshot.level ? (
           <Badge variant="outline">{t('level', { level: snapshot.level })}</Badge>
         ) : null}
@@ -289,7 +289,12 @@ function ProviderCard({
             <WindowBar t={t} label={t('monthly')} window={snapshot.monthly} nowTick={nowTick} />
           ) : null}
           {snapshot.monthlyMcp ? (
-            <WindowBar t={t} label={t('monthlyMcp')} window={snapshot.monthlyMcp} nowTick={nowTick} />
+            <WindowBar
+              t={t}
+              label={t('monthlyMcp')}
+              window={snapshot.monthlyMcp}
+              nowTick={nowTick}
+            />
           ) : null}
         </>
       ) : (
@@ -307,22 +312,30 @@ function Section({ operations, t }: { operations: Operations; t: Translate }) {
 
   function load(refresh: boolean) {
     if (refresh) setBusy(true)
-    return operations.quota(refresh).then((result) => {
-      // Same throw-on-missing-envelope semantics as the old code: a missing
-      // `value` rejects into the catch below and keeps the previous views.
-      if (result.ok && aliveRef.current) setViews(result.value!.providers || [])
-      return result
-    }).catch(() => null).then((r) => {
-      if (refresh) setBusy(false)
-      return r
-    })
+    return operations
+      .quota(refresh)
+      .then((result) => {
+        // Same throw-on-missing-envelope semantics as the old code: a missing
+        // `value` rejects into the catch below and keeps the previous views.
+        if (result.ok && aliveRef.current) setViews(result.value!.providers || [])
+        return result
+      })
+      .catch(() => null)
+      .then((r) => {
+        if (refresh) setBusy(false)
+        return r
+      })
   }
 
   useEffect(() => {
     aliveRef.current = true
     load(false)
-    const poll = setInterval(() => { if (aliveRef.current) load(false) }, AUTO_REFRESH_MS)
-    const tick = setInterval(() => { if (aliveRef.current) setNowTick(Date.now()) }, 1000)
+    const poll = setInterval(() => {
+      if (aliveRef.current) load(false)
+    }, AUTO_REFRESH_MS)
+    const tick = setInterval(() => {
+      if (aliveRef.current) setNowTick(Date.now())
+    }, 1000)
     return () => {
       aliveRef.current = false
       clearInterval(poll)
@@ -339,7 +352,14 @@ function Section({ operations, t }: { operations: Operations; t: Translate }) {
       </h2>
       <p className="dshx:mb-4 dshx:text-sm dshx:leading-[20px] dshx:text-fg-muted">{t('intro')}</p>
       <div className="dshx:mb-4">
-        <Button variant="secondary" size="sm" disabled={busy} onClick={() => { load(true) }}>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={busy}
+          onClick={() => {
+            load(true)
+          }}
+        >
           {busy ? t('refreshing') : t('refresh')}
         </Button>
       </div>
@@ -355,13 +375,12 @@ function Section({ operations, t }: { operations: Operations; t: Translate }) {
 }
 
 function apply(ctx: DshClientContext) {
-  ctx.effect(
-    () => ctx.locale.register(LOCALE_NS, { zh, en }),
-    'dsh-plan-usage: locale',
-  )
+  ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'dsh-plan-usage: locale')
   const t = ctx.locale.bind(LOCALE_NS)
   const operations: Operations = {
-    quota(refresh) { return callQuota(refresh) },
+    quota(refresh) {
+      return callQuota(refresh)
+    },
   }
   ctx.slots.inject('settings.section', () => {
     return ctx.slots.register(

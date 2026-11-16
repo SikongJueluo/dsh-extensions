@@ -114,7 +114,10 @@ const WRAPPERS = new Set(['command', 'exec', 'env', 'nohup', 'time', 'nice', 'st
  * undefined for segments with no command at all.
  */
 export function segmentHead(segment: string): string | undefined {
-  let tokens = segment.trim().split(/\s+/).filter((token) => token !== '')
+  let tokens = segment
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token !== '')
   while (tokens.length > 0 && (tokens[0] === '(' || tokens[0] === '!' || tokens[0] === '{')) {
     tokens = tokens.slice(1)
   }

@@ -128,7 +128,9 @@ export class ModelCatalog {
   /** Look up one model's metadata, synthesizing a minimal entry when unknown. */
   resolve(model: string): ModelEntry {
     const found = this.current().find((entry) => entry.id === model)
-    return found ?? { id: model, name: model, reasoning: [], inputModalities: DEFAULT_INPUT_MODALITIES }
+    return (
+      found ?? { id: model, name: model, reasoning: [], inputModalities: DEFAULT_INPUT_MODALITIES }
+    )
   }
 
   /**
@@ -139,10 +141,8 @@ export class ModelCatalog {
    */
   async refresh(headers?: Record<string, string>): Promise<ModelEntry[]> {
     const clientVersion = await this.resolveClientVersion()
-    if (
-      this.live && Date.now() - this.liveAt < this.ttlMs &&
-      this.liveVersion === clientVersion
-    ) return this.live
+    if (this.live && Date.now() - this.liveAt < this.ttlMs && this.liveVersion === clientVersion)
+      return this.live
     if (this.refreshing) return this.refreshing
     this.refreshing = this.fetchLive(headers, clientVersion)
     try {
@@ -166,11 +166,14 @@ export class ModelCatalog {
   private async resolveClientVersion(): Promise<string> {
     const explicit = this.options().clientVersion
     if (explicit) return explicit
-    if (this.versionCache && Date.now() - this.versionCache.at < this.ttlMs) return this.versionCache.value
+    if (this.versionCache && Date.now() - this.versionCache.at < this.ttlMs)
+      return this.versionCache.value
     this.versionFetching ??= (async () => {
       let value = this.versionCache?.value ?? FALLBACK_CLIENT_VERSION
       try {
-        const response = await this.fetch(NPM_CODEX_LATEST_URL, { headers: { accept: 'application/json' } })
+        const response = await this.fetch(NPM_CODEX_LATEST_URL, {
+          headers: { accept: 'application/json' },
+        })
         if (response.ok) {
           const version = ((await response.json()) as { version?: unknown })?.version
           if (typeof version === 'string' && /^\d+\.\d+\.\d+/.test(version)) value = version
@@ -186,7 +189,10 @@ export class ModelCatalog {
     return this.versionFetching
   }
 
-  private async fetchLive(headers: Record<string, string> | undefined, clientVersion: string): Promise<ModelEntry[]> {
+  private async fetchLive(
+    headers: Record<string, string> | undefined,
+    clientVersion: string,
+  ): Promise<ModelEntry[]> {
     const { baseURL } = this.options()
     const url = `${baseURL}/models?client_version=${encodeURIComponent(clientVersion)}`
     let response: Response

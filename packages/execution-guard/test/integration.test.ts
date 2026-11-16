@@ -125,13 +125,23 @@ describe('adapter: mixed native batch (host appends tool/call one at a time)', (
             content: [
               { type: 'tool-call', id: 'c1', name: 'read', arguments: '{"file_path":"a.txt"}' },
               { type: 'tool-call', id: 'c2', name: 'write', arguments: '{"file_path":"b.txt"}' },
-              { type: 'tool-call', id: 'c3', name: 'write', arguments: '{"file_path":3,"content":"x"}' },
+              {
+                type: 'tool-call',
+                id: 'c3',
+                name: 'write',
+                arguments: '{"file_path":3,"content":"x"}',
+              },
             ],
           },
           stream: [],
         },
       },
-      { type: 'tool/call', seq: 5, time: 0, data: { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{"file_path":"a.txt"}' } },
+      {
+        type: 'tool/call',
+        seq: 5,
+        time: 0,
+        data: { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{"file_path":"a.txt"}' },
+      },
     )
   })
 
@@ -139,7 +149,13 @@ describe('adapter: mixed native batch (host appends tool/call one at a time)', (
     const run = wrapPre(fixture, () => {
       nextCalls += 1
     })
-    const decision = await run({ callId: 'c1', name: 'read', arguments: { file_path: 'a.txt' }, agent: fixture.agent, signal: new AbortController().signal })
+    const decision = await run({
+      callId: 'c1',
+      name: 'read',
+      arguments: { file_path: 'a.txt' },
+      agent: fixture.agent,
+      signal: new AbortController().signal,
+    })
     expect(decision).toMatchObject({ kind: 'deny', info: { code: 'INVALID_ARGS' } })
     expect(nextCalls).toBe(0)
     const reason = (decision as { reason: string }).reason
@@ -157,21 +173,31 @@ describe('adapter: mixed native batch (host appends tool/call one at a time)', (
       ['c2', { file_path: 'b.txt' }],
       ['c3', { file_path: 3, content: 'x' }],
     ] as const) {
-      const decision = await run({ callId, name: 'write', arguments: args, agent: fixture.agent, signal: new AbortController().signal })
+      const decision = await run({
+        callId,
+        name: 'write',
+        arguments: args,
+        agent: fixture.agent,
+        signal: new AbortController().signal,
+      })
       expect(decision).toMatchObject({ kind: 'deny' })
     }
     expect(nextCalls).toBe(0)
   })
 })
 
-function wrapPre(fixture: Fixture, onNext: () => void): (exec: Record<string, unknown>) => Promise<unknown> {
+function wrapPre(
+  fixture: Fixture,
+  onNext: () => void,
+): (exec: Record<string, unknown>) => Promise<unknown> {
   const list = fixture.listeners.get('tools/pre-execute') ?? []
   const entry = list.find((item) => item.prepend) ?? list[0]
   if (entry === undefined) throw new Error('no pre-execute listener registered')
-  return async (exec) => entry.fn(exec, async () => {
-    onNext()
-    return { kind: 'allow' }
-  })
+  return async (exec) =>
+    entry.fn(exec, async () => {
+      onNext()
+      return { kind: 'allow' }
+    })
 }
 
 describe('adapter: legal batch and degenerate cases', () => {
@@ -191,7 +217,12 @@ describe('adapter: legal batch and degenerate cases', () => {
             role: 'assistant',
             content: [
               { type: 'tool-call', id: 'c1', name: 'read', arguments: '{"file_path":"a"}' },
-              { type: 'tool-call', id: 'c2', name: 'write', arguments: '{"file_path":"b","content":"x"}' },
+              {
+                type: 'tool-call',
+                id: 'c2',
+                name: 'write',
+                arguments: '{"file_path":"b","content":"x"}',
+              },
             ],
           },
           stream: [],
@@ -202,7 +233,13 @@ describe('adapter: legal batch and degenerate cases', () => {
     const run = wrapPre(fixture, () => {
       passed += 1
     })
-    const decision = await run({ callId: 'c1', name: 'read', arguments: { file_path: 'a' }, agent: fixture.agent, signal: new AbortController().signal })
+    const decision = await run({
+      callId: 'c1',
+      name: 'read',
+      arguments: { file_path: 'a' },
+      agent: fixture.agent,
+      signal: new AbortController().signal,
+    })
     expect(decision).toEqual({ kind: 'allow' })
     expect(passed).toBe(1)
   })
@@ -215,7 +252,13 @@ describe('adapter: legal batch and degenerate cases', () => {
     const run = wrapPre(fixture, () => {
       passed += 1
     })
-    const decision = await run({ callId: 'c1', name: 'write', arguments: { file_path: 'b' }, agent: fixture.agent, signal: new AbortController().signal })
+    const decision = await run({
+      callId: 'c1',
+      name: 'write',
+      arguments: { file_path: 'b' },
+      agent: fixture.agent,
+      signal: new AbortController().signal,
+    })
     expect(decision).toMatchObject({ kind: 'deny' })
     expect(passed).toBe(0)
   })
@@ -279,7 +322,13 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
     content: [],
   }
 
-  function pushStep(fixture: Fixture, callId: string, args: string, step: number, seq: number): void {
+  function pushStep(
+    fixture: Fixture,
+    callId: string,
+    args: string,
+    step: number,
+    seq: number,
+  ): void {
     fixture.events.push(
       { type: 'step/start', seq, time: 0, data: { turn: step, step: 1 } },
       {
@@ -289,14 +338,19 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
         data: {
           turn: step,
           step: 1,
-          message: { role: 'assistant', content: [{ type: 'tool-call', id: callId, name: 'write', arguments: args }] },
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool-call', id: callId, name: 'write', arguments: args }],
+          },
           stream: [],
         },
       },
     )
   }
 
-  function resultListener(fixture: Fixture): (exec: Record<string, unknown>, result: unknown) => void {
+  function resultListener(
+    fixture: Fixture,
+  ): (exec: Record<string, unknown>, result: unknown) => void {
     const list = fixture.listeners.get('tools/result') ?? []
     const entry = list[0]
     if (entry === undefined) throw new Error('no tools/result listener registered')
@@ -307,8 +361,9 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
 
   /** Notices delivered the order-safe way: through `agent.inject()`. */
   function hints(fixture: Fixture): { kind?: string; form?: string }[] {
-    return fixture.injected
-      .map((message) => (message as { source?: { kind?: string; form?: string } }).source ?? {})
+    return fixture.injected.map(
+      (message) => (message as { source?: { kind?: string; form?: string } }).source ?? {},
+    )
   }
 
   /** Notices written straight onto the session surface (must stay empty). */
@@ -346,17 +401,31 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
     const onResult = resultListener(fixture)
 
     // First occurrence: deny + final invalid -> count 1, NO hint yet.
-    const first = await pre({ callId: 'c2', name: 'write', arguments: { file_path: 'b' }, agent: fixture.agent, signal: new AbortController().signal })
+    const first = await pre({
+      callId: 'c2',
+      name: 'write',
+      arguments: { file_path: 'b' },
+      agent: fixture.agent,
+      signal: new AbortController().signal,
+    })
     expect(first).toMatchObject({ kind: 'deny' })
     onResult({ callId: 'c2', name: 'write', arguments: {}, agent: fixture.agent }, errorResult)
     expect(hints(fixture)).toEqual([])
 
     // Second same-shape occurrence in a later step: count 2 -> hint notice
     // appended to the session with the standard execution-guard source.
-    const second = await pre({ callId: 'c2', name: 'write', arguments: { file_path: 'z' }, agent: fixture.agent, signal: new AbortController().signal })
+    const second = await pre({
+      callId: 'c2',
+      name: 'write',
+      arguments: { file_path: 'z' },
+      agent: fixture.agent,
+      signal: new AbortController().signal,
+    })
     expect(second).toMatchObject({ kind: 'deny' })
     onResult({ callId: 'c2', name: 'write', arguments: {}, agent: fixture.agent }, errorResult)
-    expect(hints(fixture).some((source) => source.kind === 'execution-guard' && source.form === 'hint')).toBe(true)
+    expect(
+      hints(fixture).some((source) => source.kind === 'execution-guard' && source.form === 'hint'),
+    ).toBe(true)
     // ...and never as a bare surface append: the observer fires per call
     // inside the batch, where a surface user/message would split a parallel
     // batch's tool-call/result pairing (HTTP 400 on OpenAI-compatible endpoints).
@@ -364,7 +433,13 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
 
     // Valid sibling denied by the batch-mate: final INVALID_ARGS but no
     // own-argument fault — counted never, hinted never.
-    const valid = await pre({ callId: 'c1', name: 'read', arguments: { file_path: 'a' }, agent: fixture.agent, signal: new AbortController().signal })
+    const valid = await pre({
+      callId: 'c1',
+      name: 'read',
+      arguments: { file_path: 'a' },
+      agent: fixture.agent,
+      signal: new AbortController().signal,
+    })
     expect(valid).toMatchObject({ kind: 'deny' })
     const before = hints(fixture).length
     onResult({ callId: 'c1', name: 'read', arguments: {}, agent: fixture.agent }, errorResult)
@@ -383,15 +458,29 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
       content: [],
     }
 
-    await pre({ callId: 'c2', name: 'write', arguments: { file_path: 'b' }, agent: fixture.agent, signal: new AbortController().signal })
+    await pre({
+      callId: 'c2',
+      name: 'write',
+      arguments: { file_path: 'b' },
+      agent: fixture.agent,
+      signal: new AbortController().signal,
+    })
     onResult({ callId: 'c2', name: 'write', arguments: {}, agent: fixture.agent }, errorResult)
     // A successful write settles as ABORTED after cancellation: no reset.
     onResult({ callId: 'ok1', name: 'write', arguments: {}, agent: fixture.agent }, aborted)
     // Therefore the next same-shape invalid is the SECOND -> hint.
     pushStep(fixture, 'c3', '{"file_path":"q"}', 2, 5)
-    await pre({ callId: 'c3', name: 'write', arguments: { file_path: 'q' }, agent: fixture.agent, signal: new AbortController().signal })
+    await pre({
+      callId: 'c3',
+      name: 'write',
+      arguments: { file_path: 'q' },
+      agent: fixture.agent,
+      signal: new AbortController().signal,
+    })
     onResult({ callId: 'c3', name: 'write', arguments: {}, agent: fixture.agent }, errorResult)
-    expect(hints(fixture).some((source) => source.kind === 'execution-guard' && source.form === 'hint')).toBe(true)
+    expect(
+      hints(fixture).some((source) => source.kind === 'execution-guard' && source.form === 'hint'),
+    ).toBe(true)
   })
 
   it('host-final INVALID_ARGS outcomes (no preflight deny) count via message-line fingerprints', async () => {
@@ -400,12 +489,17 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
     const onResult = resultListener(fixture)
     const hostInvalid = {
       isError: true as const,
-      error: { message: 'arguments.file_path: expected string, got number', info: { name: 'registry', code: 'INVALID_ARGS' } },
+      error: {
+        message: 'arguments.file_path: expected string, got number',
+        info: { name: 'registry', code: 'INVALID_ARGS' },
+      },
       content: [],
     }
     onResult({ callId: 'h1', name: 'write', arguments: {}, agent: fixture.agent }, hostInvalid)
     expect(hints(fixture)).toEqual([])
     onResult({ callId: 'h2', name: 'write', arguments: {}, agent: fixture.agent }, hostInvalid)
-    expect(hints(fixture).some((source) => source.kind === 'execution-guard' && source.form === 'hint')).toBe(true)
+    expect(
+      hints(fixture).some((source) => source.kind === 'execution-guard' && source.form === 'hint'),
+    ).toBe(true)
   })
 })

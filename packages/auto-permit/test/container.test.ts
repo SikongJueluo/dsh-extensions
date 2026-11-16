@@ -300,14 +300,12 @@ describe('benign container calls stay for the judge', () => {
   })
 
   it('scans every segment of a compound input, not only the first', () => {
-    expect(containerRisk('mkdir -p out && podman run --privileged alpine'))
-      .toBe(CONTAINER_RISKS.privilege)
-    expect(containerRisk('podman build -t app . && podman push app'))
-      .toBe(CONTAINER_RISKS.push)
-    expect(containerRisk('echo hi | podman run -v /:/host alpine'))
-      .toBe(CONTAINER_RISKS.mount)
-    expect(containerRisk('podman ps; podman system prune -af'))
-      .toBe(CONTAINER_RISKS.prune)
+    expect(containerRisk('mkdir -p out && podman run --privileged alpine')).toBe(
+      CONTAINER_RISKS.privilege,
+    )
+    expect(containerRisk('podman build -t app . && podman push app')).toBe(CONTAINER_RISKS.push)
+    expect(containerRisk('echo hi | podman run -v /:/host alpine')).toBe(CONTAINER_RISKS.mount)
+    expect(containerRisk('podman ps; podman system prune -af')).toBe(CONTAINER_RISKS.prune)
   })
 
   it('folds the container boundary into the shared high-risk oracle', () => {
@@ -342,12 +340,7 @@ describe('mutable-file dependence (exact-repeat memory must re-judge)', () => {
   })
 
   it('keeps plain toolchain commands replayable', () => {
-    for (const command of [
-      'uv sync',
-      'cargo build --release',
-      'pnpm test',
-      'git status',
-    ]) {
+    for (const command of ['uv sync', 'cargo build --release', 'pnpm test', 'git status']) {
       expect(isMutableFileDependent(command), command).toBe(false)
     }
   })

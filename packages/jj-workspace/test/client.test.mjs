@@ -73,7 +73,10 @@ function mount() {
           })()
         },
         branches() {
-          return Promise.resolve({ ok: true, value: { current: 'main', branches: ['main', 'other'] } })
+          return Promise.resolve({
+            ok: true,
+            value: { current: 'main', branches: ['main', 'other'] },
+          })
         },
         requestWorktree(sessionId, from) {
           calls.push(['request', sessionId, from])
@@ -194,7 +197,8 @@ describe('new-session worktree control', () => {
   it('requests the current change for a colocated jj project, not the Git branch', async () => {
     const renderer = await renderToggle({
       panel: jjPanel(),
-      status: () => Promise.resolve({ kind: 'jj', hasGit: true, blocker: null, bookmarks: ['main'] }),
+      status: () =>
+        Promise.resolve({ kind: 'jj', hasGit: true, blocker: null, bookmarks: ['main'] }),
     })
     const input = renderer.root.findByType('input')
     expect(input.props.disabled).toBe(false)
@@ -208,7 +212,8 @@ describe('new-session worktree control', () => {
   it('passes an explicitly selected bookmark as the base', async () => {
     const renderer = await renderToggle({
       panel: jjPanel({ request: { from: null } }),
-      status: () => Promise.resolve({ kind: 'jj', hasGit: false, blocker: null, bookmarks: ['base-bm'] }),
+      status: () =>
+        Promise.resolve({ kind: 'jj', hasGit: false, blocker: null, bookmarks: ['base-bm'] }),
     })
     const menu = renderer.root.findByType(Menu)
     expect(menu.props.selectedId).toBe('@')
@@ -261,7 +266,12 @@ describe('new-session worktree control', () => {
     const useProjection = () => permission
     const status = () => {
       const blocked = permission.currentValue === 'read-only'
-      return Promise.resolve({ kind: 'jj', hasGit: false, blocker: blocked ? 'read-only' : null, bookmarks: [] })
+      return Promise.resolve({
+        kind: 'jj',
+        hasGit: false,
+        blocker: blocked ? 'read-only' : null,
+        bookmarks: [],
+      })
     }
     const props = toggleProps({ status, override: { useProjection } })
     pushPanel(jjPanel())
@@ -290,7 +300,12 @@ describe('new-session worktree control', () => {
     const useProjection = () => permission
     const status = () => {
       const blocked = permission.currentValue === 'read-only'
-      return Promise.resolve({ kind: 'jj', hasGit: false, blocker: blocked ? 'read-only' : null, bookmarks: [] })
+      return Promise.resolve({
+        kind: 'jj',
+        hasGit: false,
+        blocker: blocked ? 'read-only' : null,
+        bookmarks: [],
+      })
     }
     const props = toggleProps({ status, override: { useProjection } })
     pushPanel(jjPanel())
@@ -318,7 +333,8 @@ describe('new-session worktree control', () => {
     let resolveGit
     const status = () => {
       statusCall += 1
-      if (statusCall === 1) return Promise.resolve({ kind: 'jj', hasGit: false, blocker: null, bookmarks: ['base-bm'] })
+      if (statusCall === 1)
+        return Promise.resolve({ kind: 'jj', hasGit: false, blocker: null, bookmarks: ['base-bm'] })
       return new Promise((resolve) => {
         resolveGit = resolve
       })
@@ -377,7 +393,8 @@ describe('new-session worktree control', () => {
   it('disables creation with a clear read-only reason', async () => {
     const blocked = await renderToggle({
       panel: jjPanel(),
-      status: () => Promise.resolve({ kind: 'jj', hasGit: false, blocker: 'read-only', bookmarks: [] }),
+      status: () =>
+        Promise.resolve({ kind: 'jj', hasGit: false, blocker: 'read-only', bookmarks: [] }),
     })
     const input = blocked.root.findByType('input')
     expect(input.props.disabled).toBe(true)
@@ -389,7 +406,8 @@ describe('new-session worktree control', () => {
   it('allows a requested workspace to be withdrawn while blocked', async () => {
     const requested = await renderToggle({
       panel: jjPanel({ request: { from: null } }),
-      status: () => Promise.resolve({ kind: 'jj', hasGit: false, blocker: 'read-only', bookmarks: [] }),
+      status: () =>
+        Promise.resolve({ kind: 'jj', hasGit: false, blocker: 'read-only', bookmarks: [] }),
     })
     const checked = requested.root.findByType('input')
     expect(checked.props.disabled).toBe(false)

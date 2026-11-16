@@ -141,13 +141,16 @@ export class AccessStore {
    *   fallback (absent when it stated none), cold-session lookup, and
    *   injectable id/clock sources.
    */
-  constructor(tables: AccessTables, options: {
-    protectedRoots: readonly string[]
-    workspaceFallback?: string
-    lookup: SessionLookup
-    newId?: () => string
-    now?: () => number
-  }) {
+  constructor(
+    tables: AccessTables,
+    options: {
+      protectedRoots: readonly string[]
+      workspaceFallback?: string
+      lookup: SessionLookup
+      newId?: () => string
+      now?: () => number
+    },
+  ) {
     this.tables = tables
     this.protectedRoots = options.protectedRoots
     this.workspaceFallback = options.workspaceFallback
@@ -161,7 +164,10 @@ export class AccessStore {
     const next = this.chain.then(operation, operation)
     // Keep the chain alive for later callers; their own rejection is observed
     // by the caller's slice, not by this bookkeeping promise.
-    this.chain = next.then(() => undefined, () => undefined)
+    this.chain = next.then(
+      () => undefined,
+      () => undefined,
+    )
     return next
   }
 
@@ -189,11 +195,17 @@ export class AccessStore {
   requireMember(sessionId: string): { member: MemberRecord; group: GroupRecord } {
     const member = this.tables.members.get(sessionId)
     if (member === undefined) {
-      throw new AccessError('NOT_ATTRIBUTED', `session ${JSON.stringify(sessionId)} has no write-access group`)
+      throw new AccessError(
+        'NOT_ATTRIBUTED',
+        `session ${JSON.stringify(sessionId)} has no write-access group`,
+      )
     }
     const group = this.tables.groups.get(member.groupId)
     if (group === undefined) {
-      throw new AccessError('GROUP_MISSING', `write-access group ${JSON.stringify(member.groupId)} is missing from storage`)
+      throw new AccessError(
+        'GROUP_MISSING',
+        `write-access group ${JSON.stringify(member.groupId)} is missing from storage`,
+      )
     }
     return { member, group }
   }
@@ -204,16 +216,16 @@ export class AccessStore {
       const workspaceOverlap = findProtectedOverlap(group.workspaceRoot, this.protectedRoots)
       if (workspaceOverlap !== undefined) {
         throw new Error(
-          `session-write-access: stored group ${JSON.stringify(group.groupId)} has workspace `
-          + `${JSON.stringify(group.workspaceRoot)} overlaps protected ${JSON.stringify(workspaceOverlap)}`,
+          `session-write-access: stored group ${JSON.stringify(group.groupId)} has workspace ` +
+            `${JSON.stringify(group.workspaceRoot)} overlaps protected ${JSON.stringify(workspaceOverlap)}`,
         )
       }
       for (const grant of group.grants) {
         const overlap = findProtectedOverlap(grant.path, this.protectedRoots)
         if (overlap !== undefined) {
           throw new Error(
-            `session-write-access: stored grant ${JSON.stringify(grant.path)} in group `
-            + `${JSON.stringify(group.groupId)} overlaps protected ${JSON.stringify(overlap)}`,
+            `session-write-access: stored grant ${JSON.stringify(grant.path)} in group ` +
+              `${JSON.stringify(group.groupId)} overlaps protected ${JSON.stringify(overlap)}`,
           )
         }
       }
@@ -226,17 +238,17 @@ export class AccessStore {
     if (candidate === undefined) {
       throw new AccessError(
         'NO_WORKSPACE',
-        'session-write-access: this session recorded no cwd and the deployment configures no workspaceRoot; '
-        + 'refusing to derive a writable workspace from the process cwd',
+        'session-write-access: this session recorded no cwd and the deployment configures no workspaceRoot; ' +
+          'refusing to derive a writable workspace from the process cwd',
       )
     }
     const physical = canonicalDirectory(candidate)
     const overlap = findProtectedOverlap(physical, this.protectedRoots)
     if (overlap !== undefined) {
       throw new Error(
-        `session-write-access: refusing session workspace ${JSON.stringify(physical)}: it overlaps `
-        + `protected ${JSON.stringify(overlap)}; run the session from a workspace separated from `
-        + 'authorization storage, the profile, and plugin code',
+        `session-write-access: refusing session workspace ${JSON.stringify(physical)}: it overlaps ` +
+          `protected ${JSON.stringify(overlap)}; run the session from a workspace separated from ` +
+          'authorization storage, the profile, and plugin code',
       )
     }
     return physical
@@ -275,9 +287,10 @@ export class AccessStore {
       this.requireMember(facts.sessionId)
       return existing
     }
-    const workspaceRoot = inherited === undefined
-      ? this.admitWorkspace(facts.cwd)
-      : this.admitWorkspace(inherited.workspaceRoot)
+    const workspaceRoot =
+      inherited === undefined
+        ? this.admitWorkspace(facts.cwd)
+        : this.admitWorkspace(inherited.workspaceRoot)
     const inheritedGrants = inherited?.grants ?? []
     return this.enqueue(async () => {
       const current = this.tables.members.get(facts.sessionId)
@@ -290,7 +303,7 @@ export class AccessStore {
           version: 1,
           groupId: facts.sessionId,
           workspaceRoot,
-          grants: inheritedGrants.map(path => ({
+          grants: inheritedGrants.map((path) => ({
             version: 1 as const,
             path,
             source: 'fork' as const,
@@ -308,7 +321,7 @@ export class AccessStore {
         group = {
           ...existingGroup,
           workspaceRoot,
-          grants: inheritedGrants.map(path => ({
+          grants: inheritedGrants.map((path) => ({
             version: 1 as const,
             path,
             source: 'fork' as const,
@@ -326,7 +339,7 @@ export class AccessStore {
         sessionId: facts.sessionId,
         groupId: group.groupId,
         role: 'root',
-        ...inherited === undefined ? {} : { forkSourceSessionId: inherited.forkSourceSessionId },
+        ...(inherited === undefined ? {} : { forkSourceSessionId: inherited.forkSourceSessionId }),
         createdAt: now,
       }
       await this.tables.members.put(member.sessionId, member)
@@ -344,19 +357,31 @@ export class AccessStore {
       const member = this.tables.members.get(current)
       if (member !== undefined) {
         const { group } = this.requireMember(current)
-        return { sessionId: member.groupId, facts: { sessionId: current, cwd: group.workspaceRoot } }
+        return {
+          sessionId: member.groupId,
+          facts: { sessionId: current, cwd: group.workspaceRoot },
+        }
       }
       const facts = await this.lookup(current)
       if (facts === undefined) {
-        throw new AccessError('PARENT_UNKNOWN', `parent session ${JSON.stringify(current)} is unknown; cannot attribute its child`)
+        throw new AccessError(
+          'PARENT_UNKNOWN',
+          `parent session ${JSON.stringify(current)} is unknown; cannot attribute its child`,
+        )
       }
       if (facts.origin !== 'subagent') return { sessionId: current, facts }
       if (facts.parentSessionId === undefined) {
-        throw new AccessError('PARENT_UNKNOWN', `subagent session ${JSON.stringify(current)} has no parentSession; cannot attribute`)
+        throw new AccessError(
+          'PARENT_UNKNOWN',
+          `subagent session ${JSON.stringify(current)} has no parentSession; cannot attribute`,
+        )
       }
       current = facts.parentSessionId
     }
-    throw new AccessError('PARENT_UNKNOWN', `parent chain for ${JSON.stringify(sessionId)} exceeds the supported depth`)
+    throw new AccessError(
+      'PARENT_UNKNOWN',
+      `parent chain for ${JSON.stringify(sessionId)} exceeds the supported depth`,
+    )
   }
 
   /**
@@ -372,7 +397,10 @@ export class AccessStore {
       return existing
     }
     if (facts.parentSessionId === undefined) {
-      throw new AccessError('PARENT_UNKNOWN', `subagent session ${JSON.stringify(facts.sessionId)} has no parentSession`)
+      throw new AccessError(
+        'PARENT_UNKNOWN',
+        `subagent session ${JSON.stringify(facts.sessionId)} has no parentSession`,
+      )
     }
     const root = await this.collectRootFacts(facts.parentSessionId)
     return this.enqueue(async () => {
@@ -406,12 +434,14 @@ export class AccessStore {
   status(sessionId: string): AccessStatus {
     const { group } = this.requireMember(sessionId)
     const grants: GrantView[] = group.grants.map((grant) => {
-      const broader = group.grants.find(other => other.path !== grant.path && covers(other.path, grant.path))
+      const broader = group.grants.find(
+        (other) => other.path !== grant.path && covers(other.path, grant.path),
+      )
       return broader === undefined ? grant : { ...grant, coveredBy: broader.path }
     })
     const requests = [...this.tables.requests.entries()]
       .map(([, request]) => request)
-      .filter(request => request.groupId === group.groupId)
+      .filter((request) => request.groupId === group.groupId)
       .sort((left, right) => right.createdAt - left.createdAt)
     return {
       sessionId,
@@ -422,9 +452,11 @@ export class AccessStore {
       // A manual add can make a pending request's directory writable before
       // anyone clicks Allow; it is no longer pending, and the grant (not the
       // request row) is the permission fact.
-      pending: requests.filter(request =>
-        request.status === 'pending'
-        && !group.grants.some(grant => covers(grant.path, request.path))),
+      pending: requests.filter(
+        (request) =>
+          request.status === 'pending' &&
+          !group.grants.some((grant) => covers(grant.path, request.path)),
+      ),
       recent: requests.slice(0, 20),
     }
   }
@@ -441,7 +473,7 @@ export class AccessStore {
     return this.enqueue(async () => {
       const group = this.group(member.groupId)
       if (group === undefined) throw new AccessError('GROUP_MISSING', 'group vanished')
-      const broader = group.grants.find(grant => covers(grant.path, physical))
+      const broader = group.grants.find((grant) => covers(grant.path, physical))
       if (broader !== undefined) return { group, coveredBy: broader.path }
       const now = this.now()
       const next: GroupRecord = {
@@ -465,7 +497,7 @@ export class AccessStore {
     return this.enqueue(async () => {
       const group = this.group(member.groupId)
       if (group === undefined) throw new AccessError('GROUP_MISSING', 'group vanished')
-      const remaining = group.grants.filter(grant => grant.path !== path)
+      const remaining = group.grants.filter((grant) => grant.path !== path)
       if (remaining.length === group.grants.length) return { group, removed: false }
       const next: GroupRecord = {
         ...group,
@@ -474,8 +506,12 @@ export class AccessStore {
         updatedAt: this.now(),
       }
       await this.tables.groups.put(next.groupId, next)
-      const stillCoveredBy = remaining.find(grant => covers(grant.path, path))?.path
-      return { group: next, removed: true, ...stillCoveredBy === undefined ? {} : { stillCoveredBy } }
+      const stillCoveredBy = remaining.find((grant) => covers(grant.path, path))?.path
+      return {
+        group: next,
+        removed: true,
+        ...(stillCoveredBy === undefined ? {} : { stillCoveredBy }),
+      }
     })
   }
 
@@ -495,11 +531,16 @@ export class AccessStore {
     return this.enqueue(async () => {
       const group = this.group(member.groupId)
       if (group === undefined) throw new AccessError('GROUP_MISSING', 'group vanished')
-      const broader = group.grants.find(grant => covers(grant.path, physical))
+      const broader = group.grants.find((grant) => covers(grant.path, physical))
       if (broader !== undefined) return { kind: 'granted', group }
       const pending = [...this.tables.requests.entries()]
         .map(([, request]) => request)
-        .find(request => request.groupId === group.groupId && request.status === 'pending' && request.path === physical)
+        .find(
+          (request) =>
+            request.groupId === group.groupId &&
+            request.status === 'pending' &&
+            request.path === physical,
+        )
       if (pending !== undefined) return { kind: 'pending', request: pending }
       const request: RequestRecord = {
         version: 1,
@@ -537,7 +578,10 @@ export class AccessStore {
       const group = this.group(member.groupId)
       if (group === undefined) throw new AccessError('GROUP_MISSING', 'group vanished')
       if (request === undefined || request.groupId !== group.groupId) {
-        throw new AccessError('REQUEST_MISSING', `request ${JSON.stringify(requestId)} does not belong to this group`)
+        throw new AccessError(
+          'REQUEST_MISSING',
+          `request ${JSON.stringify(requestId)} does not belong to this group`,
+        )
       }
       if (request.status !== 'pending') return { request, group, changed: false }
       if (expectedRevision !== group.revision) {
@@ -548,23 +592,36 @@ export class AccessStore {
       }
       const now = this.now()
       if (decision === 'deny') {
-        const denied: RequestRecord = { ...request, status: 'denied', decidedAt: now, decidedBy: 'user' }
+        const denied: RequestRecord = {
+          ...request,
+          status: 'denied',
+          decidedAt: now,
+          decidedBy: 'user',
+        }
         await this.tables.requests.put(denied.requestId, denied)
         return { request: denied, group, changed: true }
       }
       const physical = admitWriteRoot(request.path, this.protectedRoots)
-      const broader = group.grants.find(grant => covers(grant.path, physical))
+      const broader = group.grants.find((grant) => covers(grant.path, physical))
       let next = group
       if (broader === undefined) {
         next = {
           ...group,
-          grants: [...group.grants, { version: 1, path: physical, source: 'user', addedAt: now, requestId }],
+          grants: [
+            ...group.grants,
+            { version: 1, path: physical, source: 'user', addedAt: now, requestId },
+          ],
           revision: group.revision + 1,
           updatedAt: now,
         }
         await this.tables.groups.put(next.groupId, next)
       }
-      const allowed: RequestRecord = { ...request, status: 'allowed', decidedAt: now, decidedBy: 'user' }
+      const allowed: RequestRecord = {
+        ...request,
+        status: 'allowed',
+        decidedAt: now,
+        decidedBy: 'user',
+      }
       await this.tables.requests.put(allowed.requestId, allowed)
       return { request: allowed, group: next, changed: true }
     })
@@ -585,7 +642,7 @@ export class AccessStore {
         sourceSessionId,
         sourceGroupId: group.groupId,
         workspaceRoot: group.workspaceRoot,
-        grants: group.grants.map(grant => grant.path),
+        grants: group.grants.map((grant) => grant.path),
         stage: 'pending',
         createdAt: now,
         updatedAt: now,
@@ -615,7 +672,12 @@ export class AccessStore {
         version: 1,
         groupId: targetSessionId,
         workspaceRoot: fork.workspaceRoot,
-        grants: fork.grants.map(path => ({ version: 1 as const, path, source: 'fork' as const, addedAt: now })),
+        grants: fork.grants.map((path) => ({
+          version: 1 as const,
+          path,
+          source: 'fork' as const,
+          addedAt: now,
+        })),
         revision: 1,
         createdAt: now,
         updatedAt: now,
@@ -627,7 +689,12 @@ export class AccessStore {
       group = {
         ...existingGroup,
         workspaceRoot: fork.workspaceRoot,
-        grants: fork.grants.map(path => ({ version: 1 as const, path, source: 'fork' as const, addedAt: now })),
+        grants: fork.grants.map((path) => ({
+          version: 1 as const,
+          path,
+          source: 'fork' as const,
+          addedAt: now,
+        })),
         revision: existingGroup.revision + 1,
         updatedAt: now,
       }
@@ -658,10 +725,12 @@ export class AccessStore {
   async commitFork(forkId: string, targetSessionId: string): Promise<GroupRecord> {
     return this.enqueue(async () => {
       const fork = this.tables.forks.get(forkId)
-      if (fork === undefined) throw new AccessError('FORK_MISSING', `fork ${JSON.stringify(forkId)} is missing`)
+      if (fork === undefined)
+        throw new AccessError('FORK_MISSING', `fork ${JSON.stringify(forkId)} is missing`)
       if (fork.stage === 'committed') {
         const member = this.tables.members.get(targetSessionId)
-        if (member === undefined) throw new AccessError('GROUP_MISSING', 'committed fork has no membership')
+        if (member === undefined)
+          throw new AccessError('GROUP_MISSING', 'committed fork has no membership')
         const group = this.group(member.groupId)
         if (group === undefined) throw new AccessError('GROUP_MISSING', 'fork group vanished')
         return group
@@ -695,7 +764,8 @@ export class AccessStore {
   async recordForkTarget(forkId: string, targetSessionId: string): Promise<ForkRecord> {
     return this.enqueue(async () => {
       const fork = this.tables.forks.get(forkId)
-      if (fork === undefined) throw new AccessError('FORK_MISSING', `fork ${JSON.stringify(forkId)} is missing`)
+      if (fork === undefined)
+        throw new AccessError('FORK_MISSING', `fork ${JSON.stringify(forkId)} is missing`)
       if (fork.stage === 'committed') return fork
       const intent: ForkRecord = {
         ...fork,
@@ -737,7 +807,8 @@ export class AccessStore {
   async abortFork(forkId: string, targetSessionId: string): Promise<void> {
     await this.enqueue(async () => {
       const fork = this.tables.forks.get(forkId)
-      if (fork === undefined) throw new AccessError('FORK_MISSING', `fork ${JSON.stringify(forkId)} is missing`)
+      if (fork === undefined)
+        throw new AccessError('FORK_MISSING', `fork ${JSON.stringify(forkId)} is missing`)
       if (fork.stage === 'committed') {
         throw new AccessError('FORK_MISSING', 'a committed Fork cannot be aborted')
       }
@@ -753,7 +824,10 @@ export class AccessStore {
       if (member !== undefined && member.groupId === targetSessionId && member.role === 'root') {
         await this.tables.members.delete(targetSessionId)
       }
-      if (this.tables.members.get(targetSessionId) === undefined && this.group(targetSessionId) !== undefined) {
+      if (
+        this.tables.members.get(targetSessionId) === undefined &&
+        this.group(targetSessionId) !== undefined
+      ) {
         await this.tables.groups.delete(targetSessionId)
       }
     })
@@ -788,7 +862,8 @@ export class AccessStore {
       const target = fork.targetSessionId
       await this.enqueue(async () => {
         const current = this.tables.forks.get(fork.forkId)
-        if (current === undefined || current.stage === 'committed' || current.stage === 'failed') return
+        if (current === undefined || current.stage === 'committed' || current.stage === 'failed')
+          return
         await this.materializeFork(current, target)
         await this.tables.forks.put(fork.forkId, {
           ...current,
@@ -799,5 +874,4 @@ export class AccessStore {
       })
     }
   }
-
 }

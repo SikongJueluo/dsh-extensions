@@ -36,7 +36,10 @@ function pairingViolations(session) {
         out.push({
           at: i + 1,
           callId: block.id,
-          next: next === undefined ? '<end of history>' : `${next.role}(source=${next.source?.kind ?? '?'})`,
+          next:
+            next === undefined
+              ? '<end of history>'
+              : `${next.role}(source=${next.source?.kind ?? '?'})`,
         })
       }
     }
@@ -47,14 +50,38 @@ function pairingViolations(session) {
 let CALL_SEQ = 0
 
 function seedToolCall(session) {
-  session.append('assistant/message', {
+  session.append(
+    'assistant/message',
+    {
+      turn: TURN,
+      step: STEP,
+      message: createAssistantMessage({
+        content: [
+          {
+            type: 'tool-call',
+            id: CALL_ID,
+            name: 'bash',
+            arguments: JSON.stringify({ command: COMMAND }),
+          },
+        ],
+      }),
+      stream: [],
+    },
+    { surfaceOp: 'append' },
+  )
+  CALL_SEQ = session.append('tool/call', {
     turn: TURN,
     step: STEP,
-    message: createAssistantMessage({ content: [{ type: 'tool-call', id: CALL_ID, name: 'bash', arguments: JSON.stringify({ command: COMMAND }) }] }),
-    stream: [],
-  }, { surfaceOp: 'append' })
-  CALL_SEQ = session.append('tool/call', { turn: TURN, step: STEP, callId: CALL_ID, name: 'bash', arguments: JSON.stringify({ command: COMMAND }) }).seq
-  session.append('approval/asked', { id: 'apr-1', toolName: 'bash', callId: CALL_ID, reason: 'escalate sandbox to danger-full-access' })
+    callId: CALL_ID,
+    name: 'bash',
+    arguments: JSON.stringify({ command: COMMAND }),
+  }).seq
+  session.append('approval/asked', {
+    id: 'apr-1',
+    toolName: 'bash',
+    callId: CALL_ID,
+    reason: 'escalate sandbox to danger-full-access',
+  })
 }
 
 /** Minimal host surface the plugin touches: logger, ctx.get, ctx.on. */
@@ -84,7 +111,8 @@ function makeConfig() {
 
 async function fireApproval(listeners, session, agent) {
   const listener = listeners.get('approval/request')
-  if (listener === undefined) throw new Error('plugin did not register an approval/request answerer')
+  if (listener === undefined)
+    throw new Error('plugin did not register an approval/request answerer')
   const req = {
     agent,
     toolName: 'bash',
@@ -109,7 +137,11 @@ async function roundTrip({ deliver }) {
     session,
     inject(message) {
       delivered.push(message)
-      session.append('agent/inbox/spliced', { target: 'next-step', start: delivered.length - 1, inserted: [message] })
+      session.append('agent/inbox/spliced', {
+        target: 'next-step',
+        start: delivered.length - 1,
+        inserted: [message],
+      })
     },
   }
   if (deliver === 'append') {
@@ -126,29 +158,47 @@ async function roundTrip({ deliver }) {
   if (outcome !== 'allowed-once') throw new Error(`unexpected outcome: ${String(outcome)}`)
 
   // ...and only NOW does the tool result land, exactly as runGroup does it.
-  session.append('tool/result', {
-    turn: TURN,
-    step: STEP,
-    message: createToolResultMessage({ callId: CALL_ID, content: [{ type: 'text', text: '=== mode=devenv ok' }], isError: false }),
-  }, { surfaceOp: 'append', sourceEventSeqs: [CALL_SEQ] })
+  session.append(
+    'tool/result',
+    {
+      turn: TURN,
+      step: STEP,
+      message: createToolResultMessage({
+        callId: CALL_ID,
+        content: [{ type: 'text', text: '=== mode=devenv ok' }],
+        isError: false,
+      }),
+    },
+    { surfaceOp: 'append', sourceEventSeqs: [CALL_SEQ] },
+  )
 
   if (deliver === 'inject') {
     // The next step boundary claims the inbox batch and only then writes each
     // message onto the surface — ReactLoopAgent.preStep + step()'s
     // `for (const message of decision.messages) this.session.append(...)`.
-    session.append('agent/inbox/spliced', { target: 'next-step', start: 0, removedCount: delivered.length, inserted: [] })
-    for (const message of delivered) session.append('user/message', message, { surfaceOp: 'append' })
+    session.append('agent/inbox/spliced', {
+      target: 'next-step',
+      start: 0,
+      removedCount: delivered.length,
+      inserted: [],
+    })
+    for (const message of delivered)
+      session.append('user/message', message, { surfaceOp: 'append' })
   }
 
   return { session, outcome, delivered }
 }
 
 function eventLine(session) {
-  return session.snapshotEvents().map((e) => {
-    if (e.type === 'user/message') return `${e.seq}:user/message(${e.data.source.kind}/${e.data.source.form ?? '-'})`
-    if (e.type === 'agent/inbox/spliced') return `${e.seq}:inbox/spliced(${e.data.target})`
-    return `${e.seq}:${e.type}`
-  }).join('  ')
+  return session
+    .snapshotEvents()
+    .map((e) => {
+      if (e.type === 'user/message')
+        return `${e.seq}:user/message(${e.data.source.kind}/${e.data.source.form ?? '-'})`
+      if (e.type === 'agent/inbox/spliced') return `${e.seq}:inbox/spliced(${e.data.target})`
+      return `${e.seq}:${e.type}`
+    })
+    .join('  ')
 }
 
 async function run(label, deliver) {
@@ -156,10 +206,19 @@ async function run(label, deliver) {
   const violations = pairingViolations(session)
   console.log(`--- ${label} ---`)
   console.log('outcome        :', outcome)
-  console.log('delivered via  :', deliver === 'append' ? 'session.append (surface)' : `agent.inject (${delivered.length} queued)`)
+  console.log(
+    'delivered via  :',
+    deliver === 'append' ? 'session.append (surface)' : `agent.inject (${delivered.length} queued)`,
+  )
   console.log('surface nodes  :', session.surface.nodes.join(', '))
   console.log('event log      :', eventLine(session))
-  console.log('derived roles  :', session.deriveMessages().map((m) => m.role).join(' -> '))
+  console.log(
+    'derived roles  :',
+    session
+      .deriveMessages()
+      .map((m) => m.role)
+      .join(' -> '),
+  )
   console.log('violations     :', violations.length === 0 ? 'none' : JSON.stringify(violations))
   console.log()
   return violations.length === 0

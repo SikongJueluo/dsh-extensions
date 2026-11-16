@@ -51,29 +51,37 @@ export function presetName(roster: PresetRoster | undefined, id: string): string
  * an error: the handoff then has no preset choice, exactly like a composition
  * without presets.
  */
-export async function snapshotPresets(ctx: Context, agent: Agent): Promise<PresetRoster | undefined> {
+export async function snapshotPresets(
+  ctx: Context,
+  agent: Agent,
+): Promise<PresetRoster | undefined> {
   const presets = ctx.get('agentPresets')
   if (presets === undefined) return undefined
   try {
     const inherited = presets.composedPreset(agent.ctx)
-    const rows = (await presets.list()).slice().sort((left, right) =>
-      (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER) ||
-      left.id.localeCompare(right.id))
-    const options = rows
-      .map((row): PresetOption => ({
-        id: row.id,
-        ...(row.name === undefined ? {} : { name: row.name }),
-        ...(row.description === undefined ? {} : { description: row.description }),
-        ...(row.broken === undefined ? {} : { broken: row.broken }),
-      }))
+    const rows = (await presets.list())
+      .slice()
+      .sort(
+        (left, right) =>
+          (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER) ||
+          left.id.localeCompare(right.id),
+      )
+    const options = rows.map((row): PresetOption => ({
+      id: row.id,
+      ...(row.name === undefined ? {} : { name: row.name }),
+      ...(row.description === undefined ? {} : { description: row.description }),
+      ...(row.broken === undefined ? {} : { broken: row.broken }),
+    }))
     return {
       ...(inherited === undefined ? {} : { inherited }),
       options,
     }
   } catch (error) {
-    ctx.logger(PACKAGE_NAME).warn('preset roster unavailable; handoff falls back to no preset choice', {
-      error: String(error),
-    })
+    ctx
+      .logger(PACKAGE_NAME)
+      .warn('preset roster unavailable; handoff falls back to no preset choice', {
+        error: String(error),
+      })
     return undefined
   }
 }
@@ -88,7 +96,8 @@ export function presetProblem(roster: PresetRoster, choice: PresetChoice): strin
     if (roster.inherited === undefined) return undefined
     const row = roster.options.find((option) => option.id === roster.inherited)
     if (row === undefined) return `当前会话的预设已不在注册表中：${roster.inherited}`
-    if (row.broken !== undefined) return `当前会话的预设当前不可用：${row.name ?? row.id}（${row.broken}）`
+    if (row.broken !== undefined)
+      return `当前会话的预设当前不可用：${row.name ?? row.id}（${row.broken}）`
     return undefined
   }
   const row = roster.options.find((option) => option.id === choice.id)
@@ -111,7 +120,8 @@ export async function mountedPreset(
 ): Promise<MountedPreset> {
   const presets = ctx.get('agentPresets')
   if (presets === undefined) {
-    if (choice.kind === 'preset') throw new Error(`当前组合没有预设注册表，无法挂载预设 ${choice.id}`)
+    if (choice.kind === 'preset')
+      throw new Error(`当前组合没有预设注册表，无法挂载预设 ${choice.id}`)
     // Inherit cannot be resolved without the registry; a preset-less session
     // is the only available degradation, and this line makes it diagnosable.
     ctx.logger(PACKAGE_NAME).warn('no preset registry; spawning a preset-less session')
@@ -123,7 +133,9 @@ export async function mountedPreset(
   try {
     resolved = await presets.resolve(target)
   } catch (error) {
-    throw new Error(`无法解析预设 ${target}：${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(
+      `无法解析预设 ${target}：${error instanceof Error ? error.message : String(error)}`,
+    )
   }
   if (resolved.broken !== undefined) {
     throw new Error(`预设 ${resolved.name ?? resolved.id} 当前不可用：${resolved.broken}`)

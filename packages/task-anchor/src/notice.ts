@@ -70,7 +70,9 @@ export function buildResumeNotice(report: ResumeReport): UserMessage {
   if (report.verification !== '') {
     lines.push(`last verification: ${report.verification}`)
   }
-  lines.push('Verify the above before continuing; this anchor records where the task believed it was.')
+  lines.push(
+    'Verify the above before continuing; this anchor records where the task believed it was.',
+  )
   const summary = boundContextSummary(
     `execution-guard: anchor ${mark(report.rootMatches)} / change ${mark(report.changeMatches)} (phase ${report.anchorPhase})`,
   )

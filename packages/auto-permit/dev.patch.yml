@@ -8,5 +8,5 @@
       name: '/home/sikongjueluo/Projects/dsh-extensions/packages/auto-permit/lib/index.js'
       config:
         enabled: true
-        provider: ""
-        model: ""
+        provider: ''
+        model: ''

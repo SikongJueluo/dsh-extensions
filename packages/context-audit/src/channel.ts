@@ -48,9 +48,15 @@ export function registerChannel(ctx: Context, deps: ChannelDeps): void {
   const handler = async (
     endpoint: string,
     payload: unknown,
-  ): Promise<{ ok: true; value: unknown } | { ok: false; error: { code: string; message: string; details: object } }> => {
+  ): Promise<
+    | { ok: true; value: unknown }
+    | { ok: false; error: { code: string; message: string; details: object } }
+  > => {
     if (endpoint !== 'report') {
-      return { ok: false, error: { code: 'UNKNOWN_ENDPOINT', message: `Unknown endpoint "${endpoint}"`, details: {} } }
+      return {
+        ok: false,
+        error: { code: 'UNKNOWN_ENDPOINT', message: `Unknown endpoint "${endpoint}"`, details: {} },
+      }
     }
     const rawDays = (payload as { days?: unknown } | null | undefined)?.days
     let days: number | undefined
@@ -59,21 +65,33 @@ export function registerChannel(ctx: Context, deps: ChannelDeps): void {
     } else if (typeof rawDays === 'number' && Number.isFinite(rawDays) && rawDays >= 1) {
       days = Math.min(3650, Math.floor(rawDays))
     } else {
-      return { ok: false, error: { code: 'BAD_DAYS', message: 'days must be a positive number or "all"', details: {} } }
+      return {
+        ok: false,
+        error: {
+          code: 'BAD_DAYS',
+          message: 'days must be a positive number or "all"',
+          details: {},
+        },
+      }
     }
     const home = dshHome()
-    const run = async (): Promise<unknown> => collectAudit(
-      join(home, 'sessions'),
-      join(home, 'storages', 'session_projcache', 'sessions'),
-      { days, sessionLimit: deps.sessionLimit, now: Date.now() },
-    )
+    const run = async (): Promise<unknown> =>
+      collectAudit(
+        join(home, 'sessions'),
+        join(home, 'storages', 'session_projcache', 'sessions'),
+        { days, sessionLimit: deps.sessionLimit, now: Date.now() },
+      )
     // Serialize scans: overlapping requests reuse the queued run's result.
     const queued = inFlight.then(run, run)
     inFlight = queued.catch(() => undefined)
     return { ok: true, value: await queued }
   }
 
-  const serve = async (svcCtx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const serve = async (
+    svcCtx: Context,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> => {
     const rejection = svcCtx.connection.requestRejection(req)
     if (rejection !== undefined) {
       res.writeHead(rejection)
@@ -90,7 +108,10 @@ export function registerChannel(ctx: Context, deps: ChannelDeps): void {
       respond(404, '{}')
       return
     }
-    if ((req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
+    if (
+      (req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !==
+      'application/json'
+    ) {
       respond(415, '{}')
       return
     }
@@ -113,8 +134,12 @@ export function registerChannel(ctx: Context, deps: ChannelDeps): void {
       return
     }
     if (
-      envelope.type !== 'client-request' || typeof envelope.rpcId !== 'string' || envelope.rpcId.length === 0 ||
-      envelope.method !== endpoint || typeof envelope.payload !== 'object' || envelope.payload === null
+      envelope.type !== 'client-request' ||
+      typeof envelope.rpcId !== 'string' ||
+      envelope.rpcId.length === 0 ||
+      envelope.method !== endpoint ||
+      typeof envelope.payload !== 'object' ||
+      envelope.payload === null
     ) {
       respond(400, '{}')
       return
@@ -124,10 +149,14 @@ export function registerChannel(ctx: Context, deps: ChannelDeps): void {
   }
 
   ctx.inject(['connection', 'webServer'], (svcCtx) => {
-    svcCtx.effect(() => svcCtx.webServer.register({
-      kind: 'prefix',
-      path: RPC_CHANNEL,
-      handler: (req, res) => serve(svcCtx, req, res),
-    }), `${RPC_CHANNEL} report channel`)
+    svcCtx.effect(
+      () =>
+        svcCtx.webServer.register({
+          kind: 'prefix',
+          path: RPC_CHANNEL,
+          handler: (req, res) => serve(svcCtx, req, res),
+        }),
+      `${RPC_CHANNEL} report channel`,
+    )
   })
 }

@@ -10,11 +10,13 @@ import { describe, expect, it } from 'vitest'
 import { isHighRisk } from '../src/rules.js'
 import { containerRisk } from '../src/container.js'
 
-const REAL_PROBE = 'podman run --rm --network none -v "$PWD/out:/app:ro" '
-  + 'localhost/realsense-official:2.59.1 ldd /app/bin/camera'
+const REAL_PROBE =
+  'podman run --rm --network none -v "$PWD/out:/app:ro" ' +
+  'localhost/realsense-official:2.59.1 ldd /app/bin/camera'
 
-const REAL_PROBE_GROUPED = 'podman run --rm -v "$PWD/build:/app:ro" '
-  + 'localhost/realsense-official:2.59.1 sh -c "ldd /app/bin/probe && grep -q libusb"'
+const REAL_PROBE_GROUPED =
+  'podman run --rm -v "$PWD/build:/app:ro" ' +
+  'localhost/realsense-official:2.59.1 sh -c "ldd /app/bin/probe && grep -q libusb"'
 
 describe('podman --rm is not a delete command', () => {
   it('does not flag the observed disposable read-only probe', () => {

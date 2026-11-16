@@ -113,132 +113,201 @@ export interface Config {
 // into the schema generics, and an annotation would fight the inference the
 // loader validates `Config` against (same discipline as auto-permit).
 export const Config = Schema.object({
-  enabled: Schema.boolean().default(true).description(
-    'Master switch. Off unregisters the web_research tool (edit remounts the row).',
-  ),
-  toolName: Schema.string().default('web_research').description(
-    'Tool name registered for the main model (edit remounts the row).',
-  ),
-  timeoutMs: Schema.number().default(140000).description(
-    'Cooperative tool-call timeout budget in ms (registration-time).',
-  ),
-  zhipuEnabled: Schema.boolean().default(true).volatile().description(
-    'Enable the Zhipu (bigmodel.cn) standalone web-search source.',
-  ),
-  zhipuApiKeyRef: Schema.string().default('ZHIPU_API_KEY').volatile().description(
-    'Credential reference (env-var name) holding the Zhipu API key. With transport mcp this is the Coding-Plan key.',
-  ),
-  zhipuTransport: Schema.union(['mcp', 'rest']).default('mcp').volatile().description(
-    'mcp: the official MCP broker (covered by GLM Coding-Plan MCP quota). rest: the open-platform per-call web_search API.',
-  ),
-  zhipuMcpUrl: Schema.string().default('https://open.bigmodel.cn/api/mcp/web_search_prime/mcp').volatile().description(
-    'Zhipu web-search MCP endpoint (streamable HTTP). The default is the GLM Coding-Plan dedicated server.',
-  ),
-  zhipuMcpTool: Schema.string().default('webSearchPrime').volatile().description(
-    'MCP tool name on that endpoint; discovered via tools/list when wrong.',
-  ),
-  zhipuApiBase: Schema.string().default('https://open.bigmodel.cn/api/paas/v4').volatile().description(
-    'Zhipu REST API base URL (transport rest only).',
-  ),
-  zhipuEngine: Schema.string().default('search_std').volatile().description(
-    'Zhipu search engine: search_std, search_pro, search_pro_sogou, or search_pro_quark.',
-  ),
-  tavilyEnabled: Schema.boolean().default(true).volatile().description(
-    'Enable the Tavily search source.',
-  ),
-  tavilyApiKeyRef: Schema.string().default('TAVILY_API_KEY').volatile().description(
-    'Credential reference (env-var name) holding the Tavily API key.',
-  ),
-  tavilyApiBase: Schema.string().default('https://api.tavily.com').volatile().description(
-    'Tavily API base URL.',
-  ),
-  tavilySearchDepth: Schema.string().default('basic').volatile().description(
-    'Tavily search depth: basic, advanced, fast, or ultra-fast.',
-  ),
-  tavilyIncludeRaw: Schema.boolean().default(false).volatile().description(
-    'Request cleaned raw page content from Tavily (larger, costlier responses).',
-  ),
-  braveEnabled: Schema.boolean().default(false).volatile().description(
-    'Enable the Brave Search API source (independent index; ~$5/1k requests).',
-  ),
-  braveApiKeyRef: Schema.string().default('BRAVE_API_KEY').volatile().description(
-    'Credential reference (env-var name) holding the Brave API key (X-Subscription-Token).',
-  ),
-  braveApiBase: Schema.string().default('https://api.search.brave.com/res/v1').volatile().description(
-    'Brave Search API base URL.',
-  ),
-  openaiEnabled: Schema.boolean().default(false).volatile().description(
-    'Enable the OpenAI web-search source (Responses API web_search tool; $10/1k search calls + model tokens — the priciest source).',
-  ),
-  openaiApiKeyRef: Schema.string().default('OPENAI_API_KEY').volatile().description(
-    'Credential reference (env-var name) holding the OpenAI API key.',
-  ),
-  openaiApiBase: Schema.string().default('https://api.openai.com/v1').volatile().description(
-    'OpenAI API base URL.',
-  ),
-  openaiModel: Schema.string().default('gpt-5.5').volatile().description(
-    'Model used for the Responses web_search call.',
-  ),
-  openaiSearchContextSize: Schema.union(['low', 'medium', 'high']).default('low').volatile().description(
-    'Search context size; low keeps tokens minimal (the integrator only needs cited URLs).',
-  ),
-  openaiReasoningEffort: Schema.string().default('low').volatile().description(
-    'Reasoning effort for the OpenAI call; set empty to omit (for non-reasoning models).',
-  ),
-  chatgptEnabled: Schema.boolean().default(false).volatile().description(
-    'Enable the ChatGPT-subscription web-search source: the Codex backend (Responses API) over the oauth-providers sign-in. Consumes subscription quota; off by default.',
-  ),
-  chatgptModel: Schema.string().default('gpt-5.5').volatile().description(
-    'Codex backend model for the ChatGPT source (must be one the backend reports).',
-  ),
-  chatgptApiBase: Schema.string().default('https://chatgpt.com/backend-api/codex').volatile().description(
-    'Codex backend base URL for the ChatGPT source.',
-  ),
-  exaEnabled: Schema.boolean().default(true).volatile().description(
-    'Enable the Exa search source.',
-  ),
-  exaApiKeyRef: Schema.string().default('EXA_API_KEY').volatile().description(
-    'Credential reference (env-var name) holding the Exa API key.',
-  ),
-  exaApiBase: Schema.string().default('https://api.exa.ai').volatile().description(
-    'Exa API base URL.',
-  ),
-  integratorProvider: Schema.string().default('deepseek-official').volatile().description(
-    'Integrator model provider (llm route id). Empty disables synthesis (degraded results).',
-  ),
-  integratorModel: Schema.string().default('deepseek-flash').volatile().description(
-    'Integrator model id on that provider. A small/fast model is usually right.',
-  ),
-  integratorMaxTokens: Schema.number().default(8192).volatile().description(
-    'Max output tokens for one integrator call. Reasoning models burn this budget on thinking first.',
-  ),
-  followupRounds: Schema.number().default(1).volatile().description(
-    'Max follow-up search rounds after the integrator flags a gap (0 disables).',
-  ),
-  maxEvidence: Schema.number().default(14).volatile().description(
-    'Evidence entries kept after dedup and ranking.',
-  ),
-  fetchTopN: Schema.number().default(2).volatile().description(
-    'Top-ranked sources with thin content (e.g. snippet-less URLs) get one best-effort page fetch for a body excerpt. 0 disables.',
-  ),
-  perSourceResults: Schema.number().default(8).volatile().description(
-    'Results requested per provider per query.',
-  ),
-  excerptChars: Schema.number().default(1600).volatile().description(
-    'Per-source excerpt character cap in the integrator digest.',
-  ),
-  totalBudgetMs: Schema.number().default(125000).volatile().description(
-    'Wall-clock budget shared by every call of one research run (ms). Sized for one slow generative source round + integration + a fast follow-up round.',
-  ),
-  perRequestTimeoutMs: Schema.number().default(12000).volatile().description(
-    'Per-request timeout applied to every provider HTTP call, independent of the shared budget.',
-  ),
-  maxRenderChars: Schema.number().default(7000).volatile().description(
-    'Character budget for the model-facing render (downstream pruners cap ~8k).',
-  ),
-  auditEnabled: Schema.boolean().default(true).volatile().description(
-    'Persist the full audit artifact (queries, hits, digest, model I/O) to the spill store.',
-  ),
+  enabled: Schema.boolean()
+    .default(true)
+    .description('Master switch. Off unregisters the web_research tool (edit remounts the row).'),
+  toolName: Schema.string()
+    .default('web_research')
+    .description('Tool name registered for the main model (edit remounts the row).'),
+  timeoutMs: Schema.number()
+    .default(140000)
+    .description('Cooperative tool-call timeout budget in ms (registration-time).'),
+  zhipuEnabled: Schema.boolean()
+    .default(true)
+    .volatile()
+    .description('Enable the Zhipu (bigmodel.cn) standalone web-search source.'),
+  zhipuApiKeyRef: Schema.string()
+    .default('ZHIPU_API_KEY')
+    .volatile()
+    .description(
+      'Credential reference (env-var name) holding the Zhipu API key. With transport mcp this is the Coding-Plan key.',
+    ),
+  zhipuTransport: Schema.union(['mcp', 'rest'])
+    .default('mcp')
+    .volatile()
+    .description(
+      'mcp: the official MCP broker (covered by GLM Coding-Plan MCP quota). rest: the open-platform per-call web_search API.',
+    ),
+  zhipuMcpUrl: Schema.string()
+    .default('https://open.bigmodel.cn/api/mcp/web_search_prime/mcp')
+    .volatile()
+    .description(
+      'Zhipu web-search MCP endpoint (streamable HTTP). The default is the GLM Coding-Plan dedicated server.',
+    ),
+  zhipuMcpTool: Schema.string()
+    .default('webSearchPrime')
+    .volatile()
+    .description('MCP tool name on that endpoint; discovered via tools/list when wrong.'),
+  zhipuApiBase: Schema.string()
+    .default('https://open.bigmodel.cn/api/paas/v4')
+    .volatile()
+    .description('Zhipu REST API base URL (transport rest only).'),
+  zhipuEngine: Schema.string()
+    .default('search_std')
+    .volatile()
+    .description(
+      'Zhipu search engine: search_std, search_pro, search_pro_sogou, or search_pro_quark.',
+    ),
+  tavilyEnabled: Schema.boolean()
+    .default(true)
+    .volatile()
+    .description('Enable the Tavily search source.'),
+  tavilyApiKeyRef: Schema.string()
+    .default('TAVILY_API_KEY')
+    .volatile()
+    .description('Credential reference (env-var name) holding the Tavily API key.'),
+  tavilyApiBase: Schema.string()
+    .default('https://api.tavily.com')
+    .volatile()
+    .description('Tavily API base URL.'),
+  tavilySearchDepth: Schema.string()
+    .default('basic')
+    .volatile()
+    .description('Tavily search depth: basic, advanced, fast, or ultra-fast.'),
+  tavilyIncludeRaw: Schema.boolean()
+    .default(false)
+    .volatile()
+    .description('Request cleaned raw page content from Tavily (larger, costlier responses).'),
+  braveEnabled: Schema.boolean()
+    .default(false)
+    .volatile()
+    .description('Enable the Brave Search API source (independent index; ~$5/1k requests).'),
+  braveApiKeyRef: Schema.string()
+    .default('BRAVE_API_KEY')
+    .volatile()
+    .description(
+      'Credential reference (env-var name) holding the Brave API key (X-Subscription-Token).',
+    ),
+  braveApiBase: Schema.string()
+    .default('https://api.search.brave.com/res/v1')
+    .volatile()
+    .description('Brave Search API base URL.'),
+  openaiEnabled: Schema.boolean()
+    .default(false)
+    .volatile()
+    .description(
+      'Enable the OpenAI web-search source (Responses API web_search tool; $10/1k search calls + model tokens — the priciest source).',
+    ),
+  openaiApiKeyRef: Schema.string()
+    .default('OPENAI_API_KEY')
+    .volatile()
+    .description('Credential reference (env-var name) holding the OpenAI API key.'),
+  openaiApiBase: Schema.string()
+    .default('https://api.openai.com/v1')
+    .volatile()
+    .description('OpenAI API base URL.'),
+  openaiModel: Schema.string()
+    .default('gpt-5.5')
+    .volatile()
+    .description('Model used for the Responses web_search call.'),
+  openaiSearchContextSize: Schema.union(['low', 'medium', 'high'])
+    .default('low')
+    .volatile()
+    .description(
+      'Search context size; low keeps tokens minimal (the integrator only needs cited URLs).',
+    ),
+  openaiReasoningEffort: Schema.string()
+    .default('low')
+    .volatile()
+    .description(
+      'Reasoning effort for the OpenAI call; set empty to omit (for non-reasoning models).',
+    ),
+  chatgptEnabled: Schema.boolean()
+    .default(false)
+    .volatile()
+    .description(
+      'Enable the ChatGPT-subscription web-search source: the Codex backend (Responses API) over the oauth-providers sign-in. Consumes subscription quota; off by default.',
+    ),
+  chatgptModel: Schema.string()
+    .default('gpt-5.5')
+    .volatile()
+    .description('Codex backend model for the ChatGPT source (must be one the backend reports).'),
+  chatgptApiBase: Schema.string()
+    .default('https://chatgpt.com/backend-api/codex')
+    .volatile()
+    .description('Codex backend base URL for the ChatGPT source.'),
+  exaEnabled: Schema.boolean()
+    .default(true)
+    .volatile()
+    .description('Enable the Exa search source.'),
+  exaApiKeyRef: Schema.string()
+    .default('EXA_API_KEY')
+    .volatile()
+    .description('Credential reference (env-var name) holding the Exa API key.'),
+  exaApiBase: Schema.string()
+    .default('https://api.exa.ai')
+    .volatile()
+    .description('Exa API base URL.'),
+  integratorProvider: Schema.string()
+    .default('deepseek-official')
+    .volatile()
+    .description(
+      'Integrator model provider (llm route id). Empty disables synthesis (degraded results).',
+    ),
+  integratorModel: Schema.string()
+    .default('deepseek-flash')
+    .volatile()
+    .description('Integrator model id on that provider. A small/fast model is usually right.'),
+  integratorMaxTokens: Schema.number()
+    .default(8192)
+    .volatile()
+    .description(
+      'Max output tokens for one integrator call. Reasoning models burn this budget on thinking first.',
+    ),
+  followupRounds: Schema.number()
+    .default(1)
+    .volatile()
+    .description('Max follow-up search rounds after the integrator flags a gap (0 disables).'),
+  maxEvidence: Schema.number()
+    .default(14)
+    .volatile()
+    .description('Evidence entries kept after dedup and ranking.'),
+  fetchTopN: Schema.number()
+    .default(2)
+    .volatile()
+    .description(
+      'Top-ranked sources with thin content (e.g. snippet-less URLs) get one best-effort page fetch for a body excerpt. 0 disables.',
+    ),
+  perSourceResults: Schema.number()
+    .default(8)
+    .volatile()
+    .description('Results requested per provider per query.'),
+  excerptChars: Schema.number()
+    .default(1600)
+    .volatile()
+    .description('Per-source excerpt character cap in the integrator digest.'),
+  totalBudgetMs: Schema.number()
+    .default(125000)
+    .volatile()
+    .description(
+      'Wall-clock budget shared by every call of one research run (ms). Sized for one slow generative source round + integration + a fast follow-up round.',
+    ),
+  perRequestTimeoutMs: Schema.number()
+    .default(12000)
+    .volatile()
+    .description(
+      'Per-request timeout applied to every provider HTTP call, independent of the shared budget.',
+    ),
+  maxRenderChars: Schema.number()
+    .default(7000)
+    .volatile()
+    .description('Character budget for the model-facing render (downstream pruners cap ~8k).'),
+  auditEnabled: Schema.boolean()
+    .default(true)
+    .volatile()
+    .description(
+      'Persist the full audit artifact (queries, hits, digest, model I/O) to the spill store.',
+    ),
 })
 
 /**

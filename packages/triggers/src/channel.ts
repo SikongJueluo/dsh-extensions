@@ -21,10 +21,16 @@ const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
 /** Template bodies ride the channel; keep a generous but finite ceiling. */
 const MAX_CHANNEL_BODY_BYTES = 256 * 1024
 
-type ChannelResult = { ok: true, value: unknown } | { ok: false, error: { code: string, message: string } }
+type ChannelResult =
+  | { ok: true; value: unknown }
+  | { ok: false; error: { code: string; message: string } }
 
 /** Dispatch one endpoint against the trigger service. */
-async function handle(service: TriggerService, endpoint: string, payload: Record<string, unknown>): Promise<ChannelResult> {
+async function handle(
+  service: TriggerService,
+  endpoint: string,
+  payload: Record<string, unknown>,
+): Promise<ChannelResult> {
   try {
     switch (endpoint) {
       case 'state': {
@@ -34,32 +40,43 @@ async function handle(service: TriggerService, endpoint: string, payload: Record
       case 'sessions':
         return { ok: true, value: { items: await service.sessions() } }
       case 'template.save':
-        return { ok: true, value: await service.saveTemplate(payload as Parameters<typeof service.saveTemplate>[0]) }
+        return {
+          ok: true,
+          value: await service.saveTemplate(payload as Parameters<typeof service.saveTemplate>[0]),
+        }
       case 'template.delete': {
         if (typeof payload.id !== 'string') return bad(endpoint, 'id must be a string')
         await service.deleteTemplate(payload.id)
         return { ok: true, value: { deleted: true } }
       }
       case 'binding.save':
-        return { ok: true, value: await service.saveBinding(payload as Parameters<typeof service.saveBinding>[0]) }
+        return {
+          ok: true,
+          value: await service.saveBinding(payload as Parameters<typeof service.saveBinding>[0]),
+        }
       case 'binding.delete': {
         if (typeof payload.id !== 'string') return bad(endpoint, 'id must be a string')
         await service.deleteBinding(payload.id)
         return { ok: true, value: { deleted: true } }
       }
       case 'run.start': {
-        if (typeof payload.bindingId !== 'string') return bad(endpoint, 'bindingId must be a string')
+        if (typeof payload.bindingId !== 'string')
+          return bad(endpoint, 'bindingId must be a string')
         const task = typeof payload.task === 'string' ? payload.task : undefined
         return { ok: true, value: await service.startRunFromBinding(payload.bindingId, task) }
       }
       case 'run.control': {
         const action = payload.action
-        if (typeof payload.runId !== 'string' || typeof action !== 'string' ||
-          !['pause', 'resume', 'cancel', 'extend', 'redeliver'].includes(action)) {
+        if (
+          typeof payload.runId !== 'string' ||
+          typeof action !== 'string' ||
+          !['pause', 'resume', 'cancel', 'extend', 'redeliver'].includes(action)
+        ) {
           return bad(endpoint, 'runId and a known action are required')
         }
         const message = typeof payload.message === 'string' ? payload.message : undefined
-        const newMaxRounds = typeof payload.newMaxRounds === 'number' ? payload.newMaxRounds : undefined
+        const newMaxRounds =
+          typeof payload.newMaxRounds === 'number' ? payload.newMaxRounds : undefined
         const deliveryId = typeof payload.deliveryId === 'string' ? payload.deliveryId : undefined
         const run = await service.controlRun(
           payload.runId,
@@ -69,10 +86,19 @@ async function handle(service: TriggerService, endpoint: string, payload: Record
         return { ok: true, value: run }
       }
       default:
-        return { ok: false, error: { code: 'UNKNOWN_ENDPOINT', message: `Unknown endpoint "${endpoint}"` } }
+        return {
+          ok: false,
+          error: { code: 'UNKNOWN_ENDPOINT', message: `Unknown endpoint "${endpoint}"` },
+        }
     }
   } catch (error) {
-    return { ok: false, error: { code: 'TRIGGER_ERROR', message: error instanceof Error ? error.message : String(error) } }
+    return {
+      ok: false,
+      error: {
+        code: 'TRIGGER_ERROR',
+        message: error instanceof Error ? error.message : String(error),
+      },
+    }
   }
 }
 
@@ -85,7 +111,11 @@ function bad(_endpoint: string, message: string): ChannelResult {
  * server are both present (soft-injected), mirroring the other packages.
  */
 export function registerTriggerChannel(ctx: Context, service: TriggerService): void {
-  const serve = async (svcCtx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const serve = async (
+    svcCtx: Context,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> => {
     const rejection = svcCtx.connection.requestRejection(req)
     if (rejection !== undefined) {
       res.writeHead(rejection)
@@ -102,7 +132,10 @@ export function registerTriggerChannel(ctx: Context, service: TriggerService): v
       respond(404, '{}')
       return
     }
-    if ((req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
+    if (
+      (req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !==
+      'application/json'
+    ) {
       respond(415, '{}')
       return
     }
@@ -117,7 +150,7 @@ export function registerTriggerChannel(ctx: Context, service: TriggerService): v
       }
       chunks.push(chunk as Buffer)
     }
-    let envelope: { type?: unknown, rpcId?: unknown, method?: unknown, payload?: unknown }
+    let envelope: { type?: unknown; rpcId?: unknown; method?: unknown; payload?: unknown }
     try {
       envelope = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof envelope
     } catch {
@@ -125,8 +158,12 @@ export function registerTriggerChannel(ctx: Context, service: TriggerService): v
       return
     }
     if (
-      envelope.type !== 'client-request' || typeof envelope.rpcId !== 'string' || envelope.rpcId.length === 0 ||
-      envelope.method !== endpoint || typeof envelope.payload !== 'object' || envelope.payload === null
+      envelope.type !== 'client-request' ||
+      typeof envelope.rpcId !== 'string' ||
+      envelope.rpcId.length === 0 ||
+      envelope.method !== endpoint ||
+      typeof envelope.payload !== 'object' ||
+      envelope.payload === null
     ) {
       respond(400, '{}')
       return
@@ -136,11 +173,15 @@ export function registerTriggerChannel(ctx: Context, service: TriggerService): v
   }
 
   ctx.inject(['connection', 'webServer'], (svcCtx) => {
-    svcCtx.effect(() => svcCtx.webServer.register({
-      kind: 'prefix',
-      path: RPC_CHANNEL,
-      handler: (req, res) => serve(svcCtx, req, res),
-    }), `${RPC_CHANNEL} trigger channel`)
+    svcCtx.effect(
+      () =>
+        svcCtx.webServer.register({
+          kind: 'prefix',
+          path: RPC_CHANNEL,
+          handler: (req, res) => serve(svcCtx, req, res),
+        }),
+      `${RPC_CHANNEL} trigger channel`,
+    )
     svcCtx.logger(PACKAGE_NAME).info('trigger channel mounted', { path: RPC_CHANNEL })
   })
 }

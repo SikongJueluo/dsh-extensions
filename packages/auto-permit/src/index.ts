@@ -218,15 +218,21 @@ export function apply(ctx: Context, config: RowConfig): void {
         // when the peer's table is older than this build.
         const cmdPermit = ctx.get('cmdPermit') as CmdPermitLike | undefined
         const container = containerRisk(evidence.call.command)
-        const highRisk = isHighRisk(evidence.call.command)
-          || (cmdPermit?.isHighRisk(evidence.call.command) ?? false)
+        const highRisk =
+          isHighRisk(evidence.call.command) ||
+          (cmdPermit?.isHighRisk(evidence.call.command) ?? false)
         if (highRisk) {
           ctx.logger.info(
             'auto-permit: high-risk shape (%s), deferring to human: %s',
             container ?? 'irreversible',
             command,
           )
-          notify(agent, container === undefined ? 'high-risk' : 'container-guard', command, container)
+          notify(
+            agent,
+            container === undefined ? 'high-risk' : 'container-guard',
+            command,
+            container,
+          )
           return rest()
         }
 
@@ -242,11 +248,7 @@ export function apply(ctx: Context, config: RowConfig): void {
           evidence.call.sandboxPermissions ?? '',
         )
         if (claim !== undefined) {
-          ctx.logger.info(
-            'auto-permit: cmd-permit allowlisted (%s): %s',
-            claim.via,
-            command,
-          )
+          ctx.logger.info('auto-permit: cmd-permit allowlisted (%s): %s', claim.via, command)
           notify(agent, 'allowed-by-cmd-permit', command, claim.via)
           rememberSelf()
           return 'allowed-once'
@@ -261,15 +263,13 @@ export function apply(ctx: Context, config: RowConfig): void {
         // when the source qualifies: their effect is a mutable file or
         // engine state, so the identical string must be judged again.
         const replayable = evidence.exactRepeatSources.some(
-          (priorCallId) => chainApproved.has(keyOf(session.id, priorCallId))
-            && !selfAllowed.has(keyOf(session.id, priorCallId)),
+          (priorCallId) =>
+            chainApproved.has(keyOf(session.id, priorCallId)) &&
+            !selfAllowed.has(keyOf(session.id, priorCallId)),
         )
         const mutableRepeat = replayable && isMutableFileDependent(evidence.call.command)
         if (mutableRepeat) {
-          ctx.logger.info(
-            'auto-permit: repeat re-judged (mutable-file dependent): %s',
-            command,
-          )
+          ctx.logger.info('auto-permit: repeat re-judged (mutable-file dependent): %s', command)
         }
         if (replayable && !mutableRepeat) {
           ctx.logger.info(
@@ -281,13 +281,7 @@ export function apply(ctx: Context, config: RowConfig): void {
           return 'allowed-once'
         }
 
-        const result = await judge(
-          ctx,
-          settings,
-          evidence,
-          session.id,
-          req.signal,
-        )
+        const result = await judge(ctx, settings, evidence, session.id, req.signal)
         if (result.verdict === 'allow') {
           ctx.logger.info(
             'auto-permit: judge allowed after %d step(s), evidence [%s]: %s',

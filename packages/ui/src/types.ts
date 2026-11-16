@@ -39,6 +39,9 @@ export interface SlotRegistration {
 }
 
 export interface LocaleService {
-  register(namespace: string, dictionaries: { zh: Record<string, string>; en: Record<string, string> }): () => void
+  register(
+    namespace: string,
+    dictionaries: { zh: Record<string, string>; en: Record<string, string> },
+  ): () => void
   bind(namespace: string): (key: string, params?: Record<string, unknown>) => string
 }

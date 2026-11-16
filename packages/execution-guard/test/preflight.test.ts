@@ -24,7 +24,9 @@ const schemaOf = (tool: string): unknown | undefined => schemas[tool]
 
 describe('checkCall', () => {
   it('accepts arguments satisfying the schema (parsed args)', () => {
-    expect(checkCall(readSchema, { tool: 'read', callId: 'a', args: { file_path: 'x' } })).toEqual({ kind: 'valid' })
+    expect(checkCall(readSchema, { tool: 'read', callId: 'a', args: { file_path: 'x' } })).toEqual({
+      kind: 'valid',
+    })
   })
 
   it('reports a missing required property with its field name', () => {
@@ -46,7 +48,9 @@ describe('checkCall', () => {
       type: 'object',
       properties: { verbose: { type: 'boolean' } },
     } as const
-    expect(checkCall(noArgsSchema, { tool: 'list', callId: 'a', argsRaw: '' })).toEqual({ kind: 'valid' })
+    expect(checkCall(noArgsSchema, { tool: 'list', callId: 'a', argsRaw: '' })).toEqual({
+      kind: 'valid',
+    })
     // Blank whitespace is truthy on the host: JSON.parse throws and the
     // schema sees a parse failure — strict parity, not a wider allowance.
     expect(checkCall(noArgsSchema, { tool: 'list', callId: 'a', argsRaw: '   ' })).toEqual({
@@ -55,11 +59,15 @@ describe('checkCall', () => {
     })
     // Against a schema with required keys the empty form reports the
     // missing property — proving it parsed as {} rather than as JSON junk.
-    expect(checkCall(readSchema, { tool: 'read', callId: 'a', argsRaw: '' })).toMatchObject({ kind: 'invalid' })
+    expect(checkCall(readSchema, { tool: 'read', callId: 'a', argsRaw: '' })).toMatchObject({
+      kind: 'invalid',
+    })
   })
 
   it('parses raw sibling JSON and rejects malformed JSON', () => {
-    expect(checkCall(readSchema, { tool: 'read', callId: 'a', argsRaw: '{"file_path":"x"}' })).toEqual({ kind: 'valid' })
+    expect(
+      checkCall(readSchema, { tool: 'read', callId: 'a', argsRaw: '{"file_path":"x"}' }),
+    ).toEqual({ kind: 'valid' })
     expect(checkCall(readSchema, { tool: 'read', callId: 'a', argsRaw: '{file_path' })).toEqual({
       kind: 'invalid',
       violations: ['arguments: not valid JSON'],
@@ -75,7 +83,10 @@ describe('checkCall', () => {
   })
 
   it('marks a call without any argument source unchecked', () => {
-    expect(checkCall(readSchema, { tool: 'read', callId: 'a' })).toEqual({ kind: 'unchecked', why: 'no-schema' })
+    expect(checkCall(readSchema, { tool: 'read', callId: 'a' })).toEqual({
+      kind: 'unchecked',
+      why: 'no-schema',
+    })
   })
 })
 

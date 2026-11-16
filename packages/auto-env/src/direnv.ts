@@ -156,7 +156,8 @@ export class DirenvLoader {
     const rcDir = findEnvrcDir(dir)
     if (rcDir === undefined) return EMPTY_OVERLAY
     const cached = this.#facts.get(rcDir)
-    if (cached !== undefined && Date.now() - cached.at < this.#options.revalidateMs) return cached.overlay
+    if (cached !== undefined && Date.now() - cached.at < this.#options.revalidateMs)
+      return cached.overlay
     return this.#revalidate(rcDir)
   }
 
@@ -165,8 +166,13 @@ export class DirenvLoader {
     const rcDir = findEnvrcDir(dir)
     if (rcDir === undefined) return { status: 'none' }
     const facts = this.#facts.get(rcDir)
-    if (facts === undefined) return { status: this.#inflight.has(rcDir) ? 'pending' : 'none', rcDir }
-    return { status: facts.status, rcDir, ...facts.detail === undefined ? {} : { detail: facts.detail } }
+    if (facts === undefined)
+      return { status: this.#inflight.has(rcDir) ? 'pending' : 'none', rcDir }
+    return {
+      status: facts.status,
+      rcDir,
+      ...(facts.detail === undefined ? {} : { detail: facts.detail }),
+    }
   }
 
   #revalidate(rcDir: string): Promise<EnvOverlay> {
@@ -175,7 +181,11 @@ export class DirenvLoader {
     const task = this.#evaluate(rcDir)
       .catch((error: unknown): EnvOverlay => {
         // #evaluate records its own failure facts; only unexpected throws land here.
-        this.#record(rcDir, this.#generation.get(rcDir) ?? 0, { status: 'error', overlay: EMPTY_OVERLAY, detail: describeError(error) })
+        this.#record(rcDir, this.#generation.get(rcDir) ?? 0, {
+          status: 'error',
+          overlay: EMPTY_OVERLAY,
+          detail: describeError(error),
+        })
         return EMPTY_OVERLAY
       })
       .finally(() => {
@@ -195,7 +205,11 @@ export class DirenvLoader {
     this.#startRcDirWatch(rcDir)
     const bin = await this.#resolveBinary()
     if (bin === undefined) {
-      this.#record(rcDir, gen, { status: 'missing', overlay: EMPTY_OVERLAY, detail: `direnv executable "${this.#options.direnvPath}" not found` })
+      this.#record(rcDir, gen, {
+        status: 'missing',
+        overlay: EMPTY_OVERLAY,
+        detail: `direnv executable "${this.#options.direnvPath}" not found`,
+      })
       return EMPTY_OVERLAY
     }
     // Own the deadline with a ref'd timer: AbortSignal.timeout() schedules
@@ -218,14 +232,22 @@ export class DirenvLoader {
       })
     } catch (error) {
       clearTimeout(timer)
-      this.#record(rcDir, gen, { status: 'error', overlay: EMPTY_OVERLAY, detail: describeError(error) })
+      this.#record(rcDir, gen, {
+        status: 'error',
+        overlay: EMPTY_OVERLAY,
+        detail: describeError(error),
+      })
       return EMPTY_OVERLAY
     }
     let outcome
     try {
       outcome = await handle.done
     } catch (error) {
-      this.#record(rcDir, gen, { status: 'error', overlay: EMPTY_OVERLAY, detail: describeError(error) })
+      this.#record(rcDir, gen, {
+        status: 'error',
+        overlay: EMPTY_OVERLAY,
+        detail: describeError(error),
+      })
       return EMPTY_OVERLAY
     } finally {
       clearTimeout(timer)
@@ -233,35 +255,56 @@ export class DirenvLoader {
     // Collect dispositions expose both readers by the seam contract; defensive.
     const { stdout, stderr: stderrReader } = handle.collected
     if (stdout === undefined || stderrReader === undefined) {
-      this.#record(rcDir, gen, { status: 'error', overlay: EMPTY_OVERLAY, detail: 'subprocess implementation dropped a requested collect stream' })
+      this.#record(rcDir, gen, {
+        status: 'error',
+        overlay: EMPTY_OVERLAY,
+        detail: 'subprocess implementation dropped a requested collect stream',
+      })
       return EMPTY_OVERLAY
     }
     const stdoutRead = stdout.readFrom(0)
     const stderr = stderrReader.readFrom(0).text.trim()
     if (settled()) {
-      this.#record(rcDir, gen, { status: 'timeout', overlay: EMPTY_OVERLAY, detail: `direnv export did not finish within ${this.#options.timeoutMs} ms` })
+      this.#record(rcDir, gen, {
+        status: 'timeout',
+        overlay: EMPTY_OVERLAY,
+        detail: `direnv export did not finish within ${this.#options.timeoutMs} ms`,
+      })
       return EMPTY_OVERLAY
     }
     if (outcome.exitCode !== 0) {
-      const detail = firstLine(stderr) ?? `direnv export exited with code ${outcome.exitCode ?? 'null'}`
+      const detail =
+        firstLine(stderr) ?? `direnv export exited with code ${outcome.exitCode ?? 'null'}`
       // direnv refuses an .envrc whose hash is not in its allow list.
       const status: DirenvStatus = stderr.includes('is blocked') ? 'blocked' : 'error'
       this.#record(rcDir, gen, { status, overlay: EMPTY_OVERLAY, detail })
       return EMPTY_OVERLAY
     }
     if (stdoutRead.lossy) {
-      this.#record(rcDir, gen, { status: 'error', overlay: EMPTY_OVERLAY, detail: `direnv export output exceeded ${this.#options.stdoutMaxBytes} bytes` })
+      this.#record(rcDir, gen, {
+        status: 'error',
+        overlay: EMPTY_OVERLAY,
+        detail: `direnv export output exceeded ${this.#options.stdoutMaxBytes} bytes`,
+      })
       return EMPTY_OVERLAY
     }
     let dump: unknown
     try {
       dump = stdoutRead.text.length === 0 ? {} : JSON.parse(stdoutRead.text)
     } catch {
-      this.#record(rcDir, gen, { status: 'error', overlay: EMPTY_OVERLAY, detail: 'direnv export emitted invalid JSON' })
+      this.#record(rcDir, gen, {
+        status: 'error',
+        overlay: EMPTY_OVERLAY,
+        detail: 'direnv export emitted invalid JSON',
+      })
       return EMPTY_OVERLAY
     }
     if (typeof dump !== 'object' || dump === null || Array.isArray(dump)) {
-      this.#record(rcDir, gen, { status: 'error', overlay: EMPTY_OVERLAY, detail: 'direnv export emitted a non-object JSON document' })
+      this.#record(rcDir, gen, {
+        status: 'error',
+        overlay: EMPTY_OVERLAY,
+        detail: 'direnv export emitted a non-object JSON document',
+      })
       return EMPTY_OVERLAY
     }
     const overlay = sanitizeDirenvDump(dump as Record<string, unknown>)
@@ -296,9 +339,13 @@ export class DirenvLoader {
     this.#logged.set(rcDir, facts.status)
     const logger = this.#ctx.logger('auto-env')
     if (facts.status === 'active') {
-      logger.info(`direnv active: ${Object.keys(facts.overlay).length} overlay entries for ${rcDir}`)
+      logger.info(
+        `direnv active: ${Object.keys(facts.overlay).length} overlay entries for ${rcDir}`,
+      )
     } else {
-      logger.warn(`direnv ${facts.status}: ${rcDir}${facts.detail === undefined ? '' : ` — ${facts.detail}`}`)
+      logger.warn(
+        `direnv ${facts.status}: ${rcDir}${facts.detail === undefined ? '' : ` — ${facts.detail}`}`,
+      )
     }
   }
 
@@ -309,7 +356,10 @@ export class DirenvLoader {
   #invalidate(rcDir: string, reason: string): void {
     this.#generation.set(rcDir, (this.#generation.get(rcDir) ?? 0) + 1)
     const hadFacts = this.#facts.delete(rcDir)
-    if (hadFacts) this.#ctx.logger('auto-env').info(`direnv inputs changed (${reason}); re-evaluating ${rcDir} on next use`)
+    if (hadFacts)
+      this.#ctx
+        .logger('auto-env')
+        .info(`direnv inputs changed (${reason}); re-evaluating ${rcDir} on next use`)
   }
 
   /** Watch the `.envrc` directory itself (rename-safe, sees new files). */
@@ -318,21 +368,26 @@ export class DirenvLoader {
     try {
       const watcher = watch(rcDir, (_event, filename) => {
         // `null` filenames cannot be filtered; treat them as a hit.
-        if (filename === null || WATCHED_BASENAMES.has(basename(filename))) this.#invalidate(rcDir, filename ?? 'unknown change')
+        if (filename === null || WATCHED_BASENAMES.has(basename(filename)))
+          this.#invalidate(rcDir, filename ?? 'unknown change')
       })
       watcher.on('error', (error) => {
         this.#watchers.delete(rcDir)
         try {
           watcher.close()
         } catch {}
-        this.#ctx.logger('auto-env').warn(`direnv input watcher stopped for ${rcDir}: ${describeError(error)}`)
+        this.#ctx
+          .logger('auto-env')
+          .warn(`direnv input watcher stopped for ${rcDir}: ${describeError(error)}`)
       })
       this.#watchers.set(rcDir, watcher)
       this.#startAllowWatch()
     } catch (error) {
       // e.g. the directory vanished; degrade to TTL-only revalidation.
       this.#watchers.set(rcDir, undefined)
-      this.#ctx.logger('auto-env').warn(`direnv input watcher unavailable for ${rcDir}: ${describeError(error)}`)
+      this.#ctx
+        .logger('auto-env')
+        .warn(`direnv input watcher unavailable for ${rcDir}: ${describeError(error)}`)
     }
   }
 
@@ -343,13 +398,15 @@ export class DirenvLoader {
    */
   #startAllowWatch(): void {
     if (this.#options.watch === false || this.#allowWatcher !== undefined) return
-    const allowDir = process.env.DIRENV_CONFIG !== undefined
-      ? join(process.env.DIRENV_CONFIG, 'allow')
-      : join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'direnv', 'allow')
+    const allowDir =
+      process.env.DIRENV_CONFIG !== undefined
+        ? join(process.env.DIRENV_CONFIG, 'allow')
+        : join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'direnv', 'allow')
     if (!existsSync(allowDir)) return
     try {
       const watcher = watch(allowDir, () => {
-        for (const rcDir of [...this.#watchers.keys()]) this.#invalidate(rcDir, 'allow list changed')
+        for (const rcDir of [...this.#watchers.keys()])
+          this.#invalidate(rcDir, 'allow list changed')
       })
       watcher.on('error', () => {
         if (this.#allowWatcher === watcher) this.#allowWatcher = undefined

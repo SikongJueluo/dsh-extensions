@@ -24,7 +24,10 @@ export function Progress({ value, tone = 'brand', label, className }: ProgressPr
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={value === null ? undefined : Math.round(clamped)}
-      className={cn('dshx:h-2 dshx:w-full dshx:overflow-hidden dshx:rounded-full dshx:bg-surface-2', className)}
+      className={cn(
+        'dshx:h-2 dshx:w-full dshx:overflow-hidden dshx:rounded-full dshx:bg-surface-2',
+        className,
+      )}
     >
       <div
         className={cn(

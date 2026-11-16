@@ -62,19 +62,39 @@ export function planResetWait(
   options: ScheduleOptions,
 ): WaitPlan {
   const budget = options.maxWaitMs - elapsedMs
-  if (budget <= 0) return { kind: 'give-up', reason: `auto-continue wait budget of ${Math.round(options.maxWaitMs / 60000)} min is exhausted` }
-  const candidates: Array<{ window: 'fiveHour' | 'weekly' | 'monthlyMcp'; percent: number | undefined; resetAt: number | undefined }> = [
-    { window: 'fiveHour', percent: snapshot?.fiveHour?.percent, resetAt: snapshot?.fiveHour?.resetAt },
+  if (budget <= 0)
+    return {
+      kind: 'give-up',
+      reason: `auto-continue wait budget of ${Math.round(options.maxWaitMs / 60000)} min is exhausted`,
+    }
+  const candidates: Array<{
+    window: 'fiveHour' | 'weekly' | 'monthlyMcp'
+    percent: number | undefined
+    resetAt: number | undefined
+  }> = [
+    {
+      window: 'fiveHour',
+      percent: snapshot?.fiveHour?.percent,
+      resetAt: snapshot?.fiveHour?.resetAt,
+    },
     { window: 'weekly', percent: snapshot?.weekly?.percent, resetAt: snapshot?.weekly?.resetAt },
-    { window: 'monthlyMcp', percent: snapshot?.monthlyMcp?.percent, resetAt: snapshot?.monthlyMcp?.resetAt },
+    {
+      window: 'monthlyMcp',
+      percent: snapshot?.monthlyMcp?.percent,
+      resetAt: snapshot?.monthlyMcp?.resetAt,
+    },
   ]
-  const withReset = candidates.filter((c): c is typeof c & { resetAt: number } => c.resetAt !== undefined)
-  if (withReset.length === 0) return { kind: 'wait', delayMs: Math.min(PROBE_SCHEDULE_MS[0]!, budget), window: 'probe' }
+  const withReset = candidates.filter(
+    (c): c is typeof c & { resetAt: number } => c.resetAt !== undefined,
+  )
+  if (withReset.length === 0)
+    return { kind: 'wait', delayMs: Math.min(PROBE_SCHEDULE_MS[0]!, budget), window: 'probe' }
   // Only a window that actually looks exhausted may drive the wait: a fresh
   // snapshot disagreeing with the failure (all windows below threshold) means
   // stale or misattributed data, and the caller should probe instead.
   const exhausted = withReset.filter((c) => (c.percent ?? 0) >= 95)
-  if (exhausted.length === 0) return { kind: 'wait', delayMs: Math.min(PROBE_SCHEDULE_MS[0]!, budget), window: 'probe' }
+  if (exhausted.length === 0)
+    return { kind: 'wait', delayMs: Math.min(PROBE_SCHEDULE_MS[0]!, budget), window: 'probe' }
   // When several windows are exhausted, the latest reset binds: an earlier
   // reset (e.g. 5h rolling over) does not help while the weekly one blocks.
   const binding = exhausted.reduce((a, b) => (a.resetAt >= b.resetAt ? a : b))
@@ -89,7 +109,12 @@ export function planResetWait(
       reason: `quota window "${binding.window}" resets in ~${hours}h, beyond the configured max wait`,
     }
   }
-  return { kind: 'wait', delayMs, window: binding.window, retryAt: binding.resetAt + options.resetMarginMs }
+  return {
+    kind: 'wait',
+    delayMs,
+    window: binding.window,
+    retryAt: binding.resetAt + options.resetMarginMs,
+  }
 }
 
 /**
@@ -98,9 +123,18 @@ export function planResetWait(
  * boundary is not missed by half an hour. The final probe may be clipped to
  * whatever budget remains.
  */
-export function planProbeWait(now: number, elapsedMs: number, probeIndex: number, options: ScheduleOptions): WaitPlan {
+export function planProbeWait(
+  now: number,
+  elapsedMs: number,
+  probeIndex: number,
+  options: ScheduleOptions,
+): WaitPlan {
   const budget = options.maxWaitMs - elapsedMs
-  if (budget <= 0) return { kind: 'give-up', reason: `auto-continue wait budget of ${Math.round(options.maxWaitMs / 60000)} min is exhausted` }
+  if (budget <= 0)
+    return {
+      kind: 'give-up',
+      reason: `auto-continue wait budget of ${Math.round(options.maxWaitMs / 60000)} min is exhausted`,
+    }
   let delayMs: number
   if (elapsedMs >= PROBE_TIGHTEN_AFTER_MS) {
     delayMs = PROBE_TIGHT_DELAY_MS

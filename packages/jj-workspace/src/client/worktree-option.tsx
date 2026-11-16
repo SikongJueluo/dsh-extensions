@@ -50,7 +50,9 @@ const controlClass = cn(
 
 function optionLabel(choice: WorktreeChoice): ReactNode {
   if (choice.note === undefined) {
-    return <span className="dshx:min-w-0 dshx:truncate dshx:font-code dshx:text-xs">{choice.label}</span>
+    return (
+      <span className="dshx:min-w-0 dshx:truncate dshx:font-code dshx:text-xs">{choice.label}</span>
+    )
   }
   return (
     <span className="dshx:inline-flex dshx:min-w-0 dshx:items-baseline dshx:gap-2">

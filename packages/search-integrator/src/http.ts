@@ -104,9 +104,8 @@ export async function withRetry<T>(
       return await fn(attempt)
     } catch (error) {
       if (options.signal.aborted) throw error
-      const retryable = error instanceof HttpError
-        ? retryableStatus(error.status)
-        : error instanceof TypeError // fetch() network failure
+      const retryable =
+        error instanceof HttpError ? retryableStatus(error.status) : error instanceof TypeError // fetch() network failure
       if (!retryable || attempt > retries) throw error
       lastError = error
       await sleep(400 * attempt + Math.floor(Math.random() * 200), options.signal)

@@ -12,7 +12,11 @@
  */
 import type { Api, Model, Provider } from '@earendil-works/pi-ai'
 import { createProvider, envApiKeyAuth } from '@earendil-works/pi-ai'
-import { anthropicMessagesApi, openAICompletionsApi, openAIResponsesApi } from '@earendil-works/pi-ai/compat'
+import {
+  anthropicMessagesApi,
+  openAICompletionsApi,
+  openAIResponsesApi,
+} from '@earendil-works/pi-ai/compat'
 
 /** Default route id when the YAML provider id is `command-code`. */
 export const DEFAULT_ROUTE = 'command-code'
@@ -33,7 +37,8 @@ const FALLBACK_CONTEXT_WINDOW = 131_072
 const FALLBACK_MAX_TOKENS = 32_768
 
 /** Claude models from Opus/Sonnet 4.6 and Fable 5 onward require adaptive thinking. */
-const ADAPTIVE_THINKING = /(opus[-.](4[-.]6|4[-.]7|4[-.]8|5)|sonnet[-.](4[-.]6|5)|fable[-.]5|mythos[-.]5)/
+const ADAPTIVE_THINKING =
+  /(opus[-.](4[-.]6|4[-.]7|4[-.]8|5)|sonnet[-.](4[-.]6|5)|fable[-.]5|mythos[-.]5)/
 
 /** Vision-capable families while the catalog reports no modalities. */
 const VISION_FAMILIES = [/^claude-/, /^gpt-/, /^google\//]
@@ -98,7 +103,9 @@ function apiOf(item: CommandCodeCatalogItem): Api | undefined {
 
 /** Declared modalities when the endpoint reports them, else the family fallback. */
 function inputOf(item: CommandCodeCatalogItem): Array<'text' | 'image'> {
-  const declared = item.modalities?.input?.filter((value): value is 'text' | 'image' => value === 'text' || value === 'image')
+  const declared = item.modalities?.input?.filter(
+    (value): value is 'text' | 'image' => value === 'text' || value === 'image',
+  )
   if (declared !== undefined && declared.length > 0) return declared
   return VISION_FAMILIES.some((family) => family.test(item.id)) ? ['text', 'image'] : ['text']
 }
@@ -174,7 +181,9 @@ export function buildCommandCodeProvider(
   const provider = createProvider({
     id: options.route,
     name: options.displayName,
-    auth: { apiKey: envApiKeyAuth('Command Code API key', ['CMD_API_KEY', 'COMMAND_CODE_API_KEY']) },
+    auth: {
+      apiKey: envApiKeyAuth('Command Code API key', ['CMD_API_KEY', 'COMMAND_CODE_API_KEY']),
+    },
     models,
     api: {
       'anthropic-messages': anthropicMessagesApi(),

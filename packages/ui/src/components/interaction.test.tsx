@@ -21,7 +21,11 @@ class ResizeObserverStub {
 }
 Object.assign(globalThis, { ResizeObserver: ResizeObserverStub })
 Object.assign(window, { ResizeObserver: ResizeObserverStub })
-window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia
+window.matchMedia = (() => ({
+  matches: false,
+  addEventListener() {},
+  removeEventListener() {},
+})) as unknown as typeof window.matchMedia
 Element.prototype.scrollIntoView = () => {}
 
 let container!: HTMLDivElement

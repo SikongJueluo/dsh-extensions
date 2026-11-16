@@ -1,7 +1,4 @@
 {
   "extends": "../../tsconfig.client.base.json",
-  "include": [
-    "src/client",
-    "../../tooling/client/env.d.ts"
-  ]
+  "include": ["src/client", "../../tooling/client/env.d.ts"]
 }

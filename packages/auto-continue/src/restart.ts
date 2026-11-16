@@ -55,7 +55,12 @@ const CONTROLLER_POLL_MS = 1_000
 function isEntry(value: unknown): value is RunningEntry {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
-  return typeof v.sessionId === 'string' && v.sessionId.length > 0 && typeof v.at === 'number' && Number.isFinite(v.at)
+  return (
+    typeof v.sessionId === 'string' &&
+    v.sessionId.length > 0 &&
+    typeof v.at === 'number' &&
+    Number.isFinite(v.at)
+  )
 }
 
 /** Whether the session's last completed turn actually finished (race guard). */
@@ -77,7 +82,13 @@ function lastTurnCompleted(agent: Agent): boolean {
 export function registerRestartResume(
   ctx: Context,
   config: { resumeOnRestart: boolean; resumeMaxAgeMs: number },
-  options: { mirrorPath?: string; settleMs?: number; staggerMs?: number; controllerWaitMs?: number; controllerPollMs?: number } = {},
+  options: {
+    mirrorPath?: string
+    settleMs?: number
+    staggerMs?: number
+    controllerWaitMs?: number
+    controllerPollMs?: number
+  } = {},
 ): void {
   const path = options.mirrorPath ?? defaultMirrorPath()
   const settleMs = options.settleMs ?? BOOT_SETTLE_MS
@@ -123,7 +134,9 @@ export function registerRestartResume(
       if (controller !== undefined || lifetime.signal.aborted || Date.now() >= deadline) {
         return controller ?? undefined
       }
-      await new Promise((resolve) => setTimeout(resolve, options.controllerPollMs ?? CONTROLLER_POLL_MS))
+      await new Promise((resolve) =>
+        setTimeout(resolve, options.controllerPollMs ?? CONTROLLER_POLL_MS),
+      )
     }
   }
 
@@ -131,22 +144,37 @@ export function registerRestartResume(
    *  it (controller absent) and the whole pass should leave the mirror alone. */
   const resumeOne = async (entry: RunningEntry): Promise<boolean> => {
     const registry = ctx.get('agents')
-    let agent: Agent | undefined = registry?.get(entry.sessionId as Parameters<typeof registry.get>[0])
+    let agent: Agent | undefined = registry?.get(
+      entry.sessionId as Parameters<typeof registry.get>[0],
+    )
     if (agent === undefined) {
       const controller = await awaitController()
       if (controller === undefined) {
-        ctx.logger.warn('auto-continue: no sessionController to resume "%s" after restart', entry.sessionId)
+        ctx.logger.warn(
+          'auto-continue: no sessionController to resume "%s" after restart',
+          entry.sessionId,
+        )
         return false
       }
-      const result = await controller.agents.resolveAgent(entry.sessionId as Parameters<SessionControllerShim['agents']['resolveAgent']>[0])
+      const result = await controller.agents.resolveAgent(
+        entry.sessionId as Parameters<SessionControllerShim['agents']['resolveAgent']>[0],
+      )
       if ('error' in result) {
-        ctx.logger.warn('auto-continue: cannot reopen "%s" after restart (%o)', entry.sessionId, result.error)
+        ctx.logger.warn(
+          'auto-continue: cannot reopen "%s" after restart (%o)',
+          entry.sessionId,
+          result.error,
+        )
         return true
       }
       agent = result.agent
     }
     if (agent === undefined || lastTurnCompleted(agent)) {
-      if (agent !== undefined) ctx.logger.info('auto-continue: "%s" finished its turn before the restart — not resumed', entry.sessionId)
+      if (agent !== undefined)
+        ctx.logger.info(
+          'auto-continue: "%s" finished its turn before the restart — not resumed',
+          entry.sessionId,
+        )
       return true
     }
     agent.followup(resumeMessage)
@@ -168,7 +196,12 @@ export function registerRestartResume(
     const now = Date.now()
     const fresh = entries.filter((entry) => now - entry.at < config.resumeMaxAgeMs)
     const stale = entries.length - fresh.length
-    if (stale > 0) ctx.logger.info('auto-continue: %d restart-resume entr%s past the max-age window — skipped', stale, stale === 1 ? 'y is' : 'ies are')
+    if (stale > 0)
+      ctx.logger.info(
+        'auto-continue: %d restart-resume entr%s past the max-age window — skipped',
+        stale,
+        stale === 1 ? 'y is' : 'ies are',
+      )
     if (fresh.length === 0) return
     // Let the composition settle, then resume one session at a time.
     await new Promise((resolve) => setTimeout(resolve, settleMs))
@@ -190,7 +223,10 @@ export function registerRestartResume(
   // a plain delay is enough because apply runs during composition.
   void adoptAtBoot()
 
-  ctx.effect(() => () => {
-    lifetime.abort(new Error('auto-continue plugin disposed'))
-  }, 'auto-continue: stop restart-resume')
+  ctx.effect(
+    () => () => {
+      lifetime.abort(new Error('auto-continue plugin disposed'))
+    },
+    'auto-continue: stop restart-resume',
+  )
 }

@@ -69,9 +69,10 @@ const en: Record<string, string> = {
   forkCreated: 'Forked session {id} is now open.',
   forkFailed: 'Fork failed: {message}',
   forkPreviousFailed:
-    'The previous Fork did not finish. Check that session\'s write scope before relying on inherited directories.',
+    "The previous Fork did not finish. Check that session's write scope before relying on inherited directories.",
   forkSeq: 'Event seq (optional)',
-  notAttributed: 'This session has no write-access group yet. Send a message or reopen the session, then retry.',
+  notAttributed:
+    'This session has no write-access group yet. Send a message or reopen the session, then retry.',
   recent: 'Recent decisions',
   reason: 'Reason',
   session: 'session',
@@ -474,7 +475,9 @@ function apply(ctx: DshClientContext) {
                     className="dshx:flex dshx:items-start dshx:justify-between dshx:gap-2.5 dshx:border-t dshx:border-border dshx:py-2 dshx:first:border-t-0"
                   >
                     <div>
-                      <div className="dshx:break-all dshx:text-xs dshx:leading-[18px]">{request.path}</div>
+                      <div className="dshx:break-all dshx:text-xs dshx:leading-[18px]">
+                        {request.path}
+                      </div>
                       <div className="dshx:mt-0.5 dshx:text-2xs dshx:leading-4 dshx:text-fg-muted">
                         {t('reason')}: {request.reason || t('empty')}
                       </div>
@@ -593,7 +596,9 @@ function apply(ctx: DshClientContext) {
                 </Button>
               </div>
               {(view.forks ?? []).some((record) => record.stage === 'failed') ? (
-                <div className="dshx:mt-2.5 dshx:text-xs dshx:text-danger">{t('forkPreviousFailed')}</div>
+                <div className="dshx:mt-2.5 dshx:text-xs dshx:text-danger">
+                  {t('forkPreviousFailed')}
+                </div>
               ) : null}
             </Field>
           ) : null}
@@ -606,7 +611,9 @@ function apply(ctx: DshClientContext) {
                     key={request.requestId}
                     className="dshx:flex dshx:items-start dshx:justify-between dshx:gap-2.5 dshx:border-t dshx:border-border dshx:py-2 dshx:first:border-t-0"
                   >
-                    <div className="dshx:break-all dshx:text-xs dshx:leading-[18px]">{request.path}</div>
+                    <div className="dshx:break-all dshx:text-xs dshx:leading-[18px]">
+                      {request.path}
+                    </div>
                     <Badge variant="outline">{request.status}</Badge>
                   </div>
                 ))}

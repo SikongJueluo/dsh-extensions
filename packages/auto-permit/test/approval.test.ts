@@ -28,10 +28,17 @@ afterAll(() => {
 
 interface Fixture {
   events: { type: string; data: unknown }[]
-  injected: { source?: { kind?: string; summary?: string }; content?: { type: string; text?: string }[] }[]
+  injected: {
+    source?: { kind?: string; summary?: string }
+    content?: { type: string; text?: string }[]
+  }[]
   appended: unknown[]
   llmCalls: { messages: { content: { type: string; text?: string }[] }[] }[]
-  answer(callId: string, toolName?: string, chainOutcome?: ApprovalOutcome): Promise<{ outcome: ApprovalOutcome; fellThrough: boolean }>
+  answer(
+    callId: string,
+    toolName?: string,
+    chainOutcome?: ApprovalOutcome,
+  ): Promise<{ outcome: ApprovalOutcome; fellThrough: boolean }>
   /** Queue the fake judge's next verdict texts (consumed one per call). */
   judgeVerdicts(verdicts: string[]): void
 }
@@ -40,7 +47,11 @@ function makeFixture(
   cmdPermit?: unknown,
   options: { verdicts?: string[]; workspace?: string; workingDirectory?: string } = {},
 ): Fixture {
-  const listeners: { type: string; fn: (...args: unknown[]) => Promise<ApprovalOutcome>; prepend: boolean }[] = []
+  const listeners: {
+    type: string
+    fn: (...args: unknown[]) => Promise<ApprovalOutcome>
+    prepend: boolean
+  }[] = []
   const events: { type: string; data: unknown }[] = []
   const injected: unknown[] = []
   const appended: unknown[] = []
@@ -78,22 +89,26 @@ function makeFixture(
       },
     },
   }
-  apply(ctx as unknown as Context, {
-    enabled: vol(true),
-    provider: vol('test-provider'),
-    model: vol('test-model'),
-  } as Config)
-  const answer = (callId: string, toolName = 'bash', chainOutcome: ApprovalOutcome = 'rejected') => {
+  apply(
+    ctx as unknown as Context,
+    {
+      enabled: vol(true),
+      provider: vol('test-provider'),
+      model: vol('test-model'),
+    } as Config,
+  )
+  const answer = (
+    callId: string,
+    toolName = 'bash',
+    chainOutcome: ApprovalOutcome = 'rejected',
+  ) => {
     const entry = listeners.find((item) => item.type === 'approval/request')
     if (entry === undefined) throw new Error('no approval/request listener registered')
     let fellThrough = false
-    const outcome = entry.fn(
-      { agent, toolName, callId, signal: undefined },
-      async () => {
-        fellThrough = true
-        return chainOutcome
-      },
-    )
+    const outcome = entry.fn({ agent, toolName, callId, signal: undefined }, async () => {
+      fellThrough = true
+      return chainOutcome
+    })
     return outcome.then((value) => ({ outcome: value, fellThrough }))
   }
   return {
@@ -125,7 +140,12 @@ function directBash(fixture: Fixture, callId: string, args: Record<string, unkno
 }
 
 /** A prior settled direct approval (asked + allowed-once pair). */
-function priorDirectAllowed(fixture: Fixture, callId: string, args: Record<string, unknown>, id: string): void {
+function priorDirectAllowed(
+  fixture: Fixture,
+  callId: string,
+  args: Record<string, unknown>,
+  id: string,
+): void {
   fixture.events.push(
     { type: 'tool/call', data: { callId, name: 'bash', arguments: JSON.stringify(args) } },
     { type: 'approval/asked', data: { id, toolName: 'bash', callId } },
@@ -153,8 +173,9 @@ describe('auto-permit answerer over PTC evidence', () => {
       workspace: WORKSPACE,
       workingDirectory: WORKSPACE,
     })
-    const command = 'podman run --rm --network none -v "$PWD/out:/app:ro" '
-      + 'localhost/realsense-official:2.59.1 ldd /app/bin/camera'
+    const command =
+      'podman run --rm --network none -v "$PWD/out:/app:ro" ' +
+      'localhost/realsense-official:2.59.1 ldd /app/bin/camera'
     directBash(fixture, 'probe', { command, sandbox_permissions: 'danger-full-access' })
     const { outcome, fellThrough } = await fixture.answer('probe')
     expect(fellThrough).toBe(true)
@@ -167,7 +188,9 @@ describe('auto-permit answerer over PTC evidence', () => {
 
   it('renders the judge category and evidence references in the deferred notice', async () => {
     const fixture = makeFixture(undefined, {
-      verdicts: ['VERDICT: defer\nREASON: script calls an unread helper\nEVIDENCE: scripts/build.sh:10-20'],
+      verdicts: [
+        'VERDICT: defer\nREASON: script calls an unread helper\nEVIDENCE: scripts/build.sh:10-20',
+      ],
       workspace: WORKSPACE,
       workingDirectory: WORKSPACE,
     })
@@ -183,12 +206,17 @@ describe('auto-permit answerer over PTC evidence', () => {
 
   it('defers a high-risk PTC sub-call to the human with a high-risk notice', async () => {
     const fixture = makeFixture()
-    ptcBash(fixture, 'root:ptc:1', { command: 'sudo rm -rf /tmp/x', sandbox_permissions: 'danger-full-access' })
+    ptcBash(fixture, 'root:ptc:1', {
+      command: 'sudo rm -rf /tmp/x',
+      sandbox_permissions: 'danger-full-access',
+    })
     const { outcome, fellThrough } = await fixture.answer('root:ptc:1')
     expect(fellThrough).toBe(true)
     expect(outcome).toBe('rejected') // the next() sentinel, i.e. the human dialog
     expect(fixture.llmCalls).toHaveLength(0)
-    expect(fixture.injected.some((message) => message.source?.summary?.includes('irreversible'))).toBe(true)
+    expect(
+      fixture.injected.some((message) => message.source?.summary?.includes('irreversible')),
+    ).toBe(true)
   })
 
   it('does NOT replay a log-only prior approval: the judge must see it (v3 migration)', async () => {
@@ -197,13 +225,20 @@ describe('auto-permit answerer over PTC evidence', () => {
     // so a log-derived exact repeat is no longer auto-allowed — the judge
     // (under the current rules) or the human decides again.
     const fixture = makeFixture()
-    priorDirectAllowed(fixture, 'd1', { command: 'uv sync', sandbox_permissions: 'workspace-write' }, 'a1')
+    priorDirectAllowed(
+      fixture,
+      'd1',
+      { command: 'uv sync', sandbox_permissions: 'workspace-write' },
+      'a1',
+    )
     ptcBash(fixture, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' })
     const { outcome, fellThrough } = await fixture.answer('root:ptc:1')
     expect(fixture.llmCalls).toHaveLength(1)
     expect(fellThrough).toBe(true)
     expect(outcome).toBe('rejected') // the next() sentinel, i.e. the human dialog
-    expect(fixture.injected.some((message) => message.source?.summary?.includes('seen this session'))).toBe(false)
+    expect(
+      fixture.injected.some((message) => message.source?.summary?.includes('seen this session')),
+    ).toBe(false)
   })
 
   it('replays an exact repeat that this process saw the CHAIN approve', async () => {
@@ -224,7 +259,9 @@ describe('auto-permit answerer over PTC evidence', () => {
     expect(second.outcome).toBe('allowed-once')
     expect(second.fellThrough).toBe(false)
     expect(fixture.llmCalls).toHaveLength(1) // only the first ask reached the judge
-    expect(fixture.injected.some((message) => message.source?.summary?.includes('seen this session'))).toBe(true)
+    expect(
+      fixture.injected.some((message) => message.source?.summary?.includes('seen this session')),
+    ).toBe(true)
   })
 
   it('does NOT replay its own judge allowance: each ask stands on its own', async () => {
@@ -245,7 +282,9 @@ describe('auto-permit answerer over PTC evidence', () => {
     expect(fixture.llmCalls).toHaveLength(2)
     expect(second.fellThrough).toBe(true)
     expect(second.outcome).toBe('rejected')
-    expect(fixture.injected.filter((message) => message.source?.summary?.includes('seen this session'))).toHaveLength(0)
+    expect(
+      fixture.injected.filter((message) => message.source?.summary?.includes('seen this session')),
+    ).toHaveLength(0)
   })
 
   it('hands the judge the full PTC evidence and defers when it defers', async () => {
@@ -265,9 +304,8 @@ describe('auto-permit answerer over PTC evidence', () => {
     expect(fellThrough).toBe(true)
     expect(outcome).toBe('rejected')
     expect(fixture.llmCalls).toHaveLength(1)
-    const text = fixture.llmCalls[0]?.messages[0]?.content
-      ?.map((block) => block.text ?? '')
-      .join('\n') ?? ''
+    const text =
+      fixture.llmCalls[0]?.messages[0]?.content?.map((block) => block.text ?? '').join('\n') ?? ''
     expect(text).toContain('"uv sync"')
     expect(text).toContain('"workspace-write"')
     expect(text).toContain('Install project dependencies')
@@ -303,9 +341,8 @@ describe('auto-permit answerer over PTC evidence', () => {
       sandbox_permissions: 'danger-full-access',
     })
     await fixture.answer('root:ptc:1')
-    const text = fixture.llmCalls[0]?.messages[0]?.content
-      ?.map((block) => block.text ?? '')
-      .join('\n') ?? ''
+    const text =
+      fixture.llmCalls[0]?.messages[0]?.content?.map((block) => block.text ?? '').join('\n') ?? ''
     expect(text).toContain(`call_workdir: "${WORKSPACE}"`)
     expect(text).toContain(`effective_cwd (recorded current working directory): "${WORKSPACE}"`)
     expect(text).toContain(`resolved_working_directory (host resolution): "${WORKSPACE}"`)
@@ -353,7 +390,9 @@ describe('container boundary', () => {
     const second = await fixture.answer('root:ptc:2')
     expect(second.fellThrough).toBe(true)
     expect(fixture.llmCalls).toHaveLength(2)
-    expect(fixture.injected.some((message) => message.source?.summary?.includes('seen this session'))).toBe(false)
+    expect(
+      fixture.injected.some((message) => message.source?.summary?.includes('seen this session')),
+    ).toBe(false)
   })
 
   it('never replays a chain-approved script invocation: the script file can change', async () => {
@@ -476,7 +515,9 @@ describe('container boundary', () => {
     expect(fellThrough).toBe(true)
     expect(outcome).toBe('rejected')
     expect(fixture.llmCalls).toHaveLength(0)
-    expect(fixture.injected.some((message) => message.source?.summary?.includes('deferred'))).toBe(true)
+    expect(fixture.injected.some((message) => message.source?.summary?.includes('deferred'))).toBe(
+      true,
+    )
   })
 
   it('resolves an omitted workdir against the host effective cwd, not the header', async () => {
@@ -489,10 +530,11 @@ describe('container boundary', () => {
       sandbox_permissions: 'danger-full-access',
     })
     await fixture.answer('cwd-1')
-    const text = fixture.llmCalls[0]?.messages[0]?.content
-      ?.map((block) => block.text ?? '')
-      .join('\n') ?? ''
-    expect(text).toContain('effective_cwd (recorded current working directory): "/home/u/other-project"')
+    const text =
+      fixture.llmCalls[0]?.messages[0]?.content?.map((block) => block.text ?? '').join('\n') ?? ''
+    expect(text).toContain(
+      'effective_cwd (recorded current working directory): "/home/u/other-project"',
+    )
     expect(text).toContain('resolved_working_directory (host resolution): "/home/u/other-project"')
     expect(text).toContain(`session_workspace (immutable original project): "${WORKSPACE}"`)
   })
@@ -508,24 +550,29 @@ describe('container boundary', () => {
       sandbox_permissions: 'danger-full-access',
     })
     await fixture.answer('root:ptc:1')
-    const text = fixture.llmCalls[0]?.messages[0]?.content
-      ?.map((block) => block.text ?? '')
-      .join('\n') ?? ''
-    expect(text).toContain('resolved_working_directory (host resolution): "/home/u/other-project/src"')
+    const text =
+      fixture.llmCalls[0]?.messages[0]?.content?.map((block) => block.text ?? '').join('\n') ?? ''
+    expect(text).toContain(
+      'resolved_working_directory (host resolution): "/home/u/other-project/src"',
+    )
   })
 
   it('falls back to the logged working-directory change when the service is absent', async () => {
     const fixture = makeFixture(undefined, { workspace: WORKSPACE })
-    fixture.events.push({ type: 'working-directory/change', data: { cwd: '/home/u/other-project' } })
+    fixture.events.push({
+      type: 'working-directory/change',
+      data: { cwd: '/home/u/other-project' },
+    })
     directBash(fixture, 'cwd-2', {
       command: 'podman build .',
       sandbox_permissions: 'danger-full-access',
     })
     await fixture.answer('cwd-2')
-    const text = fixture.llmCalls[0]?.messages[0]?.content
-      ?.map((block) => block.text ?? '')
-      .join('\n') ?? ''
-    expect(text).toContain('effective_cwd (recorded current working directory): "/home/u/other-project"')
+    const text =
+      fixture.llmCalls[0]?.messages[0]?.content?.map((block) => block.text ?? '').join('\n') ?? ''
+    expect(text).toContain(
+      'effective_cwd (recorded current working directory): "/home/u/other-project"',
+    )
     expect(text).toContain('resolved_working_directory (host resolution): "/home/u/other-project"')
   })
 })

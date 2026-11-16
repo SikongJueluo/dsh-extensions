@@ -25,12 +25,7 @@ import Schema from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
-import {
-  AnchorStore,
-  compareAnchor,
-  resolveRoot,
-  type TaskAnchor,
-} from './checkpoint.js'
+import { AnchorStore, compareAnchor, resolveRoot, type TaskAnchor } from './checkpoint.js'
 import { foldGoalEvents, mergeGoal } from './goal-evidence.js'
 import { defaultExecFile, readJjFacts, type ExecFile } from './jj.js'
 import { buildResumeNotice } from './notice.js'
@@ -45,7 +40,13 @@ export {
   type AnchorCurrent,
   type TaskAnchor,
 } from './checkpoint.js'
-export { foldGoalEvents, mergeGoal, type GoalFold, type GoalSnapshot, type GoalClaim } from './goal-evidence.js'
+export {
+  foldGoalEvents,
+  mergeGoal,
+  type GoalFold,
+  type GoalSnapshot,
+  type GoalClaim,
+} from './goal-evidence.js'
 export {
   workingLayerArgv,
   workspaceRootArgv,
@@ -78,11 +79,15 @@ export interface Config {
 // No `Schema<Config>` annotation: schemastery ≥ 3.18.4 bakes volatile modes
 // into the schema generics and the loader checks the inferred shape.
 export const Config = Schema.object({
-  storagePath: Schema.string().default('').description(
-    'Directory for recovery anchors (default: $DSH_HOME/storages/execution-guard).',
-  ),
-  jjTimeoutMs: Schema.natural().default(5000).description('Per-invocation budget for the read-only jj fact reads.'),
-  resumeNotice: Schema.boolean().default(true).description('Compare the recovery anchor on agent resume/startup.'),
+  storagePath: Schema.string()
+    .default('')
+    .description('Directory for recovery anchors (default: $DSH_HOME/storages/execution-guard).'),
+  jjTimeoutMs: Schema.natural()
+    .default(5000)
+    .description('Per-invocation budget for the read-only jj fact reads.'),
+  resumeNotice: Schema.boolean()
+    .default(true)
+    .description('Compare the recovery anchor on agent resume/startup.'),
 })
 
 export const inject = ['tools']
@@ -99,14 +104,21 @@ interface AgentLike {
     readonly id: string
     readonly header: { readonly cwd?: string }
     snapshotEvents(): readonly import('@deepseek-ai/dsh-session').SessionEvent[]
-    append(type: 'user/message', data: import('@deepseek-ai/dsh-llm').UserMessage, opts: { surfaceOp: 'append' }): unknown
+    append(
+      type: 'user/message',
+      data: import('@deepseek-ai/dsh-llm').UserMessage,
+      opts: { surfaceOp: 'append' },
+    ): unknown
   }
 }
 
 function sessionOf(ctx: Context, agent: AgentLike | undefined) {
   if (agent?.session !== undefined) return agent.session
-  return (ctx.get('sessions') as unknown as { get(id: string): AgentLike['session'] | undefined } | undefined)
-    ?.get((agent as { id?: string } | undefined)?.id ?? '')
+  return (
+    ctx.get('sessions') as unknown as
+      | { get(id: string): AgentLike['session'] | undefined }
+      | undefined
+  )?.get((agent as { id?: string } | undefined)?.id ?? '')
 }
 
 /**
@@ -135,12 +147,34 @@ export function apply(ctx: Context, config: Config, deps: ApplyDeps = {}): void 
         'On resume the anchor is compared against the live repo/goal and a notice reports consistency or drift. ' +
         'This is a recovery anchor only — it is NOT a repository write lock and it never resumes goals, rebases, or checks out anything.',
       parameters: {
-        phase: { type: 'string', required: true, description: 'Short task phase label, e.g. "implement-preflight".' },
-        ownedFiles: { type: 'array', items: { type: 'string' }, description: 'Files this task owns (bounded to 64).' },
-        verification: { type: 'string', description: 'What was verified (commands run, tests green) and what was not.' },
-        goalId: { type: 'string', description: 'Goal id you believe is active; proven only when durable goal events agree.' },
-        goalRevision: { type: 'integer', description: 'Goal revision you believe is current; a durable-fold mismatch fails the checkpoint (CAS).' },
-        expectRepoRoot: { type: 'string', description: 'Optional expected absolute jj workspace root; a mismatch fails the checkpoint.' },
+        phase: {
+          type: 'string',
+          required: true,
+          description: 'Short task phase label, e.g. "implement-preflight".',
+        },
+        ownedFiles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Files this task owns (bounded to 64).',
+        },
+        verification: {
+          type: 'string',
+          description: 'What was verified (commands run, tests green) and what was not.',
+        },
+        goalId: {
+          type: 'string',
+          description: 'Goal id you believe is active; proven only when durable goal events agree.',
+        },
+        goalRevision: {
+          type: 'integer',
+          description:
+            'Goal revision you believe is current; a durable-fold mismatch fails the checkpoint (CAS).',
+        },
+        expectRepoRoot: {
+          type: 'string',
+          description:
+            'Optional expected absolute jj workspace root; a mismatch fails the checkpoint.',
+        },
       },
       output: {
         schema: {
@@ -157,29 +191,38 @@ export function apply(ctx: Context, config: Config, deps: ApplyDeps = {}): void 
             note: { type: 'string' },
           },
         },
-        render: (_args, value) => [{ type: 'text', text: formatCheckpointResult(value as Record<string, unknown>) }],
+        render: (_args, value) => [
+          { type: 'text', text: formatCheckpointResult(value as Record<string, unknown>) },
+        ],
       },
       async execute(args, exec) {
         const agent = exec.agent as unknown as AgentLike | undefined
         const session = sessionOf(ctx, agent)
         if (session === undefined) throw new Error('checkpoint_task: no session for this execution')
         const cwd = await resolveRoot(session.header.cwd)
-        if (cwd === undefined) throw new Error('checkpoint_task: session has no usable working directory')
+        if (cwd === undefined)
+          throw new Error('checkpoint_task: session has no usable working directory')
         const read = await readJjFacts(cwd, execRunner, jjPath, jjTimeoutMs, exec.signal)
         if (!read.ok) {
-          const hint = read.reason === 'not-jj'
-            ? 'not a jj repository (git fallback is intentionally unsupported; jj is required)'
-            : read.reason === 'timeout'
-              ? `jj fact read timed out after ${jjTimeoutMs}ms`
-              : read.reason === 'drift'
-                ? 'the working layer moved while the facts were being read (jj new/rebase mid-read); retry the checkpoint'
-                : 'jj fact read failed'
+          const hint =
+            read.reason === 'not-jj'
+              ? 'not a jj repository (git fallback is intentionally unsupported; jj is required)'
+              : read.reason === 'timeout'
+                ? `jj fact read timed out after ${jjTimeoutMs}ms`
+                : read.reason === 'drift'
+                  ? 'the working layer moved while the facts were being read (jj new/rebase mid-read); retry the checkpoint'
+                  : 'jj fact read failed'
           throw new Error(`checkpoint_task: ${hint} — ${read.detail.slice(0, 400)}`)
         }
         const root = await resolveRoot(read.facts.workspaceRoot)
-        if (root === undefined) throw new Error(`checkpoint_task: jj workspace root unreadable (${read.facts.workspaceRoot})`)
+        if (root === undefined)
+          throw new Error(
+            `checkpoint_task: jj workspace root unreadable (${read.facts.workspaceRoot})`,
+          )
         if (args.expectRepoRoot !== undefined && args.expectRepoRoot !== root) {
-          throw new Error(`checkpoint_task: repo root mismatch — expected ${args.expectRepoRoot}, workspace resolves to ${root}`)
+          throw new Error(
+            `checkpoint_task: repo root mismatch — expected ${args.expectRepoRoot}, workspace resolves to ${root}`,
+          )
         }
         const fold = foldGoalEvents(session.snapshotEvents())
         const merged = mergeGoal({ goalId: args.goalId, goalRevision: args.goalRevision }, fold)
@@ -193,7 +236,11 @@ export function apply(ctx: Context, config: Config, deps: ApplyDeps = {}): void 
           phase: args.phase.slice(0, 200),
           ownedFiles,
           verification: (args.verification ?? '').slice(0, 2000),
-          vcs: { tool: 'jj', changeId: read.facts.changeId, parentChangeIds: read.facts.parentChangeIds },
+          vcs: {
+            tool: 'jj',
+            changeId: read.facts.changeId,
+            parentChangeIds: read.facts.parentChangeIds,
+          },
           ...(merged.goal !== undefined
             ? {
                 goal: {
@@ -206,15 +253,28 @@ export function apply(ctx: Context, config: Config, deps: ApplyDeps = {}): void 
             : {}),
         }
         await store.save(anchor)
-        logger.info('%s: anchor saved for session %s (phase %s)', GUARD_NAME, session.id, anchor.phase)
+        logger.info(
+          '%s: anchor saved for session %s (phase %s)',
+          GUARD_NAME,
+          session.id,
+          anchor.phase,
+        )
         return {
           saved: true,
           repoRoot: anchor.repoRoot,
           changeId: anchor.vcs.changeId,
           parentChangeIds: [...anchor.vcs.parentChangeIds],
-          ...(anchor.goal !== undefined ? { goalId: anchor.goal.goalId, goalRevision: anchor.goal.revision, goalProof: anchor.goal.proof } : {}),
+          ...(anchor.goal !== undefined
+            ? {
+                goalId: anchor.goal.goalId,
+                goalRevision: anchor.goal.revision,
+                goalProof: anchor.goal.proof,
+              }
+            : {}),
           ...(merged.proof === 'args-only-unverified'
-            ? { note: 'goal recorded from your assertion only — no durable goal-change evidence, CAS unproven' }
+            ? {
+                note: 'goal recorded from your assertion only — no durable goal-change evidence, CAS unproven',
+              }
             : {}),
         }
       },
@@ -222,54 +282,58 @@ export function apply(ctx: Context, config: Config, deps: ApplyDeps = {}): void 
   )
 
   const noticed = new Set<string>()
-  ctx.on('agent/created', async (payload: { agent: unknown; source: string; signal?: AbortSignal }) => {
-    if (!config.resumeNotice) return
-    const agent = payload.agent as AgentLike & object
-    const session = agent.session
-    if (session === undefined || noticed.has(session.id)) return
-    noticed.add(session.id)
-    try {
-      const anchor = await store.load(session.id)
-      if (anchor === undefined) return
-      const cwd = await resolveRoot(session.header.cwd)
-      const read = cwd === undefined || payload.signal?.aborted === true
-        ? undefined
-        : await readJjFacts(cwd, execRunner, jjPath, jjTimeoutMs, payload.signal)
-      const root = read?.ok === true ? await resolveRoot(read.facts.workspaceRoot) : undefined
-      const fold = foldGoalEvents(session.snapshotEvents())
-      const comparison = compareAnchor(anchor, {
-        repoRoot: root,
-        changeId: read?.ok === true ? read.facts.changeId : undefined,
-        parentChangeIds: read?.ok === true ? read.facts.parentChangeIds : undefined,
-        goalId: fold.kind === 'snapshot' ? fold.snapshot.goalId : undefined,
-        goalRevision: fold.kind === 'snapshot' ? fold.snapshot.revision : undefined,
-        goalPhase: fold.kind === 'snapshot' ? fold.snapshot.phase : undefined,
-      })
-      // Safe as a plain surface append: `agent/created` fires while the agent
-      // is still idle (the driver has not opened a turn), so there is no
-      // tool-call/result batch to split. Contrast the repeat hint in
-      // dsh-execution-guard, which fires mid-batch and must go through
-      // `agent.inject()`.
-      session.append(
-        'user/message',
-        buildResumeNotice({
-          anchorPhase: anchor.phase,
-          rootMatches: comparison.rootMatches,
-          changeMatches: comparison.changeMatches,
-          parentsMatch: comparison.parentsMatch,
-          goalIdMatches: comparison.goalIdMatches,
-          goalRevisionMatches: comparison.goalRevisionMatches,
-          goalPhaseMatches: comparison.goalPhaseMatches,
-          anchorGoal: anchor.goal,
-          ownedFiles: anchor.ownedFiles,
-          verification: anchor.verification,
-        }),
-        { surfaceOp: 'append' },
-      )
-    } catch (error) {
-      logger.warn('%s: resume notice failed: %o', GUARD_NAME, error)
-    }
-  })
+  ctx.on(
+    'agent/created',
+    async (payload: { agent: unknown; source: string; signal?: AbortSignal }) => {
+      if (!config.resumeNotice) return
+      const agent = payload.agent as AgentLike & object
+      const session = agent.session
+      if (session === undefined || noticed.has(session.id)) return
+      noticed.add(session.id)
+      try {
+        const anchor = await store.load(session.id)
+        if (anchor === undefined) return
+        const cwd = await resolveRoot(session.header.cwd)
+        const read =
+          cwd === undefined || payload.signal?.aborted === true
+            ? undefined
+            : await readJjFacts(cwd, execRunner, jjPath, jjTimeoutMs, payload.signal)
+        const root = read?.ok === true ? await resolveRoot(read.facts.workspaceRoot) : undefined
+        const fold = foldGoalEvents(session.snapshotEvents())
+        const comparison = compareAnchor(anchor, {
+          repoRoot: root,
+          changeId: read?.ok === true ? read.facts.changeId : undefined,
+          parentChangeIds: read?.ok === true ? read.facts.parentChangeIds : undefined,
+          goalId: fold.kind === 'snapshot' ? fold.snapshot.goalId : undefined,
+          goalRevision: fold.kind === 'snapshot' ? fold.snapshot.revision : undefined,
+          goalPhase: fold.kind === 'snapshot' ? fold.snapshot.phase : undefined,
+        })
+        // Safe as a plain surface append: `agent/created` fires while the agent
+        // is still idle (the driver has not opened a turn), so there is no
+        // tool-call/result batch to split. Contrast the repeat hint in
+        // dsh-execution-guard, which fires mid-batch and must go through
+        // `agent.inject()`.
+        session.append(
+          'user/message',
+          buildResumeNotice({
+            anchorPhase: anchor.phase,
+            rootMatches: comparison.rootMatches,
+            changeMatches: comparison.changeMatches,
+            parentsMatch: comparison.parentsMatch,
+            goalIdMatches: comparison.goalIdMatches,
+            goalRevisionMatches: comparison.goalRevisionMatches,
+            goalPhaseMatches: comparison.goalPhaseMatches,
+            anchorGoal: anchor.goal,
+            ownedFiles: anchor.ownedFiles,
+            verification: anchor.verification,
+          }),
+          { surfaceOp: 'append' },
+        )
+      } catch (error) {
+        logger.warn('%s: resume notice failed: %o', GUARD_NAME, error)
+      }
+    },
+  )
 }
 
 function formatCheckpointResult(value: Record<string, unknown>): string {
@@ -277,7 +341,8 @@ function formatCheckpointResult(value: Record<string, unknown>): string {
     `[execution-guard] anchor saved: root ${String(value.repoRoot)}`,
     `change ${String(value.changeId)} (parents ${(Array.isArray(value.parentChangeIds) ? value.parentChangeIds : []).map(String).join(' ')})`,
   ]
-  if (typeof value.goalId === 'string') lines.push(`goal ${value.goalId} r${String(value.goalRevision)} (${String(value.goalProof)})`)
+  if (typeof value.goalId === 'string')
+    lines.push(`goal ${value.goalId} r${String(value.goalRevision)} (${String(value.goalProof)})`)
   if (typeof value.note === 'string' && value.note !== '') lines.push(value.note)
   return lines.join('\n')
 }

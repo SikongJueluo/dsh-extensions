@@ -16,7 +16,12 @@
 import { readFileSync } from 'node:fs'
 import yaml from 'js-yaml'
 import {
-  buildAdapters, createNullAuditPort, fetchRawPost, getJson, postJson, runResearch,
+  buildAdapters,
+  createNullAuditPort,
+  fetchRawPost,
+  getJson,
+  postJson,
+  runResearch,
 } from '../lib/index.js'
 
 const mode = process.argv[2] ?? '--providers'
@@ -112,10 +117,14 @@ async function providers() {
       const hits = await adapter.search('智谱 GLM 最新模型 发布', new AbortController().signal)
       console.log(`\n[${adapter.id}] ok in ${Date.now() - started}ms — ${hits.length} hits`)
       for (const hit of hits.slice(0, 3)) {
-        console.log(`  - ${trunc(hit.title)} | ${trunc(hit.url, 70)} | date=${trunc(hit.publishedAt, 20)} | snippet=${trunc(hit.snippet, 60)}`)
+        console.log(
+          `  - ${trunc(hit.title)} | ${trunc(hit.url, 70)} | date=${trunc(hit.publishedAt, 20)} | snippet=${trunc(hit.snippet, 60)}`,
+        )
       }
     } catch (error) {
-      console.log(`\n[${adapter.id}] FAILED in ${Date.now() - started}ms: ${String(error).slice(0, 300)}`)
+      console.log(
+        `\n[${adapter.id}] FAILED in ${Date.now() - started}ms: ${String(error).slice(0, 300)}`,
+      )
     }
   }
 }
@@ -143,18 +152,33 @@ function deepseekPort() {
       })
       const body = await response.json()
       if (!response.ok) {
-        return { ok: false, text: '', finishKind: 'error', error: `HTTP ${response.status}: ${JSON.stringify(body).slice(0, 200)}` }
+        return {
+          ok: false,
+          text: '',
+          finishKind: 'error',
+          error: `HTTP ${response.status}: ${JSON.stringify(body).slice(0, 200)}`,
+        }
       }
       const choice = body.choices?.[0]
       const text = choice?.message?.content ?? ''
-      const finishKind = choice?.finish_reason === 'length' ? 'max-tokens'
-        : choice?.finish_reason === 'stop' ? 'stop'
-          : 'error'
+      const finishKind =
+        choice?.finish_reason === 'length'
+          ? 'max-tokens'
+          : choice?.finish_reason === 'stop'
+            ? 'stop'
+            : 'error'
       return {
         ok: finishKind === 'stop',
         text,
         finishKind,
-        ...(body.usage ? { usage: { inputTokens: body.usage.prompt_tokens, outputTokens: body.usage.completion_tokens } } : {}),
+        ...(body.usage
+          ? {
+              usage: {
+                inputTokens: body.usage.prompt_tokens,
+                outputTokens: body.usage.completion_tokens,
+              },
+            }
+          : {}),
         ...(finishKind !== 'stop' ? { error: `finish_reason=${choice?.finish_reason}` } : {}),
       }
     },
@@ -188,13 +212,20 @@ async function full() {
   console.log('summary:', trunc(result.summary, 400))
   console.log('points:')
   for (const point of result.points) {
-    console.log(`  [${point.status}] ${trunc(point.text, 140)} <- [${point.sources.join(',')}]${point.citationFailed ? ' (citationFailed)' : ''}`)
+    console.log(
+      `  [${point.status}] ${trunc(point.text, 140)} <- [${point.sources.join(',')}]${point.citationFailed ? ' (citationFailed)' : ''}`,
+    )
   }
-  console.log('unknowns:', result.unknowns.map((text) => trunc(text, 100)))
+  console.log(
+    'unknowns:',
+    result.unknowns.map((text) => trunc(text, 100)),
+  )
   console.log('coverage:', JSON.stringify(result.coverage, null, 0).slice(0, 400))
   console.log('sources (first 4):')
   for (const source of result.sources.slice(0, 4)) {
-    console.log(`  [${source.id}] ${trunc(source.url, 70)} | ${trunc(source.title, 50)} | ${source.providers.join('+')}`)
+    console.log(
+      `  [${source.id}] ${trunc(source.url, 70)} | ${trunc(source.title, 50)} | ${source.providers.join('+')}`,
+    )
   }
 }
 

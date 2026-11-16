@@ -83,19 +83,27 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
     if (noticed.has(entry.sessionId) || entry.retryAt <= Date.now() + 1_000) return
     noticed.add(entry.sessionId)
     try {
-      agent.session.append('user/message', buildWaitNotice(entry.provider, entry.code, entry.retryAt), { surfaceOp: 'append' })
+      agent.session.append(
+        'user/message',
+        buildWaitNotice(entry.provider, entry.code, entry.retryAt),
+        { surfaceOp: 'append' },
+      )
     } catch (error) {
       noticed.delete(entry.sessionId)
       ctx.logger.warn('auto-continue: wait notice for "%s" failed: %o', entry.sessionId, error)
     }
   }
 
-  const expired = (entry: PendingWait): boolean => Date.now() - entry.firstFailureAt >= config.maxWaitMs
+  const expired = (entry: PendingWait): boolean =>
+    Date.now() - entry.firstFailureAt >= config.maxWaitMs
 
   const attemptResume = async (entry: PendingWait): Promise<void> => {
     if (expired(entry)) {
       await spool.delete(entry.sessionId)
-      ctx.logger.info('auto-continue: pending wait for "%s" is past the budget — dropped', entry.sessionId)
+      ctx.logger.info(
+        'auto-continue: pending wait for "%s" is past the budget — dropped',
+        entry.sessionId,
+      )
       return
     }
 
@@ -106,34 +114,50 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
     if (agent === undefined) {
       const controller = ctx.get('sessionController')
       if (controller === undefined) {
-        ctx.logger.warn('auto-continue: no sessionController to resume "%s" — retrying later', entry.sessionId)
+        ctx.logger.warn(
+          'auto-continue: no sessionController to resume "%s" — retrying later',
+          entry.sessionId,
+        )
         throw new RetryLater()
       }
       const result = await controller.agents.resolveAgent(entry.sessionId as SessionId)
       if ('error' in result) {
         await spool.delete(entry.sessionId)
-        ctx.logger.warn('auto-continue: cannot resume "%s" (%o) — record dropped', entry.sessionId, result.error)
+        ctx.logger.warn(
+          'auto-continue: cannot resume "%s" (%o) — record dropped',
+          entry.sessionId,
+          result.error,
+        )
         return
       }
       agent = result.agent
     }
 
     if (agent.status !== 'idle') {
-      ctx.logger.info('auto-continue: "%s" is busy — retrying in %d ms', entry.sessionId, RETRY_LATER_MS)
+      ctx.logger.info(
+        'auto-continue: "%s" is busy — retrying in %d ms',
+        entry.sessionId,
+        RETRY_LATER_MS,
+      )
       throw new RetryLater()
     }
     // The user has driven this session since our wait began: stand down.
     if (lastUserSeq(agent) > entry.lastSeq) {
       await spool.delete(entry.sessionId)
-      ctx.logger.info('auto-continue: "%s" has newer user activity — record dropped', entry.sessionId)
+      ctx.logger.info(
+        'auto-continue: "%s" has newer user activity — record dropped',
+        entry.sessionId,
+      )
       return
     }
 
     noticed.delete(entry.sessionId)
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: resumeMessage(entry) }],
-      source: { kind: 'user' },
-    }))
+    agent.followup(
+      createUserMessage({
+        content: [{ type: 'text', text: resumeMessage(entry) }],
+        source: { kind: 'user' },
+      }),
+    )
     await spool.delete(entry.sessionId)
     ctx.logger.info(
       'auto-continue: resumed "%s" (turn %d, %s %s) after wait',
@@ -164,7 +188,11 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
             return
           }
           if (!(error instanceof RetryLater)) {
-            ctx.logger.warn('auto-continue: resuming "%s" failed: %o — record kept for the next start', entry.sessionId, error)
+            ctx.logger.warn(
+              'auto-continue: resuming "%s" failed: %o — record kept for the next start',
+              entry.sessionId,
+              error,
+            )
           }
         }
       })
@@ -194,10 +222,13 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
     }
   })
 
-  ctx.effect(() => async () => {
-    lifetime.abort(new Error('auto-continue plugin disposed'))
-    await Promise.allSettled([...pending.values()])
-  }, 'auto-continue: abort and drain pending resumptions')
+  ctx.effect(
+    () => async () => {
+      lifetime.abort(new Error('auto-continue plugin disposed'))
+      await Promise.allSettled([...pending.values()])
+    },
+    'auto-continue: abort and drain pending resumptions',
+  )
 
   return {
     schedule,

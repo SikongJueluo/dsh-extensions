@@ -174,7 +174,7 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 `reportUnusedDisableDirectives: error` 已开：当前 1 处已无用（`oauth-providers/src/client/index.tsx:246`）。
 这 7 处按“逐处审查”处理，不自动迁移成新豁免。
 
-### 3.7 修复积压（2173 条，分层计划）
+### 3.7 修复积压（2172 条，分层计划）
 
 | 层 | 内容 | 数量 |
 | --- | --- | --- |
@@ -310,24 +310,28 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 `sortImports`、`sortPackageJson`、`sortTailwindcss`、`jsdoc` 全部显式 `false`
 （`sortPackageJson` 上游默认是 **on**，必须显式关掉）。
 
-### 5.2 范围与验证
+### 5.2 范围与验证（迁移已完成）
 
-- 覆盖 JS/TS/TSX/JSON/CSS/YAML：`oxfmt --list-different` 当前列出 **228** 个文件
-  （159 ts、21 mjs、19 tsx、18 json、9 css、2 yml）。在副本上实跑一遍排版，规模是
-  **+13472 / -5128 行**，最大单个文件 `plan-usage/smoke.mjs`（+550 / -124）。
+- 覆盖 JS/TS/TSX/JSON/CSS/YAML：**228 个文件**（159 ts、21 mjs、19 tsx、18 json、9 css、
+  2 yml），实际改动 **+13479 / -5137 行**；最大单文件 `plan-usage/smoke.mjs`（+550 / -124）。
+  `format:check` 现在通过（398 个受管文件、0 差异）。
 - 行宽保持默认 100：现有 55446 行里 p95 = 97、p99 = 132，100 最贴近既有写法。换成 120
-  会把改动降到 207 个文件 / +8200 -4607 行，但那是为了少改而改标准，不采用。
-- **排版不是一次收敛的**：`packages/triggers/src/service.ts` 第一遍排版后仍会再变一次
-  （第二遍才稳定，之后 `--list-different` 为 0）。排版层必须“跑到稳定”再跑
-  `format:check`，否则刚写完就会红。
+  会把改动降到 207 个文件 / +8200 -4607 行，但那是为了少改而改标准，不采用；若之后要改，
+  只是重跑一次 `oxfmt --write .` 的独立层。
+- **排版不是一次收敛的（实测复现）**：第一遍 `oxfmt --write .` 之后
+  `packages/triggers/src/service.ts` 仍然不同，第二遍才稳定，第三遍为 no-op。排版层因此
+  跑了两遍；`format:check` 只在两遍之后才会绿。
+- **产物影响**：宿主 `lib/index.js` / `lib/index.d.ts` 逐字节不变；6 个客户端 bundle 的字节
+  变了，原因是 `styles.css` 里 `@import "…"` 被改成单引号并被内联进 bundle（CSS 规范里
+  两种引号等价）。`check:client`、`check:pack`、`build:storybook`、`test`、`check:smoke`
+  在排版后全部通过。
 - **YAML 已验证**：40 个 patch 文件的副本全部格式化后，7 条 `!!js` 行逐字未变
-  （`disabled: !!js process.platform === 'win32'` 等），注释与层级保持不变。实际会变的只有
+  （`disabled: !!js process.platform === 'win32'` 等），注释与层级保持不变。实际变动的只有
   `auto-permit` 的两个文件，差异是空字符串引号 `""` → `''`；用 js-yaml + 自定义 `!!js` tag
-  解析原文件与格式化文件，文档树**逐值相等**（`SEMANTICALLY IDENTICAL`），因此
-  `cordis.patch.yml` 纳入格式化范围。
-- **Markdown 排除（C-A6）**：Oxfmt 会重排所有表格列宽，宽度按字符数而非显示宽度计算，
+  解析原文件与格式化文件，文档树**逐值相等**（`SEMANTICALLY IDENTICAL`）。
+- **Markdown 排除（A6 待批）**：Oxfmt 会重排所有表格列宽，宽度按字符数而非显示宽度计算，
   对本仓大量中文表格是**变差**而不是变好（实测 `README.md` 44 行、`packages/handoff/README.md`
-  25 行，全部是表格 padding 与列表缩进）。
+  25 行，全部是表格 padding 与列表缩进）。若 A6 被否，补一层 `oxfmt --write '**/*.md'` 即可。
 - `.tmp/`、`.dsh/`、`packages/*/lib/`、`storybook-static/` 由 `.gitignore` 自动排除；
   `repo/`（来源不明的嵌套仓库，未被本仓跟踪）显式排除，三个工具一致。
 
@@ -355,18 +359,18 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 
 ## 7. 未验证 / 缺口
 
-- 统一入口已实现：`pnpm check:quality` 按固定顺序跑 10 步（见 [quality-acceptance-inventory.md](quality-acceptance-inventory.md) 第 5 节），当前 7 步绿、3 步红（format/lint/dead-code）。
+- 统一入口已实现：`pnpm check:quality` 按固定顺序跑 10 步（见 [quality-acceptance-inventory.md](quality-acceptance-inventory.md) 第 5 节），当前 8 步绿、2 步红（lint、dead-code）。
 - CI 已有 workflow（`.github/workflows/quality.yml`，node 24 + pnpm 12.3.4 + 安装 jj + `pnpm check:quality`），但**远端从未运行过**：仓库没有 workflow 历史，首次真实运行的日志才算证据；分支保护／必需检查属于仓库设置，需维护者单独开启。
 - 现有测试/smoke 的真实范围已逐项实测并列在 [quality-acceptance-inventory.md](quality-acceptance-inventory.md)：`pnpm test` 只覆盖声明了 `test` 的 12 个包（9 个包没有测试入口），12 个 smoke 脚本现在由 `pnpm check:smoke` 统一执行（10 个可无人值守、2 个显式排除并打印理由），`notice-order.mjs` 未被 Vitest 收集。接线在“验收聚合”层处理。
 - `context-audit` smoke 读取 `$DSH_HOME` 真会话日志（本次实测扫了 62 个日志），需在聚合时改为 fixture 隔离，不能直接进门禁。
 - Node 20 产物兼容性尚未验证（本次只跑 Node 24 的 typecheck/build/lint）。
 - 需要 profile/凭据/交互的验证（如 session-write-access 的手工 recipe）不在脚本覆盖内。
-- Oxfmt 尚未真正改写任何文件；228 个文件的迁移会在独立层完成并跑完整检查。
+- 纯排版层已落地：228 个文件、+13479/-5137 行；`format:check` 现在通过。详见 5.2。
 
 ## 8. 后续分层
 
 1. **本层（当前）**：工具 + 配置 + 扫描 + 本文批准清单。
-2. 纯排版层：`oxfmt --write .` 的 228 个文件，单独一层，不夹带语义修复；跑 `typecheck`/`build`/`check:client` 验证产物字节不变。
+2. ~~纯排版层~~（已完成）：228 个文件单独一层，未夹带语义修复；`typecheck`/`build`/`test`/`check:smoke`/`check:client`/`check:pack`/`build:storybook` 全部通过。
 3. 类型与语义修复层：先机械类（import/模板/无用导出），再类型逃生口（722 条，逐处判定契约），最后语义类（浮空 Promise、`consistent-return` 等，涉及行为时先问）。
 4. Fallow 建模与清理层：补 `implements QuotaSource`、处理 4 个孤儿源文件与 64 个多余导出、解 2 个环（未声明依赖已在打包修复层清零）。
 5. 统一入口层：把 `format:check`、`lint`、`fallow`、现有测试/smoke、`check:pack`、Storybook build 聚合进 `pnpm check`；skip 必须可见且不能替代必需项。

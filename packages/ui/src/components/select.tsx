@@ -73,13 +73,7 @@ export function Select({
   )
 
   return (
-    <div
-      className={cn(
-        'dshx:relative',
-        variant === 'ghost' && 'dshx:inline-flex',
-        className,
-      )}
-    >
+    <div className={cn('dshx:relative', variant === 'ghost' && 'dshx:inline-flex', className)}>
       {/* A fixed, zero-size portal host keeps the popup out of the slot's
           layout and scrollable overflow; the positioner still uses viewport
           coordinates, so the popup cannot push the surrounding UI. */}
@@ -103,7 +97,10 @@ export function Select({
               : 'dshx:h-8 dshx:w-full dshx:gap-2 dshx:rounded-control dshx:border dshx:border-border dshx:bg-surface-2 dshx:px-2.5 dshx:hover:bg-brand/5',
           )}
         >
-          <BaseSelect.Value placeholder={placeholder} className="dshx:min-w-0 dshx:truncate dshx:text-left" />
+          <BaseSelect.Value
+            placeholder={placeholder}
+            className="dshx:min-w-0 dshx:truncate dshx:text-left"
+          />
           <BaseSelect.Icon className="dshx:shrink-0 dshx:text-fg-muted">
             <ChevronDown className="dshx:size-3.5" />
           </BaseSelect.Icon>

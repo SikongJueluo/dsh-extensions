@@ -77,9 +77,10 @@ export async function snapshotRoster(ctx: Context, cwd: string): Promise<Workspa
     return { origin: { id: '', title: lastSegment(cwd), path: cwd, missing: false }, others: [] }
   }
   const originEntity = await registry.resolveByPath(cwd)
-  const origin: WorkspaceSummary = originEntity === undefined
-    ? { id: '', title: lastSegment(cwd), path: cwd, missing: false }
-    : await summarize(originEntity)
+  const origin: WorkspaceSummary =
+    originEntity === undefined
+      ? { id: '', title: lastSegment(cwd), path: cwd, missing: false }
+      : await summarize(originEntity)
   const entities = registry.list().filter((entity) => String(entity.id) !== origin.id)
   const others = await Promise.all(entities.map(summarize))
   return { origin, others }
@@ -98,7 +99,10 @@ export function targetForOrigin(roster: WorkspaceRoster): HandoffTarget {
  * Resolve a picked registry id back into a target, re-checking that the
  * workspace is still registered (the pick may outlive a registry edit).
  */
-export async function resolveTargetById(ctx: Context, id: string): Promise<HandoffTarget | undefined> {
+export async function resolveTargetById(
+  ctx: Context,
+  id: string,
+): Promise<HandoffTarget | undefined> {
   const registry = ctx.get('workspaceRegistry')
   if (registry === undefined) return undefined
   const entity = registry.get(id as Parameters<Registry['get']>[0])
@@ -113,7 +117,10 @@ export async function resolveTargetById(ctx: Context, id: string): Promise<Hando
  * "Target Space" + task "fix readme". Path specs fall through (returned as
  * undefined) for the caller's single-token handling.
  */
-export function consumeTitleSpec(ctx: Context, rest: string): { spec: string; remaining: string } | undefined {
+export function consumeTitleSpec(
+  ctx: Context,
+  rest: string,
+): { spec: string; remaining: string } | undefined {
   const registry = ctx.get('workspaceRegistry')
   if (registry === undefined) return undefined
   let best: { spec: string; remaining: string } | undefined
@@ -153,7 +160,9 @@ export async function resolveFlagTarget(ctx: Context, spec: string): Promise<Fla
   try {
     canonical = await realpath(trimmed)
   } catch {
-    return { error: `无法解析工作区 "${trimmed}"（按 title 或 workspace 根路径写；候选：${spell(entities)}）` }
+    return {
+      error: `无法解析工作区 "${trimmed}"（按 title 或 workspace 根路径写；候选：${spell(entities)}）`,
+    }
   }
   const byPath = entities.filter((entity) => entity.path === canonical)
   if (byPath.length === 1) return check(registry, byPath[0] as WorkspaceEntity)

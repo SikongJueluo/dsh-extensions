@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { isWithin, listBookmarks, parseTaskRecords, serializeTaskRecord, type JjTaskRecord, type JjWorkspaceHost } from '../src/jj.js'
+import {
+  isWithin,
+  listBookmarks,
+  parseTaskRecords,
+  serializeTaskRecord,
+  type JjTaskRecord,
+  type JjWorkspaceHost,
+} from '../src/jj.js'
 import { validateProcessConfig } from '../src/process.js'
 
 const record: JjTaskRecord = {
@@ -37,7 +44,11 @@ describe('bookmark parsing', () => {
       prepare: async () => {},
     }
     const bookmarks = await listBookmarks(host, '/project', new AbortController().signal)
-    expect(bookmarks.get('task')).toEqual({ name: 'task', conflict: false, changeId: 'local-change' })
+    expect(bookmarks.get('task')).toEqual({
+      name: 'task',
+      conflict: false,
+      changeId: 'local-change',
+    })
     expect(bookmarks.has('other')).toBe(false)
     expect(bookmarks.get('conflict')).toEqual({ name: 'conflict', conflict: true, changeId: '' })
   })

@@ -28,7 +28,11 @@ import Schema from '@deepseek-ai/schemastery'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 import { ReasoningEffortId, type ContentBlock, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
-import type { SubagentActivation, SubagentProvider, SubagentResult } from '@deepseek-ai/dsh-subagent'
+import type {
+  SubagentActivation,
+  SubagentProvider,
+  SubagentResult,
+} from '@deepseek-ai/dsh-subagent'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 
@@ -70,20 +74,26 @@ export interface Config {
 }
 
 /** One tier's fallback as a fresh Schema.object; empty strings mean "no fallback". */
-const tierFallback = (defaults: RouteTarget | undefined) => Schema.object({
-  provider: Schema.string().default(defaults?.provider ?? ''),
-  model: Schema.string().default(defaults?.model ?? ''),
-  reasoningEffort: Schema.string().default(defaults?.reasoningEffort ?? ''),
-}).default({ provider: defaults?.provider ?? '', model: defaults?.model ?? '', reasoningEffort: defaults?.reasoningEffort ?? '' })
+const tierFallback = (defaults: RouteTarget | undefined) =>
+  Schema.object({
+    provider: Schema.string().default(defaults?.provider ?? ''),
+    model: Schema.string().default(defaults?.model ?? ''),
+    reasoningEffort: Schema.string().default(defaults?.reasoningEffort ?? ''),
+  }).default({
+    provider: defaults?.provider ?? '',
+    model: defaults?.model ?? '',
+    reasoningEffort: defaults?.reasoningEffort ?? '',
+  })
 
 /** One tier's defaults as a fresh Schema.object (schemastery schemas are not safely shareable across fields). */
-const tierRoute = (defaults: TierRoute) => Schema.object({
-  toolName: Schema.string().default(defaults.toolName),
-  provider: Schema.string().default(defaults.provider),
-  model: Schema.string().default(defaults.model),
-  reasoningEffort: Schema.string().default(defaults.reasoningEffort ?? 'max'),
-  fallback: tierFallback(defaults.fallback),
-}).default(defaults)
+const tierRoute = (defaults: TierRoute) =>
+  Schema.object({
+    toolName: Schema.string().default(defaults.toolName),
+    provider: Schema.string().default(defaults.provider),
+    model: Schema.string().default(defaults.model),
+    reasoningEffort: Schema.string().default(defaults.reasoningEffort ?? 'max'),
+    fallback: tierFallback(defaults.fallback),
+  }).default(defaults)
 
 export const Config = Schema.object({
   provider: Schema.string().default('spawn'),
@@ -94,8 +104,18 @@ export const Config = Schema.object({
     reasoningEffort: 'max',
     fallback: { provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'max' },
   }),
-  workhorse: tierRoute({ toolName: 'subagent', provider: 'zai-coding-cn', model: 'glm-5.3', reasoningEffort: 'max' }),
-  smart: tierRoute({ toolName: 'subagent_smart', provider: 'openai-codex', model: 'gpt-6.1-sol', reasoningEffort: 'xhigh' }),
+  workhorse: tierRoute({
+    toolName: 'subagent',
+    provider: 'zai-coding-cn',
+    model: 'glm-5.3',
+    reasoningEffort: 'max',
+  }),
+  smart: tierRoute({
+    toolName: 'subagent_smart',
+    provider: 'openai-codex',
+    model: 'gpt-6.1-sol',
+    reasoningEffort: 'xhigh',
+  }),
 })
 
 /**
@@ -105,37 +125,44 @@ export const Config = Schema.object({
  * reliably than "the upcoming task is simple").
  */
 const TIER_DESCRIPTIONS = {
-  quick: 'Delegate a self-contained task to a fast, economical subagent (a separate agent that works in its own context). This is the default tier for delegation: mechanical subtasks, retrieval, counting, formatting, batch checks over many items — any focused work whose result you can verify directly. Escalate to a stronger tier only when this tier\'s result proves insufficient. The subagent returns its result, not its intermediate steps. It runs in the background by default and returns a subagent id you can continue with `send_message`; you are notified when the run settles.',
-  workhorse: 'Delegate a self-contained task to a capable general-purpose subagent (a separate agent that works in its own context). Use this tier when the work needs real engineering depth — multi-file implementation, careful analysis, design work — that subagent_quick cannot handle; prefer subagent_quick for mechanical work. The subagent returns its result, not its intermediate steps. It runs in the background by default and returns a subagent id you can continue with `send_message`; you are notified when the run settles.',
-  smart: 'Delegate a self-contained task to the strongest and most expensive subagent (a separate agent that works in its own context). Reserve this tier for genuinely hard reasoning — architecture decisions, adversarial review, subtle cross-cutting bugs — or when subagent and subagent_quick both returned inadequate results. Never use it for work a cheaper tier can do. The subagent returns its result, not its intermediate steps. It runs in the background by default and returns a subagent id you can continue with `send_message`; you are notified when the run settles.',
+  quick:
+    "Delegate a self-contained task to a fast, economical subagent (a separate agent that works in its own context). This is the default tier for delegation: mechanical subtasks, retrieval, counting, formatting, batch checks over many items — any focused work whose result you can verify directly. Escalate to a stronger tier only when this tier's result proves insufficient. The subagent returns its result, not its intermediate steps. It runs in the background by default and returns a subagent id you can continue with `send_message`; you are notified when the run settles.",
+  workhorse:
+    'Delegate a self-contained task to a capable general-purpose subagent (a separate agent that works in its own context). Use this tier when the work needs real engineering depth — multi-file implementation, careful analysis, design work — that subagent_quick cannot handle; prefer subagent_quick for mechanical work. The subagent returns its result, not its intermediate steps. It runs in the background by default and returns a subagent id you can continue with `send_message`; you are notified when the run settles.',
+  smart:
+    'Delegate a self-contained task to the strongest and most expensive subagent (a separate agent that works in its own context). Reserve this tier for genuinely hard reasoning — architecture decisions, adversarial review, subtle cross-cutting bugs — or when subagent and subagent_quick both returned inadequate results. Never use it for work a cheaper tier can do. The subagent returns its result, not its intermediate steps. It runs in the background by default and returns a subagent id you can continue with `send_message`; you are notified when the run settles.',
 } as const
 
-const CREATE_AGENT_DESCRIPTION = 'Create a persistent named agent with a standing role and get its id. The agent confirms its role, then idles until you send it tasks with `send_message`; reuse it for repeated work of the same kind instead of re-stating context on every delegation. `tier` selects the pinned route: quick (default — cheap and fast), workhorse (engineering depth), smart (strongest and most expensive; reserve it). `list_agents` shows your live agents; `interrupt_agent` stops one.'
+const CREATE_AGENT_DESCRIPTION =
+  'Create a persistent named agent with a standing role and get its id. The agent confirms its role, then idles until you send it tasks with `send_message`; reuse it for repeated work of the same kind instead of re-stating context on every delegation. `tier` selects the pinned route: quick (default — cheap and fast), workhorse (engineering depth), smart (strongest and most expensive; reserve it). `list_agents` shows your live agents; `interrupt_agent` stops one.'
 
-const PROMPT_PARAMETER_DESCRIPTION = 'The complete, self-contained task for the subagent. It does not share this conversation\'s context, so include everything it needs.'
+const PROMPT_PARAMETER_DESCRIPTION =
+  "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
 
 /** Shared output contract of the delegation tools: a continuable child id, or the collected foreground output. `as const` keeps the discriminant literals for InferValue. */
-const delegationOutputSchema = { oneOf: [
-  {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      kind: { type: 'string', required: true, const: 'continuable' },
-      subagentId: { type: 'string', required: true },
-      notice: { type: 'string', description: 'Present when the tier ran on its fallback route' },
+const delegationOutputSchema = {
+  oneOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        kind: { type: 'string', required: true, const: 'continuable' },
+        subagentId: { type: 'string', required: true },
+        notice: { type: 'string', description: 'Present when the tier ran on its fallback route' },
+      },
     },
-  },
-  {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      kind: { type: 'string', required: true, const: 'foreground' },
-      runId: { type: 'string', required: true },
-      output: { type: 'array', required: true, items: { type: 'json' } },
-      notice: { type: 'string', description: 'Present when the tier ran on its fallback route' },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        kind: { type: 'string', required: true, const: 'foreground' },
+        runId: { type: 'string', required: true },
+        output: { type: 'array', required: true, items: { type: 'json' } },
+        notice: { type: 'string', description: 'Present when the tier ran on its fallback route' },
+      },
     },
-  },
-] } as const
+  ],
+} as const
 
 /** Output contract of `create_agent`: the created agent's id. */
 const createAgentOutputSchema = {
@@ -150,25 +177,44 @@ const createAgentOutputSchema = {
 
 /** Render text blocks from the canonical JSON block array without trusting arbitrary values. */
 function outputValueText(values: readonly unknown[]): string {
-  return values.filter((value): value is { text: string } => typeof value === 'object' && value !== null && !Array.isArray(value) && (value as { type?: unknown }).type === 'text' && typeof (value as { text?: unknown }).text === 'string').map((value) => value.text).join('')
+  return values
+    .filter(
+      (value): value is { text: string } =>
+        typeof value === 'object' &&
+        value !== null &&
+        !Array.isArray(value) &&
+        (value as { type?: unknown }).type === 'text' &&
+        typeof (value as { text?: unknown }).text === 'string',
+    )
+    .map((value) => value.text)
+    .join('')
 }
 
 /** A non-`completed` stop reason means the child did not finish cleanly. */
 function stopReasonError(result: SubagentResult): string | undefined {
   switch (result.stopReason) {
-    case 'completed': return
-    case 'aborted': return 'subagent run was cancelled'
-    case 'error': return 'subagent run failed'
-    case 'max-tokens': return 'subagent run hit its token limit before finishing'
-    case 'refusal': return 'subagent declined the task'
-    default: return `subagent run ended abnormally (${String(result.stopReason)})`
+    case 'completed':
+      return
+    case 'aborted':
+      return 'subagent run was cancelled'
+    case 'error':
+      return 'subagent run failed'
+    case 'max-tokens':
+      return 'subagent run hit its token limit before finishing'
+    case 'refusal':
+      return 'subagent declined the task'
+    default:
+      return `subagent run ended abnormally (${String(result.stopReason)})`
   }
 }
 
 /** Append provider-authored failure detail and the child's preserved partial answer to a stop-reason error. */
 function withDiagnosticAndPartialText(error: string, result: SubagentResult): string {
   const diagnostic = result.diagnostic === undefined ? '' : `\nDiagnostic: ${result.diagnostic}`
-  const text = result.output.filter((block) => block.type === 'text').map((block) => block.text).join('')
+  const text = result.output
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('')
   return `${error}${diagnostic}${text.length === 0 ? '' : `\nPartial output before the run ended:\n${text}`}`
 }
 
@@ -180,7 +226,7 @@ interface ForegroundResult {
 }
 
 /** Outcome of releasing one activation, captured instead of thrown so a result failure survives. */
-type DisposalOutcome = { ok: true } | { ok: false, error: unknown }
+type DisposalOutcome = { ok: true } | { ok: false; error: unknown }
 
 /**
  * Collect and release one foreground activation.
@@ -191,33 +237,48 @@ type DisposalOutcome = { ok: true } | { ok: false, error: unknown }
  * Both teardown and the result are awaited before this returns, so the tool
  * call never reports an outcome the child is still running against.
  */
-async function settleForegroundRun(activation: SubagentActivation, signal: AbortSignal): Promise<ForegroundResult> {
+async function settleForegroundRun(
+  activation: SubagentActivation,
+  signal: AbortSignal,
+): Promise<ForegroundResult> {
   let release: Promise<DisposalOutcome> | undefined
   /** Start (or reuse) the one release this activation ever needs; dispose is idempotent. */
-  const dispose = (): Promise<DisposalOutcome> => release ??= Promise.resolve()
-    .then(() => activation.dispose())
-    .then(() => ({ ok: true as const }), (error: unknown) => ({ ok: false as const, error }))
-  const cancel = (): void => { void dispose() }
+  const dispose = (): Promise<DisposalOutcome> =>
+    (release ??= Promise.resolve()
+      .then(() => activation.dispose())
+      .then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      ))
+  const cancel = (): void => {
+    void dispose()
+  }
   // Covers an abort that landed while `startActivation` was still publishing.
   if (signal.aborted) cancel()
   else signal.addEventListener('abort', cancel, { once: true })
   try {
-    const [execution] = await Promise.allSettled([activation.result.then((result) => {
-      const error = stopReasonError(result)
-      if (error !== undefined) throw new Error(withDiagnosticAndPartialText(error, result))
-      return {
-        kind: 'foreground' as const,
-        runId: activation.childId as string,
-        // ContentBlocks travel the session log as lossless JSON; the output
-        // schema types them as the broader JsonValue[].
-        output: [...result.output] as unknown as JsonValue[],
-      }
-    })])
+    const [execution] = await Promise.allSettled([
+      activation.result.then((result) => {
+        const error = stopReasonError(result)
+        if (error !== undefined) throw new Error(withDiagnosticAndPartialText(error, result))
+        return {
+          kind: 'foreground' as const,
+          runId: activation.childId as string,
+          // ContentBlocks travel the session log as lossless JSON; the output
+          // schema types them as the broader JsonValue[].
+          output: [...result.output] as unknown as JsonValue[],
+        }
+      }),
+    ])
     // A normal completion releases here; an aborted activation already released
     // in the listener, and the result settled because of it.
     const disposal = await dispose()
     if (execution.status === 'rejected') {
-      if (!disposal.ok) throw new AggregateError([execution.reason, disposal.error], `subagent run failed: ${String(execution.reason)}; dispose failed: ${String(disposal.error)}`)
+      if (!disposal.ok)
+        throw new AggregateError(
+          [execution.reason, disposal.error],
+          `subagent run failed: ${String(execution.reason)}; dispose failed: ${String(disposal.error)}`,
+        )
       throw execution.reason
     }
     if (!disposal.ok) throw disposal.error
@@ -251,7 +312,10 @@ interface PlanUsageSnapshotShim {
 
 /** Minimal `planUsage` surface consumed by route selection; absent plugin reads as `undefined`. */
 interface PlanUsageServiceShim {
-  get(provider: string, options?: { maxAgeMs?: number; force?: boolean }): Promise<PlanUsageSnapshotShim | undefined>
+  get(
+    provider: string,
+    options?: { maxAgeMs?: number; force?: boolean },
+  ): Promise<PlanUsageSnapshotShim | undefined>
 }
 
 /** The context surface route selection reads — structurally satisfied by Context, narrowed so tests can stub it. */
@@ -285,12 +349,18 @@ export function fallbackTarget(tier: TierRoute): RouteTarget | undefined {
 }
 
 /** Whether any reported window sits at its limit with the reset still ahead. */
-export function anyWindowExhausted(snapshot: PlanUsageSnapshotShim | undefined, now: number): boolean {
+export function anyWindowExhausted(
+  snapshot: PlanUsageSnapshotShim | undefined,
+  now: number,
+): boolean {
   if (snapshot === undefined) return false
-  return [snapshot.fiveHour, snapshot.weekly, snapshot.monthly, snapshot.monthlyMcp].some((window) => {
-    if (window === undefined || typeof window.percent !== 'number' || window.percent < 100) return false
-    return window.resetAt === undefined || window.resetAt > now
-  })
+  return [snapshot.fiveHour, snapshot.weekly, snapshot.monthly, snapshot.monthlyMcp].some(
+    (window) => {
+      if (window === undefined || typeof window.percent !== 'number' || window.percent < 100)
+        return false
+      return window.resetAt === undefined || window.resetAt > now
+    },
+  )
 }
 
 /** `<provider>/<model>`, for messages. */
@@ -303,7 +373,9 @@ export function callConfigOf(target: RouteTarget): LlmCallConfig {
   return {
     provider: target.provider,
     model: target.model,
-    ...(target.reasoningEffort !== undefined && target.reasoningEffort !== '' ? { reasoningEffort: ReasoningEffortId(target.reasoningEffort) } : {}),
+    ...(target.reasoningEffort !== undefined && target.reasoningEffort !== ''
+      ? { reasoningEffort: ReasoningEffortId(target.reasoningEffort) }
+      : {}),
   }
 }
 
@@ -320,7 +392,10 @@ const PLAN_SNAPSHOT_MAX_AGE_MS = 60_000
 const PLAN_READ_BUDGET_MS = 2_000
 
 /** Read the pinned route's coding-plan snapshot; any failure or overrun reads as "no quota data". */
-async function planSnapshotOf(ctx: RouteSelectionContext, provider: string): Promise<PlanUsageSnapshotShim | undefined> {
+async function planSnapshotOf(
+  ctx: RouteSelectionContext,
+  provider: string,
+): Promise<PlanUsageSnapshotShim | undefined> {
   const planUsage = ctx.get('planUsage') as PlanUsageServiceShim | undefined
   if (planUsage === undefined) return undefined
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -328,7 +403,10 @@ async function planSnapshotOf(ctx: RouteSelectionContext, provider: string): Pro
     const budget = new Promise<undefined>((resolve) => {
       timer = setTimeout(() => resolve(undefined), PLAN_READ_BUDGET_MS)
     })
-    return await Promise.race([planUsage.get(provider, { maxAgeMs: PLAN_SNAPSHOT_MAX_AGE_MS }), budget])
+    return await Promise.race([
+      planUsage.get(provider, { maxAgeMs: PLAN_SNAPSHOT_MAX_AGE_MS }),
+      budget,
+    ])
   } catch {
     return undefined
   } finally {
@@ -337,7 +415,11 @@ async function planSnapshotOf(ctx: RouteSelectionContext, provider: string): Pro
 }
 
 /** Why the pinned route cannot serve a delegation right now, or `undefined` when it can. */
-async function pinnedRouteBlocker(ctx: RouteSelectionContext, tier: TierRoute, signal: AbortSignal): Promise<RouteBlocker | undefined> {
+async function pinnedRouteBlocker(
+  ctx: RouteSelectionContext,
+  tier: TierRoute,
+  signal: AbortSignal,
+): Promise<RouteBlocker | undefined> {
   try {
     await ctx.llm.resolveCallConfig(callConfigOf(tier), signal)
   } catch (error) {
@@ -346,7 +428,8 @@ async function pinnedRouteBlocker(ctx: RouteSelectionContext, tier: TierRoute, s
     return { kind: 'unavailable', detail: `route unavailable (${failureDetail(error)})`, error }
   }
   const snapshot = await planSnapshotOf(ctx, tier.provider)
-  if (anyWindowExhausted(snapshot, Date.now())) return { kind: 'exhausted', detail: 'coding-plan window exhausted' }
+  if (anyWindowExhausted(snapshot, Date.now()))
+    return { kind: 'exhausted', detail: 'coding-plan window exhausted' }
   return undefined
 }
 
@@ -357,13 +440,21 @@ async function pinnedRouteBlocker(ctx: RouteSelectionContext, tier: TierRoute, s
  * failure is rethrown (fail loud); an exhausted window without a fallback
  * stays on the pinned route, where dsh-auto-continue resumes it at the reset.
  */
-export async function selectTierRoute(ctx: RouteSelectionContext, tier: TierRoute, signal: AbortSignal): Promise<RouteSelection> {
+export async function selectTierRoute(
+  ctx: RouteSelectionContext,
+  tier: TierRoute,
+  signal: AbortSignal,
+): Promise<RouteSelection> {
   const blocker = await pinnedRouteBlocker(ctx, tier, signal)
   if (blocker === undefined) return { target: tier }
   const fallback = fallbackTarget(tier)
   if (fallback === undefined) {
     if (blocker.kind === 'unavailable') throw blocker.error
-    ctx.logger.warn('crew: %s is %s and this tier names no fallback — delegating anyway', routeName(tier), blocker.detail)
+    ctx.logger.warn(
+      'crew: %s is %s and this tier names no fallback — delegating anyway',
+      routeName(tier),
+      blocker.detail,
+    )
     return { target: tier }
   }
   try {
@@ -381,16 +472,28 @@ export async function selectTierRoute(ctx: RouteSelectionContext, tier: TierRout
 }
 
 /** What one tier-child start produced: a background continuable child id, or the settled foreground result. */
-type TierChildOutcome = { background: true; childId: string; notice?: string } | { background: false; value: ForegroundResult; notice?: string }
+type TierChildOutcome =
+  | { background: true; childId: string; notice?: string }
+  | { background: false; value: ForegroundResult; notice?: string }
 
 /** Start one child on a pinned tier route: select the route (with its fallback), then run continuable-in-background or settle in the foreground. */
-async function startTierChild(ctx: Context, config: Config, subagentProvider: SubagentProvider, tier: TierRoute, spec: { label: string; promptText: string; runInForeground: boolean }, exec: ToolRunContext): Promise<TierChildOutcome> {
+async function startTierChild(
+  ctx: Context,
+  config: Config,
+  subagentProvider: SubagentProvider,
+  tier: TierRoute,
+  spec: { label: string; promptText: string; runInForeground: boolean },
+  exec: ToolRunContext,
+): Promise<TierChildOutcome> {
   const parent = exec.agent
   if (!parent) throw new Error('crew tool requires a calling agent (exec.agent was undefined)')
   exec.signal.throwIfAborted()
   const selection = await selectTierRoute(ctx, tier, exec.signal)
   const agentOptions = callConfigOf(selection.target)
-  if (ctx.subagents.getProvider(config.provider) !== subagentProvider) throw new Error(`subagent provider "${config.provider}" changed while resolving the child LLM route; retry the delegation`)
+  if (ctx.subagents.getProvider(config.provider) !== subagentProvider)
+    throw new Error(
+      `subagent provider "${config.provider}" changed while resolving the child LLM route; retry the delegation`,
+    )
   const maxDepth = ctx.subagents.resolveMaxDepth()
   const request = {
     prompt: [{ type: 'text' as const, text: spec.promptText }],
@@ -412,9 +515,17 @@ async function startTierChild(ctx: Context, config: Config, subagentProvider: Su
     delivery: spec.runInForeground ? 'caller' : 'parent',
   })
   if (!spec.runInForeground) {
-    return { background: true, childId: activation.childId as string, ...(notice !== undefined ? { notice } : {}) }
+    return {
+      background: true,
+      childId: activation.childId as string,
+      ...(notice !== undefined ? { notice } : {}),
+    }
   }
-  return { background: false, value: await settleForegroundRun(activation, exec.signal), ...(notice !== undefined ? { notice } : {}) }
+  return {
+    background: false,
+    value: await settleForegroundRun(activation, exec.signal),
+    ...(notice !== undefined ? { notice } : {}),
+  }
 }
 
 /** Install the crew delegation composition. */
@@ -429,94 +540,142 @@ export function apply(ctx: Context, config: Config) {
   if (toolNames.size !== 4) throw new Error('crew: tier toolNames must be distinct')
 
   const assertProviderConfiguration = (subagentProvider: SubagentProvider) => {
-    if (!subagentProvider.capabilities.agentOptions) throw new Error(`crew: provider "${subagentProvider.name}" does not support child agentOptions`)
-    if (subagentProvider.prepareContinuable === undefined) throw new Error(`crew: provider "${subagentProvider.name}" does not support continuable children`)
+    if (!subagentProvider.capabilities.agentOptions)
+      throw new Error(
+        `crew: provider "${subagentProvider.name}" does not support child agentOptions`,
+      )
+    if (subagentProvider.prepareContinuable === undefined)
+      throw new Error(
+        `crew: provider "${subagentProvider.name}" does not support continuable children`,
+      )
   }
 
   let mounted: (() => void)[] | undefined
   const mount = (subagentProvider: SubagentProvider) => {
     assertProviderConfiguration(subagentProvider)
-    const disposers = tiers.map(({ route: tier, description }) => ctx.tools.register(defineTool({
-      name: tier.toolName,
-      description,
-      parameters: {
-        description: {
-          type: 'string',
-          required: true,
-          description: 'A short (3-5 word) description of the delegated task, for display.',
-        },
-        prompt: {
-          type: 'string',
-          required: true,
-          description: PROMPT_PARAMETER_DESCRIPTION,
-        },
-        run_in_background: {
-          type: 'boolean',
-          description: 'Defaults to true. Set false only when your next action depends on the result.',
-        },
-      },
-      output: {
-        schema: delegationOutputSchema,
-        render: (_args, value) => [{
-          type: 'text',
-          text: (value.kind === 'continuable' ? `started subagent ${value.subagentId}` : outputValueText(value.output)) +
-            (value.notice === undefined ? '' : `\n[crew] ${value.notice}`),
-        }],
-      },
-      isConcurrencySafe: () => true,
-      async execute(args, exec) {
-        const outcome = await startTierChild(ctx, config, subagentProvider, tier, {
-          label: args.description,
-          promptText: args.prompt,
-          runInForeground: args.run_in_background === false,
-        }, exec)
-        const notice = outcome.notice
-        if (outcome.background) {
-          return { kind: 'continuable' as const, subagentId: outcome.childId, ...(notice !== undefined ? { notice } : {}) }
-        }
-        return { ...outcome.value, ...(notice !== undefined ? { notice } : {}) }
-      },
-    })))
-    mounted = [...disposers, ctx.tools.register(defineTool({
-      name: 'create_agent',
-      description: CREATE_AGENT_DESCRIPTION,
-      parameters: {
-        description: {
-          type: 'string',
-          required: true,
-          description: 'A short (3-5 word) label for the agent, for display.',
-        },
-        role: {
-          type: 'string',
-          required: true,
-          description: 'The agent\'s standing responsibility — its charter for every later task. Keep it specific: scope, favored tools, expected output format.',
-        },
-        tier: {
-          type: 'string',
-          enum: ['quick', 'workhorse', 'smart'],
-          description: 'Pinned route tier: quick (default), workhorse, or smart.',
-        },
-      },
-      output: {
-        schema: createAgentOutputSchema,
-        render: (_args, value) => [{
-          type: 'text',
-          text: `created agent ${value.agentId}` + (value.notice === undefined ? '' : `\n[crew] ${value.notice}`),
-        }],
-      },
-      isConcurrencySafe: () => true,
-      async execute(args, exec) {
-        const tier = tierRoutes[args.tier ?? 'quick']
-        const outcome = await startTierChild(ctx, config, subagentProvider, tier, {
-          label: args.description,
-          promptText: `Take on this standing role:\n\n${args.role}\n\nReply with a one-line confirmation that you are ready, then wait for tasks delivered as messages.`,
-          runInForeground: false,
-        }, exec)
-        const agentId = outcome.background ? outcome.childId : (outcome.value.runId as string)
-        const notice = outcome.notice
-        return { kind: 'created' as const, agentId, ...(notice !== undefined ? { notice } : {}) }
-      },
-    }))]
+    const disposers = tiers.map(({ route: tier, description }) =>
+      ctx.tools.register(
+        defineTool({
+          name: tier.toolName,
+          description,
+          parameters: {
+            description: {
+              type: 'string',
+              required: true,
+              description: 'A short (3-5 word) description of the delegated task, for display.',
+            },
+            prompt: {
+              type: 'string',
+              required: true,
+              description: PROMPT_PARAMETER_DESCRIPTION,
+            },
+            run_in_background: {
+              type: 'boolean',
+              description:
+                'Defaults to true. Set false only when your next action depends on the result.',
+            },
+          },
+          output: {
+            schema: delegationOutputSchema,
+            render: (_args, value) => [
+              {
+                type: 'text',
+                text:
+                  (value.kind === 'continuable'
+                    ? `started subagent ${value.subagentId}`
+                    : outputValueText(value.output)) +
+                  (value.notice === undefined ? '' : `\n[crew] ${value.notice}`),
+              },
+            ],
+          },
+          isConcurrencySafe: () => true,
+          async execute(args, exec) {
+            const outcome = await startTierChild(
+              ctx,
+              config,
+              subagentProvider,
+              tier,
+              {
+                label: args.description,
+                promptText: args.prompt,
+                runInForeground: args.run_in_background === false,
+              },
+              exec,
+            )
+            const notice = outcome.notice
+            if (outcome.background) {
+              return {
+                kind: 'continuable' as const,
+                subagentId: outcome.childId,
+                ...(notice !== undefined ? { notice } : {}),
+              }
+            }
+            return { ...outcome.value, ...(notice !== undefined ? { notice } : {}) }
+          },
+        }),
+      ),
+    )
+    mounted = [
+      ...disposers,
+      ctx.tools.register(
+        defineTool({
+          name: 'create_agent',
+          description: CREATE_AGENT_DESCRIPTION,
+          parameters: {
+            description: {
+              type: 'string',
+              required: true,
+              description: 'A short (3-5 word) label for the agent, for display.',
+            },
+            role: {
+              type: 'string',
+              required: true,
+              description:
+                "The agent's standing responsibility — its charter for every later task. Keep it specific: scope, favored tools, expected output format.",
+            },
+            tier: {
+              type: 'string',
+              enum: ['quick', 'workhorse', 'smart'],
+              description: 'Pinned route tier: quick (default), workhorse, or smart.',
+            },
+          },
+          output: {
+            schema: createAgentOutputSchema,
+            render: (_args, value) => [
+              {
+                type: 'text',
+                text:
+                  `created agent ${value.agentId}` +
+                  (value.notice === undefined ? '' : `\n[crew] ${value.notice}`),
+              },
+            ],
+          },
+          isConcurrencySafe: () => true,
+          async execute(args, exec) {
+            const tier = tierRoutes[args.tier ?? 'quick']
+            const outcome = await startTierChild(
+              ctx,
+              config,
+              subagentProvider,
+              tier,
+              {
+                label: args.description,
+                promptText: `Take on this standing role:\n\n${args.role}\n\nReply with a one-line confirmation that you are ready, then wait for tasks delivered as messages.`,
+                runInForeground: false,
+              },
+              exec,
+            )
+            const agentId = outcome.background ? outcome.childId : (outcome.value.runId as string)
+            const notice = outcome.notice
+            return {
+              kind: 'created' as const,
+              agentId,
+              ...(notice !== undefined ? { notice } : {}),
+            }
+          },
+        }),
+      ),
+    ]
   }
   const unmount = () => {
     if (mounted === undefined) return
@@ -533,13 +692,18 @@ export function apply(ctx: Context, config: Config) {
   })
   const present = ctx.subagents.getProvider(config.provider)
   if (present !== undefined) mount(present)
-  else ctx.logger.info(`subagent provider "${config.provider}" not registered yet; the crew tools will register when it appears`)
+  else
+    ctx.logger.info(
+      `subagent provider "${config.provider}" not registered yet; the crew tools will register when it appears`,
+    )
 
   ctx.systemPrompt.section({
     name: 'tool:crew',
     order: ctx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
-    text: (context) => mounted === undefined || tiers.some((tier) => ctx.tools.get(tier.route.toolName, context.scope) === undefined)
-      ? ''
-      : 'Start independent subagent delegations together in one assistant message and continue useful work while they run.',
+    text: (context) =>
+      mounted === undefined ||
+      tiers.some((tier) => ctx.tools.get(tier.route.toolName, context.scope) === undefined)
+        ? ''
+        : 'Start independent subagent delegations together in one assistant message and continue useful work while they run.',
   })
 }

@@ -35,7 +35,11 @@ import type {
   TokenUsage,
 } from '@deepseek-ai/dsh-llm'
 import { longEdgeDimensions } from '@deepseek-ai/dsh-attachment'
-import type { AttachmentStore, ImageAttachmentRef, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
+import type {
+  AttachmentStore,
+  ImageAttachmentRef,
+  RequestImageAttachment,
+} from '@deepseek-ai/dsh-attachment'
 import type { FetchLike } from '../../transport.js'
 import type { ModelCatalog } from './catalog.js'
 import { oauthHeaders } from './auth.js'
@@ -117,7 +121,9 @@ function mapUsage(usage: {
 /** Map an HTTP status plus parsed error body to a stable LlmError code. */
 function httpErrorCode(status: number, detail: Record<string, unknown> | undefined): string {
   if (status === 401 || status === 403) return 'AUTH'
-  const text = [detail?.code, detail?.type, detail?.message, detail?.detail].filter(Boolean).join(' ')
+  const text = [detail?.code, detail?.type, detail?.message, detail?.detail]
+    .filter(Boolean)
+    .join(' ')
   if (isQuotaExceededError(text)) return QUOTA_EXCEEDED_CODE
   if (status === 429) return 'RATE_LIMIT'
   if (status === 400) {
@@ -173,7 +179,10 @@ function finishReason(state: TranslateState): FinishReason {
   if (!state.anyBlock) {
     return {
       kind: 'error',
-      failure: { message: 'model returned a completed response with no content', code: EMPTY_RESPONSE_CODE },
+      failure: {
+        message: 'model returned a completed response with no content',
+        code: EMPTY_RESPONSE_CODE,
+      },
     }
   }
   return { kind: 'stop' }
@@ -190,7 +199,16 @@ async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<Strea
   const open = (key: string, type: TrackedBlock['type']): TrackedBlock => {
     let block = blocks.get(key)
     if (!block) {
-      block = { key, type, index: nextIndex++, started: false, closed: false, callId: '', name: '', text: '' }
+      block = {
+        key,
+        type,
+        index: nextIndex++,
+        started: false,
+        closed: false,
+        callId: '',
+        name: '',
+        text: '',
+      }
       blocks.set(key, block)
       order.push(key)
       state.anyBlock = true
@@ -286,7 +304,9 @@ async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<Strea
       }
       if (resp.usage) pendingUsage = mapUsage(resp.usage)
     } else if (type === 'response.failed' || type === 'error') {
-      const err = (ev.response as { error?: { message?: string; code?: string } } | undefined)?.error ?? (ev.error as { message?: string; code?: string } | undefined)
+      const err =
+        (ev.response as { error?: { message?: string; code?: string } } | undefined)?.error ??
+        (ev.error as { message?: string; code?: string } | undefined)
       state.errorFailure = {
         message: err?.message ?? 'model request failed',
         code: typeof err?.code === 'string' ? err.code : 'PROVIDER_ERROR',
@@ -320,7 +340,13 @@ export class OpenAiOauthAdapter extends LlmAdapter {
   private readonly getFetch: () => Promise<FetchLike>
   private readonly resolveAttachments: () => AttachmentStore | undefined
 
-  constructor({ options, tokenStore, catalog, getFetch, resolveAttachments }: OpenAiOauthAdapterDeps) {
+  constructor({
+    options,
+    tokenStore,
+    catalog,
+    getFetch,
+    resolveAttachments,
+  }: OpenAiOauthAdapterDeps) {
     super()
     this.options = options
     this.tokenStore = tokenStore
@@ -362,7 +388,10 @@ export class OpenAiOauthAdapter extends LlmAdapter {
     }
   }
 
-  private modelInfo(provider: string, model: { id: string; name: string; inputModalities: readonly ('text' | 'image')[] }): LlmModelInfo {
+  private modelInfo(
+    provider: string,
+    model: { id: string; name: string; inputModalities: readonly ('text' | 'image')[] },
+  ): LlmModelInfo {
     return { provider, id: model.id, name: model.name, inputModalities: model.inputModalities }
   }
 
@@ -371,10 +400,13 @@ export class OpenAiOauthAdapter extends LlmAdapter {
     const fetchFn = await this.getFetch()
     const { access, accountId } = await this.tokenStore.resolve(cfg.refreshMarginMs)
     const controller = new AbortController()
-    const signal = options.signal === undefined
-      ? controller.signal
-      : AbortSignal.any([options.signal, controller.signal])
-    const iterator = this.request(options, signal, cfg, fetchFn, access, accountId)[Symbol.asyncIterator]()
+    const signal =
+      options.signal === undefined
+        ? controller.signal
+        : AbortSignal.any([options.signal, controller.signal])
+    const iterator = this.request(options, signal, cfg, fetchFn, access, accountId)[
+      Symbol.asyncIterator
+    ]()
     try {
       while (true) {
         const result = await iterator.next()
@@ -386,7 +418,9 @@ export class OpenAiOauthAdapter extends LlmAdapter {
         throw new LlmError('OpenAI OAuth request aborted by caller', 'ABORTED', { cause: error })
       }
       if (error instanceof LlmError) throw error
-      throw new LlmError(`OpenAI OAuth stream from ${cfg.baseURL} failed`, 'TRANSPORT', { cause: error })
+      throw new LlmError(`OpenAI OAuth stream from ${cfg.baseURL} failed`, 'TRANSPORT', {
+        cause: error,
+      })
     } finally {
       controller.abort('stream consumer stopped')
       if (iterator.return !== undefined) {
@@ -404,7 +438,10 @@ export class OpenAiOauthAdapter extends LlmAdapter {
    * conversation (offloaded occurrences stay text placeholders). Returns
    * `undefined` for text-only requests, so nothing else changes on the wire.
    */
-  private async prepareImages(options: GenerateOptions, signal: AbortSignal): Promise<RequestImages | undefined> {
+  private async prepareImages(
+    options: GenerateOptions,
+    signal: AbortSignal,
+  ): Promise<RequestImages | undefined> {
     if (!options.messages.some((message) => contentHasImage(message.content))) return undefined
     const attachments = this.resolveAttachments()
     if (attachments === undefined) {
@@ -422,12 +459,21 @@ export class OpenAiOauthAdapter extends LlmAdapter {
       }
     }
     const versions = new Map<string, RequestImageAttachment>()
-    await Promise.all([...refs.values()].map(async (ref) => {
-      versions.set(ref.attachmentId, await attachments.readImageRequest(ref, {
-        ...longEdgeDimensions(ref.width, ref.height, REQUEST_IMAGE_LONG_EDGE),
-        maxBytes: REQUEST_IMAGE_MAX_BYTES,
-      }, signal))
-    }))
+    await Promise.all(
+      [...refs.values()].map(async (ref) => {
+        versions.set(
+          ref.attachmentId,
+          await attachments.readImageRequest(
+            ref,
+            {
+              ...longEdgeDimensions(ref.width, ref.height, REQUEST_IMAGE_LONG_EDGE),
+              maxBytes: REQUEST_IMAGE_MAX_BYTES,
+            },
+            signal,
+          ),
+        )
+      }),
+    )
     return versions
   }
 
@@ -445,9 +491,10 @@ export class OpenAiOauthAdapter extends LlmAdapter {
     // Same affinity pair pi-ai's Codex SSE transport sends (`session-id` +
     // `x-client-request-id`, both the clamped cache key): it keeps a session's
     // requests on one backend route so the prompt cache actually hits.
-    const affinityKey = cfg.promptCacheKey && options.sessionId !== undefined
-      ? clampSessionAffinityKey(String(options.sessionId))
-      : undefined
+    const affinityKey =
+      cfg.promptCacheKey && options.sessionId !== undefined
+        ? clampSessionAffinityKey(String(options.sessionId))
+        : undefined
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       accept: 'text/event-stream',
@@ -468,13 +515,18 @@ export class OpenAiOauthAdapter extends LlmAdapter {
       })
     } catch (error) {
       if (signal.aborted) throw error
-      throw new LlmError(`OpenAI OAuth request to ${cfg.baseURL} failed`, 'TRANSPORT', { cause: error })
+      throw new LlmError(`OpenAI OAuth request to ${cfg.baseURL} failed`, 'TRANSPORT', {
+        cause: error,
+      })
     }
     if (!response.ok) {
       let message = `OpenAI OAuth API error (HTTP ${response.status})`
       let providerError: Record<string, unknown> | undefined
       try {
-        const parsed = (await response.json()) as { error?: Record<string, unknown>; detail?: unknown }
+        const parsed = (await response.json()) as {
+          error?: Record<string, unknown>
+          detail?: unknown
+        }
         providerError = parsed?.error ?? (parsed as Record<string, unknown>)
         if (typeof parsed?.detail === 'string') message = parsed.detail
         else if (providerError?.message) message = String(providerError.message)
@@ -487,7 +539,8 @@ export class OpenAiOauthAdapter extends LlmAdapter {
         ...(rid ? { requestId: rid } : {}),
       })
     }
-    if (!response.body) throw new LlmError('OpenAI OAuth API returned no response body', 'EMPTY_RESPONSE')
+    if (!response.body)
+      throw new LlmError('OpenAI OAuth API returned no response body', 'EMPTY_RESPONSE')
     yield* translate(parseSse(response.body))
   }
 }

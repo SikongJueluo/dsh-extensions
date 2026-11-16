@@ -80,9 +80,15 @@ export interface AuthChannel {
 function wirePrompt(prompt: AuthorizationPrompt): WirePrompt {
   const base: WirePrompt = { kind: prompt.kind, message: prompt.message }
   if (prompt.kind === 'select') {
-    return { ...base, options: prompt.options.map((option) => ({ id: option.id, label: option.label })) }
+    return {
+      ...base,
+      options: prompt.options.map((option) => ({ id: option.id, label: option.label })),
+    }
   }
-  return { ...base, ...(prompt.placeholder !== undefined ? { placeholder: prompt.placeholder } : {}) }
+  return {
+    ...base,
+    ...(prompt.placeholder !== undefined ? { placeholder: prompt.placeholder } : {}),
+  }
 }
 
 /** Extract a string field from an unknown JSON payload. */
@@ -121,21 +127,30 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
         const pending = { prompt: wirePrompt(prompt), resolve, reject }
         entry.bridge.pending = pending
         // The flow withdrawing its own (losing) question is not a decline.
-        prompt.signal?.addEventListener('abort', () => {
-          if (entry.bridge?.pending === pending) entry.bridge.pending = undefined
-          reject(new Error('Authorization prompt withdrawn'))
-        }, { once: true })
+        prompt.signal?.addEventListener(
+          'abort',
+          () => {
+            if (entry.bridge?.pending === pending) entry.bridge.pending = undefined
+            reject(new Error('Authorization prompt withdrawn'))
+          },
+          { once: true },
+        )
       }),
   })
 
-  const settle = (entry: ProviderEntry, status: 'authorized' | 'cancelled' | 'failed', message?: string): void => {
+  const settle = (
+    entry: ProviderEntry,
+    status: 'authorized' | 'cancelled' | 'failed',
+    message?: string,
+  ): void => {
     if (entry.bridge === undefined) return
     entry.bridge.pending = undefined
     entry.bridge.done = { status, ...(message !== undefined ? { message } : {}) }
   }
 
   const begin = async (svcCtx: Context, entry: ProviderEntry): Promise<Record<string, unknown>> => {
-    if (entry.bridge !== undefined && entry.bridge.done === undefined) return { started: false, running: true }
+    if (entry.bridge !== undefined && entry.bridge.done === undefined)
+      return { started: false, running: true }
     entry.bridge = {}
     void svcCtx.authorization
       .begin({ key: entry.key, interaction: interactionOf(entry) })
@@ -148,8 +163,14 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
     svcCtx: Context,
     endpoint: string,
     payload: unknown,
-  ): Promise<{ ok: true; value: unknown } | { ok: false; error: { code: string; message: string; details: object } }> => {
-    const failure = (code: string, message: string): { ok: false; error: { code: string; message: string; details: object } } => ({
+  ): Promise<
+    | { ok: true; value: unknown }
+    | { ok: false; error: { code: string; message: string; details: object } }
+  > => {
+    const failure = (
+      code: string,
+      message: string,
+    ): { ok: false; error: { code: string; message: string; details: object } } => ({
       ok: false,
       error: { code, message, details: {} },
     })
@@ -173,11 +194,21 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
         }
         default: {
           const entry = entryOf(field(payload, 'provider'))
-          if (entry === undefined) return failure('UNKNOWN_PROVIDER', `No provider "${field(payload, 'provider')}" is registered`)
+          if (entry === undefined)
+            return failure(
+              'UNKNOWN_PROVIDER',
+              `No provider "${field(payload, 'provider')}" is registered`,
+            )
           switch (endpoint) {
             case 'status': {
               const info = await svcCtx.credentials.describeRecord(entry.key)
-              return { ok: true, value: { signedIn: info?.configured === true, running: entry.bridge !== undefined && entry.bridge.done === undefined } }
+              return {
+                ok: true,
+                value: {
+                  signedIn: info?.configured === true,
+                  running: entry.bridge !== undefined && entry.bridge.done === undefined,
+                },
+              }
             }
             case 'begin':
               return { ok: true, value: await begin(svcCtx, entry) }
@@ -241,7 +272,11 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
    * envelope the connection RPC carriers use, on this package's own
    * web-server prefix route.
    */
-  const serve = async (svcCtx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const serve = async (
+    svcCtx: Context,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> => {
     const rejection = svcCtx.connection.requestRejection(req)
     if (rejection !== undefined) {
       res.writeHead(rejection)
@@ -258,7 +293,10 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
       respond(404, '{}')
       return
     }
-    if ((req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
+    if (
+      (req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase() !==
+      'application/json'
+    ) {
       respond(415, '{}')
       return
     }
@@ -281,8 +319,12 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
       return
     }
     if (
-      envelope.type !== 'client-request' || typeof envelope.rpcId !== 'string' || envelope.rpcId.length === 0 ||
-      envelope.method !== endpoint || typeof envelope.payload !== 'object' || envelope.payload === null
+      envelope.type !== 'client-request' ||
+      typeof envelope.rpcId !== 'string' ||
+      envelope.rpcId.length === 0 ||
+      envelope.method !== endpoint ||
+      typeof envelope.payload !== 'object' ||
+      envelope.payload === null
     ) {
       respond(400, '{}')
       return
@@ -292,11 +334,15 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
   }
 
   ctx.inject(['authorization', 'connection', 'webServer'], (svcCtx) => {
-    svcCtx.effect(() => svcCtx.webServer.register({
-      kind: 'prefix',
-      path: RPC_CHANNEL,
-      handler: (req, res) => serve(svcCtx, req, res),
-    }), `${RPC_CHANNEL} sign-in channel`)
+    svcCtx.effect(
+      () =>
+        svcCtx.webServer.register({
+          kind: 'prefix',
+          path: RPC_CHANNEL,
+          handler: (req, res) => serve(svcCtx, req, res),
+        }),
+      `${RPC_CHANNEL} sign-in channel`,
+    )
   })
 
   return {

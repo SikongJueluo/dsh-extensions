@@ -24,7 +24,9 @@ const ctx = {
   commands: {
     register(def) {
       registered = def
-      return () => { registered = null }
+      return () => {
+        registered = null
+      }
     },
   },
   logger() {
@@ -36,7 +38,13 @@ const ctx = {
   },
   get(name) {
     if (name === 'agentDefaultModel') {
-      return { currentSelection: () => ({ provider: 'global-provider', model: 'global-model', reasoningEffort: 'low' }) }
+      return {
+        currentSelection: () => ({
+          provider: 'global-provider',
+          model: 'global-model',
+          reasoningEffort: 'low',
+        }),
+      }
     }
     if (name === 'llm') return { listProviders: async () => [], listModels: async () => [] }
     return undefined
@@ -58,7 +66,8 @@ if (config.modelMenu !== true) throw new Error('bad modelMenu default')
 if (config.pickTimeoutMs !== 120000) throw new Error('bad pickTimeoutMs default')
 
 apply(ctx, config)
-if (registered === null || registered.name !== COMMAND_NAME) throw new Error('command not registered')
+if (registered === null || registered.name !== COMMAND_NAME)
+  throw new Error('command not registered')
 console.log('registered command:', registered.name, '|', registered.description)
 
 // A bare /handoff is the retry entry: with no unfinished record in sight it
@@ -78,19 +87,33 @@ if (result.kind !== 'error' || !result.text.includes('没有可重试')) {
 }
 
 // --retry and a task description reject each other up front.
-const retryClash = await registered.handler({ rawInput: '--retry fix readme', agent: part1Agent, signal: null })
+const retryClash = await registered.handler({
+  rawInput: '--retry fix readme',
+  agent: part1Agent,
+  signal: null,
+})
 console.log('retry-clash result:', JSON.stringify(retryClash))
 if (retryClash.kind !== 'error' || !retryClash.text.includes('互斥')) {
   throw new Error('expected --retry plus a task to be rejected as exclusive')
 }
 
-const badModelFlag = await registered.handler({ rawInput: '--model nogood fix readme', agent: null, signal: null })
+const badModelFlag = await registered.handler({
+  rawInput: '--model nogood fix readme',
+  agent: null,
+  signal: null,
+})
 console.log('bad-model-flag result:', JSON.stringify(badModelFlag))
-if (badModelFlag.kind !== 'error' || !badModelFlag.text.includes('Usage')) throw new Error('expected flag usage error')
+if (badModelFlag.kind !== 'error' || !badModelFlag.text.includes('Usage'))
+  throw new Error('expected flag usage error')
 
-const flagNoTask = await registered.handler({ rawInput: '--model deepseek/chat', agent: null, signal: null })
+const flagNoTask = await registered.handler({
+  rawInput: '--model deepseek/chat',
+  agent: null,
+  signal: null,
+})
 console.log('flag-no-task result:', JSON.stringify(flagNoTask))
-if (flagNoTask.kind !== 'error' || !flagNoTask.text.includes('Usage')) throw new Error('expected flag+task usage error')
+if (flagNoTask.kind !== 'error' || !flagNoTask.text.includes('Usage'))
+  throw new Error('expected flag+task usage error')
 
 // ---------------------------------------------------------------- part 2 ---
 // A full stub context: channel route captured, agents.create recorded, and a
@@ -106,9 +129,9 @@ await mkdir(targetCwd, { recursive: true })
 let route = null
 let created = null
 let renamed = null
-const followups = []           // the origin agent's queued prompt
-const spawnedFollowups = []    // the fresh agent's first prompt
-const attached = []            // [workspaceId, sessionId] attach records
+const followups = [] // the origin agent's queued prompt
+const spawnedFollowups = [] // the fresh agent's first prompt
+const attached = [] // [workspaceId, sessionId] attach records
 const flowDisposers = []
 
 function stubWorkspace(id, title, path) {
@@ -118,7 +141,9 @@ function stubWorkspace(id, title, path) {
     path,
     sessionIds: [],
     status: async () => 'ok',
-    attachSession: async (sessionId) => { attached.push([id, sessionId]) },
+    attachSession: async (sessionId) => {
+      attached.push([id, sessionId])
+    },
   }
 }
 const wsOrigin = stubWorkspace('ws-origin', 'Origin Space', cwd)
@@ -131,28 +156,50 @@ const registry = {
 
 const svcCtx = {
   logger: ctx.logger,
-  effect(fn) { flowDisposers.push(fn()); return () => {} },
+  effect(fn) {
+    flowDisposers.push(fn())
+    return () => {}
+  },
   connection: { requestRejection: () => undefined },
-  webServer: { register(spec) { route = spec; return () => { route = null } } },
+  webServer: {
+    register(spec) {
+      route = spec
+      return () => {
+        route = null
+      }
+    },
+  },
 }
 const flowCtx = {
   commands: ctx.commands,
   logger: ctx.logger,
   effect: ctx.effect,
   get: ctx.get,
-  inject(_services, cb) { cb(svcCtx) },
+  inject(_services, cb) {
+    cb(svcCtx)
+  },
   agents: {
     async create(options) {
       created = options
       return {
-        agent: { id: options.sessionId, followup: (message) => { spawnedFollowups.push(message) } },
+        agent: {
+          id: options.sessionId,
+          followup: (message) => {
+            spawnedFollowups.push(message)
+          },
+        },
         dispose: async () => {},
       }
     },
   },
 }
 flowCtx.get = (key) => {
-  if (key === 'sessionTitle') return { rename: (_session, title) => { renamed = title } }
+  if (key === 'sessionTitle')
+    return {
+      rename: (_session, title) => {
+        renamed = title
+      },
+    }
   if (key === 'workspaceRegistry') return registry
   // The origin session's durable selection: what it is actually on, including
   // the effort — deliberately different from the agent's creation options.
@@ -173,16 +220,31 @@ console.log('channel route registered:', route.path)
 
 /** One channel call exactly as the browser half sends it. */
 async function channel(endpoint, payload) {
-  const body = JSON.stringify({ type: 'client-request', rpcId: `smoke-${endpoint}`, method: endpoint, payload })
+  const body = JSON.stringify({
+    type: 'client-request',
+    rpcId: `smoke-${endpoint}`,
+    method: endpoint,
+    payload,
+  })
   const req = {
     method: 'POST',
     url: `/dsh-handoff/${endpoint}`,
     headers: { 'content-type': 'application/json' },
-    async *[Symbol.asyncIterator]() { yield Buffer.from(body, 'utf8') },
+    async *[Symbol.asyncIterator]() {
+      yield Buffer.from(body, 'utf8')
+    },
   }
   let status = 0
   let text = ''
-  const res = { writeHead(code) { status = code }, end(chunk) { text = chunk ?? '' }, destroy() {} }
+  const res = {
+    writeHead(code) {
+      status = code
+    },
+    end(chunk) {
+      text = chunk ?? ''
+    },
+    destroy() {},
+  }
   await route.handler(req, res)
   if (status !== 200) throw new Error(`channel ${endpoint} -> HTTP ${status}`)
   return JSON.parse(text).result
@@ -201,9 +263,15 @@ const agent = {
   // same order the /model popup shows. The origin session's pending selection
   // is what the fresh session must inherit, effort included.
   model: {
-    current: () => ({ provider: 'origin-provider', model: 'origin-model', reasoningEffort: 'medium' }),
+    current: () => ({
+      provider: 'origin-provider',
+      model: 'origin-model',
+      reasoningEffort: 'medium',
+    }),
   },
-  followup(message) { followups.push(message) },
+  followup(message) {
+    followups.push(message)
+  },
 }
 
 /**
@@ -216,7 +284,8 @@ async function completeBrief() {
   if (briefPath === undefined) throw new Error('brief instruction names no target file')
   await mkdir(dirname(briefPath), { recursive: true })
   await writeFile(briefPath, `# Goal\nsmoke\n<!-- handoff:complete -->\n`, 'utf8')
-  for (let i = 0; i < 200 && created === null; i += 1) await new Promise(resolve => setTimeout(resolve, 10))
+  for (let i = 0; i < 200 && created === null; i += 1)
+    await new Promise((resolve) => setTimeout(resolve, 10))
   if (created === null) throw new Error('the watcher never spawned the fresh session')
   return { briefPath, briefText }
 }
@@ -234,13 +303,15 @@ async function runHandoff(rawInput, choice) {
   for (let i = 0; i < 40 && pick === null; i += 1) {
     const listed = await channel('pending', {})
     if (listed.requests.length > 0) pick = listed.requests[0]
-    else await new Promise(resolve => setTimeout(resolve, 10))
+    else await new Promise((resolve) => setTimeout(resolve, 10))
   }
   if (pick === null) throw new Error(`"${rawInput}": the command never published a pending pick`)
   const chosen = await channel('choose', { requestId: pick.id, choice })
-  if (chosen.ok !== true) throw new Error(`"${rawInput}": choose rejected: ${JSON.stringify(chosen)}`)
+  if (chosen.ok !== true)
+    throw new Error(`"${rawInput}": choose rejected: ${JSON.stringify(chosen)}`)
   const answer = await handled
-  if (answer.kind !== 'success') throw new Error(`"${rawInput}": command failed: ${JSON.stringify(answer)}`)
+  if (answer.kind !== 'success')
+    throw new Error(`"${rawInput}": command failed: ${JSON.stringify(answer)}`)
   const brief = await completeBrief()
   return {
     pick,
@@ -260,7 +331,8 @@ async function runFlagged(rawInput) {
   followups.length = 0
   spawnedFollowups.length = 0
   const answer = await registered.handler({ rawInput, agent, signal: null })
-  if (answer.kind !== 'success') throw new Error(`"${rawInput}": flagged command failed: ${JSON.stringify(answer)}`)
+  if (answer.kind !== 'success')
+    throw new Error(`"${rawInput}": flagged command failed: ${JSON.stringify(answer)}`)
   const brief = await completeBrief()
   return {
     answer,
@@ -286,7 +358,7 @@ let pending = null
 for (let i = 0; i < 40 && pending === null; i += 1) {
   const listed = await channel('pending', {})
   if (listed.requests.length > 0) pending = listed.requests[0]
-  else await new Promise(resolve => setTimeout(resolve, 10))
+  else await new Promise((resolve) => setTimeout(resolve, 10))
 }
 if (pending === null) throw new Error('the command never published a pending pick')
 console.log('pending pick:', JSON.stringify(pending))
@@ -302,7 +374,11 @@ if (pending.fallback?.reasoningEffort !== 'low') {
 if (pending.origin?.path !== cwd || pending.origin?.title !== 'Origin Space') {
   throw new Error(`origin workspace missing from the pick: ${JSON.stringify(pending.origin)}`)
 }
-if (pending.pickWorkspace !== true || pending.workspaces?.length !== 1 || pending.workspaces[0].id !== 'ws-target') {
+if (
+  pending.pickWorkspace !== true ||
+  pending.workspaces?.length !== 1 ||
+  pending.workspaces[0].id !== 'ws-target'
+) {
   throw new Error(`workspace roster missing from the pick: ${JSON.stringify(pending.workspaces)}`)
 }
 
@@ -323,42 +399,66 @@ console.log('command result:', JSON.stringify(answer))
 if (answer.kind !== 'success' || !answer.text.includes('picked-provider/picked-model')) {
   throw new Error('command result does not name the picked route')
 }
-if (!answer.text.includes('强度 high')) throw new Error('command result does not name the picked effort')
+if (!answer.text.includes('强度 high'))
+  throw new Error('command result does not name the picked effort')
 if (!answer.text.includes('Target Space') || !answer.text.includes(targetCwd)) {
   throw new Error('command result does not name the target workspace')
 }
-if (followups.length !== 1) throw new Error('expected exactly one briefing turn on the origin agent')
+if (followups.length !== 1)
+  throw new Error('expected exactly one briefing turn on the origin agent')
 
 // Simulate the origin agent writing the brief it was asked for.
 const briefText = followups[0].content[0].text
 const briefPath = briefText.match(/\S+handoff\.md/)?.[0]
 if (briefPath === undefined) throw new Error('brief instruction names no target file')
-if (!briefText.includes('另一个工作区')) throw new Error('cross-workspace brief instruction lacks the inline hint')
+if (!briefText.includes('另一个工作区'))
+  throw new Error('cross-workspace brief instruction lacks the inline hint')
 await mkdir(dirname(briefPath), { recursive: true })
 await writeFile(briefPath, `# Goal\nsmoke\n<!-- handoff:complete -->\n`, 'utf8')
 
-for (let i = 0; i < 200 && created === null; i += 1) await new Promise(resolve => setTimeout(resolve, 10))
+for (let i = 0; i < 200 && created === null; i += 1)
+  await new Promise((resolve) => setTimeout(resolve, 10))
 if (created === null) throw new Error('the watcher never spawned the fresh session')
-if (created.agentOptions.provider !== 'picked-provider' || created.agentOptions.model !== 'picked-model') {
+if (
+  created.agentOptions.provider !== 'picked-provider' ||
+  created.agentOptions.model !== 'picked-model'
+) {
   throw new Error(`fresh session used the wrong route: ${JSON.stringify(created.agentOptions)}`)
 }
 if (created.agentOptions.reasoningEffort !== 'high') {
-  throw new Error(`fresh session dropped the picked effort: ${JSON.stringify(created.agentOptions)}`)
+  throw new Error(
+    `fresh session dropped the picked effort: ${JSON.stringify(created.agentOptions)}`,
+  )
 }
 if (created.meta.cwd !== targetCwd) {
-  throw new Error(`fresh session did not spawn on the target workspace: ${JSON.stringify(created.meta)}`)
+  throw new Error(
+    `fresh session did not spawn on the target workspace: ${JSON.stringify(created.meta)}`,
+  )
 }
 if (!attached.some(([id, sessionId]) => id === 'ws-target' && sessionId === created.sessionId)) {
-  throw new Error(`fresh session was not attached to the target workspace: ${JSON.stringify(attached)}`)
+  throw new Error(
+    `fresh session was not attached to the target workspace: ${JSON.stringify(attached)}`,
+  )
 }
 // The full brief must exist as a readable copy inside the target workspace.
 const copyPath = `${targetCwd}/.dsh/handoff/${briefPath.split('/').pop()}`
-if (!await fileExists(copyPath)) throw new Error(`no brief copy in the target workspace: ${copyPath}`)
-if (!spawnedFollowups[0].content[0].text.includes('另一个工作区') || !spawnedFollowups[0].content[0].text.includes('smoke')) {
+if (!(await fileExists(copyPath)))
+  throw new Error(`no brief copy in the target workspace: ${copyPath}`)
+if (
+  !spawnedFollowups[0].content[0].text.includes('另一个工作区') ||
+  !spawnedFollowups[0].content[0].text.includes('smoke')
+) {
   throw new Error('the cross-workspace bootstrap prompt lacks the note or the brief')
 }
 if (renamed !== 'Handoff: fix the readme') throw new Error(`unexpected session title: ${renamed}`)
-console.log('spawned:', JSON.stringify(created.agentOptions), '| title:', renamed, '| copy:', copyPath)
+console.log(
+  'spawned:',
+  JSON.stringify(created.agentOptions),
+  '| title:',
+  renamed,
+  '| copy:',
+  copyPath,
+)
 
 // Inheriting the window must carry the session's durable effort (medium), not
 // the creation-option effort (absent), and must keep the origin output cap.
@@ -413,7 +513,9 @@ if (fallback.meta.cwd !== targetCwd) {
 // of the (placeholder) workspace the browser sends back.
 const flagged = await runHandoff('--workspace Target Space flag cycle', { kind: 'inherit' })
 if (flagged.pick.pickWorkspace !== undefined && flagged.pick.pickWorkspace !== false) {
-  throw new Error(`flag-resolved pick must not ask for a workspace: ${JSON.stringify(flagged.pick)}`)
+  throw new Error(
+    `flag-resolved pick must not ask for a workspace: ${JSON.stringify(flagged.pick)}`,
+  )
 }
 if (flagged.meta.cwd !== targetCwd) {
   throw new Error(`--workspace did not steer the spawn: ${JSON.stringify(flagged.meta)}`)
@@ -421,15 +523,25 @@ if (flagged.meta.cwd !== targetCwd) {
 console.log('flag spawn cwd:', flagged.meta.cwd)
 
 // A --workspace spec that matches nothing fails up front with the candidates.
-const badFlag = await registered.handler({ rawInput: '--workspace nosuch fix readme', agent, signal: null })
+const badFlag = await registered.handler({
+  rawInput: '--workspace nosuch fix readme',
+  agent,
+  signal: null,
+})
 console.log('bad-flag result:', JSON.stringify(badFlag))
 if (badFlag.kind !== 'error' || !badFlag.text.includes('Target Space')) {
   throw new Error('bad --workspace spec must fail naming the candidates')
 }
 
 // Both flags together skip the dialog entirely; order is free.
-const ordered = await runFlagged('--workspace Target Space --model picked-provider/picked-model ordered cycle')
-if (ordered.meta.cwd !== targetCwd || ordered.options.provider !== 'picked-provider' || ordered.options.model !== 'picked-model') {
+const ordered = await runFlagged(
+  '--workspace Target Space --model picked-provider/picked-model ordered cycle',
+)
+if (
+  ordered.meta.cwd !== targetCwd ||
+  ordered.options.provider !== 'picked-provider' ||
+  ordered.options.model !== 'picked-model'
+) {
   throw new Error(`flag order broke resolution: ${JSON.stringify(ordered)}`)
 }
 console.log('ordered flags spawn:', ordered.meta.cwd)
@@ -444,9 +556,15 @@ if (bareIdle.kind !== 'error' || !bareIdle.text.includes('没有可重试')) {
 }
 
 // The flagged cycle must have left a spawn-marked meta next to its brief.
-const orderedMeta = JSON.parse(await readFile(ordered.briefPath.replace(/\.md$/, '.meta.json'), 'utf8'))
-if (orderedMeta.task !== 'ordered cycle' || orderedMeta.originSession !== 'origin-session'
-  || orderedMeta.spawnedAt === undefined || orderedMeta.target.path !== targetCwd) {
+const orderedMeta = JSON.parse(
+  await readFile(ordered.briefPath.replace(/\.md$/, '.meta.json'), 'utf8'),
+)
+if (
+  orderedMeta.task !== 'ordered cycle' ||
+  orderedMeta.originSession !== 'origin-session' ||
+  orderedMeta.spawnedAt === undefined ||
+  orderedMeta.target.path !== targetCwd
+) {
   throw new Error(`spawned cycle must leave a marked meta: ${JSON.stringify(orderedMeta)}`)
 }
 
@@ -461,12 +579,16 @@ let slowPick = null
 for (let i = 0; i < 40 && slowPick === null; i += 1) {
   const listed = await channel('pending', {})
   if (listed.requests.length > 0) slowPick = listed.requests[0]
-  else await new Promise(resolve => setTimeout(resolve, 10))
+  else await new Promise((resolve) => setTimeout(resolve, 10))
 }
 if (slowPick === null) throw new Error('slow cycle never published a pick')
-await channel('choose', { requestId: slowPick.id, choice: { kind: 'inherit', workspace: 'origin' } })
+await channel('choose', {
+  requestId: slowPick.id,
+  choice: { kind: 'inherit', workspace: 'origin' },
+})
 const slowAnswer = await slowHandled
-if (slowAnswer.kind !== 'success') throw new Error(`slow cycle failed: ${JSON.stringify(slowAnswer)}`)
+if (slowAnswer.kind !== 'success')
+  throw new Error(`slow cycle failed: ${JSON.stringify(slowAnswer)}`)
 const slowBriefPath = followups[0].content[0].text.match(/\S+handoff\.md/)?.[0]
 if (slowBriefPath === undefined) throw new Error('slow cycle instruction names no file')
 await mkdir(dirname(slowBriefPath), { recursive: true })
@@ -478,8 +600,9 @@ if (slowMeta.task !== 'slow cycle' || slowMeta.spawnedAt !== undefined) {
 }
 let notice = null
 for (let i = 0; i < 450 && notice === null; i += 1) {
-  if (followups.length >= 2 && followups[1].content[0].text.includes('交接未完成')) notice = followups[1]
-  else await new Promise(resolve => setTimeout(resolve, 10))
+  if (followups.length >= 2 && followups[1].content[0].text.includes('交接未完成'))
+    notice = followups[1]
+  else await new Promise((resolve) => setTimeout(resolve, 10))
 }
 if (notice === null) throw new Error('the timed-out watcher never queued the failure notice')
 if (!notice.content[0].text.includes('不带参数的 /handoff')) {
@@ -497,18 +620,28 @@ let retryPick = null
 for (let i = 0; i < 40 && retryPick === null; i += 1) {
   const listed = await channel('pending', {})
   if (listed.requests.length > 0) retryPick = listed.requests[0]
-  else await new Promise(resolve => setTimeout(resolve, 10))
+  else await new Promise((resolve) => setTimeout(resolve, 10))
 }
 if (retryPick === null) throw new Error('bare /handoff never published a pick')
-if (retryPick.defaultChoice?.kind !== 'inherit' || retryPick.previous?.workspaceId !== 'ws-origin') {
-  throw new Error(`retry pick lacks the previous defaults: ${JSON.stringify({ defaultChoice: retryPick.defaultChoice, previous: retryPick.previous })}`)
+if (
+  retryPick.defaultChoice?.kind !== 'inherit' ||
+  retryPick.previous?.workspaceId !== 'ws-origin'
+) {
+  throw new Error(
+    `retry pick lacks the previous defaults: ${JSON.stringify({ defaultChoice: retryPick.defaultChoice, previous: retryPick.previous })}`,
+  )
 }
 if (!retryPick.task.includes('slow cycle')) {
   throw new Error(`retry pick does not show the recovered task: ${retryPick.task}`)
 }
 await channel('choose', {
   requestId: retryPick.id,
-  choice: { kind: 'model', provider: 'picked-provider', model: 'picked-model', workspace: 'origin' },
+  choice: {
+    kind: 'model',
+    provider: 'picked-provider',
+    model: 'picked-model',
+    workspace: 'origin',
+  },
 })
 const retryAnswer = await retryHandled
 if (retryAnswer.kind !== 'success' || !retryAnswer.text.includes('resumed')) {
@@ -520,13 +653,19 @@ if (!resumeInstruction.includes('补完') || !resumeInstruction.includes(slowBri
 }
 // Completing the file now spawns as usual, and the meta gets its spawn mark
 // plus the re-resolved choice.
-await writeFile(slowBriefPath, '# Goal\nslow\n\n## Task\nslow cycle\n<!-- handoff:complete -->\n', 'utf8')
-for (let i = 0; i < 200 && created === null; i += 1) await new Promise(resolve => setTimeout(resolve, 10))
+await writeFile(
+  slowBriefPath,
+  '# Goal\nslow\n\n## Task\nslow cycle\n<!-- handoff:complete -->\n',
+  'utf8',
+)
+for (let i = 0; i < 200 && created === null; i += 1)
+  await new Promise((resolve) => setTimeout(resolve, 10))
 if (created === null) throw new Error('the retried watcher never spawned')
 if (renamed !== 'Handoff: slow cycle') throw new Error(`retry spawn title wrong: ${renamed}`)
 slowMeta = JSON.parse(await readFile(slowMetaPath, 'utf8'))
 if (slowMeta.spawnedAt === undefined) throw new Error('spawn must mark the retried meta')
-if (slowMeta.choice.provider !== 'picked-provider') throw new Error('retry must record the re-resolved choice')
+if (slowMeta.choice.provider !== 'picked-provider')
+  throw new Error('retry must record the re-resolved choice')
 if (!spawnedFollowups[0].content[0].text.includes('origin-session')) {
   throw new Error('retry bootstrap prompt must name the original origin session')
 }
@@ -544,21 +683,25 @@ let lostPick = null
 for (let i = 0; i < 40 && lostPick === null; i += 1) {
   const listed = await channel('pending', {})
   if (listed.requests.length > 0) lostPick = listed.requests[0]
-  else await new Promise(resolve => setTimeout(resolve, 10))
+  else await new Promise((resolve) => setTimeout(resolve, 10))
 }
 if (lostPick === null) throw new Error('lost-watch cycle never published a pick')
-await channel('choose', { requestId: lostPick.id, choice: { kind: 'inherit', workspace: 'origin' } })
+await channel('choose', {
+  requestId: lostPick.id,
+  choice: { kind: 'inherit', workspace: 'origin' },
+})
 const lostAnswer = await lostHandled
-if (lostAnswer.kind !== 'success') throw new Error(`lost-watch cycle failed: ${JSON.stringify(lostAnswer)}`)
+if (lostAnswer.kind !== 'success')
+  throw new Error(`lost-watch cycle failed: ${JSON.stringify(lostAnswer)}`)
 const lostBriefPath = followups[0].content[0].text.match(/\S+handoff\.md/)?.[0]
 await mkdir(dirname(lostBriefPath), { recursive: true })
 await writeFile(lostBriefPath, '# Goal\nlost\n', 'utf8')
 for (let i = 0; i < 450 && followups.length < 2; i += 1) {
-  await new Promise(resolve => setTimeout(resolve, 10))
+  await new Promise((resolve) => setTimeout(resolve, 10))
 }
 if (followups.length < 2) throw new Error('lost-watch cycle never timed out')
 await writeFile(lostBriefPath, '# Goal\nlost\n<!-- handoff:complete -->\n', 'utf8')
-await new Promise(resolve => setTimeout(resolve, 100))
+await new Promise((resolve) => setTimeout(resolve, 100))
 if (created !== null) throw new Error('no watcher should be alive after the timeout')
 
 followups.length = 0

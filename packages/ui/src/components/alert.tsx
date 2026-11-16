@@ -15,8 +15,7 @@ const alertVariants = cva('dshx:rounded-control dshx:border dshx:px-3 dshx:py-2 
 })
 
 export interface AlertProps
-  extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof alertVariants> {}
+  extends React.HTMLAttributes<HTMLDivElement>, VariantProps<typeof alertVariants> {}
 
 /** Inline status/error notice; errors assertively announce to screen readers. */
 export function Alert({ className, variant, role, ...props }: AlertProps) {

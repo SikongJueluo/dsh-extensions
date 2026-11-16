@@ -128,51 +128,107 @@ export interface Config {
 }
 
 export const Config = Schema.object({
-  sshPath: Schema.string().default('ssh').description('ssh executable: absolute path or bare PATH name resolved in the harness environment.'),
+  sshPath: Schema.string()
+    .default('ssh')
+    .description(
+      'ssh executable: absolute path or bare PATH name resolved in the harness environment.',
+    ),
   approvalMode: Schema.union(['session', 'every', 'never'])
     .default('session')
-    .description('Per-target authorization: "session" asks once per session then remembers in memory, "every" asks on every call, "never" skips approval entirely — only for targets you fully trust.'),
-  defaultTimeoutMs: Schema.number().step(1).min(1_000).default(600_000).description('Default per-call budget (ms).'),
-  maxTimeoutMs: Schema.number().step(1).min(1_000).default(3_600_000).description('Upper bound a caller may raise the per-call budget to (ms).'),
-  startTimeoutMs: Schema.number().step(1).min(1_000).default(60_000).description('Budget for docker start + running-state poll before a call (ms).'),
-  graceMs: Schema.number().step(100).min(100).default(5_000).description('TERM→KILL grace for the local ssh when a budget expires (ms).'),
+    .description(
+      'Per-target authorization: "session" asks once per session then remembers in memory, "every" asks on every call, "never" skips approval entirely — only for targets you fully trust.',
+    ),
+  defaultTimeoutMs: Schema.number()
+    .step(1)
+    .min(1_000)
+    .default(600_000)
+    .description('Default per-call budget (ms).'),
+  maxTimeoutMs: Schema.number()
+    .step(1)
+    .min(1_000)
+    .default(3_600_000)
+    .description('Upper bound a caller may raise the per-call budget to (ms).'),
+  startTimeoutMs: Schema.number()
+    .step(1)
+    .min(1_000)
+    .default(60_000)
+    .description('Budget for docker start + running-state poll before a call (ms).'),
+  graceMs: Schema.number()
+    .step(100)
+    .min(100)
+    .default(5_000)
+    .description('TERM→KILL grace for the local ssh when a budget expires (ms).'),
   stdoutMaxBytes: Schema.number()
     .step(1)
     .min(4_096)
     .default(1_048_576)
-    .description('Raw stdout retained per call (bytes); the retained tail stays in memory and the complete stream spills to a local file (64 MiB cap). This is not the model-facing display budget.'),
+    .description(
+      'Raw stdout retained per call (bytes); the retained tail stays in memory and the complete stream spills to a local file (64 MiB cap). This is not the model-facing display budget.',
+    ),
   stderrMaxBytes: Schema.number()
     .step(1)
     .min(1_024)
     .default(65_536)
-    .description('Raw stderr retained per call (bytes); the retained tail stays in memory and the complete stream spills to a local file (64 MiB cap). This is not the model-facing display budget.'),
+    .description(
+      'Raw stderr retained per call (bytes); the retained tail stays in memory and the complete stream spills to a local file (64 MiB cap). This is not the model-facing display budget.',
+    ),
   displayMaxBytes: Schema.number()
     .step(1)
     .min(1_024)
     .default(16_384)
-    .description('Per-stream model-facing display budget (bytes). Longer streams are shown as a bounded head/tail excerpt and saved to the session spill store when possible.'),
+    .description(
+      'Per-stream model-facing display budget (bytes). Longer streams are shown as a bounded head/tail excerpt and saved to the session spill store when possible.',
+    ),
   targets: Schema.dict(
     Schema.object({
-      sshHost: Schema.string().required().description('~/.ssh/config alias (or user@host) of the remote docker host — never model-controlled.'),
-      sshPort: Schema.number().step(1).min(1).max(65_535).description('Remote ssh port; omit to let the ssh config decide.'),
-      sshOptions: Schema.array(Schema.string()).description('Operator-trusted extra ssh options, pre-split (e.g. [-o, ProxyJump=bastion]). Model input never reaches these; BatchMode=yes is forced and cannot be weakened.'),
-      container: Schema.string().required().description('Container name on the remote host. Only docker inspect/start/exec ever touch it; it is never created or rebuilt.'),
-      containerUser: Schema.string().description('docker exec -u spec, double-quoted in the script so $(…) stays live. Default: $(id -u):$(id -g) — the remote login user.'),
+      sshHost: Schema.string()
+        .required()
+        .description(
+          '~/.ssh/config alias (or user@host) of the remote docker host — never model-controlled.',
+        ),
+      sshPort: Schema.number()
+        .step(1)
+        .min(1)
+        .max(65_535)
+        .description('Remote ssh port; omit to let the ssh config decide.'),
+      sshOptions: Schema.array(Schema.string()).description(
+        'Operator-trusted extra ssh options, pre-split (e.g. [-o, ProxyJump=bastion]). Model input never reaches these; BatchMode=yes is forced and cannot be weakened.',
+      ),
+      container: Schema.string()
+        .required()
+        .description(
+          'Container name on the remote host. Only docker inspect/start/exec ever touch it; it is never created or rebuilt.',
+        ),
+      containerUser: Schema.string().description(
+        'docker exec -u spec, double-quoted in the script so $(…) stays live. Default: $(id -u):$(id -g) — the remote login user.',
+      ),
       defaultCwd: Schema.string()
         .required()
-        .description('Absolute container directory for calls that omit cwd. Adding a project under this directory needs no config change.'),
+        .description(
+          'Absolute container directory for calls that omit cwd. Adding a project under this directory needs no config change.',
+        ),
       shell: Schema.string()
         .default(DEFAULT_CONTAINER_SHELL)
-        .description(`Container shell, inserted into a double-quoted assignment (may embed $(id -un)); invoked as <shell> -l -c <wrapper>. Default: ${DEFAULT_CONTAINER_SHELL}`),
+        .description(
+          `Container shell, inserted into a double-quoted assignment (may embed $(id -un)); invoked as <shell> -l -c <wrapper>. Default: ${DEFAULT_CONTAINER_SHELL}`,
+        ),
       envInit: Schema.union(['direnv', 'none'])
         .default('direnv')
-        .description('direnv mirrors remote.py (fish_add_path + direnv allow . + direnv export fish) when a .envrc exists; none skips the direnv block. Environment-init failures are reported and the command is not started.'),
-      autoStart: Schema.boolean().default(true).description('docker-start a stopped container before exec (existing containers only — never create, rebuild, or swap images).'),
+        .description(
+          'direnv mirrors remote.py (fish_add_path + direnv allow . + direnv export fish) when a .envrc exists; none skips the direnv block. Environment-init failures are reported and the command is not started.',
+        ),
+      autoStart: Schema.boolean()
+        .default(true)
+        .description(
+          'docker-start a stopped container before exec (existing containers only — never create, rebuild, or swap images).',
+        ),
       description: Schema.string().description('Human hint shown in approval prompts.'),
     }),
   )
     .default({})
-    .description('Whitelisted remote targets. The model only ever picks a key of this dict; every value here is operator-owned.'),
+    .description(
+      'Whitelisted remote targets. The model only ever picks a key of this dict; every value here is operator-owned.',
+    ),
 })
 
 /** Per-stream spill cap for collected stdout/stderr (bytes). */
@@ -226,7 +282,12 @@ export interface RemoteSpill {
 interface SpillStoreLike {
   saveText(input: {
     readonly owner: { readonly sessionId: string }
-    readonly source: { readonly kind: 'tool'; readonly toolName: string; readonly callId: string; readonly label: string }
+    readonly source: {
+      readonly kind: 'tool'
+      readonly toolName: string
+      readonly callId: string
+      readonly label: string
+    }
     readonly suggestedName: string
     readonly content: string
   }): Promise<{ readonly locator: string; readonly bytes: number; readonly retrievalHint: string }>
@@ -302,7 +363,12 @@ export class RemoteRunner {
    * aborted run is reported as `timeout-unknown` / `cancelled-unknown`
    * because the remote command's fate is unknowable from here.
    */
-  async run(name: string, target: RemoteTarget, command: string, options: RemoteRunOptions): Promise<RemoteRunResult> {
+  async run(
+    name: string,
+    target: RemoteTarget,
+    command: string,
+    options: RemoteRunOptions,
+  ): Promise<RemoteRunResult> {
     const startedAt = Date.now()
     const nonce = randomBytes(16).toString('hex')
     const script = buildRemoteScript(target, {
@@ -351,12 +417,17 @@ export class RemoteRunner {
       const control = parseControl(stderr.text, nonce)
       const stderrContent = control?.before ?? stderr.text
       const controlLineBytes =
-        control === undefined ? 0 : Buffer.byteLength(stderr.text, 'utf8') - Buffer.byteLength(control.before, 'utf8')
+        control === undefined
+          ? 0
+          : Buffer.byteLength(stderr.text, 'utf8') - Buffer.byteLength(control.before, 'utf8')
       const stderrBytes = Math.max(0, stderr.totalBytes - controlLineBytes)
       const outcome = classifyOutcome(exitCode, control, timedOut, cancelled)
       const commandExitCode =
-        outcome === 'ok' && control?.kind === 'command-start' ? parseExitCode(control.detail, exitCode) : undefined
-      const detail = control === undefined || control.kind === 'command-start' ? undefined : control.detail
+        outcome === 'ok' && control?.kind === 'command-start'
+          ? parseExitCode(control.detail, exitCode)
+          : undefined
+      const detail =
+        control === undefined || control.kind === 'command-start' ? undefined : control.detail
       const stdoutView = formatDisplay(stdout.text, this.#config.displayMaxBytes)
       const stderrView = formatDisplay(stderrContent, this.#config.displayMaxBytes)
       const stdoutTruncated = stdoutView.truncated || stdout.lossy
@@ -442,7 +513,11 @@ export class RemoteRunner {
       return { text: read.text, totalBytes: read.nextOffset, lossy: read.lossy }
     }
     try {
-      return { text: await readFile(read.spillPath, 'utf8'), totalBytes: read.nextOffset, lossy: false }
+      return {
+        text: await readFile(read.spillPath, 'utf8'),
+        totalBytes: read.nextOffset,
+        lossy: false,
+      }
     } catch {
       return { text: read.text, totalBytes: read.nextOffset, lossy: true }
     }
@@ -462,7 +537,12 @@ export class RemoteRunner {
     if (options.callId === undefined) throw new Error('no tool call id is available')
     const ref = await store.saveText({
       owner: { sessionId: options.owner.sessionId },
-      source: { kind: 'tool', toolName: TOOL_NAME, callId: options.callId, label: `${stream} of remote_exec[${target}]` },
+      source: {
+        kind: 'tool',
+        toolName: TOOL_NAME,
+        callId: options.callId,
+        label: `${stream} of remote_exec[${target}]`,
+      },
       suggestedName: `remote-exec-${target}-${stream}${lossy ? '-tail' : ''}.log`,
       content,
     })
@@ -484,10 +564,14 @@ export function formatResult(value: RemoteRunResult): string {
   switch (value.outcome) {
     case 'timeout-unknown':
     case 'cancelled-unknown':
-      lines.push('The local ssh was stopped; the remote command may STILL BE RUNNING and its result is unknown — do not blindly re-run it.')
+      lines.push(
+        'The local ssh was stopped; the remote command may STILL BE RUNNING and its result is unknown — do not blindly re-run it.',
+      )
       break
     case 'ssh-error':
-      lines.push('The ssh transport failed; if the command had started, it may still be running — do not blindly re-run it.')
+      lines.push(
+        'The ssh transport failed; if the command had started, it may still be running — do not blindly re-run it.',
+      )
       break
     case 'prep-error':
       lines.push('Preparation failed; the command was NOT started.')
@@ -499,7 +583,9 @@ export function formatResult(value: RemoteRunResult): string {
       lines.push('Environment initialization failed; the command was NOT started.')
       break
     case 'status-unknown':
-      lines.push('The command may have run, but its completion status could not be read; do not blindly re-run it.')
+      lines.push(
+        'The command may have run, but its completion status could not be read; do not blindly re-run it.',
+      )
       break
     case 'spawn-error':
       lines.push('The local ssh could not be started; the command was NOT started.')
@@ -509,23 +595,35 @@ export function formatResult(value: RemoteRunResult): string {
   }
   if (value.detail !== undefined) lines.push(`detail: ${value.detail}`)
   if (value.stdout !== '') {
-    lines.push(`--- stdout (${value.stdoutBytes} bytes${value.stdoutTruncated ? ', excerpt' : ''}) ---`, value.stdout)
+    lines.push(
+      `--- stdout (${value.stdoutBytes} bytes${value.stdoutTruncated ? ', excerpt' : ''}) ---`,
+      value.stdout,
+    )
   } else if (value.stdoutBytes > 0) {
     lines.push(`--- stdout (${value.stdoutBytes} bytes, not shown) ---`)
   }
   if (value.stderr !== '') {
-    lines.push(`--- stderr (${value.stderrBytes} bytes${value.stderrTruncated ? ', excerpt' : ''}) ---`, value.stderr)
+    lines.push(
+      `--- stderr (${value.stderrBytes} bytes${value.stderrTruncated ? ', excerpt' : ''}) ---`,
+      value.stderr,
+    )
   } else if (value.stderrBytes > 0) {
     lines.push(`--- stderr (${value.stderrBytes} bytes, not shown) ---`)
   }
   if (value.stdoutSpill !== undefined) {
-    lines.push(`full stdout: ${value.stdoutSpill.locator} (${value.stdoutSpill.bytes} bytes; ${value.stdoutSpill.hint})`)
+    lines.push(
+      `full stdout: ${value.stdoutSpill.locator} (${value.stdoutSpill.bytes} bytes; ${value.stdoutSpill.hint})`,
+    )
   }
   if (value.stderrSpill !== undefined) {
-    lines.push(`full stderr: ${value.stderrSpill.locator} (${value.stderrSpill.bytes} bytes; ${value.stderrSpill.hint})`)
+    lines.push(
+      `full stderr: ${value.stderrSpill.locator} (${value.stderrSpill.bytes} bytes; ${value.stderrSpill.hint})`,
+    )
   }
   if (value.lossy === true) {
-    lines.push('Raw output exceeded retention; only the retained tail is available (a spill artifact, if present, is that tail).')
+    lines.push(
+      'Raw output exceeded retention; only the retained tail is available (a spill artifact, if present, is that tail).',
+    )
   }
   if (value.spillError !== undefined) lines.push(`Full output unavailable: ${value.spillError}`)
   return lines.join('\n')
@@ -536,7 +634,9 @@ function describeError(error: unknown): string {
 }
 
 /** Resolve config targets: one required default cwd per target, validated at mount. */
-export function resolveTargets(targets: Record<string, ConfiguredTarget>): Map<string, RemoteTarget> {
+export function resolveTargets(
+  targets: Record<string, ConfiguredTarget>,
+): Map<string, RemoteTarget> {
   const resolved = new Map<string, RemoteTarget>()
   for (const [name, target] of Object.entries(targets)) {
     resolved.set(name, resolveTarget(name, target))
@@ -592,12 +692,20 @@ export function apply(ctx: Context, config: Config): void {
   const targetNames = targetEntries.map(([name]) => name)
   const listing =
     targetEntries.length > 0
-      ? targetEntries.map(([name, target]) => `${name} (default cwd: ${target.defaultCwd})`).join(' | ')
+      ? targetEntries
+          .map(([name, target]) => `${name} (default cwd: ${target.defaultCwd})`)
+          .join(' | ')
       : 'NONE (the operator must add targets in the plugin config first)'
-  logger.info(`mounted with ${targetNames.length} target(s)${targetNames.length > 0 ? `: ${targetNames.join(', ')}` : ''}`)
+  logger.info(
+    `mounted with ${targetNames.length} target(s)${targetNames.length > 0 ? `: ${targetNames.join(', ')}` : ''}`,
+  )
 
   /** Ask for (or recall) this session's grant for one target. Fail-closed. */
-  async function authorize(exec: ToolRunContext, name: string, target: RemoteTarget): Promise<void> {
+  async function authorize(
+    exec: ToolRunContext,
+    name: string,
+    target: RemoteTarget,
+  ): Promise<void> {
     if (config.approvalMode === 'never') return
     const agent = exec.agent
     if (agent === undefined) {
@@ -663,9 +771,15 @@ export function apply(ctx: Context, config: Config): void {
         target: targetParameter,
         cwd: {
           type: 'string',
-          description: 'Absolute directory inside the container for this call. Omit to use the target default cwd. The directory must already exist; it is never created.',
+          description:
+            'Absolute directory inside the container for this call. Omit to use the target default cwd. The directory must already exist; it is never created.',
         },
-        command: { type: 'string', required: true, description: 'fish-compatible command executed in cwd (fish syntax: `env VAR=1 cmd`, not `VAR=1 cmd`).' },
+        command: {
+          type: 'string',
+          required: true,
+          description:
+            'fish-compatible command executed in cwd (fish syntax: `env VAR=1 cmd`, not `VAR=1 cmd`).',
+        },
         timeoutMs: {
           type: 'integer',
           description: `Optional per-call budget in ms (default ${config.defaultTimeoutMs}, capped at ${config.maxTimeoutMs}).`,
@@ -679,17 +793,50 @@ export function apply(ctx: Context, config: Config): void {
             target: { type: 'string', required: true },
             cwd: { type: 'string', required: true },
             outcome: { type: 'string', enum: REMOTE_OUTCOMES, required: true },
-            exitCode: { type: 'integer', description: 'Command exit code; omitted when the command did not run or its exit is unknown.' },
+            exitCode: {
+              type: 'integer',
+              description:
+                'Command exit code; omitted when the command did not run or its exit is unknown.',
+            },
             stdout: { type: 'string', required: true },
             stderr: { type: 'string', required: true },
-            stdoutBytes: { type: 'integer', required: true, description: 'Total stdout bytes before the display excerpt.' },
-            stderrBytes: { type: 'integer', required: true, description: 'Total stderr content bytes before the display excerpt (protocol control line excluded).' },
-            stdoutTruncated: { type: 'boolean', required: true, description: 'True when stdout is an excerpt, not the complete stream.' },
-            stderrTruncated: { type: 'boolean', required: true, description: 'True when stderr is an excerpt, not the complete stream.' },
+            stdoutBytes: {
+              type: 'integer',
+              required: true,
+              description: 'Total stdout bytes before the display excerpt.',
+            },
+            stderrBytes: {
+              type: 'integer',
+              required: true,
+              description:
+                'Total stderr content bytes before the display excerpt (protocol control line excluded).',
+            },
+            stdoutTruncated: {
+              type: 'boolean',
+              required: true,
+              description: 'True when stdout is an excerpt, not the complete stream.',
+            },
+            stderrTruncated: {
+              type: 'boolean',
+              required: true,
+              description: 'True when stderr is an excerpt, not the complete stream.',
+            },
             durationMs: { type: 'integer', required: true },
-            detail: { type: 'string', description: 'Protocol detail for setup/env/cwd failures; absent when the command ran.' },
-            lossy: { type: 'boolean', description: 'True when a raw stream exceeded retention and only its tail is available.' },
-            spillError: { type: 'string', description: 'Set when a truncated stream could not be saved to the session spill store.' },
+            detail: {
+              type: 'string',
+              description:
+                'Protocol detail for setup/env/cwd failures; absent when the command ran.',
+            },
+            lossy: {
+              type: 'boolean',
+              description:
+                'True when a raw stream exceeded retention and only its tail is available.',
+            },
+            spillError: {
+              type: 'string',
+              description:
+                'Set when a truncated stream could not be saved to the session spill store.',
+            },
             stdoutSpill: {
               type: 'object',
               additionalProperties: false,
@@ -719,11 +866,16 @@ export function apply(ctx: Context, config: Config): void {
       async execute(args, exec) {
         const target = resolvedTargets.get(args.target)
         if (target === undefined) {
-          throw new Error(`unknown remote target ${JSON.stringify(args.target)}; configured: ${listing}`)
+          throw new Error(
+            `unknown remote target ${JSON.stringify(args.target)}; configured: ${listing}`,
+          )
         }
         const cwd = resolveCallCwd(args.cwd, target)
         await authorize(exec, args.target, target)
-        const timeoutMs = Math.min(Math.max(args.timeoutMs ?? config.defaultTimeoutMs, 1_000), config.maxTimeoutMs)
+        const timeoutMs = Math.min(
+          Math.max(args.timeoutMs ?? config.defaultTimeoutMs, 1_000),
+          config.maxTimeoutMs,
+        )
         const result = await runner.run(args.target, target, args.command, {
           cwd,
           timeoutMs,
@@ -734,7 +886,8 @@ export function apply(ctx: Context, config: Config): void {
         logger.info(
           `remote_exec ${args.target} cwd=${JSON.stringify(cwd)} -> ${result.outcome} (exit=${result.exitCode ?? 'unknown'}, ${(result.durationMs / 1000).toFixed(1)}s)`,
         )
-        if (result.spillError !== undefined) logger.warn(`remote_exec ${args.target}: ${result.spillError}`)
+        if (result.spillError !== undefined)
+          logger.warn(`remote_exec ${args.target}: ${result.spillError}`)
         return result
       },
     }),

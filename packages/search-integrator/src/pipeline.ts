@@ -22,7 +22,12 @@ import type { LlmPort, LlmUsage } from './llm.js'
 import type { SearchAdapter } from './providers.js'
 import type { SearchIntegratorSettings } from './settings.js'
 import type {
-  AuditRef, Coverage, RawHit, ResearchResult, ResultSource, SourceFailure,
+  AuditRef,
+  Coverage,
+  RawHit,
+  ResearchResult,
+  ResultSource,
+  SourceFailure,
 } from './types.js'
 
 /** Everything one execution needs, injected for testability. */
@@ -123,16 +128,24 @@ function toResultSources(
     id: source.id,
     url: source.url,
     ...(source.title === undefined ? {} : { title: source.title }),
-    ...(source.snippet === '' ? {} : {
-      snippet: source.snippet.length > 240 ? `${source.snippet.slice(0, 240)}…` : source.snippet,
-    }),
+    ...(source.snippet === ''
+      ? {}
+      : {
+          snippet:
+            source.snippet.length > 240 ? `${source.snippet.slice(0, 240)}…` : source.snippet,
+        }),
     ...(source.publishedAt === undefined ? {} : { publishedAt: source.publishedAt }),
     providers: source.providers,
   }))
 }
 
 function termsOf(question: string, queries: readonly string[]): string[] {
-  return [question, ...queries].join(' ').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
+  return (
+    [question, ...queries]
+      .join(' ')
+      .toLowerCase()
+      .match(/[\p{L}\p{N}]+/gu) ?? []
+  )
 }
 
 const EMPTY_USAGE: LlmUsage = { inputTokens: 0, outputTokens: 0 }
@@ -170,16 +183,21 @@ export async function runResearch(
   try {
     const configFailures = deps.configFailures
     if (deps.adapters.length === 0) {
-      return failedResult(args.question, [], configFailures,
-        `no search sources available: ${failureList(configFailures)}`)
+      return failedResult(
+        args.question,
+        [],
+        configFailures,
+        `no search sources available: ${failureList(configFailures)}`,
+      )
     }
 
     // 1. Seed queries: caller-provided, else planned, else the raw question.
-    const seedQueries = args.queries !== undefined && args.queries.length > 0
-      ? args.queries.slice(0, MAX_QUERIES)
-      : deps.llm !== undefined
-        ? await planQueries(deps.llm, args.question, signal) ?? [args.question]
-        : [args.question]
+    const seedQueries =
+      args.queries !== undefined && args.queries.length > 0
+        ? args.queries.slice(0, MAX_QUERIES)
+        : deps.llm !== undefined
+          ? ((await planQueries(deps.llm, args.question, signal)) ?? [args.question])
+          : [args.question]
     const queries = [...new Set(seedQueries.map((query) => query.trim()).filter((q) => q !== ''))]
     const effectiveQueries = queries.length > 0 ? queries : [args.question]
     const terms = termsOf(args.question, effectiveQueries)
@@ -188,11 +206,17 @@ export async function runResearch(
     const round1 = await searchRound(deps.adapters, effectiveQueries, signal)
     throwIfAborted(signal)
     const searched = new Set(round1.succeeded)
-    const rounds: RoundRecord[] = [{ queries: [...effectiveQueries], hits: round1.hits, failures: round1.failures }]
+    const rounds: RoundRecord[] = [
+      { queries: [...effectiveQueries], hits: round1.hits, failures: round1.failures },
+    ]
     let failures = [...configFailures, ...round1.failures]
     if (round1.hits.length === 0) {
-      return failedResult(args.question, effectiveQueries, failures,
-        `no search results (queries: ${effectiveQueries.join(' | ')}); failed sources: ${failureList(round1.failures) === '' ? 'none' : failureList(round1.failures)}`)
+      return failedResult(
+        args.question,
+        effectiveQueries,
+        failures,
+        `no search results (queries: ${effectiveQueries.join(' | ')}); failed sources: ${failureList(round1.failures) === '' ? 'none' : failureList(round1.failures)}`,
+      )
     }
 
     // 3. Evidence + first integration.
@@ -201,21 +225,29 @@ export async function runResearch(
       deps,
       signal,
     )
-    const digest1 = buildRetrievalContext({
-      searchedAt: new Date(started).toISOString(),
-      queries: [...effectiveQueries],
-      searched: [...searched],
-      failed: [...configFailures, ...round1.failures],
-    }) + '\n\n' + buildDigest(evidence1, deps.settings.excerptChars, 24_000)
+    const digest1 =
+      buildRetrievalContext({
+        searchedAt: new Date(started).toISOString(),
+        queries: [...effectiveQueries],
+        searched: [...searched],
+        failed: [...configFailures, ...round1.failures],
+      }) +
+      '\n\n' +
+      buildDigest(evidence1, deps.settings.excerptChars, 24_000)
     let llmUsage: LlmUsage = EMPTY_USAGE
     const rawOutputs: string[] = []
     let integration: RawIntegration | undefined
     let degradedReason: string | undefined
     if (deps.llm === undefined) {
-      degradedReason = 'integrator model not configured (integratorProvider/integratorModel); evidence below is deduplicated and ranked but NOT synthesized or verified'
+      degradedReason =
+        'integrator model not configured (integratorProvider/integratorModel); evidence below is deduplicated and ranked but NOT synthesized or verified'
     } else {
       const outcome = await runIntegration(
-        deps.llm, args.question, digest1, evidence1.length, signal,
+        deps.llm,
+        args.question,
+        digest1,
+        evidence1.length,
+        signal,
         { maxTokens: deps.settings.integratorMaxTokens },
       )
       throwIfAborted(signal)
@@ -233,14 +265,18 @@ export async function runResearch(
     let digestUsed = digest1
     let coverageRounds = 1
     let coverageQueries = [...effectiveQueries]
-    if (integration !== undefined
-      && integration.followupNeeded
-      && deps.settings.followupRounds > 0
-      && deps.llm !== undefined
-      && !signal.aborted
-      && deps.settings.totalBudgetMs - (Date.now() - started) > FOLLOWUP_MIN_REMAINING_MS) {
-      const followupQueries = [...new Set(integration.followupQueries)]
-        .slice(0, MAX_FOLLOWUP_QUERIES)
+    if (
+      integration !== undefined &&
+      integration.followupNeeded &&
+      deps.settings.followupRounds > 0 &&
+      deps.llm !== undefined &&
+      !signal.aborted &&
+      deps.settings.totalBudgetMs - (Date.now() - started) > FOLLOWUP_MIN_REMAINING_MS
+    ) {
+      const followupQueries = [...new Set(integration.followupQueries)].slice(
+        0,
+        MAX_FOLLOWUP_QUERIES,
+      )
       const round2 = await searchRound(deps.adapters, followupQueries, signal, GENERATIVE_SOURCES)
       throwIfAborted(signal)
       for (const id of round2.succeeded) searched.add(id)
@@ -252,14 +288,21 @@ export async function runResearch(
         deps,
         signal,
       )
-      const digest2 = buildRetrievalContext({
-        searchedAt: new Date(started).toISOString(),
-        queries: [...effectiveQueries, ...followupQueries],
-        searched: [...searched],
-        failed: failures,
-      }) + '\n\n' + buildDigest(evidence2, deps.settings.excerptChars, 24_000)
+      const digest2 =
+        buildRetrievalContext({
+          searchedAt: new Date(started).toISOString(),
+          queries: [...effectiveQueries, ...followupQueries],
+          searched: [...searched],
+          failed: failures,
+        }) +
+        '\n\n' +
+        buildDigest(evidence2, deps.settings.excerptChars, 24_000)
       const outcome2 = await runIntegration(
-        deps.llm, args.question, digest2, evidence2.length, signal,
+        deps.llm,
+        args.question,
+        digest2,
+        evidence2.length,
+        signal,
         { maxTokens: deps.settings.integratorMaxTokens, finalRound: true },
       )
       throwIfAborted(signal)
@@ -276,8 +319,10 @@ export async function runResearch(
       } else {
         integration = {
           ...integration,
-          unknowns: [...integration.unknowns,
-            `follow-up round failed (${outcome2.reason}); first-pass integration kept`],
+          unknowns: [
+            ...integration.unknowns,
+            `follow-up round failed (${outcome2.reason}); first-pass integration kept`,
+          ],
         }
       }
     }
@@ -286,31 +331,35 @@ export async function runResearch(
     const durationMs = Date.now() - started
     let auditRef: AuditRef | undefined
     if (deps.settings.auditEnabled) {
-      const payload = JSON.stringify({
-        version: 1,
-        promptVersion: PROMPT_VERSION,
-        startedAt: new Date(started).toISOString(),
-        durationMs,
-        question: args.question,
-        rounds: rounds.map((round) => ({
-          queries: round.queries,
-          hitCount: round.hits.length,
-          failures: round.failures,
-          hits: round.hits,
-        })),
-        evidence,
-        digest: digestUsed,
-        llmRawOutputs: rawOutputs,
-        usage: llmUsage,
-        settings: {
-          maxEvidence: deps.settings.maxEvidence,
-          perSourceResults: deps.settings.perSourceResults,
-          excerptChars: deps.settings.excerptChars,
-          followupRounds: deps.settings.followupRounds,
-          integratorProvider: deps.settings.integratorProvider,
-          integratorModel: deps.settings.integratorModel,
+      const payload = JSON.stringify(
+        {
+          version: 1,
+          promptVersion: PROMPT_VERSION,
+          startedAt: new Date(started).toISOString(),
+          durationMs,
+          question: args.question,
+          rounds: rounds.map((round) => ({
+            queries: round.queries,
+            hitCount: round.hits.length,
+            failures: round.failures,
+            hits: round.hits,
+          })),
+          evidence,
+          digest: digestUsed,
+          llmRawOutputs: rawOutputs,
+          usage: llmUsage,
+          settings: {
+            maxEvidence: deps.settings.maxEvidence,
+            perSourceResults: deps.settings.perSourceResults,
+            excerptChars: deps.settings.excerptChars,
+            followupRounds: deps.settings.followupRounds,
+            integratorProvider: deps.settings.integratorProvider,
+            integratorModel: deps.settings.integratorModel,
+          },
         },
-      }, null, 2)
+        null,
+        2,
+      )
       try {
         auditRef = await deps.audit.save(payload, 'web-research-audit.json')
       } catch {
@@ -338,7 +387,9 @@ export async function runResearch(
         status: 'degraded',
         summary: `Integrated synthesis is unavailable: ${degradedReason ?? 'unknown reason'}.`,
         points: [],
-        unknowns: ['Every item below is unverified search evidence; treat with caution and verify before relying on it.'],
+        unknowns: [
+          'Every item below is unverified search evidence; treat with caution and verify before relying on it.',
+        ],
         degradedReason,
       }
     }
@@ -370,8 +421,12 @@ async function enrichThinSources(
   const fetcher = deps.fetchPage
   if (fetcher === undefined || deps.settings.fetchTopN <= 0) return [...evidence]
   const targets = new Set(
-    evidence.slice(0, deps.settings.fetchTopN)
-      .filter((source) => Math.max(source.content?.length ?? 0, source.snippet.length) < THIN_CONTENT_CHARS)
+    evidence
+      .slice(0, deps.settings.fetchTopN)
+      .filter(
+        (source) =>
+          Math.max(source.content?.length ?? 0, source.snippet.length) < THIN_CONTENT_CHARS,
+      )
       .map((source) => source.id),
   )
   if (targets.size === 0) return [...evidence]
@@ -381,7 +436,10 @@ async function enrichThinSources(
       if (!targets.has(source.id)) return source
       // Each page fetch gets its own deadline: a slow site must not eat the
       // shared budget the sources and the integrator still need.
-      const fetchSignal = AbortSignal.any([signal, AbortSignal.timeout(deps.settings.perRequestTimeoutMs)])
+      const fetchSignal = AbortSignal.any([
+        signal,
+        AbortSignal.timeout(deps.settings.perRequestTimeoutMs),
+      ])
       try {
         const page = await fetcher(source.url, fetchSignal)
         if (page === undefined) return source
@@ -394,7 +452,9 @@ async function enrichThinSources(
       }
     }),
   )
-  return settled.map((entry) => entry.status === 'fulfilled' ? entry.value : (entry.reason as never))
+  return settled.map((entry) =>
+    entry.status === 'fulfilled' ? entry.value : (entry.reason as never),
+  )
 }
 
 function failureList(failures: readonly SourceFailure[]): string {
