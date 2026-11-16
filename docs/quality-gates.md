@@ -174,11 +174,11 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 `reportUnusedDisableDirectives: error` 已开：当前 1 处已无用（`oauth-providers/src/client/index.tsx:246`）。
 这 7 处按“逐处审查”处理，不自动迁移成新豁免。
 
-### 3.7 修复积压（2172 条，分层计划）
+### 3.7 修复积压（2153 条，分层计划）
 
 | 层 | 内容 | 数量 |
 | --- | --- | --- |
-| 类型逃生口 | `no-unsafe-type-assertion` 474、`no-non-null-assertion` 189、`no-unsafe-*`（member/call/assign/return/argument）54、`no-explicit-any` 5 | 722 |
+| 类型逃生口 | `no-unsafe-type-assertion` 466、`no-non-null-assertion` 189、`no-unsafe-*`（member/call/assign/return/argument）54、`no-explicit-any` 5 | 714 |
 | 机械可改 | 有建议修复的其余条目，如 `require-unicode-regexp` 228、`no-useless-undefined` 108、`prefer-template` 90、`no-duplicate-imports` 83 | ~1300 |
 | 语义需判断 | `no-floating-promises` 16、`consistent-return` 10、`unbound-method` 10、`prefer-nullish-coalescing` 54、`no-array-sort` 38、`promise/always-return` 36 等 | ~150 |
 
@@ -190,7 +190,7 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 
 | 规则 | src | client | test | 合计 |
 | --- | ---: | ---: | ---: | ---: |
-| `no-unsafe-type-assertion` | 214 | 15 | 245 | 474 |
+| `no-unsafe-type-assertion` | 206 | 15 | 245 | 466 |
 | `no-non-null-assertion` | 21 | 1 | 167 | 189 |
 | `no-unsafe-member-access` | 8 | 8 | 7 | 23 |
 | `no-unsafe-assignment` | 1 | 0 | 9 | 10 |
@@ -198,17 +198,17 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 | `no-unsafe-return` / `argument` | 0 / 2 | 5 / 0 | 3 / 1 | 11 |
 | `no-explicit-any` | 5 | 0 | 0 | 5 |
 
-另有 1 条 `no-unsafe-assignment` 在 `.storybook/preview.tsx`（不在上表四列内，故合计仍为 722）。
+另有 1 条 `no-unsafe-assignment` 在 `.storybook/preview.tsx`（不在上表四列内，故合计为 714）。
 
-八条规则合计：生产代码（src + client）**288 条**、测试 **433 条**、Storybook 预览 1 条。其中 `no-unsafe-type-assertion` 在生产侧 229 条、测试侧 245 条。测试占比高不代表可以整体
+八条规则合计：生产代码（src + client）**280 条**、测试 **433 条**、Storybook 预览 1 条。其中 `no-unsafe-type-assertion` 在生产侧 221 条、测试侧 245 条。测试占比高不代表可以整体
 豁免——测试里的假类型同样会在重构时骗过编译器——但修复顺序应先生产后测试：生产侧的断言
 掩盖的是真实契约。
 
-#### 3.7.2 生产侧按写法分类（229 条）
+#### 3.7.2 生产侧按写法分类（223 条）
 
 | 写法 | 数量 | 例子 | 正确修法 |
 | --- | ---: | --- | --- |
-| 收窄断言（`x as T`，含 `JSON.parse` 与 `ctx.get`） | 173 | `JSON.parse(payload) as JsonRpcResponse`（`search-integrator/src/mcp.ts:63`） | 在边界做真实校验（schema/type guard），或补 SDK 泛型 |
+| 收窄断言（`x as T`，含 `JSON.parse` 与 `ctx.get`） | 167 | `JSON.parse(payload) as JsonRpcResponse`（`search-integrator/src/mcp.ts:63`） | 在边界做真实校验（schema/type guard），或补 SDK 泛型 |
 | 从 `any` 断言 | 52 | `ctx.get('spillStore') as SpillStoreLike \| undefined`（`search-integrator/src/audit.ts:49`） | 查宿主契约后用带类型的 getter；`ctx.get` 的返回形状要靠 SDK 类型验证 |
 | 泛型断言（类型参数可任意实例化） | 4 | — | 用真实的泛型约束替代断言 |
 
@@ -217,8 +217,8 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 因为它们是“边界未校验”或“宿主契约未验证”的明确信号。
 
 热点文件：`search-integrator/src/providers.ts` 17、`integrate.ts` 10、
-`triggers/src/service.ts` 9、`search-integrator/src/tool.ts` 8、`cmd-permit/src/index.ts` 7、
-`more-providers/src/config.ts` 7、`triggers/src/replay.ts` 7、`triggers/src/channel.ts` 7。
+`triggers/src/service.ts` 9、`search-integrator/src/tool.ts` 8、`more-providers/src/config.ts` 7、
+`triggers/src/replay.ts` 7、`triggers/src/channel.ts` 7、`cmd-permit/src/index.ts` 7。
 
 #### 3.7.3 修复顺序（每层独立 jj 层）
 
@@ -271,14 +271,14 @@ Fallow 无法给 JS 调用点归属类型；`RewriteCache.size` 是真死代码�
 
 ### 4.3 扫描结果（`fallow dead-code`）
 
-102 条 error 级、35 条 warn 级。error 级构成：
+98 条 error 级、35 条 warn 级。error 级构成：
 
 | 类别 | 数量 | 性质 |
 | --- | --- | --- |
-| unused files | 4 | `auto-permit/src/identity.ts`，以及 `execution-guard/src/{checkpoint,goal-evidence,jj}.ts`——`checkpoint_task` 已迁到 `task-anchor`，这三个是拆分后的遗留模块。smoke/live-check 脚本已用 Fallow `supportEntry` 建模为开发入口 |
 | unused exports | 64 | 多数是“只在本文件使用却写了 `export`”，去掉关键字即可；少数是重复导出 |
 | unused types | 10 | 同上 |
 | unused class members | 19 | 见 4.2 |
+| unused files | 0 | `task-anchor` 拆分遗留的 4 个模块已删除（`execution-guard/src/{checkpoint,goal-evidence,jj}.ts`、`auto-permit/src/identity.ts`），构建产物逐字节不变 |
 | duplicate exports | 3 | `ConflictSide`、`FetchLike`、`SourceLogger` 各定义两份 |
 | circular dependencies | 2 | `handoff` 的 `brief→spawn`（2 环）与 `brief→spawn→meta`（3 环），与 Oxlint `import/no-cycle` 的 4 处命中一致 |
 
@@ -371,7 +371,7 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 
 1. **本层（当前）**：工具 + 配置 + 扫描 + 本文批准清单。
 2. ~~纯排版层~~（已完成）：228 个文件单独一层，未夹带语义修复；`typecheck`/`build`/`test`/`check:smoke`/`check:client`/`check:pack`/`build:storybook` 全部通过。
-3. 类型与语义修复层：先机械类（import/模板/无用导出），再类型逃生口（722 条，逐处判定契约），最后语义类（浮空 Promise、`consistent-return` 等，涉及行为时先问）。
+3. 类型与语义修复层：先机械类（import/模板/无用导出），再类型逃生口（714 条，逐处判定契约），最后语义类（浮空 Promise、`consistent-return` 等，涉及行为时先问）。
 4. Fallow 建模与清理层：补 `implements QuotaSource`、处理 4 个孤儿源文件与 64 个多余导出、解 2 个环（未声明依赖已在打包修复层清零）。
 5. 统一入口层：把 `format:check`、`lint`、`fallow`、现有测试/smoke、`check:pack`、Storybook build 聚合进 `pnpm check`；skip 必须可见且不能替代必需项。
 6. CI 层：GitHub Actions 复用同一入口；远端成功记录与平台保护设置分开报告。

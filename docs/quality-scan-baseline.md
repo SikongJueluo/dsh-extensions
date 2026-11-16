@@ -187,12 +187,7 @@
 
 ## C. Fallow 明细
 
-### 未被任何入口引用的文件（4）
-
-- `packages/auto-permit/src/identity.ts`
-- `packages/execution-guard/src/checkpoint.ts`
-- `packages/execution-guard/src/goal-evidence.ts`
-- `packages/execution-guard/src/jj.ts`
+### 未被任何入口引用的文件（初次扫描 4 个，已全部删除）
 
 
 ### 循环依赖（2）
@@ -222,7 +217,7 @@
 pnpm lint                      # oxlint（含 type-aware，读 .oxlintrc.json）
 OXC_LOG=debug pnpm lint        # 打印 program 分配与 unmatched 列表
 pnpm format:check              # oxfmt --check .（排版已收敛，当前 0 差异）
-pnpm fallow                    # fallow dead-code（102 条 error 级）
+pnpm fallow                    # fallow dead-code（当前 98 条 error 级）
 pnpm fallow:health             # 复杂度报告（不阻塞）
 pnpm fallow:dupes              # 重复度报告（不阻塞）
 ```
