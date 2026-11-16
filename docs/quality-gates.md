@@ -201,7 +201,7 @@ Fallow 无法给 JS 调用点归属类型；`RewriteCache.size` 是真死代码�
 
 ### 4.3 扫描结果（`fallow dead-code`）
 
-107 条 error 级、35 条 warn 级。error 级构成：
+102 条 error 级、35 条 warn 级。error 级构成：
 
 | 类别 | 数量 | 性质 |
 | --- | --- | --- |
@@ -209,7 +209,6 @@ Fallow 无法给 JS 调用点归属类型；`RewriteCache.size` 是真死代码�
 | unused exports | 64 | 多数是“只在本文件使用却写了 `export`”，去掉关键字即可；少数是重复导出 |
 | unused types | 10 | 同上 |
 | unused class members | 19 | 见 4.2 |
-| unlisted dependencies | 5 | `handoff` 用 `@deepseek-ai/dsh-client-connection` / `dsh-host-webserver` 未声明；`triggers` 测试用 `dsh-storage`、`remote-exec` smoke 用 `dsh-util-values`、`search-integrator` smoke 用 `js-yaml` 未声明 |
 | duplicate exports | 3 | `ConflictSide`、`FetchLike`、`SourceLogger` 各定义两份 |
 | circular dependencies | 2 | `handoff` 的 `brief→spawn`（2 环）与 `brief→spawn→meta`（3 环），与 Oxlint `import/no-cycle` 的 4 处命中一致 |
 
@@ -292,7 +291,7 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 1. **本层（当前）**：工具 + 配置 + 扫描 + 本文批准清单。
 2. 纯排版层：`oxfmt --write .` 的 228 个文件，单独一层，不夹带语义修复；跑 `typecheck`/`build`/`check:client` 验证产物字节不变。
 3. 类型与语义修复层：先机械类（import/模板/无用导出），再类型逃生口（722 条，逐处判定契约），最后语义类（浮空 Promise、`consistent-return` 等，涉及行为时先问）。
-4. Fallow 建模与清理层：补 `implements QuotaSource`、接线或删除 5 个孤儿脚本、补 5 个未声明依赖、解 2 个环。
+4. Fallow 建模与清理层：补 `implements QuotaSource`、处理 4 个孤儿源文件与 64 个多余导出、解 2 个环（未声明依赖已在打包修复层清零）。
 5. 统一入口层：把 `format:check`、`lint`、`fallow`、现有测试/smoke、`check:pack`、Storybook build 聚合进 `pnpm check`；skip 必须可见且不能替代必需项。
 6. CI 层：GitHub Actions 复用同一入口；远端成功记录与平台保护设置分开报告。
 7. 升级流程：每次升 oxlint/oxfmt/fallow，列出新增规则 → 已启用/不适用/待决定，并记录默认值与行为变化。

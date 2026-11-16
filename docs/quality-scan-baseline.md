@@ -194,13 +194,6 @@
 - `packages/execution-guard/src/goal-evidence.ts`
 - `packages/execution-guard/src/jj.ts`
 
-### 未声明依赖（5）
-
-- `@deepseek-ai/dsh-client-connection` ← `packages/handoff/src/channel.ts`
-- `@deepseek-ai/dsh-host-webserver` ← `packages/handoff/src/channel.ts`
-- `@deepseek-ai/dsh-storage` ← `packages/triggers/test/durable.test.ts`
-- `@deepseek-ai/dsh-util-values` ← `packages/remote-exec/smoke.mjs`
-- `js-yaml` ← `packages/search-integrator/scripts/smoke-research.mjs`
 
 ### 循环依赖（2）
 
@@ -229,7 +222,7 @@
 pnpm lint                      # oxlint（含 type-aware，读 .oxlintrc.json）
 OXC_LOG=debug pnpm lint        # 打印 program 分配与 unmatched 列表
 pnpm format:check              # oxfmt --check .（228 个文件待排版）
-pnpm fallow                    # fallow dead-code（107 条 error 级）
+pnpm fallow                    # fallow dead-code（102 条 error 级）
 pnpm fallow:health             # 复杂度报告（不阻塞）
 pnpm fallow:dupes              # 重复度报告（不阻塞）
 ```

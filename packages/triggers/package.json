@@ -57,6 +57,7 @@
     "@deepseek-ai/dsh-llm": "catalog:",
     "@deepseek-ai/dsh-session": "catalog:",
     "@deepseek-ai/dsh-session-query": "catalog:",
+    "@deepseek-ai/dsh-storage": "catalog:",
     "@deepseek-ai/dsh-storage-domain": "catalog:",
     "@deepseek-ai/dsh-tools": "catalog:",
     "@deepseek-ai/schemastery": "catalog:",

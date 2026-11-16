@@ -46,6 +46,7 @@
     "@deepseek-ai/dsh-subprocess": "catalog:",
     "@deepseek-ai/dsh-tools": "catalog:",
     "@deepseek-ai/dsh-user-approval": "catalog:",
+    "@deepseek-ai/dsh-util-values": "catalog:",
     "@deepseek-ai/schemastery": "catalog:"
   }
 }
