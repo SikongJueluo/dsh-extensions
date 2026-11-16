@@ -8,11 +8,11 @@
  * TokenStore, so tokens handed out here are always the fresh, refresh-rotated
  * ones — never a stale copy read straight from the credential record.
  *
- * @module dsh-oauth-providers/service
+ * @module dsh-more-providers/oauth/service
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
-import { PACKAGE_NAME } from './identity.js'
+import { PACKAGE_NAME } from '../identity.js'
 
 /** A usable OAuth credential pair for one provider. */
 export interface OAuthToken {
@@ -64,7 +64,7 @@ export class OAuthProvidersService extends Service {
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    /** Provided by dsh-oauth-providers; absent when that plugin is not mounted. */
+    /** Provided by dsh-more-providers; absent when that plugin is not mounted. */
     oauthProviders: OAuthProvidersService
   }
 }

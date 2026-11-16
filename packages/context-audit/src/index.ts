@@ -5,7 +5,7 @@
  * Scans the local session event logs (nothing leaves the machine) and
  * reports per-route and per-session cache-hit rates, token usage, and
  * per-tool call/failure statistics, so routing choices, cache-affinity
- * changes (e.g. the chatgpt `promptCacheKey` toggle in dsh-oauth-providers),
+ * changes (e.g. the chatgpt `promptCacheKey` toggle in dsh-more-providers),
  * and tool design can be judged with data instead of anecdotes.
  *
  * @module dsh-context-audit

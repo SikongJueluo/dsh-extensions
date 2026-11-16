@@ -10,14 +10,14 @@
  *
  * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
  *
- * @module dsh-openai/auth
+ * @module dsh-more-providers/providers/chatgpt/auth
  */
 import type { LoggerService } from '@deepseek-ai/cordis'
 import type { CredentialKey, CredentialRecord } from '@deepseek-ai/dsh-credentials'
 import { isRecord } from '../../record.js'
 import { refreshGrant } from './oauth.js'
 import type { OAuthGrant } from './oauth.js'
-import type { FetchLike } from '../../transport.js'
+import type { FetchLike } from '../../oauth/transport.js'
 
 /** Refresh once the access token is this close to expiry (default 24h). */
 export const DEFAULT_REFRESH_MARGIN_MS = 24 * 60 * 60 * 1000

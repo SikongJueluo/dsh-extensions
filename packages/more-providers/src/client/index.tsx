@@ -1,7 +1,9 @@
-// Client half of dsh-more-providers: surfaces the host half's last config
-// state. Provider rows register at startup only, so an invalid file stays
-// reported until dsh restarts — the notice says so explicitly.
+// Client half of dsh-more-providers: the OAuth provider sign-in section, plus
+// the host half's last config state. Provider rows register at startup only, so
+// an invalid file stays reported until dsh restarts — the notice says so
+// explicitly.
 import { ConfigStatusToast, type DshClientContext } from '@dsh-extensions/ui'
+import { registerOAuthSettings } from './oauth'
 import './styles.css'
 
 function apply(ctx: DshClientContext) {
@@ -17,7 +19,8 @@ function apply(ctx: DshClientContext) {
       ProvidersConfigNotice,
     )
   })
+  registerOAuthSettings(ctx)
 }
 
 export { apply }
-export const inject = ['slots']
+export const inject = ['slots', 'locale', 'remote', 'remote.llm', 'remote.session']

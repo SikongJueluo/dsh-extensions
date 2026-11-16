@@ -10,7 +10,7 @@
  * seconds** (normalized to ms here). Verified against headroom's live
  * capture of the endpoint (MIT).
  *
- * The token comes from the `oauthProviders` service (dsh-oauth-providers),
+ * The token comes from the `oauthProviders` service (dsh-more-providers),
  * so it is always the fresh, refresh-rotated one; without that plugin (or
  * without a sign-in) this source resolves `undefined`.
  *
@@ -115,7 +115,7 @@ export class OpenAiUsageSource implements QuotaSource {
     const token = await this.getToken().catch(() => undefined)
     if (token === undefined) {
       this.logger?.warn(
-        'plan-usage: no ChatGPT token available (not signed in, or dsh-oauth-providers absent)',
+        'plan-usage: no ChatGPT token available (not signed in, or dsh-more-providers absent)',
       )
       return undefined
     }

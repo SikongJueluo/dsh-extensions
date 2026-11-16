@@ -95,7 +95,7 @@ if (previousRuntime === undefined) delete process.env.XDG_RUNTIME_DIR
 else process.env.XDG_RUNTIME_DIR = previousRuntime
 
 // ── config resolution / inheritance ─────────────────────────────────────────
-const resolved = await loadConfig(configPath)
+const { providers: resolved } = await loadConfig(configPath)
 check(
   'account routes are provider-account',
   JSON.stringify(resolved.map((r) => r.route)) === '["mdkj-stable","mdkj-cheap","zai-coding-cn"]',
@@ -130,7 +130,7 @@ writeFileSync(
     },
   }),
 )
-const precedence = await loadConfig(precedencePath)
+const { providers: precedence } = await loadConfig(precedencePath)
 check(
   'apiKeyFile wins over secretName',
   precedence[0]?.keySource.kind === 'file' && precedence[0]?.keySource.path === keyFile,
@@ -190,7 +190,7 @@ writeFileSync(
     },
   }),
 )
-const dormant = await buildProviders(await loadConfig(dormantPath), {
+const dormant = await buildProviders((await loadConfig(dormantPath)).providers, {
   info() {},
   warn() {},
   error() {},
@@ -239,7 +239,7 @@ writeFileSync(
     },
   }),
 )
-const noThinking = await buildProviders(await loadConfig(noThinkingPath), {
+const noThinking = await buildProviders((await loadConfig(noThinkingPath)).providers, {
   info() {},
   warn() {},
   error() {},
@@ -281,7 +281,7 @@ writeFileSync(
     },
   }),
 )
-const discovered = await buildProviders(await loadConfig(discoveryPath), {
+const discovered = await buildProviders((await loadConfig(discoveryPath)).providers, {
   info() {},
   warn() {},
   error() {},
@@ -310,7 +310,7 @@ writeFileSync(
     },
   }),
 )
-const fallback = await buildProviders(await loadConfig(fallbackPath), {
+const fallback = await buildProviders((await loadConfig(fallbackPath)).providers, {
   info() {},
   warn() {},
   error() {},

@@ -347,6 +347,10 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 
 逐项批准/否决即可（例如“A1-A19 全部批准，但 B15 保留启用”）。
 
+2026-11-16 OAuth 并入 more-providers：A9 中原 OAuth 客户端的同一处 hooks 抑制迁到
+`packages/more-providers/src/client/oauth.tsx`，A17 的同一处 transport 抑制迁到
+`packages/more-providers/src/oauth/transport.ts`。登记只跟随原代码移动，规则和豁免数量不变。
+
 | # | 待批准项 | 建议 |
 | --- | --- | --- |
 | A1 | `style` 整类 off + 采纳 6 条 | 批准 |
@@ -365,7 +369,7 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 | A14 | 给 `handoff/src/selection.ts:195` 的 `await llm.listModels(...)` 加一条带理由的 `oxlint-disable-next-line typescript/await-thenable`（tsgolint 误报，`tsc` 证明该调用返回 Promise） | 批准 |
 | A15 | `handoff/src/client/index.tsx` 的 `autoFocus={!COARSE}` 加一条带理由的抑制（AGENTS 明确：autoFocus 只作桌面增强、`pointer: coarse` 时关闭） | 批准 |
 | A16 | `remote-exec/src/display.ts` 与 `auto-env/src/direnv.ts` 的 ANSI 正则加两条带理由的 `no-control-regex` 抑制（正则本身就是要匹配控制字符） | 批准 |
-| A17 | `oauth-providers/src/transport.ts:19` 的 `promisify(execFile)` 加一条带理由的 `strict-void-return` 抑制（tsgolint 对 promisify 重载的误报；显式标注类型无效，`tsc` 通过） | 批准 |
+| A17 | `more-providers/src/oauth/transport.ts:19` 的 `promisify(execFile)` 加一条带理由的 `strict-void-return` 抑制（tsgolint 对 promisify 重载的误报；显式标注类型无效，`tsc` 通过） | 批准 |
 | A18 | `no-duplicate-imports` 设 `allowSeparateTypeImports: true`：81 条里有 54 条是 `import type {…}` 与同模块值导入并存，而 `typescript/consistent-type-imports` 要求类型导入单独成句，两条规则当前互相打架 | 批准 |
 | A19 | 剩余 9 条 correctness 的处理授权：优先按语义修正；凡修正会改变 UI 结构或可观察行为的（`set-state-in-effect` 5、`prefer-tag-over-role` 2、`no-callback-in-promise` 1），改为一条带理由的抑制并在提交说明里写明为什么不能改 | 批准 |
 | A20 | 规则级排除 B21（`import/no-empty-named-blocks`、`unicorn/require-module-specifiers`）：这两条在 oxlint 里没有选项，而 `import type {} from 'x'` 是本仓（以及宿主 SDK）拉 declaration merge 的唯一写法 | 批准 |

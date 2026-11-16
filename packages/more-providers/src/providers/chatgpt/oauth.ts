@@ -11,13 +11,13 @@
  * Adapted from pi-ai's `openai-codex` flow (MIT) and werifu/dsh-oai-oauth
  * (MIT) — see THIRD-PARTY-NOTICE.md.
  *
- * @module dsh-openai/oauth
+ * @module dsh-more-providers/providers/chatgpt/oauth
  */
 import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { PACKAGE_NAME } from '../../identity.js'
 import { isRecord } from '../../record.js'
-import type { FetchLike } from '../../transport.js'
+import type { FetchLike } from '../../oauth/transport.js'
 
 /** The public OAuth client id the Codex CLI uses for the ChatGPT login. */
 const OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'

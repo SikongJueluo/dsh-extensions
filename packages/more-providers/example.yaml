@@ -1,6 +1,22 @@
 # Copy to $DSH_HOME/more-providers.yaml and adjust secret names.
-# secretDir defaults to $XDG_RUNTIME_DIR/agenix.
+# `providers` is required; an empty object (`providers: {}`) is valid and keeps
+# the default-on ChatGPT OAuth provider. secretDir defaults to
+# $XDG_RUNTIME_DIR/agenix; editing this file needs a dsh restart.
 providers:
+  # ChatGPT (subscription OAuth) needs no key and is enabled by default, so the
+  # whole block below is optional. Uncomment only to override a default.
+  # Values shown are the built-in defaults.
+  # chatgpt:
+  #   baseURL: https://chatgpt.com/backend-api/codex
+  #   refreshMarginMs: 86400000      # refresh the grant 24h before expiry
+  #   defaultContextWindow: 272000   # fallback when the backend omits a window
+  #   promptCacheKey: true           # per-session prompt_cache_key + affinity headers
+  #   # clientVersion: ""            # omitted/empty = latest @openai/codex from npm
+
+  # Disabling keeps the stored OAuth credential: re-enabling needs no sign-in.
+  # chatgpt:
+  #   enabled: false
+
   zai-coding-cn:
     kind: builtin
     secretName: zhipu-coding-api-key

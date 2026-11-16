@@ -4,7 +4,6 @@ Out-of-tree [DeepSeek Harness](https://www.deepseek.com/harness/en/) 插件 bund
 
 | Bundle | 说明 |
 | --- | --- |
-| [`dsh-oauth-providers`](packages/oauth-providers/) | OAuth 认证的 LLM 厂商集（当前：ChatGPT 订阅），无需 API Key |
 | [`dsh-plan-usage`](packages/plan-usage/) | GLM / OpenAI Codex / MiniMax / OpenCode Go 套餐配额查询，`planUsage` 服务 + 设置页分区 |
 | [`dsh-auto-permit`](packages/auto-permit/) | 审批瀑布上的 AI 判官：小模型在弹窗之前决定是否放行 bash 提权（高危/容器硬边界 → 白名单 → 精确记忆 → 判官调用；含本地容器构建/临时验证） |
 | [`dsh-cmd-permit`](packages/cmd-permit/) | 同一瀑布上的确定性白名单：配置内的命令族提权不弹窗也不耗判官调用（种子为空——缓存类绕行改走 toolchain-access 目录授权，rtk 代理任意命令也不再默认 Full access）；`denyShape` 高危表以 `ctx.cmdPermit` 共享给上面那位 |
@@ -22,7 +21,7 @@ Out-of-tree [DeepSeek Harness](https://www.deepseek.com/harness/en/) 插件 bund
 | [`dsh-session-write-access`](packages/session-write-access/) | 持久化的 Session 多项目写入授权：替换 `sandboxPolicy`，用户可在面板提前添加或批准 Agent 申请的目录，主会话与本地子 Agent 共享、重启恢复；文件工具与 bash 同一策略，显式「Fork 并继承授权」；接入与回滚见包 README |
 | [`dsh-toolchain-access`](packages/toolchain-access/) | 沙箱窄目录授权：默认开启 uv/Cargo/pnpm/Gradle/Maven 缓存、共享锁目录与 Semgrep 私有 state，workspace-write 下精确 bind（钉版 bwrap 布局、fail-closed）；可显式缩减或全关，整套工具链安装另行 opt-in；接入见 [plan-dsh-toolchain-access.md](docs/plan-dsh-toolchain-access.md) |
 | [`dsh-recursive-skills`](packages/recursive-skills/) | 分类目录里嵌套的 `SKILL.md` 自动进入原生技能目录：追加 provider、按需加载、增删与 frontmatter 变化热刷新；原生直接技能仍优先；接入见 [plan-dsh-recursive-skills.md](docs/plan-dsh-recursive-skills.md) |
-| [`dsh-more-providers`](packages/more-providers/) | 用 YAML 注册额外 LLM 厂商（当前：Command Code 订阅），模型目录按三种 wire 协议映射 |
+| [`dsh-more-providers`](packages/more-providers/) | YAML 注册额外 LLM 厂商（builtin / custom / Command Code，三种 wire 协议映射），并内建默认启用的 ChatGPT 订阅 OAuth（原 `dsh-oauth-providers` 并入本包，桥接回环登录需在桌面浏览器完成） |
 | [`dsh-triggers`](packages/triggers/) | 双会话 execute → review → rework 触发循环：轮次预算、暂停/恢复、会话内浏览器视图 |
 
 ## 安装
@@ -38,7 +37,7 @@ dsh --profile <profile>
 
 ## 客户端 UI
 
-八个浏览器半插件共享 [`packages/ui`](packages/ui/)：shadcn 组合 API + Base UI 原语 + Tailwind CSS v4，颜色只使用公开的 `--dsw-alias-*` token。它是私有 workspace 包，构建期按需打进各插件的 `lib/client.js`，不单独安装或启用。构建约定见 [packages/ui/README.md](packages/ui/README.md)，迁移范围与验证记录见 [docs/client-ui-migration.md](docs/client-ui-migration.md)。
+九个浏览器半插件共享 [`packages/ui`](packages/ui/)：shadcn 组合 API + Base UI 原语 + Tailwind CSS v4，颜色只使用公开的 `--dsw-alias-*` token。它是私有 workspace 包，构建期按需打进各插件的 `lib/client.js`，不单独安装或启用。构建约定见 [packages/ui/README.md](packages/ui/README.md)，迁移范围与验证记录见 [docs/client-ui-migration.md](docs/client-ui-migration.md)。
 
 ## 开发
 
@@ -46,4 +45,4 @@ dsh --profile <profile>
 
 ## 许可
 
-GPL-3.0-or-later。`packages/oauth-providers` 部分派生自 [werifu/dsh-oai-oauth](https://github.com/werifu/dsh-oai-oauth)（MIT）与 [@earendil-works/pi-ai](https://github.com/earendil-works/pi)（MIT），完整许可文本见 [THIRD-PARTY-NOTICE.md](packages/oauth-providers/THIRD-PARTY-NOTICE.md)。
+GPL-3.0-or-later。[`dsh-more-providers`](packages/more-providers/) 的 ChatGPT 协议部分派生自 [werifu/dsh-oai-oauth](https://github.com/werifu/dsh-oai-oauth)（MIT），pi-ai 适配沿用 [@earendil-works/pi-ai](https://github.com/earendil-works/pi)（MIT），完整许可文本见 [THIRD-PARTY-NOTICE.md](packages/more-providers/THIRD-PARTY-NOTICE.md)。

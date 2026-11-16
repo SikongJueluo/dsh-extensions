@@ -24,7 +24,7 @@
 
 共享同一端点+key 的路由合并为一次上游调用；服务层再按路由做 TTL 缓存 + 并发去重（等待中的恢复 agent 与设置页共用）。
 
-**key 解析**：装了 [dsh-more-providers](../more-providers/) 时，GLM / OpenCode / MiniMax / CommandCode source 优先调用 `ctx.get('providerKeys')?.key(route)`，再回退各 source 的 env / `providers` 配置；未装该插件时行为与旧版完全一致。`chatgpt` 仍走 `oauthProviders`。
+**key 解析**：装了 [dsh-more-providers](../more-providers/) 时，GLM / OpenCode / MiniMax / CommandCode source 优先调用 `ctx.get('providerKeys')?.key(route)`，再回退各 source 的 env / `providers` 配置；未装该插件时行为与旧版完全一致。`chatgpt` 走同一 bundle 的 `oauthProviders` 服务。
 
 ## 服务契约
 
@@ -41,7 +41,7 @@ interface PlanUsageService {
 
 `get` 永不抛错：无源、无凭证、上游失败都返回 `undefined`。`QuotaSnapshot` 含 `fiveHour` / `weekly` / `monthly`（月度窗，OpenCode 与 Command Code）/ `monthlyMcp`（各带 `percent` / `used` / `total` / `remaining` / `unit` / `resetAt` / `windowMinutes`）与 `level`。
 
-**OpenAI 依赖说明**：`chatgpt` 路由的 token 经 `oauthProviders` 服务（[dsh-oauth-providers](../oauth-providers/) v0.4+ 提供）获取，未装该插件或未登录时此源优雅降级为 `undefined`。
+**OpenAI 依赖说明**：`chatgpt` 路由的 token 经 `oauthProviders` 服务获取（[dsh-more-providers](../more-providers/) 提供，原 dsh-oauth-providers 已并入本包），未装该插件或未登录时此源优雅降级为 `undefined`。
 
 **Command Code 依赖说明**：卡片只在 `command-code` 路由实际注册时出现，通常由 [dsh-more-providers](../more-providers/) 注册；source 优先用该插件的 `providerKeys` 服务，回退 `CMD_API_KEY` / `COMMAND_CODE_API_KEY` 环境变量。
 
@@ -82,5 +82,5 @@ dsh --profile web --patch ./packages/plan-usage/dev.patch.yml --no-open --port 3
 - 五个配额 API 均为未公开端点；上游字段变更时解析器返回 `undefined`（消费方自行兜底），不会误展示。
 - Command Code 的 `/alpha/*` 路由是 CLI 内部接口，且 `$1` Go plan 不允许外部工具；Go key 会优雅降级为无卡片数据。
 - 无 key 的路由不再显示空卡；`PlanUsageService.providers()` 仍按契约返回 live 路由全集，过滤发生在本包设置页的 channel。
-- OpenAI 源依赖 dsh-oauth-providers 的 `oauthProviders` 服务（软依赖）。
+- OpenAI 源依赖 dsh-more-providers 的 `oauthProviders` 服务（软依赖；未装或未登录时该卡不出现）。
 - 仅 GLM 系支持 `providers` 配置覆盖；OpenAI/MiniMax/OpenCode/Command Code 端点固定。

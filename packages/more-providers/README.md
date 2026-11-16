@@ -1,10 +1,18 @@
 # dsh-more-providers
 
-**YAML 驱动的 DSH provider registry。** 它取代 `programs.dsh.piAiProviders` 那一层静态 allowlist：
-provider 定义、模型目录、账号变体、密钥路径都写在一个 YAML 文件里；插件按 key 可用性注册路由，
-并向 dsh-plan-usage 暴露同步的 `providerKeys` 服务。stock `dsh-llm-pi-ai` 由本 bundle 禁用，
-ChatGPT OAuth 仍归 [dsh-oauth-providers](../oauth-providers/)，`deepseek-official` 仍走内置
-`DEEPSEEK_API_KEY`。
+**YAML 驱动的 DSH provider registry：API-key 厂商 + 默认启用的 ChatGPT 订阅 OAuth。**
+
+0.2.0 起这里同时提供原来 `dsh-oauth-providers` 的 ChatGPT 登录：共享模块位于包内，
+pi-ai 与 ChatGPT 协议都留在本包内部。一份 YAML 管所有 API-key 路由
+（provider 定义、模型目录、账号变体、密钥路径），ChatGPT 走宿主凭据 + 设置页登录，
+无需 API Key。插件按 key 可用性注册路由，并向其他插件暴露同步的 `providerKeys`
+与 OAuth 的 `oauthProviders` 服务。stock `dsh-llm-pi-ai` 由本 bundle 禁用，
+`deepseek-official` 仍走内置 `DEEPSEEK_API_KEY`。
+
+| 部分 | 配置位置 | 凭据 |
+|---|---|---|
+| API-key 路由（`builtin` / `custom` / `command-code`） | YAML `providers.<id>` | `apiKeyFile` / `secretName` / `apiKeyEnv` |
+| ChatGPT 订阅（route `chatgpt`） | YAML `providers.chatgpt`，可整节省略 | 设置页「OAuth 登录」写入 `ctx.credentials` 的 `oauth-providers/chatgpt` |
 
 ## 快速开始
 
@@ -17,26 +25,18 @@ dsh plugin --profile web add ./packages/more-providers
 
 2. 创建 `$DSH_HOME/more-providers.yaml`（默认 `~/.dsh/more-providers.yaml`）。
    插件行的 `configFile` 可指定别的路径：相对路径以进程 cwd 为基准，支持 `~/` 展开。
-3. 删除/清空 `~/.config/nixos/home/ai/dsh/providers.nix` 里的 `programs.dsh.piAiProviders`；
-   否则 stock row 虽然被禁用，配置仍会留在组合里。
-4. `home-manager switch` / `nixos-rebuild` 后重启：
+   **最小合法内容就是 `providers: {}`**——ChatGPT 默认启用，API-key 厂商按需添加
+   （见[示例配置](#示例配置)）。
+3. 重启 dsh：
 
 ```sh
 systemctl --user restart dsh-web
 ```
 
-### 迁移清单（重要）
-
-1. **先** `cp packages/more-providers/example.yaml ~/.dsh/more-providers.yaml` 并确认 secret 名；
-   在 YAML 存在之前重启会让 stock `llm-pi-ai` 已禁用、插件无 provider，默认模型会失败。
-2. 确认 `/run/user/<uid>/agenix/` 下有 `zhipu-coding-api-key`、`opencode-api-key`、
-   `moonshot-api-key`、`minimax-coding-api-key`、`commandcode-api-key`；MDKJ 两个 key 需要先加
-   `age.secrets` 并解密。
-3. 删除/清空 `~/.config/nixos/home/ai/dsh/providers.nix` 的 `programs.dsh.piAiProviders`；
-   `secrets.nix` 里给 MCP/工具的 env 可保留，provider 的 env 映射不再需要。
-4. `agent-default-model` 仍是 `zai-coding-cn / glm-5.3`，所以
-   `zai-coding-cn` 的 key 必须先可用。
-5. 重启后看日志应出现 `more-providers: registered N route(s)`；模型选择器出现各 provider。
+4. ChatGPT：打开设置页「OAuth 登录」，点「登录」按提示完成（详见
+   [ChatGPT 订阅（OAuth）](#chatgpt-订阅oauth)）。
+5. 从旧 `dsh-oauth-providers` 迁过来时，**先把旧 bundle 移出 profile，再部署本包**，
+   不能双挂；步骤见 [从 dsh-oauth-providers 迁移](#从-dsh-oauth-providers-迁移)。
 
 ## 示例配置
 
@@ -44,6 +44,18 @@ systemctl --user restart dsh-web
 # $DSH_HOME/more-providers.yaml
 # secretDir 默认 $XDG_RUNTIME_DIR/agenix；通常不用写。
 providers:
+  # ChatGPT 整节可省；这里列的是内建默认值，只改需要覆盖的项。
+  # chatgpt:
+  #   baseURL: https://chatgpt.com/backend-api/codex
+  #   refreshMarginMs: 86400000
+  #   defaultContextWindow: 272000
+  #   promptCacheKey: true
+  #   # clientVersion: ""        # 省略/留空 = 取 npm 上 @openai/codex 最新版
+
+  # 关闭 ChatGPT：不注册路由、设置页无卡，凭据保留（重新开启无需重登）。
+  # chatgpt:
+  #   enabled: false
+
   zai-coding-cn:
     kind: builtin
     secretName: zhipu-coding-api-key
@@ -86,10 +98,36 @@ providers:
         secretName: mdkj-cheap-gpt-api-key
 ```
 
-生成的路由：`zai-coding-cn`、`opencode-go`、`moonshotai`、`minimax`、`command-code`、
-`mdkj-stable`、`mdkj-cheap`。`mdkj` 本身是模板，不注册。
+生成的路由：`chatgpt`、`zai-coding-cn`、`opencode-go`、`moonshotai`、`minimax`、
+`command-code`、`mdkj-stable`、`mdkj-cheap`。`mdkj` 本身是模板，不注册。
 
 ## 配置规则
+
+### 顶层
+
+- `providers` **必填**；空对象合法（只跑 ChatGPT）。
+- `secretDir` 可选，必须是绝对路径。
+- 整份文档只认 `providers` / `providers.<id>` / `providers.chatgpt` 这些键，未知键直接
+  判定整份无效（见[校验与运行时](#校验与运行时)）。
+
+### `providers.chatgpt`
+
+ChatGPT 的 LLM 路由固定是 `chatgpt`（保留名：其他 provider / account 不能占用，
+即使 ChatGPT 被关闭也保留）。整节省略即启用，全部字段可选：
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `enabled` | `true` | `false` 关闭。**只停止注册与显示，不删除凭据** |
+| `baseURL` | `https://chatgpt.com/backend-api/codex` | Codex Responses 后端地址，绝对 http(s) URL |
+| `clientVersion` | 省略/留空 = 取 npm 上 `@openai/codex` 最新版 | 报给后端的 client 版本 |
+| `refreshMarginMs` | `86400000`（24h） | 距过期多久开始刷新 OAuth 授权（正整数，毫秒） |
+| `defaultContextWindow` | `272000` | 后端没有描述上下文窗口时的兜底（正整数） |
+| `promptCacheKey` | `true` | 按会话派生 `prompt_cache_key` + session-affinity 头，让后端提示缓存把同一会话路由到同一节点 |
+
+- 五个连接参数只在这里配置，**没有** `kind` / key / `accounts`；改完 YAML 重启 dsh 生效。
+- 该节同样严格校验：出现未知键或非法值（非字符串 `clientVersion`、非 http(s) 的
+  `baseURL`、非正整数的毫秒/窗口）会让整份 YAML 无效——**即使 `enabled: false` 也会校验**，
+  免得留下一个以后打开才炸的配置。
 
 ### `kind`
 
@@ -100,6 +138,7 @@ providers:
 | `command-code` | Command Code 的混合协议目录 | 只有 key；可选 `baseURL` / `modelsURL` / `zdr` |
 
 `api` 只支持 `openai-completions`、`openai-responses`、`anthropic-messages`。
+`chatgpt` 不是 `kind`，它是内建 OAuth provider，不参与这套规则。
 
 ### `accounts`
 
@@ -149,32 +188,76 @@ apiKeyEnv: MDKJ_STABLE_GPT_API_KEY                           # 环境变量
 `modelsURL` 拉取成功时优先用目录；目录缺的字段会由同 id 的静态 `models` 补齐。目录失败/为空时
 整体回退静态 `models`；两者都没有则跳过该 provider（只影响这一条路由）。
 
-### 校验与运行时
+## ChatGPT 订阅（OAuth）
+
+- **路由**：`chatgpt`，显示名 `ChatGPT (OpenAI)`；模型目录从 Codex 后端动态拉取，
+  后端未描述窗口时用 `defaultContextWindow` 兜底。
+- **登录 UI**：设置页「OAuth 登录」分区（slot `dsh-oauth-providers`、locale 命名空间
+  `oauth-providers`，沿用旧包标识以兼容）。卡片由宿主**实际注册**的 provider 列表决定：
+  `chatgpt` 关闭时该卡不出现，客户端不假设它一定存在。每张卡显示登录状态、
+  模型 badge、刷新按钮；已登录时多一个「退出登录」。
+- **登录流程**：点「登录」→ 本包自有通道 `/dsh-oauth-providers` 的 `begin` 返回授权链接
+  （浏览器打开即走本机回跳）→ 浏览器无法回跳时把重定向 URL 或授权码粘回设置页 `submit`
+  → 前端轮询 `poll` 拿通知/提示 → `authorized` 后自动刷新模型目录。随时可「取消登录」；
+  登录成功后按需刷新 provider 卡。
+- **凭据**：`ctx.credentials` 的 `oauth-providers/chatgpt`。合并前后地址不变，
+  **已有 ChatGPT 登录不需要重登**；`enabled: false` 或删掉整节都不动凭据，
+  只有「退出登录」才删除。
+- **失效边界**：未登录/授权过期只让 `chatgpt` 这一条路由不可用，其他 YAML 路由照常；
+  dsh-plan-usage 的 OpenAI 配额卡也因此优雅降级为无卡。
+- **手机端**：回环回跳（`localhost:1455`）不在 dsh-mobile 网关的代理范围，登录请在电脑
+  浏览器完成；手机端只消费登录状态。
+- **出网**：沿用进程网络与系统代理自动探测，本包没有插件级代理配置。
+- **token 刷新**：`oauthProviders.token('chatgpt')` 每次给的是刷新轮换后的新 token，
+  不会读陈旧副本。
+
+## 校验与运行时
 
 - **配置错误整份 fail-closed**：未知字段、非法 `kind`/`api`、缺 `baseURL`、空 `accounts`、
-  没有任何 key source、重复 route id 等，会让整份 YAML 不生效；插件只 log error、不崩 dsh，
-  并且不注册任何 provider 行。
+  没有任何 key source、重复或保留的 route id、`providers.chatgpt` 的未知键/非法值等，
+  会让整份 YAML 不生效；插件只 log error、不崩 dsh，并且**不注册任何 provider 行**
+  ——包括 ChatGPT：没有 `chatgpt` 路由，也不建立 `oauthProviders` 服务与登录通道。
+- **文件缺失同样整份无效**：`$DSH_HOME/more-providers.yaml` 不存在或没有 `providers` 键时
+  没有可注册内容；设置页的「OAuth 登录」分区仍在，但没有任何卡片。
 - **Web 错误提示**：Host 在 `/dsh-more-providers/config-status` 暴露当前状态（文件、错误、
-  revision、恢复方式），浏览器半插件经 `shell.overlay` 显示 toast。多个 preset 实例共享同一
-  条路由并聚合返回 `instances`，不会因宿主拒绝重复路由而丢失通知。页面加载或重连后仍会看到
-  当前错误；同一连接内同一错误不会因重复读取反复弹出。
+  revision、恢复方式），浏览器半经 `shell.overlay` 显示 toast（复用共享 `ConfigStatusToast`）。
+  多个 preset 实例共享同一条路由并聚合返回 `instances`。页面加载或重连后仍会看到当前错误；
+  同一连接内同一错误不会因重复读取反复弹出。
 - **运行时目录失败按 provider 隔离**：`modelsURL` 超时/非 2xx/坏 JSON/空列表时用静态 `models`
   fallback；没有 fallback 才跳过该 provider，其他 provider 照常注册。
-- **key 缺失**是正常休眠，不算配置错误。
+- **key 缺失**是正常休眠，不算配置错误；**未登录**只影响 `chatgpt` 路由。
 - **改完 YAML 需要重启 dsh**：provider 行只在启动时注册，本插件刻意不做文件监听或
-  provider 热更新。修好文件后，页面上的错误提示仍会保留（并明确写「修好后需重启 dsh」），
-  直到重启后重新读取。
+  provider 热更新（ChatGPT 的五个参数同属 YAML，也一样要重启）。修好文件后，页面上的
+  错误提示仍会保留（并明确写「修好后需重启 dsh」），直到重启后重新读取。
 
-## `providerKeys` 服务
+## 服务
 
-插件注册同步服务：
+两个宿主服务都从本包注册：
 
 ```ts
-ctx.get('providerKeys')?.key('zai-coding-cn') // string | undefined
+ctx.get('providerKeys')?.key('zai-coding-cn')          // string | undefined
+await ctx.get('oauthProviders')?.token('chatgpt')      // { access, accountId? } | undefined
+ctx.get('oauthProviders')?.providers()                 // 可发 token 的 provider id
 ```
 
-dsh-plan-usage 的 GLM / OpenCode / MiniMax / CommandCode source 优先用它，再回退
-`process.env`。未装本插件时行为与旧版一致。
+- `providerKeys.key(route)`：dsh-plan-usage 的 GLM / OpenCode / MiniMax / CommandCode source
+  优先用它，再回退 `process.env`。未装本插件时行为与旧版一致。
+- `oauthProviders`：每个 OAuth provider 一个 token 解析器；未登录、刷新失败都返回
+  `undefined`，永不抛错。dsh-plan-usage 的 OpenAI 源、search-integrator 的 chatgpt 检索源
+  都是软依赖。
+
+## 从 dsh-oauth-providers 迁移
+
+旧 `packages/oauth-providers` 包已删除，其实现已并入本包。**不能双挂**：两个 bundle 同时启用会
+撞 route `chatgpt`、`oauthProviders` 服务、`/dsh-oauth-providers` 路由、设置页 slot id
+与同一份凭据写入。
+
+- 顺序：先从 Nix flake / profile 移除旧 bundle 并 rebuild/重启，再部署本包；仓库外的
+  具体 flake 改动与命令见 [plan-more-providers-oauth-merge.md](../../docs/plan-more-providers-oauth-merge.md)。
+- 旧 Cordis 行配置里的 `chatgpt:` 覆盖（若有）需要手工搬进 YAML 的 `providers.chatgpt`；
+  用默认值时不用补任何条目。
+- 不需要重新登录：凭据记录仍是 `oauth-providers/chatgpt`。
+- 关闭 ChatGPT（`enabled: false`）不删除凭据。
 
 ## MDKJ
 
@@ -207,7 +290,9 @@ pnpm -C packages/more-providers smoke
 
 `smoke.mjs` 覆盖 YAML 校验/继承、key 优先级、文件 mtime、builtin + custom 构建、目录发现与
 fallback、Command Code 三协议映射、`providerKeys` 服务和 `apply` 注册路径；不访问网络。共享
-配置库自身的路径、watch、原子替换与状态路由契约由 `packages/config` 的 Vitest 覆盖。
+配置库自身的路径、watch、原子替换与状态路由契约由 `packages/config` 的 Vitest 覆盖。合并后的
+端到端记录（真实 OAuth 登录、GUI、真实上游推理）见
+[plan-more-providers-oauth-merge.md](../../docs/plan-more-providers-oauth-merge.md) 的验证一节。
 
 ## 已知限制
 
@@ -215,6 +300,10 @@ fallback、Command Code 三协议映射、`providerKeys` 服务和 `apply` 注�
 - builtin 的模型完全来自 pi-ai catalog，不能逐 model 覆盖。
 - 自定义 model 的 wire-level `reasoningEfforts` 重命名 v1 不暴露；只支持同名映射。
 - 多账号自动切换未实现；stable/cheap 需要手动选 route。
+- ChatGPT 走的是 Codex 私有后端：模型目录与行为随上游变化，接口变动只会让 `chatgpt`
+  路由报错，不影响 YAML 路由。
+- ChatGPT 的五个连接参数只能改 YAML 并重启；登录本身在设置页完成。
+- 登录需要能访问回环回跳的桌面浏览器，手机端只读状态。
 - 配置文件是运行时数据，不在 nix store；home-manager 可以用 `home.file` 管理它。
 
 ## 卸载
@@ -222,3 +311,9 @@ fallback、Command Code 三协议映射、`providerKeys` 服务和 `apply` 注�
 ```sh
 dsh plugin --profile web remove dsh-more-providers
 ```
+
+## 许可
+
+GPL-3.0-or-later。ChatGPT 协议部分派生自 [werifu/dsh-oai-oauth](https://github.com/werifu/dsh-oai-oauth)（MIT），
+pi-ai 适配沿用 [@earendil-works/pi-ai](https://github.com/earendil-works/pi)（MIT）；完整许可文本见
+[THIRD-PARTY-NOTICE.md](THIRD-PARTY-NOTICE.md)。

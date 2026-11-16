@@ -1,14 +1,8 @@
-// Client half of dsh-oauth-providers: a Settings section listing every
-// OAuth-authenticated provider this package ships (today: ChatGPT). TypeScript
-// TSX on the shared @dsh-extensions/ui components. Registers the
-// `settings.section` slot, localizes through the DSH locale service, reads
-// provider state through the typed Client Remote wire, and drives each
-// provider's sign-in through this package's own channel
-// (`/dsh-oauth-providers`): begin → poll the notice/prompt → submit or
-// decline — the pi-style "open this link, paste the code if the redirect
-// fails" login.
-//
-// Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
+/**
+ * OAuth sign-in cards backed by the stable /dsh-oauth-providers channel.
+ * Derived from werifu/dsh-oai-oauth (MIT); see THIRD-PARTY-NOTICE.md.
+ * @module dsh-more-providers/client/oauth
+ */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Badge,
@@ -20,7 +14,6 @@ import {
   cn,
   type DshClientContext,
 } from '@dsh-extensions/ui'
-import './styles.css'
 import { isRecord } from '../record.js'
 
 const LOCALE_NS = 'oauth-providers'
@@ -376,7 +369,9 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
           setAuth(result.value ?? null)
           const v = result.value ?? {}
           if (v.running) {
-            setTimeout(pollSignIn, 1200)
+            setTimeout(() => {
+              void pollSignIn()
+            }, 1200)
             return undefined
           }
           if (v.done && v.done.status === 'authorized') {
@@ -387,7 +382,11 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
         return undefined
       })
       .catch(() => {
-        if (aliveRef.current) setTimeout(pollSignIn, 2500)
+        if (aliveRef.current) {
+          setTimeout(() => {
+            void pollSignIn()
+          }, 2500)
+        }
       })
   }
 
@@ -622,8 +621,13 @@ function isRemoteLike(value: unknown): value is RemoteLike {
   )
 }
 
-function apply(ctx: DshClientContext) {
-  ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'dsh-oauth-providers: locale')
+/**
+ * Mount the OAuth provider section into this plugin's client half. The locale
+ * namespace, section id and channel prefix keep the `dsh-oauth-providers`
+ * names the host half and the settings page already address.
+ */
+export function registerOAuthSettings(ctx: DshClientContext): void {
+  ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'dsh-more-providers: oauth locale')
   const t = ctx.locale.bind(LOCALE_NS)
   // Host operations stay in the apply world; the section and its cards only
   // receive these bound callbacks plus the localized string binder.
@@ -631,13 +635,13 @@ function apply(ctx: DshClientContext) {
     modelCatalog() {
       const remote: unknown = ctx.remote
       if (!isRemoteLike(remote))
-        throw new TypeError('oauth-providers: remote session service unavailable')
+        throw new TypeError('dsh-more-providers: remote session service unavailable')
       return remote.session.modelCatalog()
     },
     discoverModels(ns, provider) {
       const remote: unknown = ctx.remote
       if (!isRemoteLike(remote))
-        throw new TypeError('oauth-providers: remote llm service unavailable')
+        throw new TypeError('dsh-more-providers: remote llm service unavailable')
       return remote.llm.discoverModels(ns, { provider })
     },
   }
@@ -654,6 +658,3 @@ function apply(ctx: DshClientContext) {
     )
   })
 }
-
-export { apply }
-export const inject = ['slots', 'locale', 'remote', 'remote.llm', 'remote.session']

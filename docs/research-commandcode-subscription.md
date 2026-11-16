@@ -463,5 +463,5 @@ export interface QuotaWindow {
 - [opencodex 配额 commit](https://github.com/lidge-jun/opencodex/commit/2d5f374fbedc924998fa0dd4f2f78206d155bcbb)——`windowLimits`、USD credits、org 作用域与测试向量。
 - [CodexBar Command Code notes](https://github.com/steipete/codexbar/blob/7447bc77c2497323d9c41e40164ce705533493c8/docs/command-code.md)——5h/周/月与 `monthlyCreditsGranted`、Cookie/API key 两种来源。
 - 本机 dsh：`@deepseek-ai/dsh-llm` / `dsh-llm-pi-ai` / `@earendil-works/pi-ai` 的 `lib/types/*.d.ts` 与 `lib/index.js`（0.2.2-rc.1）。
-- 同仓参考：[`packages/oauth-providers`](../packages/oauth-providers/)（自定义 `ctx.llm` 路由的现成范式）、
+- 同仓参考：[`packages/more-providers`](../packages/more-providers/)（内含 ChatGPT OAuth 的自定义 `ctx.llm` 路由范式，原 oauth-providers 已并入）、
   [`packages/plan-usage`](../packages/plan-usage/)（source 聚合与设置页卡片）。

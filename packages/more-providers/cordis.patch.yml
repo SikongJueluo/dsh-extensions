@@ -1,9 +1,6 @@
-# dsh-more-providers bundle layer: the YAML-driven provider registry.
-#
-# It owns every API-key LLM route, so the stock pi-ai adapter row is disabled
-# to avoid a second provider directory and duplicate-route conflicts. ChatGPT
-# OAuth stays with dsh-oauth-providers; deepseek-official stays with the stock
-# DeepSeek adapter. Provider definitions live in $DSH_HOME/more-providers.yaml.
+# Unified API-key and OAuth providers, configured in more-providers.yaml.
+# The stock pi-ai row is disabled to avoid duplicate routes; deepseek-official
+# continues to use the stock DeepSeek adapter.
 - id: llm-pi-ai
   name: '@deepseek-ai/dsh-llm-pi-ai'
   disabled: true

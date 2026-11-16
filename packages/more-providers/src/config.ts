@@ -14,6 +14,7 @@ import { isAbsolute, join } from 'node:path'
 import { ConfigError, readConfigFile, resolveConfigFile } from '@dsh-extensions/config'
 import { isRecord } from './record.js'
 import type { KeySource } from './keys.js'
+import type { ResolvedChatGptConfig } from './providers/chatgpt/index.js'
 
 export { ConfigError }
 
@@ -28,6 +29,12 @@ export interface ModelConfig {
 }
 
 export type ProviderKind = 'builtin' | 'custom' | 'command-code'
+
+/** Validated startup configuration; omitted ChatGPT means explicitly disabled. */
+export interface ResolvedConfig {
+  providers: ResolvedProvider[]
+  chatgpt?: ResolvedChatGptConfig
+}
 
 /** One enabled route after inheritance and key-source resolution. */
 export interface ResolvedProvider {
@@ -477,8 +484,46 @@ function parseProvider(providerId: string, value: unknown, secretDir: string): R
   return result
 }
 
-/** Resolve one parsed YAML document into enabled routes. */
-export function resolveConfig(value: unknown): ResolvedProvider[] {
+/** Validate built-in OAuth overrides even when the provider is disabled. */
+function parseChatGpt(value: unknown): ResolvedChatGptConfig | undefined {
+  const path = 'providers.chatgpt'
+  const raw = value === undefined ? {} : asRecord(value, path)
+  for (const [key, entry] of Object.entries(raw)) {
+    if (entry === null) fail(`${path}.${key}`, 'null is not a valid provider option')
+  }
+  rejectUnknown(
+    raw,
+    new Set([
+      'enabled',
+      'baseURL',
+      'clientVersion',
+      'refreshMarginMs',
+      'defaultContextWindow',
+      'promptCacheKey',
+    ]),
+    path,
+  )
+  const enabled = optionalBoolean(raw, 'enabled', path)
+  const baseURL = optionalUrl(raw, 'baseURL', path, false)
+  const clientVersion = raw.clientVersion
+  if (clientVersion !== undefined && typeof clientVersion !== 'string') {
+    fail(`${path}.clientVersion`, 'expected a string')
+  }
+  const refreshMarginMs = optionalPositiveInteger(raw, 'refreshMarginMs', path)
+  const defaultContextWindow = optionalPositiveInteger(raw, 'defaultContextWindow', path)
+  const promptCacheKey = optionalBoolean(raw, 'promptCacheKey', path)
+  if (enabled === false) return undefined
+  return {
+    ...(baseURL === undefined ? {} : { baseURL }),
+    ...(clientVersion === undefined ? {} : { clientVersion }),
+    ...(refreshMarginMs === undefined ? {} : { refreshMarginMs }),
+    ...(defaultContextWindow === undefined ? {} : { defaultContextWindow }),
+    ...(promptCacheKey === undefined ? {} : { promptCacheKey }),
+  }
+}
+
+/** Resolve API-key routes and default-on OAuth providers from one strict document. */
+export function resolveConfig(value: unknown): ResolvedConfig {
   const raw = asRecord(value, 'config')
   rejectUnknown(raw, new Set(['secretDir', 'providers']), 'config')
   const secretDir = optionalString(raw, 'secretDir', 'config')
@@ -488,17 +533,22 @@ export function resolveConfig(value: unknown): ResolvedProvider[] {
   const providersRaw = raw.providers
   if (providersRaw === undefined || providersRaw === null) fail('config.providers', 'is required')
   const providers = asRecord(providersRaw, 'config.providers')
-  const routes = new Set<string>()
+  const chatgpt = parseChatGpt(providers.chatgpt)
+  const routes = new Set(['chatgpt'])
   const result: ResolvedProvider[] = []
   for (const [providerId, provider] of Object.entries(providers)) {
+    if (providerId === 'chatgpt') continue
     for (const resolved of parseProvider(providerId, provider, effectiveSecretDir)) {
       if (routes.has(resolved.route))
-        fail(`providers.${providerId}`, `duplicate route id "${resolved.route}"`)
+        fail(`providers.${providerId}`, `duplicate or reserved route id "${resolved.route}"`)
       routes.add(resolved.route)
       result.push(resolved)
     }
   }
-  return result
+  return {
+    providers: result,
+    ...(chatgpt === undefined ? {} : { chatgpt }),
+  }
 }
 
 /** The effective `secretDir` (agenix's user runtime directory by default). */
@@ -515,6 +565,6 @@ export function resolveConfigPath(explicit?: string): string {
 }
 
 /** Read and validate the YAML file. Throws ConfigError on any problem. */
-export async function loadConfig(path: string): Promise<ResolvedProvider[]> {
+export async function loadConfig(path: string): Promise<ResolvedConfig> {
   return readConfigFile(path, resolveConfig)
 }

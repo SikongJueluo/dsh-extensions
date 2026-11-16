@@ -18,7 +18,7 @@
  *
  * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
  *
- * @module dsh-openai-oauth/serialize
+ * @module dsh-more-providers/providers/chatgpt/serialize
  */
 import {
   LlmError,
@@ -29,6 +29,7 @@ import {
 import type {
   ContentBlock,
   GenerateOptions,
+  ImageAttachmentAccessResolver,
   ImageBlock,
   RequestMessage,
 } from '@deepseek-ai/dsh-llm'
@@ -83,11 +84,13 @@ function imagePart(version: RequestImageAttachment): InputItem {
  * Serialize one user message's blocks into Responses content parts. Text-only
  * messages keep the historical single joined `input_text` part; messages with
  * live image blocks map block-by-block (`input_text` / `input_image`), while
- * offloaded image occurrences degrade to their placeholder text.
+ * offloaded image occurrences degrade to their placeholder text — enriched
+ * with the model-tool-readable path when `access` resolves one.
  */
 function userContent(
   blocks: readonly ContentBlock[],
   images: RequestImages | undefined,
+  access?: ImageAttachmentAccessResolver,
 ): InputItem[] {
   if (!blocks.some((block) => block.type === 'image')) {
     return [{ type: 'input_text', text: flattenText(blocks) }]
@@ -98,13 +101,19 @@ function userContent(
       if (block.text.length > 0) content.push({ type: 'input_text', text: block.text })
     } else if (block.type === 'image') {
       if (block.offloaded === true) {
-        content.push({ type: 'input_text', text: offloadedImageText(block.attachment) })
+        content.push({
+          type: 'input_text',
+          text: offloadedImageText(block.attachment, access?.(block.attachment)),
+        })
         continue
       }
       const version = requestVersion(block, images)
       // Label the occurrence the way Codex does, so the model can name it.
       content.push(
-        { type: 'input_text', text: requestImageHandleText(block.attachment, version) },
+        {
+          type: 'input_text',
+          text: requestImageHandleText(block.attachment, version, access?.(block.attachment)),
+        },
         imagePart(version),
       )
     }
@@ -121,6 +130,7 @@ function userContent(
 function toolOutput(
   blocks: readonly ContentBlock[],
   images: RequestImages | undefined,
+  access?: ImageAttachmentAccessResolver,
 ): string | InputItem[] {
   if (!blocks.some((block) => block.type === 'image')) {
     return flattenText(blocks) || '(no output)'
@@ -131,7 +141,10 @@ function toolOutput(
       if (block.text.length > 0) items.push({ type: 'input_text', text: block.text })
     } else if (block.type === 'image') {
       if (block.offloaded === true) {
-        items.push({ type: 'input_text', text: offloadedImageText(block.attachment) })
+        items.push({
+          type: 'input_text',
+          text: offloadedImageText(block.attachment, access?.(block.attachment)),
+        })
         continue
       }
       items.push(imagePart(requestVersion(block, images)))
@@ -148,9 +161,10 @@ type InputItem = Record<string, unknown>
  * System messages are skipped — the harness delivers the system prompt
  * separately as `GenerateOptions.system` → `instructions`.
  */
-export function serializeInput(
+function serializeInput(
   messages: readonly RequestMessage[],
   images?: RequestImages,
+  access?: ImageAttachmentAccessResolver,
 ): InputItem[] {
   const input: InputItem[] = []
   for (const message of messages) {
@@ -181,13 +195,13 @@ export function serializeInput(
       input.push({
         type: 'function_call_output',
         call_id: message.toolCallId,
-        output: toolOutput(message.content, images),
+        output: toolOutput(message.content, images, access),
       })
       continue
     }
 
     // User-role messages (persisted or one-shot identity-free inputs).
-    input.push({ role: 'user', content: userContent(message.content, images) })
+    input.push({ role: 'user', content: userContent(message.content, images, access) })
   }
   return input
 }
@@ -197,7 +211,7 @@ export function serializeInput(
  * Returns `undefined` (omitted) for the "off" / unset case so the backend
  * applies its own default.
  */
-export function resolveReasoning(effort: string | undefined): { effort: string } | undefined {
+function resolveReasoning(effort: string | undefined): { effort: string } | undefined {
   if (effort === undefined || effort === 'off') return undefined
   return { effort }
 }
@@ -237,6 +251,7 @@ export function serializeRequest(
   options: GenerateOptions,
   images?: RequestImages,
   affinity?: SerializeAffinity,
+  access?: ImageAttachmentAccessResolver,
 ): Record<string, unknown> {
   const tools = options.tools?.map((tool) => ({
     type: 'function',
@@ -254,7 +269,7 @@ export function serializeRequest(
     ...(options.system !== undefined && options.system.length > 0
       ? { instructions: options.system }
       : {}),
-    input: serializeInput(options.messages, images),
+    input: serializeInput(options.messages, images, access),
     ...(promptCacheKey !== undefined ? { prompt_cache_key: promptCacheKey } : {}),
     ...(tools !== undefined && tools.length > 0
       ? { tools, tool_choice: 'auto', parallel_tool_calls: true }

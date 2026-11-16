@@ -87,7 +87,7 @@ dsh 本体与 `$DSH_HOME`（`~/.dsh` 下 profiles、patch 层、bin 等运行时
 
 ## 新增插件
 
-1. `cp -r packages/oauth-providers packages/<name>`。
+1. 参考 `packages/plan-usage` 的双半包骨架新建 `packages/<name>`，复制 manifest、patch 与构建配置；源码按本插件职责编写。
 2. 改 `package.json`：`name`（`dsh-<name>`）、`description`；consumed services 进 `peerDependencies` + `devDependencies`，仅宿主侧用不到的 runtime 依赖进 `dependencies`。
 3. 改 `cordis.patch.yml`（行的 `id` 与 `name` 换成新包名）和 `dev.patch.yml`（绝对路径）。
 4. 改 `src/`；不需要浏览器 UI 就删掉 `src/client/`、`vite.client.config.ts`、`tsconfig.client.json`、`dsh.client` 声明与 `exports["./client"]`。

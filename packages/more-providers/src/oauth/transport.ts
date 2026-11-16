@@ -10,7 +10,7 @@
  *
  * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
  *
- * @module dsh-openai-oauth/transport
+ * @module dsh-more-providers/oauth/transport
  */
 import { ProxyAgent, fetch as undiciFetch } from 'undici'
 import { execFile } from 'node:child_process'

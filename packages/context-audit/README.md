@@ -4,8 +4,8 @@
 （`$DSH_HOME/sessions/…/session.v*.jsonl.zstd`），输出三层统计。数据不离开本机。
 
 1. **按 provider/model 路由**：请求数、prompt 总量（uncached+缓存读）、缓存读取、
-   命中率、输出、会话数 —— 缓存优化（如 [dsh-oauth-providers](../oauth-providers) 的
-   chatgpt `promptCacheKey` 开关）A/B 对照的核心读数；
+   命中率、输出、会话数 —— 缓存优化（如 [dsh-more-providers](../more-providers) 的
+   `providers.chatgpt.promptCacheKey` 开关）A/B 对照的核心读数；
 2. **按工具**：调用数、失败数、失败率、平均/最长耗时、无结果（中断）数、会话数、
    错误码分布 —— 判断你的工具与 DSH 内置工具的好坏，指导后续改进；
 3. **按会话**：uncached 输入最大的会话（标题 + 时间范围 + 路由构成）。

@@ -1,12 +1,14 @@
 # 调研：more-providers 的 MDKJ 图片附件服务报错
 
+> 以下为修复前的诊断快照。后续合并和修复见 [OAuth 合并迁移计划](plan-more-providers-oauth-merge.md)；OAuth 源码链接已随文件迁移。
+
 调研日期：2026-11-16。依据：本仓源码、当前安装产物、DSH 0.2.2-rc.1 的类型与实现，以及无网络差分实验。本次仅新增调研记录，未修改业务代码、profile 或 Nix 配置。
 
 ## 结论
 
 **直接根因是 more-providers 创建 `PiAiAdapter` 时没有传入 `resolveAttachments`。** 请求历史含图片时，适配器无法取得附件服务，在供应商 HTTP 请求之前抛出 `pi-ai image input requires the durable attachment service`（`UNSUPPORTED_CONTENT`）。
 
-与此前 OAuth 的问题同属插件图片链路不完整，但不能说是同一个实现缺陷：旧 OAuth 调研记录的是仅支持文本的序列化限制，以及随后修复的工具结果图片路径；当前 OAuth 已自行读取持久附件，more-providers 则漏接 stock 适配器的服务回调。参见[旧调研的实现记录](research-chatgpt-backend-image-input.md#L87)及[当前 OAuth 接线](../packages/oauth-providers/src/providers/chatgpt/index.ts#L179)。
+与此前 OAuth 的问题同属插件图片链路不完整，但不能说是同一个实现缺陷：旧 OAuth 调研记录的是仅支持文本的序列化限制，以及随后修复的工具结果图片路径；当前 OAuth 已自行读取持久附件，more-providers 则漏接 stock 适配器的服务回调。参见[旧调研的实现记录](research-chatgpt-backend-image-input.md#L87)及[当前 OAuth 接线](../packages/more-providers/src/providers/chatgpt/index.ts#L179)。
 
 ## 直接证据
 
@@ -50,7 +52,7 @@ TEXT ONLY: reaches mocked provider without attachment service
 
 ## OAuth 对照与修复建议
 
-当前 OAuth 在[构造自己的适配器](../packages/oauth-providers/src/providers/chatgpt/index.ts#L179)时传入惰性 `resolveAttachments`；[prepareImages](../packages/oauth-providers/src/providers/chatgpt/adapter.ts#L443) 按附件 id 去重并调用 `readImageRequest`；[序列化](../packages/oauth-providers/src/providers/chatgpt/serialize.ts#L59)再将请求版本编码为 data URL。它自行实现这些步骤，more-providers 则将转换交给 `PiAiAdapter`。
+当前 OAuth 在[构造自己的适配器](../packages/more-providers/src/providers/chatgpt/index.ts#L179)时传入惰性 `resolveAttachments`；[prepareImages](../packages/more-providers/src/providers/chatgpt/adapter.ts#L443) 按附件 id 去重并调用 `readImageRequest`；[序列化](../packages/more-providers/src/providers/chatgpt/serialize.ts#L59)再将请求版本编码为 data URL。它自行实现这些步骤，more-providers 则将转换交给 `PiAiAdapter`。
 
 最小修复应让 `buildAdapter` 接收取服务的闭包，并从 `apply` 传入：
 

@@ -71,8 +71,8 @@ const APPROVED = [
   ['packages/jj-workspace/src/client/index.tsx', ['react-hooks/exhaustive-deps']],
   ['packages/jj-workspace/src/client/worktree-option.tsx', ['react/set-state-in-effect']],
   // A17: tsgolint misreads the `promisify(execFile)` overload; `tsc` accepts it.
-  ['packages/oauth-providers/src/transport.ts', ['typescript/strict-void-return']],
-  ['packages/oauth-providers/src/client/index.tsx', ['react-hooks/exhaustive-deps']],
+  ['packages/more-providers/src/oauth/transport.ts', ['typescript/strict-void-return']],
+  ['packages/more-providers/src/client/oauth.tsx', ['react-hooks/exhaustive-deps']],
   ['packages/plan-usage/src/client/index.tsx', ['react-hooks/exhaustive-deps']],
   // A16: the pattern exists to match ANSI escapes.
   ['packages/remote-exec/src/display.ts', ['eslint/no-control-regex']],

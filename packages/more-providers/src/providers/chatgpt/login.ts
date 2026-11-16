@@ -7,11 +7,11 @@
  * surface that can host an authorization conversation — the shared browser
  * channel in this package, or a future standard surface — may run it.
  *
- * @module dsh-oauth-providers/providers/chatgpt/login
+ * @module dsh-more-providers/providers/chatgpt/login
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { CredentialKey } from '@deepseek-ai/dsh-credentials'
-import type { AuthChannel } from '../../channel.js'
+import type { AuthChannel } from '../../oauth/channel.js'
 import {
   createAuthorizationRequest,
   exchangeAuthorizationCode,
@@ -20,7 +20,7 @@ import {
   startCallbackServer,
 } from './oauth.js'
 import type { OAuthGrant } from './oauth.js'
-import type { FetchLike } from '../../transport.js'
+import type { FetchLike } from '../../oauth/transport.js'
 import { DISPLAY_NAME, PROVIDER } from './identity.js'
 import { PACKAGE_NAME } from '../../identity.js'
 

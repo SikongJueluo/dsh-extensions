@@ -56,7 +56,7 @@ async function quotaView(
 
 /**
  * Mount the channel route; appears once the connection service and a web
- * server are both present (soft-injected), mirroring dsh-oauth-providers.
+ * server are both present (soft-injected), mirroring dsh-more-providers' OAuth channel.
  */
 export function registerChannel(ctx: Context, service: PlanUsageService): void {
   const handler = async (

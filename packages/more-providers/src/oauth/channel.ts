@@ -13,7 +13,7 @@
  * registry at plugin load regardless, so `providers`/`status` answer even in
  * compositions without the seam.
  *
- * @module dsh-oauth-providers/channel
+ * @module dsh-more-providers/oauth/channel
  */
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only imports: pull the `Context.connection` / `Context.webServer`
@@ -27,8 +27,8 @@ import type {
 } from '@deepseek-ai/dsh-authorization'
 import { credentialKeyScope } from '@deepseek-ai/dsh-credentials'
 import type { CredentialKey } from '@deepseek-ai/dsh-credentials'
-import { PLUGIN_NAME, RPC_CHANNEL } from './identity.js'
-import { isRecord } from './record.js'
+import { OAUTH_CREDENTIAL_SCOPE, RPC_CHANNEL } from '../identity.js'
+import { isRecord } from '../record.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 /** One endpoint segment of the channel (same grammar as connection RPC). */
@@ -129,7 +129,7 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
   // flow would otherwise leave a stale failure in each already-open model
   // picker until a full page reload.
   ctx.on('credentials/record-updated', (key: CredentialKey) => {
-    if (credentialKeyScope(key) === PLUGIN_NAME) ctx.emit('llm/adapters-updated')
+    if (credentialKeyScope(key) === OAUTH_CREDENTIAL_SCOPE) ctx.emit('llm/adapters-updated')
   })
 
   const interactionOf = (entry: ProviderEntry): AuthorizationInteraction => ({

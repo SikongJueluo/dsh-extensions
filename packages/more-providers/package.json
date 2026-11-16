@@ -1,7 +1,7 @@
 {
   "name": "dsh-more-providers",
-  "version": "0.1.0",
-  "description": "Env-driven extra LLM providers for DSH: Command Code subscription (CMD_API_KEY) today, with its live model catalog mapped across anthropic-messages, openai-responses and openai-completions",
+  "version": "0.2.0",
+  "description": "YAML-configured LLM providers and built-in ChatGPT OAuth sign-in for DSH, with shared host image integration",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",
@@ -20,12 +20,14 @@
     "cordis.patch.yml",
     "dev.patch.yml",
     "README.md",
+    "THIRD-PARTY-NOTICE.md",
     "example.yaml"
   ],
   "scripts": {
     "build": "tsdown && vite build --config vite.client.config.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
     "smoke": "node smoke.mjs",
+    "test": "vitest run",
     "clean": "rm -rf lib",
     "prepare": "tsdown && vite build --config vite.client.config.ts"
   },
@@ -36,15 +38,25 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-connection"
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-remotes"
       ]
     }
   },
   "dependencies": {
+    "undici": "^8.10.0",
     "yaml": "^2.4.2"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-attachment": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-authorization": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-connection": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-credentials": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-fs": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-host-webserver": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-llm": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-llm-pi-ai": "^0.2.2-rc.1",
     "@deepseek-ai/schemastery": "^3.19.0",
@@ -53,6 +65,11 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "catalog:",
+    "@deepseek-ai/dsh-attachment": "catalog:",
+    "@deepseek-ai/dsh-authorization": "catalog:",
+    "@deepseek-ai/dsh-credentials": "catalog:",
+    "@deepseek-ai/dsh-fs": "catalog:",
+    "@deepseek-ai/dsh-host-webserver": "catalog:",
     "@deepseek-ai/dsh-llm": "catalog:",
     "@deepseek-ai/dsh-llm-pi-ai": "catalog:",
     "@deepseek-ai/schemastery": "catalog:",
@@ -67,6 +84,7 @@
     "react-dom": "catalog:",
     "tailwindcss": "catalog:",
     "vite": "catalog:",
+    "vitest": "^3.2.4",
     "@deepseek-ai/dsh-client-connection": "catalog:"
   }
 }

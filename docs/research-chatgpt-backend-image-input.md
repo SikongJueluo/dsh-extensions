@@ -1,11 +1,13 @@
 # 调研：ChatGPT backend（`/backend-api/codex/responses`）的图像输入支持
 
+> 维护注：本文行为与行号描述保留调研时快照；2026-11-16 OAuth 已并入 more-providers，仓内源码链接已随文件迁移。
+
 > 结论先行：**`POST https://chatgpt.com/backend-api/codex/responses` 接受 Responses API 格式的图像输入，本插件"adapter 不支持图片"的硬拒绝是过时的自我限制，不是后端限制。** 官方参考客户端 Codex CLI（Rust）自 2025-04 首次导入起就向同一端点发送
 > `{ "type": "input_image", "image_url": "data:image/png;base64,…", "detail": "high" }` 内容块；当前 codex 模型目录里全部 11 个模型（含 gpt-6 全家族 `gpt-6-astra` / `gpt-6-sol` / `gpt-6-luna` / `gpt-6.1-sol`）的 `input_modalities` 均为 `["text","image"]`。放开只需改 serialize.ts 的用户消息分支 + adapter.ts 的 `inputModalities`。
 
 - 调研日期：2026-10-01。方法：浅查无果后全量 clone `openai/codex`（含全部历史 + tags），逐文件读源码 + git 考古；上游 `werifu/dsh-oai-oauth` 同法核对。
 - 源码 pin：openai/codex @ [`5aa92804`](https://github.com/openai/codex/commit/5aa92804d255dcaefe169dd7febb4006a2474e32)（2026-09-30，下称 CODEX，行号均取自该 commit）；werifu/dsh-oai-oauth @ [`75a0509`](https://github.com/werifu/dsh-oai-oauth/commit/75a0509a987cb4ba45dc293c0a23f2805988beb4)（2026-08-14，其 HEAD）。
-- 本仓现状：[serialize.ts:27-35](../packages/oauth-providers/src/providers/chatgpt/serialize.ts#L27-L35) 对含图内容抛 `UNSUPPORTED_CONTENT`；[adapter.ts:335](../packages/oauth-providers/src/providers/chatgpt/adapter.ts#L335) 与 [:348](../packages/oauth-providers/src/providers/chatgpt/adapter.ts#L348) 广告 `inputModalities: ['text']`。
+- 本仓现状：[serialize.ts:27-35](../packages/more-providers/src/providers/chatgpt/serialize.ts#L27-L35) 对含图内容抛 `UNSUPPORTED_CONTENT`；[adapter.ts:335](../packages/more-providers/src/providers/chatgpt/adapter.ts#L335) 与 [:348](../packages/more-providers/src/providers/chatgpt/adapter.ts#L348) 广告 `inputModalities: ['text']`。
 
 ## 1. Codex CLI 发给该端点的图像 wire 形状（问题 1）
 
@@ -77,11 +79,11 @@ pub const DEFAULT_IMAGE_DETAIL: ImageDetail = ImageDetail::High;
 
 **判定：过时的插件限制，不是后端限制。** 参考客户端自 2025-04 起就在这条 OAuth 线路上发图，当前目录所有模型（含 gpt-6 全家族）都声明接受 image 输入，且 codex 对 wire 的宽容默认（缺省即 text+image）也说明后端无"文本-only"约束。
 
-需要的最小 wire 改动（[serialize.ts](../packages/oauth-providers/src/providers/chatgpt/serialize.ts)）：
+需要的最小 wire 改动（[serialize.ts](../packages/more-providers/src/providers/chatgpt/serialize.ts)）：
 
 1. 删掉用户消息路径上的 `assertTextOnly`（tool 输出路径可暂留文本）。
 2. 用户消息 content 从"flatten 成单个 `input_text`"改为按块映射：`text` → `{ type:'input_text', text }`；`image` → `{ type:'input_image', image_url: 'data:' + mediaType + ';base64,' + base64(attachment bytes), detail: 'high' }`（字节经 `attachmentId` 从附件服务取回；GIF 建议重编码 PNG，>2048px 先缩放，对齐 §2 约束）。
-3. [adapter.ts:335/:348](../packages/oauth-providers/src/providers/chatgpt/adapter.ts#L335) 的 `inputModalities` 改 `['text','image']`（可按模型目录的 `input_modalities` 投影）。
+3. [adapter.ts:335/:348](../packages/more-providers/src/providers/chatgpt/adapter.ts#L335) 的 `inputModalities` 改 `['text','image']`（可按模型目录的 `input_modalities` 投影）。
 4. 其余不动：`store:false` / `stream:true` / `include` / `instructions` 与图像正交；畸形图可仿 codex 降级为文本占位而非抛错。
 
 > **2026-10-01 已实现**（feat(oauth-providers): send images to the ChatGPT

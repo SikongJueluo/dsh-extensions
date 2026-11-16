@@ -9,7 +9,7 @@
  *
  * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
  *
- * @module dsh-openai/discovery
+ * @module dsh-more-providers/providers/chatgpt/discovery
  */
 import { oauthHeaders } from './auth.js'
 import type { TokenStore } from './auth.js'
@@ -23,19 +23,17 @@ export interface DiscoveredModelView {
 }
 
 export interface DiscoveryDeps {
-  options: () => {
-    refreshMarginMs: number
-  }
+  refreshMarginMs: number
   tokenStore: TokenStore
   catalog: ModelCatalog
 }
 
 /** Build the `registerModelDiscovery` handler for the `openai` namespace. */
-export function createDiscovery({ options, tokenStore, catalog }: DiscoveryDeps) {
+export function createDiscovery({ refreshMarginMs, tokenStore, catalog }: DiscoveryDeps) {
   return async function discover(): Promise<DiscoveredModelView[]> {
     // Probe the stored sign-in first (refreshing when near expiry) so a
     // missing or expired login surfaces as the provider's failure reason.
-    const token = await tokenStore.resolve(options().refreshMarginMs)
+    const token = await tokenStore.resolve(refreshMarginMs)
     const models = await catalog.forceRefresh(oauthHeaders(token.access, token.accountId))
     return models.map((model) => {
       const view: DiscoveredModelView = { id: model.id, name: model.name }

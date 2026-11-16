@@ -9,10 +9,9 @@ the Software.
 The ChatGPT provider modules (adapter, auth, catalog, discovery, oauth,
 login, serialize) and the shared transport derive in substantial part from
 <https://github.com/werifu/dsh-oai-oauth>, ported to this repository's build
-layout and adapted to the DSH 0.1.5-rc API surface
-(`ToolCallId` brand rename, `ctx.settings.installSection`, client Remote wire,
-credential-seam token storage in place of the Codex CLI `auth.json`; now one
-provider module of the multi-provider `dsh-oauth-providers` package).
+layout and adapted to the DSH credential, authorization and client Remote
+interfaces. They are maintained in this package after merging dsh-oauth-providers
+into dsh-more-providers.
 
 MIT License
 

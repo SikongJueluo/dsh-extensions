@@ -8,11 +8,11 @@
  *
  * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
  *
- * @module dsh-openai-oauth/catalog
+ * @module dsh-more-providers/providers/chatgpt/catalog
  */
 import { LlmError } from '@deepseek-ai/dsh-llm'
-import { readJson } from '../../transport.js'
-import type { FetchLike } from '../../transport.js'
+import { readJson } from '../../oauth/transport.js'
+import type { FetchLike } from '../../oauth/transport.js'
 import { isRecord } from '../../record.js'
 
 /** Input modality vocabulary shared with the harness model catalog. */
@@ -100,14 +100,14 @@ function parseModelsPayload(payload: unknown): ModelEntry[] {
 
 export interface ModelCatalogOptions {
   fetch: FetchLike
-  options: () => CatalogOptions
+  options: CatalogOptions
   /** How long a successful fetch may be served from cache. */
   ttlMs?: number
 }
 
 export class ModelCatalog {
   private readonly fetch: FetchLike
-  private readonly options: () => CatalogOptions
+  private readonly options: CatalogOptions
   private readonly ttlMs: number
   private live: ModelEntry[] | null = null
   private liveAt = 0
@@ -166,7 +166,7 @@ export class ModelCatalog {
    * The registry query failing never fails the catalog.
    */
   private async resolveClientVersion(): Promise<string> {
-    const explicit = this.options().clientVersion
+    const explicit = this.options.clientVersion
     if (explicit) return explicit
     if (this.versionCache && Date.now() - this.versionCache.at < this.ttlMs)
       return this.versionCache.value
@@ -196,7 +196,7 @@ export class ModelCatalog {
     headers: Record<string, string> | undefined,
     clientVersion: string,
   ): Promise<ModelEntry[]> {
-    const { baseURL } = this.options()
+    const { baseURL } = this.options
     const url = `${baseURL}/models?client_version=${encodeURIComponent(clientVersion)}`
     let response: Response
     try {

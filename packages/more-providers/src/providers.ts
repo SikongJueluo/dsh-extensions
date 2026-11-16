@@ -28,6 +28,7 @@ import {
 import type { KeySource } from './keys.js'
 import { readKey } from './keys.js'
 import { isRecord } from './record.js'
+import type { ProviderImageServices } from './runtime.js'
 
 const FALLBACK_CONTEXT_WINDOW = 131_072
 const FALLBACK_MAX_TOKENS = 32_768
@@ -389,8 +390,10 @@ export async function buildProviders(
 export function buildAdapter(
   profiles: ReadonlyMap<string, ResolvedPiAiProviderProfile>,
   keyOf: (provider: string) => string | undefined,
+  images: ProviderImageServices,
 ): PiAiAdapter {
   return new PiAiAdapter({
+    ...images,
     profiles: () => profiles,
     resolveApiKey: async (provider) => {
       const key = keyOf(provider)

@@ -8,7 +8,7 @@
  *
  * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
  *
- * @module dsh-openai-oauth/adapter
+ * @module dsh-more-providers/providers/chatgpt/adapter
  */
 import { Readable } from 'node:stream'
 import {
@@ -28,6 +28,7 @@ import {
 import type {
   FinishReason,
   GenerateOptions,
+  ImageAttachmentAccessResolver,
   LlmModelInfo,
   LlmProviderInfo,
   LlmResolvedModelInfo,
@@ -35,13 +36,10 @@ import type {
   TokenUsage,
 } from '@deepseek-ai/dsh-llm'
 import { longEdgeDimensions } from '@deepseek-ai/dsh-attachment'
-import type {
-  AttachmentStore,
-  ImageAttachmentRef,
-  RequestImageAttachment,
-} from '@deepseek-ai/dsh-attachment'
-import type { FetchLike } from '../../transport.js'
+import type { ImageAttachmentRef, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
+import type { FetchLike } from '../../oauth/transport.js'
 import { isRecord } from '../../record.js'
+import type { ProviderImageServices } from '../../runtime.js'
 import type { ModelCatalog } from './catalog.js'
 import { oauthHeaders } from './auth.js'
 import type { TokenStore } from './auth.js'
@@ -50,7 +48,13 @@ import { PACKAGE_NAME } from '../../identity.js'
 import { serializeRequest, clampSessionAffinityKey } from './serialize.js'
 import type { RequestImages } from './serialize.js'
 
-/** Connection facts the adapter reads per request. */
+/** One request's prepared image content: versions plus their access resolver. */
+interface PreparedRequestImages {
+  images: RequestImages
+  access: ImageAttachmentAccessResolver
+}
+
+/** Connection facts resolved from the startup config snapshot. */
 export interface AdapterOptions {
   baseURL: string
   defaultReasoningEffort: string
@@ -332,34 +336,28 @@ async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<Strea
 }
 
 export interface OpenAiOauthAdapterDeps {
-  options: () => AdapterOptions
+  options: AdapterOptions
   tokenStore: TokenStore
   catalog: ModelCatalog
   getFetch: () => Promise<FetchLike>
-  /** Live attachment store reader; `undefined` when the service is absent. */
-  resolveAttachments: () => AttachmentStore | undefined
+  /** Host image services, shared with the other adapters in this plugin. */
+  images: ProviderImageServices
 }
 
 export class OpenAiOauthAdapter extends LlmAdapter {
-  private readonly options: () => AdapterOptions
+  private readonly options: AdapterOptions
   private readonly tokenStore: TokenStore
   private readonly catalog: ModelCatalog
   private readonly getFetch: () => Promise<FetchLike>
-  private readonly resolveAttachments: () => AttachmentStore | undefined
+  private readonly images: ProviderImageServices
 
-  constructor({
-    options,
-    tokenStore,
-    catalog,
-    getFetch,
-    resolveAttachments,
-  }: OpenAiOauthAdapterDeps) {
+  constructor({ options, tokenStore, catalog, getFetch, images }: OpenAiOauthAdapterDeps) {
     super()
     this.options = options
     this.tokenStore = tokenStore
     this.catalog = catalog
     this.getFetch = getFetch
-    this.resolveAttachments = resolveAttachments
+    this.images = images
   }
 
   override providerInfo(provider: string): LlmProviderInfo {
@@ -369,14 +367,14 @@ export class OpenAiOauthAdapter extends LlmAdapter {
   override async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
     // Probe OAuth first so the model selector can show the provider offline
     // (red) when the ChatGPT login is missing or no longer refreshable.
-    const { access, accountId } = await this.tokenStore.resolve(this.options().refreshMarginMs)
+    const { access, accountId } = await this.tokenStore.resolve(this.options.refreshMarginMs)
     const models = await this.catalog.refresh(oauthHeaders(access, accountId))
     return models.map((model) => this.modelInfo(provider, model))
   }
 
   override async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     const entry = this.catalog.resolve(model)
-    const cfg = this.options()
+    const cfg = this.options
     const contextWindow = entry.contextWindow ?? cfg.defaultContextWindow
     const efforts = entry.reasoning.length > 0 ? entry.reasoning : cfg.defaultReasoningEfforts
     return {
@@ -403,7 +401,7 @@ export class OpenAiOauthAdapter extends LlmAdapter {
   }
 
   override async *stream(options: GenerateOptions): AsyncGenerator<StreamChunk> {
-    const cfg = this.options()
+    const cfg = this.options
     const fetchFn = await this.getFetch()
     const { access, accountId } = await this.tokenStore.resolve(cfg.refreshMarginMs)
     const controller = new AbortController()
@@ -444,13 +442,15 @@ export class OpenAiOauthAdapter extends LlmAdapter {
    * Read encoded request images for every live image occurrence in the
    * conversation (offloaded occurrences stay text placeholders). Returns
    * `undefined` for text-only requests, so nothing else changes on the wire.
+   * The access resolver gives the serializer's handle/offload texts the
+   * model-tool-readable path when the host filesystem provider exposes one.
    */
   private async prepareImages(
     options: GenerateOptions,
     signal: AbortSignal,
-  ): Promise<RequestImages | undefined> {
+  ): Promise<PreparedRequestImages | undefined> {
     if (!options.messages.some((message) => contentHasImage(message.content))) return undefined
-    const attachments = this.resolveAttachments()
+    const attachments = this.images.resolveAttachments()
     if (attachments === undefined) {
       throw new LlmError(
         'the attachment service is unavailable; cannot read request images',
@@ -481,7 +481,10 @@ export class OpenAiOauthAdapter extends LlmAdapter {
         )
       }),
     )
-    return versions
+    return {
+      images: versions,
+      access: (ref) => this.images.resolveImageAccess(attachments, ref),
+    }
   }
 
   private async *request(
@@ -492,9 +495,13 @@ export class OpenAiOauthAdapter extends LlmAdapter {
     access: string,
     accountId: string | undefined,
   ): AsyncGenerator<StreamChunk> {
-    const body = serializeRequest(options, await this.prepareImages(options, signal), {
-      promptCacheKey: cfg.promptCacheKey,
-    })
+    const prepared = await this.prepareImages(options, signal)
+    const body = serializeRequest(
+      options,
+      prepared?.images,
+      { promptCacheKey: cfg.promptCacheKey },
+      prepared?.access,
+    )
     // Same affinity pair pi-ai's Codex SSE transport sends (`session-id` +
     // `x-client-request-id`, both the clamped cache key): it keeps a session's
     // requests on one backend route so the prompt cache actually hits.
