@@ -134,7 +134,6 @@ export interface VcsRoot {
 }
 
 /** The common prefix of every jj command; the adapter prepends the executable and environment. */
-const LIST_TEMPLATE = 'name ++ "\\n"'
 const ROOT_TEMPLATE = 'root ++ "\\n"'
 
 /** Read one template field of one revision. */

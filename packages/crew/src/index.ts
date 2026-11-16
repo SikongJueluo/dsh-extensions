@@ -27,7 +27,7 @@
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
-import { ReasoningEffortId, type ContentBlock, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type {
   SubagentActivation,
   SubagentProvider,

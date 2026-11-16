@@ -24,7 +24,7 @@ import { registerAuthChannel } from './channel.js'
 import { OAuthProvidersService } from './service.js'
 import { ChatGptConfig, registerChatGpt } from './providers/chatgpt/index.js'
 import type { ChatGptConfig as ChatGptConfigShape } from './providers/chatgpt/index.js'
-import { PACKAGE_NAME, PLUGIN_NAME, RPC_CHANNEL } from './identity.js'
+import { PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
 
 export { PACKAGE_NAME, PLUGIN_NAME, RPC_CHANNEL } from './identity.js'
 export { OAuthProvidersService } from './service.js'

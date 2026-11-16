@@ -156,11 +156,6 @@ function mergeRawHits(hits: readonly RawHit[]): Working[] {
   return merged
 }
 
-/** Tokenize for overlap scoring: word tokens incl. CJK runs, lowercased. */
-function tokens(text: string): string[] {
-  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
-}
-
 /**
  * Deterministic score: cross-source agreement first, question/query term
  * overlap second. No recency guessing — dates stay visible in the digest for

@@ -174,7 +174,7 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 `reportUnusedDisableDirectives: error` 已开：当前 1 处已无用（`oauth-providers/src/client/index.tsx:246`）。
 这 7 处按“逐处审查”处理，不自动迁移成新豁免。
 
-### 3.7 修复积压（2149 条，分层计划）
+### 3.7 修复积压（2127 条，分层计划）
 
 | 层 | 内容 | 数量 |
 | --- | --- | --- |

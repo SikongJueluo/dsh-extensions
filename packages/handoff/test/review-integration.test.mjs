@@ -268,7 +268,7 @@ async function completeBrief(host, originId) {
 test('flag path: --review binds the loop before the first prompt and the loop closes', async () => {
   const config = handoffPlugin.Config ? handoffPlugin.Config({}) : {}
   const { root, host } = await boot({ config: { ...config, pollMs: 100, timeoutMs: 8000 } })
-  const t = await test.context
+  const _t = await test.context
   try {
     const command = host.state.commandDefs.get('handoff')
     assert.ok(command, 'handoff command registered')
@@ -279,7 +279,7 @@ test('flag path: --review binds the loop before the first prompt and the loop cl
       'cross-plugin service visible',
     )
 
-    const { cwd, agent } = await originFixture(host, 'flag')
+    const { agent } = await originFixture(host, 'flag')
     // --review fixes the verdict and --model fixes the route, so nothing is
     // left to ask: the scripted invocation must not open (or wait for) a card.
     await channel(host, 'pending', {})
@@ -400,7 +400,7 @@ test('flag path: --review binds the loop before the first prompt and the loop cl
 
 test('dialog path: the review verdict from the browser binds with its budget', async () => {
   const config = handoffPlugin.Config ? handoffPlugin.Config({}) : {}
-  const { root, host } = await boot({ config: { ...config, pollMs: 100, timeoutMs: 8000 } })
+  const { host } = await boot({ config: { ...config, pollMs: 100, timeoutMs: 8000 } })
   try {
     const command = host.state.commandDefs.get('handoff')
     const { agent } = await originFixture(host, 'dialog')

@@ -34,7 +34,6 @@
  */
 import Schema from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import { currentStepCalls, lastHumanSeq } from './batch.js'
 import { buildHintMessage, deliverNotice } from './notice.js'

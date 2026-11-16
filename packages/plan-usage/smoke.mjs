@@ -307,7 +307,7 @@ check(
 const regionCalls = []
 const regionSource = new MiniMaxSource({
   env: { MINIMAX_API_KEY: 'cn-key' },
-  fetchImpl: async (url, init) => {
+  fetchImpl: async (url, _init) => {
     regionCalls.push(String(url))
     if (url.startsWith('https://api.minimax.io/')) {
       return new Response(

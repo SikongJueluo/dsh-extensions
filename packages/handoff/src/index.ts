@@ -16,7 +16,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-commands'
 import Schema from '@deepseek-ai/schemastery'
-import { COMMAND_NAME, DEFAULT_BRIEF_DIR, PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
+import { DEFAULT_BRIEF_DIR, PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
 import { handoffCommandDefinition } from './command.js'
 import { registerHandoffChannel } from './channel.js'
 import { createPreferenceStore } from './preferences.js'

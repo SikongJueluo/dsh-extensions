@@ -21,7 +21,7 @@ import {
 } from './oauth.js'
 import type { OAuthGrant } from './oauth.js'
 import type { FetchLike } from '../../transport.js'
-import { CREDENTIAL_ID, DISPLAY_NAME, PROVIDER } from './identity.js'
+import { DISPLAY_NAME, PROVIDER } from './identity.js'
 import { PACKAGE_NAME } from '../../identity.js'
 
 export interface ChatGptSignInDeps {

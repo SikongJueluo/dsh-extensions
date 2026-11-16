@@ -243,7 +243,7 @@ describe('AccessStore grants', () => {
   })
 
   it('refuses a symlinked grant but accepts a symlinked session workspace', async () => {
-    const { root, workspace, store } = makeStore()
+    const { root, store } = makeStore()
     const real = join(root, 'real')
     const link = join(root, 'link')
     mkdirSync(real)
@@ -363,7 +363,7 @@ describe('AccessStore fork', () => {
   })
 
   it('marks a pending record without a target as failed on reconcile', async () => {
-    const { root, workspace, store } = makeStore()
+    const { workspace, store } = makeStore()
     await store.ensureRootSession({ sessionId: 'root', cwd: workspace })
     const fork = await store.beginFork('root')
     await store.reconcileForks()

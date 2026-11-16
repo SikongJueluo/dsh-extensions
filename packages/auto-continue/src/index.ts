@@ -22,7 +22,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
-import { PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
+import { PLUGIN_NAME } from './identity.js'
 import { registerRecovery } from './recovery.js'
 import { registerResume } from './resume.js'
 import { registerCommands } from './command.js'

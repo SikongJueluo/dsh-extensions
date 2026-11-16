@@ -12,7 +12,6 @@ import {
   ConfigError,
   ProviderKeys,
   apply,
-  buildAdapter,
   buildCommandCodeProvider,
   buildProviders,
   defaultSecretDir,
@@ -254,7 +253,7 @@ check(
 // ── model discovery + static fallback (stubbed fetch) ─────────────────────
 const originalFetch = globalThis.fetch
 let discoveryCalls = 0
-globalThis.fetch = async (url) => {
+globalThis.fetch = async (_url) => {
   discoveryCalls += 1
   return new Response(
     JSON.stringify({

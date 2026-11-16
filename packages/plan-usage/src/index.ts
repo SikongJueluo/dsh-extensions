@@ -19,7 +19,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
-import { PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
+import { PLUGIN_NAME } from './identity.js'
 import type { ProviderMonitorSettings } from './sources/glm.js'
 import type { CommandCodeMonitorSettings } from './sources/commandcode.js'
 import { PlanUsageService } from './service.js'

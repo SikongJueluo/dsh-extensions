@@ -234,7 +234,7 @@ describe('cross-plugin service through the Cordis proxy', () => {
   it('an autoDeliver run submits the executor final reply through the proxy without any tool call', async () => {
     const { root, host } = await boot()
     const svc = root.get('triggerBindings')!
-    const bound = await svc.bindReviewLoop({
+    await svc.bindReviewLoop({
       task: '任务',
       executorSession: EXECUTOR,
       parentSession: PARENT,
@@ -270,7 +270,7 @@ describe('cross-plugin service through the Cordis proxy', () => {
   it('an active goal holds the auto-delivery until the goal settles', async () => {
     const { root, host } = await boot()
     const svc = root.get('triggerBindings')!
-    const bound = await svc.bindReviewLoop({
+    await svc.bindReviewLoop({
       task: '任务',
       executorSession: EXECUTOR,
       parentSession: PARENT,
@@ -352,7 +352,7 @@ describe('cross-plugin service through the Cordis proxy', () => {
   })
 
   it('one session cannot pend the same turn for two runs', async () => {
-    const { root, host } = await boot()
+    const { root } = await boot()
     const svc = root.get('triggerBindings')!
     const first = await svc.bindReviewLoop({
       task: 't1',

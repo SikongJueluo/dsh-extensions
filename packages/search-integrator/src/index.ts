@@ -17,7 +17,6 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { makeResearchTool, createToolHost } from './tool.js'
-import { Config } from './settings.js'
 import type { Config as RowConfig } from './settings.js'
 
 export { Config } from './settings.js'
