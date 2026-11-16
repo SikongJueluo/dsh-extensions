@@ -1,0 +1,62 @@
+name: quality
+
+# One entry point for local development and CI: `pnpm check:quality`.
+# This workflow only provisions the environment and calls it.
+#
+# NOT YET VERIFIED REMOTELY: the repository has no workflow history at the time
+# this file was written, and the smoke runner needs `jj` (installed below). The
+# first real run is the evidence; until then this file proves intent, not
+# enforcement. Branch protection / required checks are a repository setting the
+# maintainer must enable separately.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.3.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      # The smoke runner shells out to `jj`, and the jj-workspace suites create
+      # real repositories, so the binary and an identity must exist before the
+      # checks run. Pinned to the version used locally.
+      - name: Install jj
+        run: |
+          curl -fsSL "https://github.com/jj-vcs/jj/releases/download/v0.46.0/jj-v0.46.0-x86_64-unknown-linux-musl.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin ./jj
+          jj --version
+
+      - name: Configure the commit identity the tests need
+        run: |
+          git config --global user.name "dsh-extensions CI"
+          git config --global user.email "ci@dsh-extensions.invalid"
+          mkdir -p "$HOME/.config/jj"
+          cat > "$HOME/.config/jj/config.toml" <<'EOF'
+          user.name = "dsh-extensions CI"
+          user.email = "ci@dsh-extensions.invalid"
+          EOF
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm check:quality

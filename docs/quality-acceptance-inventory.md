@@ -72,18 +72,29 @@ Fallow 的入口来自 `package.json` 脚本与框架插件，不解析 `check-s
 - `session-write-access` 的真实 profile/交互 recipe（见包 README）不在任何脚本内。
 - `dsh plugin add` / `--patch` 加载类验证一律由用户执行（宿主归 Nix 管）。
 
-## 5. 建议的聚合顺序（草案，待批准）
+## 5. 统一入口（已实现）
 
-1. `format:check` → `lint` → `fallow dead-code`（最快失败、无需构建）
-2. `typecheck`
-3. `build`（此后所有 `lib/` 消费者才有意义）
-4. `pnpm -r run test`
-5. `pnpm check:smoke`：先预检 `git`/`jj`，缺一个就 **fail**；唯一需要真实凭据的脚本显式排除并打印理由
-6. `check:client` → `check:pack` → `build:storybook`
-7. `fallow health` / `fallow dupes`：只输出报告，不影响退出码
+`pnpm check:quality`（[scripts/check-quality.mjs](../scripts/check-quality.mjs)）按顺序跑 10 步，
+默认**跑完全部再汇总**（`--fail-fast` 可改为首个失败即停，`--only=<step>` 只跑单步）：
 
-聚合本身单独一层；smoke 的修复（第 3 节三个失败）与 `notice-order.mjs` 的接线也在那一层，
-不要为了“能跑绿”把它们从门禁里删掉。
+| # | step | 命令 | 当前状态 |
+| --- | --- | --- | --- |
+| 1 | format | `format:check` | ✗ 228 个文件待排版 |
+| 2 | lint | `lint` | ✗ 2173 条待修 |
+| 3 | dead-code | `fallow` | ✗ 102 条 error 级 |
+| 4 | types | `typecheck` | ✓ |
+| 5 | build | `build` | ✓ |
+| 6 | tests | `test` | ✓ |
+| 7 | smoke | `check:smoke` | ✓ |
+| 8 | client | `check:client` | ✓ |
+| 9 | pack | `check:pack` | ✓ |
+| 10 | storybook | `build:storybook` | ✓ |
+
+顺序的理由：前三步不需要构建、最快失败；`build` 之后所有 `lib/` 消费者（测试、smoke、
+client 检查）才有意义。`fallow health` / `fallow dupes` 不进这个入口，它们是报告，不是门禁。
+
+`pnpm check`（typecheck + build + check:client）保留为旧的快速聚合，不删也不改名，
+避免正在使用它的脚本（例如新增插件的流程）静默改变语义。
 
 ## 6. Node 20 兼容
 

@@ -21,6 +21,7 @@
     "fallow:dupes": "fallow dupes",
     "check:client": "node scripts/check-client.mjs",
     "check:smoke": "node scripts/check-smoke.mjs",
+    "check:quality": "node scripts/check-quality.mjs",
     "check": "pnpm run typecheck && pnpm run build && pnpm run check:client",
     "storybook": "storybook dev -p 6006",
     "build:storybook": "storybook build",

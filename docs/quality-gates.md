@@ -306,7 +306,8 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 
 ## 7. 未验证 / 缺口
 
-- CI 尚未建立：没有 `.github/workflows`，本地与远端共用入口、远端成功记录、平台必需检查都还是待办（需要推送授权）。
+- 统一入口已实现：`pnpm check:quality` 按固定顺序跑 10 步（见 [quality-acceptance-inventory.md](quality-acceptance-inventory.md) 第 5 节），当前 7 步绿、3 步红（format/lint/dead-code）。
+- CI 已有 workflow（`.github/workflows/quality.yml`，node 24 + pnpm 12.3.4 + 安装 jj + `pnpm check:quality`），但**远端从未运行过**：仓库没有 workflow 历史，首次真实运行的日志才算证据；分支保护／必需检查属于仓库设置，需维护者单独开启。
 - 现有测试/smoke 的真实范围已逐项实测并列在 [quality-acceptance-inventory.md](quality-acceptance-inventory.md)：`pnpm test` 只覆盖声明了 `test` 的 12 个包（9 个包没有测试入口），12 个 smoke 脚本现在由 `pnpm check:smoke` 统一执行（10 个可无人值守、2 个显式排除并打印理由），`notice-order.mjs` 未被 Vitest 收集。接线在“验收聚合”层处理。
 - `context-audit` smoke 读取 `$DSH_HOME` 真会话日志（本次实测扫了 62 个日志），需在聚合时改为 fixture 隔离，不能直接进门禁。
 - Node 20 产物兼容性尚未验证（本次只跑 Node 24 的 typecheck/build/lint）。
