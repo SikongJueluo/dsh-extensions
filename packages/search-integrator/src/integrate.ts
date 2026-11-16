@@ -60,7 +60,7 @@ export interface RawIntegration {
 }
 
 /** Remove `[n]` markers from text when n is not a valid evidence number. */
-export function scrubInvalidCitations(text: string, sourceCount: number): string {
+function scrubInvalidCitations(text: string, sourceCount: number): string {
   return text.replace(/\s*\[(\d+)\]/g, (match, digits: string) => {
     const id = Number(digits)
     return id >= 1 && id <= sourceCount ? match : ''

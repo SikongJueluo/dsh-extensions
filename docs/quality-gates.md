@@ -271,15 +271,17 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 
 ### 4.3 扫描结果（`fallow dead-code`）
 
-78 条 error 级、35 条 warn 级。error 级构成：
+**5 条 error 级、35 条 warn 级。** error 级构成：
 
 | 类别 | 数量 | 性质 |
 | --- | --- | --- |
-| unused exports | 64 | 多数是“只在本文件使用却写了 `export`”，去掉关键字即可；少数是重复导出 |
-| unused types | 9 | 同上 |
-| unused class members | 3 | 见 4.2 |
-| unused files | 0 | `task-anchor` 拆分遗留的 4 个模块已删除（`execution-guard/src/{checkpoint,goal-evidence,jj}.ts`、`auto-permit/src/identity.ts`），构建产物逐字节不变 |
+| unused class members | 3 | 见 4.2：2 个只有 `.mjs` smoke 调用点，1 个是未使用的公开 getter |
 | circular dependencies | 2 | `handoff` 的 `brief→spawn`（2 环）与 `brief→spawn→meta`（3 环），与 Oxlint `import/no-cycle` 的 4 处命中一致 |
+
+已清零的类别（各自在独立层完成）：unused files（4 个 `task-anchor` 拆分遗留模块）、
+unused exports（64）、unused types（9）、unlisted dependencies（5）、duplicate exports（3）。
+`unused exports`/`unused types` 的处理方式是“能删的删、只在本文件用的去掉 `export` 关键字”，
+过程中顺带暴露出 7 个连本文件都不用的符号，一并删除。
 
 warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 是有意的
 测试/加载双入口）、`unused-dev-dependencies` 30（其中 `packages/ui` 的 20+ 个是

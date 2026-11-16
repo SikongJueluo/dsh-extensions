@@ -107,7 +107,7 @@ function finiteNumber(value: unknown): number | undefined {
 }
 
 /** Normalize a consumed share to 0-100 with one decimal; `undefined` when absent. */
-export function normalizePercent(value: unknown): number | undefined {
+function normalizePercent(value: unknown): number | undefined {
   const raw = finiteNumber(value)
   if (raw === undefined) return undefined
   const clamped = Math.min(100, Math.max(0, raw))
@@ -115,7 +115,7 @@ export function normalizePercent(value: unknown): number | undefined {
 }
 
 /** Normalize an epoch-ms reset timestamp; `undefined` when absent or absurd. */
-export function normalizeResetAt(value: unknown): number | undefined {
+function normalizeResetAt(value: unknown): number | undefined {
   const raw = finiteNumber(value)
   // Accept ms epochs from ~2020 to ~2100; anything else is not a timestamp.
   if (raw === undefined || raw < 1_577_836_800_000 || raw > 4_102_444_800_000) return undefined

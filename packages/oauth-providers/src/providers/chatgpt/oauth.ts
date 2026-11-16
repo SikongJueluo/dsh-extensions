@@ -19,19 +19,19 @@ import { PACKAGE_NAME } from '../../identity.js'
 import type { FetchLike } from '../../transport.js'
 
 /** The public OAuth client id the Codex CLI uses for the ChatGPT login. */
-export const OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
+const OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 /** OpenAI authorization endpoint. */
-export const OAUTH_AUTHORIZE_URL = 'https://auth.openai.com/oauth/authorize'
+const OAUTH_AUTHORIZE_URL = 'https://auth.openai.com/oauth/authorize'
 /** OpenAI token endpoint (code exchange and refresh). */
-export const OAUTH_TOKEN_URL = 'https://auth.openai.com/oauth/token'
+const OAUTH_TOKEN_URL = 'https://auth.openai.com/oauth/token'
 /** Loopback redirect URI registered for the client id (fixed port). */
 export const OAUTH_REDIRECT_URI = 'http://localhost:1455/auth/callback'
 /** Loopback port the callback server listens on. */
-export const OAUTH_CALLBACK_PORT = 1455
+const OAUTH_CALLBACK_PORT = 1455
 /** Loopback host the callback server binds. */
-export const OAUTH_CALLBACK_HOST = '127.0.0.1'
+const OAUTH_CALLBACK_HOST = '127.0.0.1'
 /** OAuth scopes for the ChatGPT login. */
-export const OAUTH_SCOPE = 'openid profile email offline_access'
+const OAUTH_SCOPE = 'openid profile email offline_access'
 /** JWT claim path carrying the ChatGPT account id. */
 const JWT_CLAIM_PATH = 'https://api.openai.com/auth'
 
@@ -50,7 +50,7 @@ function base64url(bytes: Uint8Array): string {
 }
 
 /** Generate a PKCE S256 verifier/challenge pair. */
-export async function generatePkce(): Promise<{ verifier: string; challenge: string }> {
+async function generatePkce(): Promise<{ verifier: string; challenge: string }> {
   const verifierBytes = new Uint8Array(32)
   globalThis.crypto.getRandomValues(verifierBytes)
   const verifier = base64url(verifierBytes)
@@ -113,7 +113,7 @@ export function parseAuthorizationInput(input: string): { code?: string; state?:
 }
 
 /** Decode a compact JWT payload without verifying the signature. */
-export function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
+function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
   const parts = jwt.split('.')
   if (parts.length !== 3) return null
   try {
@@ -127,7 +127,7 @@ export function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
 }
 
 /** Extract the ChatGPT account id from an access token's claims. */
-export function accountIdOf(accessToken: string): string | undefined {
+function accountIdOf(accessToken: string): string | undefined {
   const auth = decodeJwtPayload(accessToken)?.[JWT_CLAIM_PATH] as
     | { chatgpt_account_id?: unknown }
     | undefined
@@ -136,7 +136,7 @@ export function accountIdOf(accessToken: string): string | undefined {
 }
 
 /** Validate a token-endpoint response and map it into an {@link OAuthGrant}. */
-export function grantFromTokenResponse(json: unknown): OAuthGrant {
+function grantFromTokenResponse(json: unknown): OAuthGrant {
   const body = json as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown }
   if (
     typeof body?.access_token !== 'string' ||

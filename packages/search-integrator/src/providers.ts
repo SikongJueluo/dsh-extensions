@@ -433,7 +433,7 @@ function createOpenaiAdapter(config: AdapterConfig): SearchAdapter {
  * annotations (title-bearing). Generated prose is discarded — only the URLs
  * are evidence.
  */
-export function extractCodexSources(sseText: string): { url: string; title?: string }[] {
+function extractCodexSources(sseText: string): { url: string; title?: string }[] {
   const byUrl = new Map<string, { url: string; title?: string }>()
   const put = (url: unknown, title: unknown): void => {
     if (typeof url !== 'string' || url === '' || byUrl.has(url)) return

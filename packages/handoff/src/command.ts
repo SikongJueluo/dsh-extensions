@@ -69,7 +69,7 @@ const REVIEW_FLAG = '--review'
 /** Prefix flag setting the auto-review round budget; implies --review. */
 const REVIEW_ROUNDS_FLAG = '--review-rounds'
 /** Round budget offered by default when the user just ticks the toggle. */
-export const DEFAULT_REVIEW_ROUNDS = 5
+const DEFAULT_REVIEW_ROUNDS = 5
 
 function ok(text: string): CommandResult {
   return { kind: 'success', text }

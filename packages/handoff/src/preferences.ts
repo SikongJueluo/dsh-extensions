@@ -23,7 +23,7 @@ import type { ModelChoice } from './brief.js'
 import { PACKAGE_NAME } from './identity.js'
 
 /** Domain unit name (storage-domain unit names admit no hyphens). */
-export const PREFERENCE_DOMAIN = 'handoff'
+const PREFERENCE_DOMAIN = 'handoff'
 /** The single table holding one record per profile. */
 const PREFERENCE_TABLE = 'preferences'
 /** Record format version; bumped only by an incompatible record shape. */
@@ -55,7 +55,7 @@ const schemaRecord = z.object({
 type PreferenceRecord = z.infer<typeof schemaRecord>
 
 /** The declared domain; the owning package defines it once. */
-export const HANDOFF_DOMAIN = defineDomain({
+const HANDOFF_DOMAIN = defineDomain({
   name: PREFERENCE_DOMAIN,
   version: RECORD_VERSION,
   tables: {
@@ -69,7 +69,7 @@ export const HANDOFF_DOMAIN = defineDomain({
  * the record key. Characters outside the backend's key grammar are folded to
  * underscores; running without a profile uses a stable fallback key.
  */
-export function preferenceKey(environment: NodeJS.ProcessEnv = process.env): string {
+function preferenceKey(environment: NodeJS.ProcessEnv = process.env): string {
   const raw = environment.DSH_PROFILE?.trim() ?? ''
   const base = raw.length > 0 ? raw : DEFAULT_PROFILE_KEY
   return base.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || DEFAULT_PROFILE_KEY

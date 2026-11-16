@@ -18,14 +18,11 @@ import {
   openAIResponsesApi,
 } from '@earendil-works/pi-ai/compat'
 
-/** Default route id when the YAML provider id is `command-code`. */
-export const DEFAULT_ROUTE = 'command-code'
-
 /** Provider API root; the Anthropic SDK appends `/v1/messages` itself. */
 export const DEFAULT_BASE_URL = 'https://api.commandcode.ai/provider'
 
 /** OpenAI-compatible base; `/responses` and `/chat/completions` hang off it. */
-export const DEFAULT_OPENAI_BASE_URL = `${DEFAULT_BASE_URL}/v1`
+const DEFAULT_OPENAI_BASE_URL = `${DEFAULT_BASE_URL}/v1`
 
 /** Unauthenticated model catalog. */
 export const DEFAULT_MODELS_URL = `${DEFAULT_OPENAI_BASE_URL}/models`

@@ -392,4 +392,3 @@ export function buildAdapter(
 }
 
 /** Exported for the smoke test. */
-export { AUTH, DEFAULT_RETRY_POLICY, profileFor }

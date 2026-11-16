@@ -24,21 +24,16 @@ import type { AuthChannel } from '../../channel.js'
 import { createFetch } from '../../transport.js'
 import type { FetchLike } from '../../transport.js'
 
-export { PROVIDER, SETTINGS_NAMESPACE, CREDENTIAL_ID, DISPLAY_NAME } from './identity.js'
+export { PROVIDER, SETTINGS_NAMESPACE, DISPLAY_NAME } from './identity.js'
 // Wire-shape helpers re-exported for smoke tests and future cache-affinity work.
-export { serializeRequest, clampSessionAffinityKey, resolveReasoning } from './serialize.js'
-export { serializeInput } from './serialize.js'
 
 /** The credential record the sign-in flow writes and the adapter reads. */
 // The credential scope is this plugin's registered name (the composition row id).
-export const CREDENTIAL_KEY = credentialKey(PLUGIN_NAME, CREDENTIAL_ID)
+const CREDENTIAL_KEY = credentialKey(PLUGIN_NAME, CREDENTIAL_ID)
 
 /** ChatGPT codex backend base URL (Responses API). */
-export const DEFAULT_BASE_URL = 'https://chatgpt.com/backend-api/codex'
-export const DEFAULT_CONTEXT_WINDOW = 272000
-
-/** Reasoning effort vocabulary shared by the ChatGPT backend (selectable per request). */
-export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'off'] as const
+const DEFAULT_BASE_URL = 'https://chatgpt.com/backend-api/codex'
+const DEFAULT_CONTEXT_WINDOW = 272000
 
 /**
  * Config shape validated by the {@link ChatGptConfig} schema (row config and
@@ -90,7 +85,7 @@ export const ChatGptConfig: Schema<ChatGptConfig> = Schema.object({
 })
 
 /** Fully-resolved connection facts (defaults applied and validated). */
-export interface ResolvedOptions {
+interface ResolvedOptions {
   baseURL: string
   /** Explicit client-version override; undefined = derive from npm. */
   clientVersion?: string
@@ -105,7 +100,7 @@ export interface ResolvedOptions {
  * Resolve validated connection facts from a raw config snapshot. Every default
  * and bound is re-judged here so a settings edit fails loudly at first use.
  */
-export function resolveAdapterOptions(config: ResolvedChatGptConfig = {}): ResolvedOptions {
+function resolveAdapterOptions(config: ResolvedChatGptConfig = {}): ResolvedOptions {
   const refreshMarginMs = config.refreshMarginMs ?? DEFAULT_REFRESH_MARGIN_MS
   if (!Number.isFinite(refreshMarginMs) || refreshMarginMs <= 0) {
     throw new Error(`${PACKAGE_NAME}/chatgpt: refreshMarginMs must be a positive number`)

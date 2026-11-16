@@ -22,7 +22,7 @@ const DSH_PLATFORM_MODULES = [
  * rejects an undeclared request. Keep this list exact; never widen it to a
  * package prefix.
  */
-export const DSH_HOST_MODULES = ['@deepseek-ai/dsh-client-ui-primitives']
+const DSH_HOST_MODULES = ['@deepseek-ai/dsh-client-ui-primitives']
 
 export interface DshClientOptions {
   /** Package name the module loader registers; must equal `package.json` name. */

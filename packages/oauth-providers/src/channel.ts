@@ -36,7 +36,7 @@ const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
 const MAX_CHANNEL_BODY_BYTES = 64 * 1024
 
 /** One question pending on a provider's bridge, as the browser sees it. */
-export interface WirePrompt {
+interface WirePrompt {
   kind: 'text' | 'secret' | 'select'
   message: string
   placeholder?: string
@@ -44,7 +44,7 @@ export interface WirePrompt {
 }
 
 /** Everything the browser may poll about one provider's attempt. */
-export interface BridgeState {
+interface BridgeState {
   notice?: AuthorizationNotice
   pending?: {
     prompt: WirePrompt

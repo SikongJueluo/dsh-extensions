@@ -255,7 +255,7 @@ function exactFloors(env: GrantEnv, canonicalHome: string): readonly string[] {
 }
 
 /** The verdict for one (canonical) path: which rule refuses it, if any. */
-export type PathRefusal = 'floor-path' | 'credential-segment'
+type PathRefusal = 'floor-path' | 'credential-segment'
 
 /**
  * The system-floor half of the refusal rules. Kept separate because a
@@ -263,7 +263,7 @@ export type PathRefusal = 'floor-path' | 'credential-segment'
  * over a credential tree (`$XDG_CONFIG_HOME/.config` included) is exactly
  * what makes semgrep's state private, so only the system floors apply there.
  */
-export function pathFloorRefusal(
+function pathFloorRefusal(
   path: string,
   env: GrantEnv,
   canonicalHome: string,
@@ -279,11 +279,7 @@ export function pathFloorRefusal(
  * implementation so the two rule sets can never drift apart. `path` is
  * canonical (post-realpath); `canonicalHome` is the realpath'd HOME.
  */
-export function pathRefusal(
-  path: string,
-  env: GrantEnv,
-  canonicalHome: string,
-): PathRefusal | undefined {
+function pathRefusal(path: string, env: GrantEnv, canonicalHome: string): PathRefusal | undefined {
   const floor = pathFloorRefusal(path, env, canonicalHome)
   if (floor !== undefined) return floor
   if (path.split(sep).some((segment) => CREDENTIAL_SEGMENTS.has(segment)))

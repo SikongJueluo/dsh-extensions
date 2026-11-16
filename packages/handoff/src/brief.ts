@@ -213,7 +213,7 @@ export function continueInstruction(
 }
 
 /** The executor-side loop rules a review-loop handoff must carry up front. */
-export function reviewBootstrapSection(runId: string, maxRounds: number): string {
+function reviewBootstrapSection(runId: string, maxRounds: number): string {
   return [
     '',
     '---',

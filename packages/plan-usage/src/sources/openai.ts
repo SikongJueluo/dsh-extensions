@@ -20,7 +20,7 @@ import type { QuotaSnapshot } from '../types.js'
 import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
 /** The ChatGPT backend usage endpoint Codex clients poll. */
-export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage'
+const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage'
 
 /** Token provider — typically `() => ctx.get('oauthProviders')?.token('chatgpt')`. */
 export type TokenProvider = () => Promise<{ access: string; accountId?: string } | undefined>

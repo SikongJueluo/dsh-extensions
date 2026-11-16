@@ -46,10 +46,10 @@ export function oauthHeaders(access: string, accountId?: string): Record<string,
 }
 
 /** Stable classes for auth failures, so callers can branch without parsing messages. */
-export type AuthErrorCode = 'AUTH_MISSING' | 'AUTH_INVALID' | 'AUTH_REFRESH_FAILED'
+type AuthErrorCode = 'AUTH_MISSING' | 'AUTH_INVALID' | 'AUTH_REFRESH_FAILED'
 
 /** An auth failure with a routable code (no sign-in vs. refresh failure). */
-export class AuthError extends Error {
+class AuthError extends Error {
   readonly code: AuthErrorCode
 
   constructor(code: AuthErrorCode, message: string, options?: { cause?: unknown }) {

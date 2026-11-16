@@ -87,7 +87,7 @@ export interface MiniMaxError {
 }
 
 /** Envelope codes that mean the credential was rejected rather than the service failing. */
-export function isAuthStatusCode(code: number | undefined): boolean {
+function isAuthStatusCode(code: number | undefined): boolean {
   return code === 1004 || code === 2049
 }
 

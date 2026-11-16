@@ -20,7 +20,7 @@ import type { QuotaSnapshot } from '../types.js'
 import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
 /** The OpenCode Go usage endpoint. */
-export const OPENCODE_GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage'
+const OPENCODE_GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage'
 
 /** Env var holding the API key (matching the pi-ai provider config). */
 const ENV_KEY = 'OPENCODE_API_KEY'

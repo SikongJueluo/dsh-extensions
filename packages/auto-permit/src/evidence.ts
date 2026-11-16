@@ -74,10 +74,10 @@ export interface Evidence {
 }
 
 /** Upper bounds mirroring the pi ai-bash-judge calibration (evidence windows). */
-export const MAX_PROMPTS = 16
-export const MAX_PROMPT_CHARS = 12000
-export const MAX_APPROVED = 8
-export const MAX_APPROVED_CHARS = 400
+const MAX_PROMPTS = 16
+const MAX_PROMPT_CHARS = 12000
+const MAX_APPROVED = 8
+const MAX_APPROVED_CHARS = 400
 /**
  * Judge evidence budget for the pending command. The pending command itself
  * is NEVER clipped before the hard rules and the allowlist run: a decision

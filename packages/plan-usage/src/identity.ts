@@ -13,8 +13,5 @@ export const PLUGIN_NAME = 'dsh-plan-usage'
 /** Host service name (consumed as `ctx.get('planUsage')`). */
 export const SERVICE_NAME = 'planUsage'
 
-/** Browser locale namespace. */
-export const LOCALE_NS = 'plan-usage'
-
 /** Browser ↔ host channel path on the web server. */
 export const RPC_CHANNEL = '/dsh-plan-usage'

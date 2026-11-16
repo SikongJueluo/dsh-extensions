@@ -103,5 +103,3 @@ export const SESSION_WRITE_ACCESS_DOMAIN = defineDomain({
     forks: domainTable<string, ForkRecord>(forkSchema),
   },
 })
-
-export type AccessDomain = typeof SESSION_WRITE_ACCESS_DOMAIN

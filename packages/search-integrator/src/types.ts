@@ -124,10 +124,3 @@ export interface ResearchResult {
   /** Present on `degraded`/`failed`: the concrete reason. */
   readonly degradedReason?: string
 }
-
-/** Aggregated token usage of the auxiliary model calls (audit-only). */
-export interface UsageTotals {
-  readonly calls: number
-  readonly inputTokens: number
-  readonly outputTokens: number
-}

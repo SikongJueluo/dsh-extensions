@@ -79,7 +79,7 @@ export interface Inspector {
 }
 
 /** The declared tool surface; no other capability is reachable from a judge. */
-export const INSPECT_TOOLS: readonly ToolSchema[] = [
+const INSPECT_TOOLS: readonly ToolSchema[] = [
   {
     name: 'read_file',
     description:

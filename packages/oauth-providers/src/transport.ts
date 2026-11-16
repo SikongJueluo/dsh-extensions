@@ -64,7 +64,7 @@ function normalizeAddress(addr: string | null | undefined): string | null {
  * Parse `scutil --proxy` output into a proxy URL. Prefers the HTTPS proxy,
  * then the HTTP proxy; ignores disabled or wildcard entries.
  */
-export function parseMacosProxy(stdout: string): string | null {
+function parseMacosProxy(stdout: string): string | null {
   let host: string | undefined
   let port: string | undefined
   if (/HTTPSEnable\s*:\s*1/.test(stdout)) {
@@ -90,13 +90,13 @@ const WINDOWS_INTERNET_SETTINGS =
   'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'
 
 /** Parse a `REG_DWORD` value (e.g. `0x1`) from `reg query` output. */
-export function parseRegDword(stdout: string): number | null {
+function parseRegDword(stdout: string): number | null {
   const match = /REG_DWORD\s+0x([0-9a-fA-F]+)/.exec(stdout)
   return match ? parseInt(match[1]!, 16) : null
 }
 
 /** Parse a string (`REG_SZ`/`REG_EXPAND_SZ`) value from `reg query` output. */
-export function parseRegString(stdout: string): string | null {
+function parseRegString(stdout: string): string | null {
   const match = /(?:REG_SZ|REG_EXPAND_SZ)\s+(.+?)\s*$/m.exec(stdout)
   return match?.[1]?.trim() ?? null
 }
@@ -106,7 +106,7 @@ export function parseRegString(stdout: string): string | null {
  * `proto=host:port;...` list, or the reverse `host:port=proto,proto` form.
  * Prefers the `https` entry, then `http`, then the bare address.
  */
-export function parseWindowsProxyServer(value: string): string | null {
+function parseWindowsProxyServer(value: string): string | null {
   if (!value) return null
   let bare: string | null = null
   let http: string | null = null
@@ -146,14 +146,14 @@ async function detectWindowsSystemProxy(): Promise<string | null> {
 // --- Linux (GNOME gsettings / KDE) -------------------------------------------
 
 /** Parse a gsettings string value (`'quoted'`) into a plain string. */
-export function parseGsettingsString(stdout: string): string | null {
+function parseGsettingsString(stdout: string): string | null {
   const match = /^'((?:[^'\\]|\\.)*)'\s*$/.exec(stdout.trim())
   if (!match) return null
   return match[1]!.replace(/\\(.)/g, '$1')
 }
 
 /** Parse a gsettings integer value into a number. */
-export function parseGsettingsInt(stdout: string): number | null {
+function parseGsettingsInt(stdout: string): number | null {
   const match = /^-?\d+\s*$/.exec(stdout.trim())
   return match ? parseInt(match[0], 10) : null
 }
@@ -232,7 +232,7 @@ async function detectSystemProxy(): Promise<string | null> {
  * Resolve the outbound proxy URL: explicit config, then environment, then the
  * operating system proxy.
  */
-export async function resolveProxy(
+async function resolveProxy(
   explicit?: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | null> {

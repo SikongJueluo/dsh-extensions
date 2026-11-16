@@ -437,7 +437,7 @@ export async function collectAudit(
 }
 
 /** Format a token count compactly (7,801,315 → 7.8M). */
-export function formatTokens(value: number): string {
+function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
   return String(value)

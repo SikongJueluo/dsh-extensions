@@ -64,7 +64,7 @@ function attachCause(error: unknown): never {
 }
 
 /** Sleep that rejects promptly when the signal aborts. */
-export function sleep(ms: number, signal: AbortSignal): Promise<void> {
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       signal.removeEventListener('abort', onAbort)

@@ -63,12 +63,6 @@ export class RepeatTracker {
   }
 }
 
-/** Which callIds of one agent deserve a correction hint in post-execute. */
-export interface PendingHints {
-  /** callId → occurrence count of the failing shape at deny time. */
-  readonly calls: Map<string, number>
-}
-
 /**
  * Extract the per-call hint duty from a deny decision.
  *

@@ -21,7 +21,7 @@ const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
 const MAX_CHANNEL_BODY_BYTES = 8 * 1024
 
 /** The channel prefix the browser posts the connection envelope to. */
-export const RPC_CHANNEL = '/dsh-jj-workspace'
+const RPC_CHANNEL = '/dsh-jj-workspace'
 
 /** Why the jj option cannot create a workspace under the Session's current policy. */
 export type JjBlocker = 'read-only' | 'outside-writable-root' | 'jj-unavailable'

@@ -22,7 +22,7 @@ export type InputModality = 'text' | 'image'
  * backend follows the same conservative default as Codex: absent
  * `input_modalities` means text and images are both accepted.
  */
-export const DEFAULT_INPUT_MODALITIES: readonly InputModality[] = ['text', 'image']
+const DEFAULT_INPUT_MODALITIES: readonly InputModality[] = ['text', 'image']
 
 /** One model entry in the internal catalog. */
 export interface ModelEntry {
@@ -34,7 +34,7 @@ export interface ModelEntry {
 }
 
 /** Bundled fallback when neither config nor the npm registry answers. */
-export const FALLBACK_CLIENT_VERSION = '0.157.1'
+const FALLBACK_CLIENT_VERSION = '0.157.1'
 /** Where the newest published Codex client version is read from. */
 const NPM_CODEX_LATEST_URL = 'https://registry.npmjs.org/@openai/codex/latest'
 
@@ -75,7 +75,7 @@ function parseInputModalities(value: unknown): readonly InputModality[] {
 }
 
 /** Parse the ChatGPT `/models` payload into the internal catalog shape. */
-export function parseModelsPayload(payload: unknown): ModelEntry[] {
+function parseModelsPayload(payload: unknown): ModelEntry[] {
   const list = (payload as { models?: RawModel[] } | null)?.models ?? []
   const out: ModelEntry[] = []
   for (const model of list) {

@@ -12,8 +12,8 @@ import type { CommandDefinition, CommandInvocation, CommandResult } from '@deeps
 import type { ResumeHandle } from './resume.js'
 import type { WaitSpool } from './spool.js'
 
-export const CANCEL_COMMAND = 'ac-cancel'
-export const STATUS_COMMAND = 'ac-status'
+const CANCEL_COMMAND = 'ac-cancel'
+const STATUS_COMMAND = 'ac-status'
 
 function ok(text: string): CommandResult {
   return { kind: 'success', text }

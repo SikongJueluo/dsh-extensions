@@ -22,7 +22,7 @@ const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/
 const MAX_CHANNEL_BODY_BYTES = 16 * 1024
 
 /** What the browser sees for one monitored provider. */
-export interface ProviderQuotaView {
+interface ProviderQuotaView {
   provider: string
   snapshot?: import('./types.js').QuotaSnapshot
   /** Why the quota is unavailable, when known. */

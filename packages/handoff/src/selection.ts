@@ -76,7 +76,7 @@ export function toAgentOptions(route: RouteSummary | undefined): AgentOptions | 
 // ── remembered-model validation ────────────────────────────────────────────
 
 /** Budget for one catalog snapshot; past it the default is used unvalidated. */
-export const CATALOG_TIMEOUT_MS = 8_000
+const CATALOG_TIMEOUT_MS = 8_000
 
 /** One selectable reasoning effort, as the catalog advertises it. */
 export interface CatalogEffort {
