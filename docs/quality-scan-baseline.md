@@ -187,17 +187,12 @@
 
 ## C. Fallow 明细
 
-### 未被任何入口引用的文件（9）
+### 未被任何入口引用的文件（4）
 
-- `packages/auto-env/live-check.mjs`
 - `packages/auto-permit/src/identity.ts`
-- `packages/auto-permit/test/notice-order.mjs`
-- `packages/cmd-permit/smoke.mjs`
 - `packages/execution-guard/src/checkpoint.ts`
 - `packages/execution-guard/src/goal-evidence.ts`
 - `packages/execution-guard/src/jj.ts`
-- `packages/handoff/smoke.mjs`
-- `packages/search-integrator/scripts/smoke-research.mjs`
 
 ### 未声明依赖（5）
 
@@ -234,7 +229,7 @@
 pnpm lint                      # oxlint（含 type-aware，读 .oxlintrc.json）
 OXC_LOG=debug pnpm lint        # 打印 program 分配与 unmatched 列表
 pnpm format:check              # oxfmt --check .（228 个文件待排版）
-pnpm fallow                    # fallow dead-code（112 条 error 级）
+pnpm fallow                    # fallow dead-code（107 条 error 级）
 pnpm fallow:health             # 复杂度报告（不阻塞）
 pnpm fallow:dupes              # 重复度报告（不阻塞）
 ```

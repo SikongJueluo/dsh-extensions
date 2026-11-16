@@ -201,11 +201,11 @@ Fallow 无法给 JS 调用点归属类型；`RewriteCache.size` 是真死代码�
 
 ### 4.3 扫描结果（`fallow dead-code`）
 
-112 条 error 级、35 条 warn 级。error 级构成：
+107 条 error 级、35 条 warn 级。error 级构成：
 
 | 类别 | 数量 | 性质 |
 | --- | --- | --- |
-| unused files | 9 | 5 个从未被任何脚本引用的 smoke/manual 脚本（`cmd-permit/smoke.mjs`、`handoff/smoke.mjs`、`auto-env/live-check.mjs`、`auto-permit/test/notice-order.mjs`、`search-integrator/scripts/smoke-research.mjs`）+ 4 个无引用的源文件（`auto-permit/src/identity.ts`，以及 `execution-guard/src/{checkpoint,goal-evidence,jj}.ts`——`checkpoint_task` 已迁到 `task-anchor`，这三个是拆分后的遗留模块） |
+| unused files | 4 | `auto-permit/src/identity.ts`，以及 `execution-guard/src/{checkpoint,goal-evidence,jj}.ts`——`checkpoint_task` 已迁到 `task-anchor`，这三个是拆分后的遗留模块。smoke/live-check 脚本已用 Fallow `supportEntry` 建模为开发入口 |
 | unused exports | 64 | 多数是“只在本文件使用却写了 `export`”，去掉关键字即可；少数是重复导出 |
 | unused types | 10 | 同上 |
 | unused class members | 19 | 见 4.2 |
@@ -258,7 +258,7 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 
 ## 6. 批准清单
 
-逐项批准/否决即可（例如“A1-A10 全部批准，但 B15 保留启用”）。
+逐项批准/否决即可（例如“A1-A11 全部批准，但 B15 保留启用”）。
 
 | # | 待批准项 | 建议 |
 | --- | --- | --- |
@@ -272,8 +272,7 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 | A8 | 复杂度/重复只报告、不阻塞（4.4） | 批准 |
 | A9 | 7 处存量 `react-hooks/exhaustive-deps` 抑制在修复层逐处处理（3.6） | 批准 |
 | A10 | 根 `engines.node >= 24`（2） | 批准 |
-| A11 | `check:smoke` 排除 `context-audit/smoke.mjs`，直到它改用 fixture `$DSH_HOME`（它现在读真实会话日志） | 批准 |
-| A12 | `check:smoke` 排除 `search-integrator/scripts/smoke-research.mjs`（需要真实 API key 与外网），保留为人工验证 | 批准 |
+| A11 | `check:smoke` 排除 `search-integrator/scripts/smoke-research.mjs`（需要真实 API key 与外网），保留为人工验证 | 批准 |
 
 若希望更严：`require-unicode-regexp`（228）、`prefer-strict-equal` 与
 `prefer-to-be-truthy/falsy`（vitest 风格，606）、`strict-boolean-expressions`（B2）

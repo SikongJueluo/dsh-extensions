@@ -13,6 +13,14 @@
     // provided by the NixOS profile, not by a node_modules package.
     "jj",
   ],
+  // Dev-only entry points the static graph cannot see: the smoke runner spawns
+  // these by path at runtime, and `live-check.mjs` is a documented manual probe
+  // (see packages/auto-env/README.md). Without this they read as orphan files.
+  "supportEntry": [
+    "packages/*/smoke.mjs",
+    "packages/*/scripts/smoke-*.mjs",
+    "packages/*/live-check.mjs"
+  ],
   "usedClassMembers": [
     // Cordis services are reached through `ctx.<name>` proxies whose type is
     // resolved at runtime, so a public method or static `Config`/`inject` on a

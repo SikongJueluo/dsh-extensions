@@ -15,7 +15,7 @@
 | 发布内容 | `pnpm check:pack` | ✅ 20 个 bundle 的 pack 内容 |
 | Storybook | `pnpm build:storybook` | ✅ 构建成功 |
 | 测试 | `pnpm test` | ✅ 12 个包；51 个 vitest 文件 + handoff 的 18 个 `node:test` 用例 |
-| smoke | 无统一入口，12 个脚本 | ✅ 12 个都退出 0；其中 1 个依赖真实凭据、1 个读真实 `$DSH_HOME`（见第 4 节） |
+| smoke | `pnpm check:smoke`，12 个脚本 | ✅ 11 个自动执行（含 fixture 化的 context-audit）、1 个因真实凭据显式排除 |
 
 `pnpm check` = `typecheck` + `build` + `check:client`，不含 test / smoke / pack / Storybook。
 
@@ -40,12 +40,12 @@ search-integrator  session-write-access  task-anchor  toolchain-access  triggers
   已加进该包的 `test` 脚本（`vitest run && node test/notice-order.mjs`），不再是“存在但
   永不执行”的文件。
 
-## 3. smoke 脚本（12 个，由 `pnpm check:smoke` 统一执行 10 个、显式排除 2 个）
+## 3. smoke 脚本（12 个，由 `pnpm check:smoke` 统一执行 11 个、显式排除 1 个）
 
 | 脚本 | 结果 | 说明 |
 | --- | --- | --- |
 | `cmd-permit/smoke.mjs` | ✅ 0 | 纯匹配器 |
-| `context-audit/smoke.mjs` | ✅ 0 | **读取真实 `$DSH_HOME`**：本次扫了 62 个日志、59 个会话才出结果 |
+| `context-audit/smoke.mjs` | ✅ 0 | 已改为 **fixture 会话日志**（zstd 压缩的 `session.v1.jsonl.zstd` + projection cache 标题），默认不读 `$DSH_HOME`；`--real` 保留人工全量扫描 |
 | `crew/smoke.mjs` | ✅ 0 | stub ctx |
 | `jj-workspace/smoke.mjs` | ✅ 0 | 真 `jj` + 临时仓库；不跑远端 push |
 | `more-providers/smoke.mjs` | ✅ 0 | 临时目录 + 注入 env |
@@ -60,17 +60,15 @@ search-integrator  session-write-access  task-anchor  toolchain-access  triggers
 此前三个脚本已随 SDK/配置演进而失效或根本不退出，已修复。现在由
 `node scripts/check-smoke.mjs`（`pnpm check:smoke`）统一发现并串行执行：**不允许静默跳过**
 ——发现的脚本必须要么执行、要么在 `EXCLUDED` 里写明理由，理由指向的文件消失也会让运行失败。
-当前 10 个执行、2 个显式排除（见第 4 节），整套约 14 秒。
+当前 11 个执行、1 个显式排除（需真实凭据），整套约 15 秒。
 
-Fallow 仍会把 `context-audit` 以外的三个根目录脚本报成“未被入口引用”（它的入口来自
-`package.json` 脚本，不解析 `check-smoke.mjs` 的发现逻辑）；这是静态图与运行器的差别，
-不影响执行。
+Fallow 的入口来自 `package.json` 脚本与框架插件，不解析 `check-smoke.mjs` 的发现逻辑，
+所以 smoke 与 `live-check.mjs` 在 `.fallowrc.jsonc` 里用 `supportEntry` 建模为开发入口；
+剩余的 `unused-files` 只剩 4 个真正无引用的源文件。
 
 ## 4. 需要环境、凭据或交互，不能进自动门禁
 
 - `smoke-research.mjs`：需要 `ZHIPU_API_KEY` / `EXA_API_KEY` 等 + 外网，属人工/按需验证。
-- `context-audit/smoke.mjs`：依赖本机真实会话日志才能覆盖报告路径。自动门禁应注入 fixture
-  `$DSH_HOME`；否则结果随用户机器变化，且会读取隐私数据。
 - `session-write-access` 的真实 profile/交互 recipe（见包 README）不在任何脚本内。
 - `dsh plugin add` / `--patch` 加载类验证一律由用户执行（宿主归 Nix 管）。
 
@@ -80,7 +78,7 @@ Fallow 仍会把 `context-audit` 以外的三个根目录脚本报成“未被�
 2. `typecheck`
 3. `build`（此后所有 `lib/` 消费者才有意义）
 4. `pnpm -r run test`
-5. `pnpm check:smoke`：先预检 `git`/`jj`，缺一个就 **fail**；两个环境相关脚本显式排除并打印理由
+5. `pnpm check:smoke`：先预检 `git`/`jj`，缺一个就 **fail**；唯一需要真实凭据的脚本显式排除并打印理由
 6. `check:client` → `check:pack` → `build:storybook`
 7. `fallow health` / `fallow dupes`：只输出报告，不影响退出码
 

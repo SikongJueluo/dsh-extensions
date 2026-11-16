@@ -7,7 +7,7 @@
  * was reachable from `package.json` before this runner, so they drifted: three
  * had gone stale without anyone noticing.
  *
- * Two scripts are deliberately not run here and are listed with the reason in
+ * One script is deliberately not run here and is listed with the reason in
  * EXCLUDED below. A script cannot be skipped silently: every discovered script
  * must either run or carry an explicit exclusion, and a stale exclusion (path
  * gone) fails the run.
@@ -25,14 +25,10 @@ const TIMEOUT_MS = 180_000
 
 /**
  * Scripts that must not run in the automatic gate, with the contract they need.
- * Both are still real checks — they run by hand, in an environment that has the
- * data or credentials they exercise.
+ * It is still a real check — it runs by hand, in an environment that has the
+ * credentials it exercises.
  */
 const EXCLUDED = new Map([
-  [
-    'packages/context-audit/smoke.mjs',
-    'reads the real $DSH_HOME session log; needs a fixture home before it can gate',
-  ],
   [
     'packages/search-integrator/scripts/smoke-research.mjs',
     'calls real provider endpoints; needs ZHIPU_API_KEY / EXA_API_KEY and network',
