@@ -69,6 +69,7 @@ export class RewriteCache {
   }
 
   /** Cached entry count. */
+  // fallow-ignore-next-line unused-class-member -- only the .mjs smoke reads it; fallow cannot attribute a JS call site
   get size(): number {
     return this.map.size
   }

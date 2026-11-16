@@ -1,3 +1,4 @@
+/* oxlint-disable react/set-state-in-effect -- the effect mirrors external data into local UI state; deriving it would change render timing */
 import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
 import { cn, Root } from '@dsh-extensions/ui'
 import {

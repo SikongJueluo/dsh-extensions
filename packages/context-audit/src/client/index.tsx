@@ -1,3 +1,4 @@
+/* oxlint-disable react/set-state-in-effect -- the effect mirrors external data into local UI state; deriving it would change render timing */
 // Client half of dsh-context-audit: a sidebar panel (like Plugins / Tasks)
 // whose main page reports, over the local session event logs:
 //

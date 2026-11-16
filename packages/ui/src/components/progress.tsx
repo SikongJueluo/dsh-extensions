@@ -1,3 +1,4 @@
+/* oxlint-disable jsx-a11y/prefer-tag-over-role -- role is required by the Base UI primitive contract; swapping the element would change host styles */
 import { cn } from '../lib/cn'
 
 export interface ProgressProps {

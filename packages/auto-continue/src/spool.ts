@@ -122,6 +122,7 @@ export class WaitSpool {
   }
 
   /** Insert or replace one session's record, then persist. */
+  // fallow-ignore-next-line unused-class-member -- only the .mjs smoke calls it; fallow cannot attribute a JS call site
   async set(entry: PendingWait): Promise<void> {
     this.entries.set(entry.sessionId, entry)
     await this.persist()

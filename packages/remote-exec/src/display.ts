@@ -16,6 +16,7 @@ export interface DisplayView {
 }
 
 /** CSI, OSC and two-character ANSI escapes; applied only to the bounded excerpt. */
+// oxlint-disable-next-line eslint/no-control-regex -- the pattern exists to match ANSI escapes
 const ANSI_PATTERN = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-_])/g
 
 /** Bytes reserved inside the budget for the omission/cap marker. */

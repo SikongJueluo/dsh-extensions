@@ -192,6 +192,7 @@ export async function loadModelCatalog(ctx: Context): Promise<CatalogSnapshot | 
   const llm = ctx.get('llm')
   if (llm === undefined) return undefined
   const collect = async (): Promise<CatalogSnapshot> => {
+    // oxlint-disable-next-line typescript/await-thenable -- tsgolint misreads await in a for-of head; tsc proves the call returns a Promise
     const providers = await llm.listProviders()
     const models: CatalogModel[] = []
     const failures: CatalogFailure[] = []

@@ -142,6 +142,7 @@ export class DirenvLoader {
    * `undefined` when nothing has been computed yet — the caller should
    * treat it as "no overlay available this once" and kick `ensure`.
    */
+  // fallow-ignore-next-line unused-class-member -- only the .mjs smoke calls it; fallow cannot attribute a JS call site
   snapshot(dir: string): EnvOverlay | undefined {
     const rcDir = findEnvrcDir(dir)
     if (rcDir === undefined) return EMPTY_OVERLAY
@@ -454,6 +455,7 @@ export function sanitizeDirenvDump(dump: Record<string, unknown>): EnvOverlay {
 }
 
 /** ANSI escape sequences (direnv colorizes stderr for terminals). */
+// oxlint-disable-next-line eslint/no-control-regex -- the pattern exists to match ANSI escapes
 const ANSI_PATTERN = /\x1b\[[0-9;?]*[A-Za-z]/g
 
 function firstLine(text: string): string | undefined {

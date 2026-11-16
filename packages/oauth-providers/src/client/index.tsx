@@ -259,7 +259,6 @@ function Section({ operations, t }: SectionProps) {
     return () => {
       aliveRef.current = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (

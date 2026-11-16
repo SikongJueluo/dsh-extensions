@@ -340,6 +340,8 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 
 ## 6. 批准清单
 
+> **2026-11-16 已获批准：A1–A19 全部通过**（用户回复「我觉得可以」）。下列条目已落到配置与代码中，仅 A19 的剩余修复随修复层推进。
+
 逐项批准/否决即可（例如“A1-A19 全部批准，但 B15 保留启用”）。
 
 | # | 待批准项 | 建议 |
@@ -386,8 +388,8 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 | 步骤 | 状态 |
 | --- | --- |
 | format / types / build / tests / smoke / client / pack / storybook | ✅ 8 步全绿 |
-| lint | ❌ 1708 条（其中 9 条 correctness 需人工判断，其余是 style/restriction 采纳项与 pedantic 规则） |
-| dead-code | ❌ 3 条（2 个只有 `.mjs` 调用点的成员 + 1 个未使用的公开 getter，见 A12/A13） |
+| lint | ❌ 1517 条（A18/B20 与 A14–A19 的抑制已生效；剩余为 require-unicode-regexp 222、no-non-null-assertion 181 等） |
+| dead-code | ✅ 0（A12/A13 已落地） |
 | 远端 CI | ⏳ workflow 已写，**从未运行**；分支保护未设置 |
 
 需要用户先裁决的完整清单就是第 6 节的 A1–A18 与 3.4-B 的 B1–B20；它们决定 lint 的最终范围。

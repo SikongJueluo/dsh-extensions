@@ -37,7 +37,9 @@
     "prefer-const": "error",
     "object-shorthand": "error",
     "prefer-template": "error",
-    "no-duplicate-imports": "error",
+    // A18 (approved): type-only imports stay separate from value imports;
+    // consistent-type-imports requires that shape.
+    "no-duplicate-imports": ["error", { "allowSeparateTypeImports": true }],
     "typescript/consistent-type-imports": "error",
     "typescript/array-type": "error",
 
@@ -56,6 +58,9 @@
     "no-sequences": "error",
     "promise/catch-or-return": "error",
     "unicorn/prefer-number-properties": "error",
+    // B20 (approved): explicit `undefined` in stubs documents intent; its autofix
+    // breaks typed Promise signatures.
+    "unicorn/no-useless-undefined": "off",
 
     // --- exclusions from `pedantic` (the list awaiting approval in
     // docs/quality-gates.md §6) ---

@@ -1,3 +1,4 @@
+/* oxlint-disable react/set-state-in-effect -- the effect mirrors external data into local UI state; deriving it would change render timing */
 // Client half of dsh-triggers: the current Session's trigger view.
 //
 // One Conversation tab (order 30) shows the execute/review loops THIS session

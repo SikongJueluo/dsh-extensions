@@ -16,6 +16,7 @@ import { ProxyAgent, fetch as undiciFetch } from 'undici'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
+// oxlint-disable-next-line typescript/strict-void-return -- tsgolint misreads the promisify overload; tsc accepts it
 const execFileAsync = promisify(execFile)
 
 /** A proxy-aware fetch compatible with the DOM `fetch` shape. */

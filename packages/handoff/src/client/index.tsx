@@ -1,3 +1,5 @@
+/* oxlint-disable jsx-a11y/no-autofocus, react/set-state-in-effect -- autoFocus is a desktop-only enhancement (off under pointer: coarse);
+   the effect mirrors external data into local UI state and deriving it would change render timing */
 // Client half of dsh-handoff: the configuration card shown when /handoff asks
 // which model, preset, and workspace the fresh session should use. TypeScript
 // TSX on the shared @dsh-extensions/ui components, built by Vite into the DSH
