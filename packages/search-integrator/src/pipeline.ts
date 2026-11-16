@@ -225,15 +225,12 @@ export async function runResearch(
       deps,
       signal,
     )
-    const digest1 =
-      buildRetrievalContext({
-        searchedAt: new Date(started).toISOString(),
-        queries: [...effectiveQueries],
-        searched: [...searched],
-        failed: [...configFailures, ...round1.failures],
-      }) +
-      '\n\n' +
-      buildDigest(evidence1, deps.settings.excerptChars, 24_000)
+    const digest1 = `${buildRetrievalContext({
+      searchedAt: new Date(started).toISOString(),
+      queries: [...effectiveQueries],
+      searched: [...searched],
+      failed: [...configFailures, ...round1.failures],
+    })}\n\n${buildDigest(evidence1, deps.settings.excerptChars, 24_000)}`
     let llmUsage: LlmUsage = EMPTY_USAGE
     const rawOutputs: string[] = []
     let integration: RawIntegration | undefined
@@ -288,15 +285,12 @@ export async function runResearch(
         deps,
         signal,
       )
-      const digest2 =
-        buildRetrievalContext({
-          searchedAt: new Date(started).toISOString(),
-          queries: [...effectiveQueries, ...followupQueries],
-          searched: [...searched],
-          failed: failures,
-        }) +
-        '\n\n' +
-        buildDigest(evidence2, deps.settings.excerptChars, 24_000)
+      const digest2 = `${buildRetrievalContext({
+        searchedAt: new Date(started).toISOString(),
+        queries: [...effectiveQueries, ...followupQueries],
+        searched: [...searched],
+        failed: failures,
+      })}\n\n${buildDigest(evidence2, deps.settings.excerptChars, 24_000)}`
       const outcome2 = await runIntegration(
         deps.llm,
         args.question,

@@ -208,7 +208,7 @@ describe('bounds and versions', () => {
   it('rejects a too-large explicit search file instead of clipping matches', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-auto-permit-big-'))
     try {
-      await writeFile(join(dir, 'big.txt'), 'needle\n' + 'x'.repeat(300 * 1024))
+      await writeFile(join(dir, 'big.txt'), `needle\n${'x'.repeat(300 * 1024)}`)
       const scoped = (await createInspector(dir, dir)) as Inspector
       const result = await scoped.execute(
         'search_files',
@@ -357,8 +357,7 @@ describe('truncated match lines are incomplete evidence', () => {
   it('marks an explicit single-file search whose matched line was clipped', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-auto-permit-line-'))
     try {
-      const line =
-        'podman run --rm --label note=' + 'x'.repeat(400) + ' --privileged -v /:/host alpine true'
+      const line = `podman run --rm --label note=${'x'.repeat(400)} --privileged -v /:/host alpine true`
       await writeFile(join(dir, 'long.sh'), `${line}\n`)
       const scoped = (await createInspector(dir, dir)) as Inspector
       const result = await scoped.execute(
@@ -378,8 +377,7 @@ describe('truncated match lines are incomplete evidence', () => {
   it('marks a recursive search whose matched line was clipped', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-auto-permit-line-dir-'))
     try {
-      const line =
-        'podman run --rm --label note=' + 'x'.repeat(400) + ' --privileged -v /:/host alpine true'
+      const line = `podman run --rm --label note=${'x'.repeat(400)} --privileged -v /:/host alpine true`
       await writeFile(join(dir, 'long.sh'), `${line}\n`)
       const scoped = (await createInspector(dir, dir)) as Inspector
       const result = await scoped.execute('search_files', JSON.stringify({ text: 'podman' }))

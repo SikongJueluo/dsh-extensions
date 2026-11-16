@@ -165,12 +165,12 @@ let rpcSeq = 0
 
 function callRpc<T>(endpoint: string, payload: Record<string, unknown>): Promise<T> {
   rpcSeq += 1
-  return fetch(RPC_BASE + '/' + endpoint, {
+  return fetch(`${RPC_BASE}/${endpoint}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       type: 'client-request',
-      rpcId: 'handoff-' + String(rpcSeq),
+      rpcId: `handoff-${String(rpcSeq)}`,
       method: endpoint,
       payload: payload || {},
     }),
@@ -426,9 +426,9 @@ function Picker({ request, operations, onSettled }: PickerProps) {
     const entry = catalogModel(route.provider, route.model)
     const parts: string[] = []
     if (entry) parts.push(entry.name)
-    parts.push(route.provider + '/' + route.model)
+    parts.push(`${route.provider}/${route.model}`)
     if (route.reasoningEffort) {
-      parts.push('强度 ' + effortText(route.provider, route.model, route.reasoningEffort))
+      parts.push(`强度 ${effortText(route.provider, route.model, route.reasoningEffort)}`)
     }
     return parts.join(' · ')
   }
@@ -528,7 +528,7 @@ function Picker({ request, operations, onSettled }: PickerProps) {
   const modelValue = modelFixed
     ? routeText(fixedModel, '由 --model 指定')
     : effectiveChoice.kind === 'model'
-      ? routeText(effectiveChoice, effectiveChoice.provider + '/' + effectiveChoice.model)
+      ? routeText(effectiveChoice, `${effectiveChoice.provider}/${effectiveChoice.model}`)
       : effectiveChoice.kind === 'default'
         ? routeText(request.fallback, '部署默认模型')
         : routeText(request.inherited, '沿用本会话的模型与强度')
@@ -542,8 +542,11 @@ function Picker({ request, operations, onSettled }: PickerProps) {
   )
   const effortValue =
     effortRouteCard && effortRouteCard.reasoningEffort
-      ? '强度 ' +
-        effortText(effortRouteCard.provider, effortRouteCard.model, effortRouteCard.reasoningEffort)
+      ? `强度 ${effortText(
+          effortRouteCard.provider,
+          effortRouteCard.model,
+          effortRouteCard.reasoningEffort,
+        )}`
       : '模型默认强度'
 
   let presetValue: string | null = null
@@ -556,27 +559,26 @@ function Picker({ request, operations, onSettled }: PickerProps) {
       presetValue = '继承当前（无预设）'
     } else {
       const inheritedPresetRow = presetOption(presetBlock.inherited)
-      presetValue =
-        '继承当前 · ' +
-        presetName(presetBlock.inherited) +
-        (inheritedPresetRow === null || inheritedPresetRow.broken ? '（不可用）' : '')
+      presetValue = `继承当前 · ${presetName(
+        presetBlock.inherited,
+      )}${inheritedPresetRow === null || inheritedPresetRow.broken ? '（不可用）' : ''}`
     }
   }
 
   let wsValue: string
   let wsChangeable: boolean
   if (fixedWorkspace) {
-    wsValue = fixedWorkspace.title + '（' + fixedWorkspace.path + '）'
+    wsValue = `${fixedWorkspace.title}（${fixedWorkspace.path}）`
     wsChangeable = false
   } else if (needsWorkspace()) {
     const effectiveCard = effectiveWorkspace()
     const pickedCard = (request.workspaces ?? []).find((w) => w.id === effectiveCard)
     wsValue = pickedCard
-      ? pickedCard.title + '（' + pickedCard.path + '）'
-      : '原工作区（' + (request.origin ? request.origin.path : '') + '）'
+      ? `${pickedCard.title}（${pickedCard.path}）`
+      : `原工作区（${request.origin ? request.origin.path : ''}）`
     wsChangeable = true
   } else {
-    wsValue = '原工作区（' + (request.origin ? request.origin.path : '') + '）'
+    wsValue = `原工作区（${request.origin ? request.origin.path : ''}）`
     wsChangeable = false
   }
   const showWorkspace = fixedWorkspace !== null || needsWorkspace()
@@ -601,7 +603,7 @@ function Picker({ request, operations, onSettled }: PickerProps) {
               {FLAG_BADGE}
             </Badge>
           ) : null}
-          {review.enabled ? '最多 ' + review.rounds + ' 轮' : '关闭'}
+          {review.enabled ? `最多 ${review.rounds} 轮` : '关闭'}
         </span>
         {reviewFixed ? null : (
           <Switch
@@ -737,7 +739,7 @@ function Picker({ request, operations, onSettled }: PickerProps) {
         ) : (
           <>
             {groups.map((group) => (
-              <div key={'g:' + group.id}>
+              <div key={`g:${group.id}`}>
                 <div className={GROUP_TITLE_CLASS}>{group.name}</div>
                 {group.models.map((model) => {
                   const description: string[] = []
@@ -751,11 +753,11 @@ function Picker({ request, operations, onSettled }: PickerProps) {
                         break
                       }
                     }
-                    description.push('默认强度 ' + defaultName)
+                    description.push(`默认强度 ${defaultName}`)
                   }
                   return (
                     <Entry
-                      key={'m:' + group.id + '/' + model.id}
+                      key={`m:${group.id}/${model.id}`}
                       label={model.name}
                       description={description.join(' · ') || undefined}
                       badge={
@@ -778,7 +780,7 @@ function Picker({ request, operations, onSettled }: PickerProps) {
                 <div className={GROUP_TITLE_CLASS}>不可用</div>
                 {failures.map((failure) => (
                   <div
-                    key={'f:' + failure.id}
+                    key={`f:${failure.id}`}
                     className="dshx:flex dshx:flex-col dshx:gap-0.5 dshx:px-2.5 dshx:py-2"
                   >
                     <span className="dshx:text-sm dshx:font-medium dshx:leading-[22px]">
@@ -813,7 +815,7 @@ function Picker({ request, operations, onSettled }: PickerProps) {
                 : undefined
           return (
             <Entry
-              key={'e:' + effort.id}
+              key={`e:${effort.id}`}
               label={effort.name}
               description={effort.description || undefined}
               badge={marker}
@@ -839,8 +841,8 @@ function Picker({ request, operations, onSettled }: PickerProps) {
             inherited
               ? inheritedRow
                 ? (inheritedRow.name ? inheritedRow.name : inherited) +
-                  (inheritedRow.broken ? ' · 不可用：' + inheritedRow.broken : ' · 原会话当前预设')
-                : inherited + ' · 已不在注册表中'
+                  (inheritedRow.broken ? ` · 不可用：${inheritedRow.broken}` : ' · 原会话当前预设')
+                : `${inherited} · 已不在注册表中`
               : '原会话没有挂载预设'
           }
           badge={effectivePreset.kind === 'inherit' ? CURRENT_BADGE : undefined}
@@ -857,10 +859,10 @@ function Picker({ request, operations, onSettled }: PickerProps) {
         ) : (
           options.map((option) => (
             <Entry
-              key={'p:' + option.id}
+              key={`p:${option.id}`}
               label={option.name || option.id}
               description={
-                option.broken ? '不可用：' + option.broken : option.description || option.id
+                option.broken ? `不可用：${option.broken}` : option.description || option.id
               }
               badge={
                 effectivePreset.kind === 'preset' && effectivePreset.id === option.id
@@ -886,7 +888,7 @@ function Picker({ request, operations, onSettled }: PickerProps) {
     const wsList = request.workspaces ?? []
     const wsNeedle = query.trim().toLowerCase()
     const wsFiltered = wsList.filter((w) => {
-      return wsNeedle.length === 0 || (w.title + ' ' + w.path).toLowerCase().includes(wsNeedle)
+      return wsNeedle.length === 0 || `${w.title} ${w.path}`.toLowerCase().includes(wsNeedle)
     })
     const wsTitleCounts: Record<string, number> = {}
     for (const w of wsList) {
@@ -914,12 +916,12 @@ function Picker({ request, operations, onSettled }: PickerProps) {
         ) : (
           wsFiltered.map((w) => {
             const tail = w.path.split('/').filter(Boolean).slice(-2).join('/')
-            const label = (wsTitleCounts[w.title] ?? 0) > 1 ? w.title + ' (' + tail + ')' : w.title
+            const label = (wsTitleCounts[w.title] ?? 0) > 1 ? `${w.title} (${tail})` : w.title
             return (
               <Entry
-                key={'w:' + w.id}
+                key={`w:${w.id}`}
                 label={label}
-                description={w.missing ? w.path + ' · 目录不存在' : w.path}
+                description={w.missing ? `${w.path} · 目录不存在` : w.path}
                 muted={w.missing === true}
                 badge={effectiveWs === w.id ? CURRENT_BADGE : undefined}
                 busy={busy}

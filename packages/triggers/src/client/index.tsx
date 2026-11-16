@@ -135,7 +135,7 @@ function callRpc<T>(endpoint: string, payload?: Record<string, unknown>): Promis
     signal,
     body: JSON.stringify({
       type: 'client-request',
-      rpcId: 'triggers-' + String(Date.now()) + '-' + String(Math.random()).slice(2),
+      rpcId: `triggers-${String(Date.now())}-${String(Math.random()).slice(2)}`,
       method: endpoint,
       payload: payload ?? {},
     }),
@@ -372,15 +372,9 @@ function fmtTime(ms: number): string {
   if (typeof ms !== 'number' || !Number.isFinite(ms)) return '—'
   const date = new Date(ms)
   const pad = (value: number): string => String(value).padStart(2, '0')
-  return (
-    pad(date.getMonth() + 1) +
-    '-' +
-    pad(date.getDate()) +
-    ' ' +
-    pad(date.getHours()) +
-    ':' +
-    pad(date.getMinutes())
-  )
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
+    date.getMinutes(),
+  )}`
 }
 
 // Host session ids share long common prefixes (`session-<uuid>` or plain
@@ -390,7 +384,7 @@ function fmtTime(ms: number): string {
 function shortId(id: string): string {
   const raw = String(id).replace(/^session-/, '')
   if (raw.length <= 10) return raw
-  return raw.slice(0, 4) + '…' + raw.slice(-4)
+  return `${raw.slice(0, 4)}…${raw.slice(-4)}`
 }
 
 function safeId(value: string): string {
@@ -409,7 +403,7 @@ function sessionLabel(t: Translate, sessionsById: SessionsById, id: string | und
   // session; show the distinguishable short id without the warning.
   const catalogKnown =
     sessionsById !== undefined && sessionsById !== null && Object.keys(sessionsById).length > 0
-  return shortId(id) + (catalogKnown ? ' · ' + t('unknownSession') : '')
+  return shortId(id) + (catalogKnown ? ` · ${t('unknownSession')}` : '')
 }
 
 function roleOf(
@@ -618,7 +612,7 @@ function runReason(t: Translate, run: TriggerRun, role: Role | undefined): strin
   }
   if (run.status === 'paused-error') {
     const detail = lastStopDetail(run)
-    return detail === undefined ? t('reasonPausedError') : t('reasonPausedError') + ' ' + detail
+    return detail === undefined ? t('reasonPausedError') : `${t('reasonPausedError')} ${detail}`
   }
   if (run.status === 'completed') return t('reasonCompleted')
   if (run.status === 'cancelled') return t('reasonCancelled')
@@ -737,18 +731,9 @@ function ConfigFacts(props: {
     return id || '—'
   }
   const refs = binding.templates ?? {}
-  const templatesLine =
-    t('tplStart') +
-    ' ' +
-    templateName(refs.start) +
-    ' · ' +
-    t('tplReview') +
-    ' ' +
-    templateName(refs.review) +
-    ' · ' +
-    t('tplRework') +
-    ' ' +
-    templateName(refs.rework)
+  const templatesLine = `${t('tplStart')} ${templateName(refs.start)} · ${t(
+    'tplReview',
+  )} ${templateName(refs.review)} · ${t('tplRework')} ${templateName(refs.rework)}`
   return (
     <section
       aria-label={t('configTitle')}
@@ -779,7 +764,7 @@ function HistoryList({ t, run }: { t: Translate; run: TriggerRun }) {
       <div className={SUBLABEL_CLASS}>
         {t('historyTitle') +
           (history.length > shown.length
-            ? ' · ' + t('historyTruncated', { shown: shown.length, total: history.length })
+            ? ` · ${t('historyTruncated', { shown: shown.length, total: history.length })}`
             : '')}
       </div>
       {shown.map((entry, index) => (
@@ -791,7 +776,7 @@ function HistoryList({ t, run }: { t: Translate; run: TriggerRun }) {
             {fmtTime(entry.at)}
           </span>
           <span className="dshx:min-w-0 dshx:[overflow-wrap:anywhere]">
-            {t(HISTORY_KEYS[entry.kind] ?? entry.kind) + (entry.detail ? ' · ' + entry.detail : '')}
+            {t(HISTORY_KEYS[entry.kind] ?? entry.kind) + (entry.detail ? ` · ${entry.detail}` : '')}
           </span>
         </div>
       ))}
@@ -840,9 +825,9 @@ function DeliveryList(props: {
         >
           <Chip tone="idle">{t(KIND_KEYS[delivery.kind] ?? delivery.kind)}</Chip>
           <span className="dshx:text-xs dshx:text-fg-secondary">
-            {t('deliveryTo', { to: sessionLabel(t, sessionsById, delivery.to) }) +
-              ' · ' +
-              fmtTime(delivery.createdAt)}
+            {`${t('deliveryTo', { to: sessionLabel(t, sessionsById, delivery.to) })} · ${fmtTime(
+              delivery.createdAt,
+            )}`}
           </span>
           <span
             className={cn(
@@ -1061,7 +1046,7 @@ function RunBody(props: {
         {runReason(t, run, role)}
       </p>
       {run.pendingSignal ? <p className={HINT_CLASS}>{t('pendingSignalNote')}</p> : null}
-      {run.endNote ? <p className={HINT_CLASS}>{t('endNote') + '：' + run.endNote}</p> : null}
+      {run.endNote ? <p className={HINT_CLASS}>{`${t('endNote')}：${run.endNote}`}</p> : null}
       {attention.length > 0 ? (
         <DeliveryList
           t={t}
@@ -1101,7 +1086,7 @@ function RunEntry(props: {
   const tone = statusTone(run.status)
   const title =
     typeof run.task === 'string' && run.task.trim().length > 0 ? run.task : t('untitledRun')
-  const detailId = 'dsh-triggers-run-' + safeId(run.id)
+  const detailId = `dsh-triggers-run-${safeId(run.id)}`
   return (
     <div>
       <button
@@ -1116,7 +1101,7 @@ function RunEntry(props: {
           {title}
         </span>
         <span className="dshx:shrink-0 dshx:whitespace-nowrap dshx:text-2xs dshx:text-fg-secondary dshx:max-[600px]:hidden">
-          {t('round', { round: run.round, max: run.maxRounds }) + ' · ' + fmtTime(run.startedAt)}
+          {`${t('round', { round: run.round, max: run.maxRounds })} · ${fmtTime(run.startedAt)}`}
         </span>
         <Chevron open={open} />
       </button>
@@ -1164,7 +1149,7 @@ function TriggerRow(props: {
   const title = groupTitle(t, group)
   const peerLabel = group.role === 'parent' ? t('peerExecutor') : t('peerReviewer')
   const peer = sessionLabel(t, sessionsById, group.peer)
-  const detailId = 'dsh-triggers-detail-' + safeId(group.id)
+  const detailId = `dsh-triggers-detail-${safeId(group.id)}`
   const others = current === undefined ? [] : group.runs.filter((run) => run.id !== current.id)
   const bindingPairChanged =
     binding !== undefined &&
@@ -1204,7 +1189,7 @@ function TriggerRow(props: {
                 </span>
               ) : null}
               {group.role ? <span className="dshx:opacity-55">·</span> : null}
-              {group.role ? <span>{peerLabel + ' ' + peer}</span> : <span>{peer}</span>}
+              {group.role ? <span>{`${peerLabel} ${peer}`}</span> : <span>{peer}</span>}
               {current ? <span className="dshx:opacity-55">·</span> : null}
               {current ? (
                 <span>{t('round', { round: current.round, max: current.maxRounds })}</span>
@@ -1261,7 +1246,7 @@ function TriggerRow(props: {
             </Disclosure>
           ) : null}
           {others.length > 0 ? (
-            <Disclosure label={t('otherRuns') + ' (' + String(others.length) + ')'}>
+            <Disclosure label={`${t('otherRuns')} (${String(others.length)})`}>
               <div className="dshx:flex dshx:flex-col dshx:gap-1">
                 {others.map((run) => (
                   <RunEntry

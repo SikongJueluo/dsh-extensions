@@ -178,12 +178,12 @@ describe('v3 dedup corrections', () => {
         hit({
           url: 'https://one.example/a',
           title: 'Same headline',
-          snippet: sharedPrefix + ' version 1.0',
+          snippet: `${sharedPrefix} version 1.0`,
         }),
         hit({
           url: 'https://two.example/b',
           title: 'Same headline',
-          snippet: sharedPrefix + ' version 2.0',
+          snippet: `${sharedPrefix} version 2.0`,
           provider: 'exa',
         }),
       ],

@@ -99,23 +99,23 @@ function fmtDuration(ms: number) {
   s -= h * 3600
   const m = Math.floor(s / 60)
   s -= m * 60
-  if (d > 0) return d + 'd ' + h + 'h'
-  if (h > 0) return h + 'h ' + m + 'm'
-  if (m > 0) return m + 'm ' + s + 's'
-  return s + 's'
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
 }
 
 function fmtCount(n: number) {
   if (typeof n !== 'number' || !isFinite(n)) return '—'
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B'
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`
   return String(Math.round(n))
 }
 
 function fmtUsd(n: number) {
   if (typeof n !== 'number' || !isFinite(n)) return '—'
-  return '$' + n.toFixed(2)
+  return `$${n.toFixed(2)}`
 }
 
 interface QuotaWindow {
@@ -156,12 +156,12 @@ interface Operations {
 let rpcSeq = 0
 function callQuota(refresh: boolean): Promise<QuotaResult> {
   rpcSeq += 1
-  return fetch(RPC_BASE + '/quota', {
+  return fetch(`${RPC_BASE}/quota`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       type: 'client-request',
-      rpcId: 'plan-usage-' + String(rpcSeq),
+      rpcId: `plan-usage-${String(rpcSeq)}`,
       method: 'quota',
       payload: { refresh: !!refresh },
     }),
@@ -180,9 +180,9 @@ interface QuotaEnvelope {
 // "5h" / "2.5h" / "45m" from API-reported window minutes, when present.
 function fmtWindowSize(minutes: number | undefined) {
   if (!minutes || minutes <= 0) return null
-  if (minutes < 60) return minutes + 'm'
+  if (minutes < 60) return `${minutes}m`
   const h = minutes / 60
-  return (h === Math.round(h) ? String(Math.round(h)) : h.toFixed(1)) + 'h'
+  return `${h === Math.round(h) ? String(Math.round(h)) : h.toFixed(1)}h`
 }
 
 function windowLabel(t: Translate, base: string, w: QuotaWindow | undefined | null) {
@@ -227,10 +227,11 @@ function WindowBar({
     bits.push(resetText(t, w, nowTick))
     meta = bits.join(' · ')
   } else if (typeof w.used === 'number' && typeof w.total === 'number' && w.total > 0) {
-    meta =
-      t('usedOfTotal', { used: fmtCount(w.used), total: fmtCount(w.total) }) +
-      ' · ' +
-      resetText(t, w, nowTick)
+    meta = `${t('usedOfTotal', { used: fmtCount(w.used), total: fmtCount(w.total) })} · ${resetText(
+      t,
+      w,
+      nowTick,
+    )}`
   } else {
     const bits: string[] = []
     if (w.unit === 'usd' && typeof w.remaining === 'number') {

@@ -254,7 +254,7 @@ describe('atomic commit: state advance and owed prompt are one write', () => {
     expect(host.prompts).toHaveLength(1)
     expect(host.prompts[0]!.requestId).toBe(owed[0]!.requestId)
     expect(host.prompts[0]!.sessionId).toBe(PARENT)
-    expect(host.prompts[0]!.text).toContain('runId=' + bound.runId)
+    expect(host.prompts[0]!.text).toContain(`runId=${bound.runId}`)
     // Confirmed send leaves the outbox and marks the projection row sent.
     expect(host.outboxOf(bound.runId)).toHaveLength(0)
     const projected = [...host.tables.deliveries.values()].find(
@@ -295,7 +295,7 @@ describe('atomic commit: state advance and owed prompt are one write', () => {
     expect(host.run(bound.runId)!.phase).toBe('awaiting-review')
     expect(host.prompts).toHaveLength(1)
     expect(host.prompts[0]!.sessionId).toBe(PARENT)
-    expect(host.prompts[0]!.text).toContain('runId=' + bound.runId)
+    expect(host.prompts[0]!.text).toContain(`runId=${bound.runId}`)
   })
 
   it('a crash after the send but before the sent-mark re-sends on restart; the queue dedupe keeps one copy', async () => {
@@ -364,7 +364,7 @@ describe('atomic commit: state advance and owed prompt are one write', () => {
     void svc2
     expect(host.prompts).toHaveLength(1)
     expect(host.prompts[0]!.sessionId).toBe(EXECUTOR)
-    expect(host.prompts[0]!.text).toContain('runId=' + runId)
+    expect(host.prompts[0]!.text).toContain(`runId=${runId}`)
     expect(host.outboxOf(runId)).toHaveLength(0)
   })
 })

@@ -591,7 +591,14 @@ function apply(ctx: DshClientContext) {
                 >
                   {t('fork')}
                 </Button>
-                <Button size="md" variant="secondary" disabled={busy} onClick={refresh}>
+                <Button
+                  size="md"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => {
+                    void refresh()
+                  }}
+                >
                   {t('refresh')}
                 </Button>
               </div>

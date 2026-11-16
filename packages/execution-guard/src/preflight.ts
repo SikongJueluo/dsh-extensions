@@ -162,8 +162,9 @@ export function checkBatch(
   }
   const reason = clip(
     `${GUARD_NAME}: ${INVALID_ARGS_CODE} — batch rejected before dispatch ` +
-      `(${invalid.length} of ${calls.length} call(s) invalid; all members of this batch are denied).\n` +
-      lines.join('\n'),
+      `(${invalid.length} of ${calls.length} call(s) invalid; all members of this batch are denied).\n${lines.join(
+        '\n',
+      )}`,
     MAX_REASON_CHARS,
   )
   return { kind: 'deny', reason, invalid, unchecked }

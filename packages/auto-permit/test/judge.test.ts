@@ -671,7 +671,7 @@ describe('deterministic evidence gates', () => {
   })
 
   it('cannot allow after a too-large explicit search', async () => {
-    await writeFile(join(root, 'huge.txt'), 'needle\n' + 'x'.repeat(300 * 1024))
+    await writeFile(join(root, 'huge.txt'), `needle\n${'x'.repeat(300 * 1024)}`)
     const llm = route([
       () => toolChunks('search_files', { text: 'needle', path: 'huge.txt' }),
       () => textChunks('VERDICT: allow\nREASON: no dangerous match'),
@@ -858,8 +858,7 @@ describe('clipped search matches cannot authorize', () => {
   it('defers after an explicit or recursive search clips a matched line', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-auto-permit-search-line-'))
     try {
-      const line =
-        'podman run --rm --label note=' + 'x'.repeat(400) + ' --privileged -v /:/host alpine true'
+      const line = `podman run --rm --label note=${'x'.repeat(400)} --privileged -v /:/host alpine true`
       await writeFile(join(dir, 'long.sh'), `${line}\n`)
       for (const args of [{ text: 'podman', path: 'long.sh' }, { text: 'podman' }]) {
         const llm = route([

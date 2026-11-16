@@ -644,9 +644,7 @@ export function apply(ctx: Context, config: Config) {
             render: (_args, value) => [
               {
                 type: 'text',
-                text:
-                  `created agent ${value.agentId}` +
-                  (value.notice === undefined ? '' : `\n[crew] ${value.notice}`),
+                text: `created agent ${value.agentId}${value.notice === undefined ? '' : `\n[crew] ${value.notice}`}`,
               },
             ],
           },

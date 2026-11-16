@@ -97,6 +97,7 @@ oxfmt 0.78.0           fallow 3.43.1
 | B17 | `unicorn/max-nested-calls` | 74 | `task-anchor/test/checkpoint.test.ts:95` | 同 B9 |
 | B18 | `no-await-in-loop` | 105 | `jj-workspace/test/client-deps.test.mjs:154` | 循环内顺序 await 是本仓刻意的顺序/背压语义；并行化会改变可观察顺序 |
 | B19 | `import/max-dependencies` | 8 | `oauth-providers/.../chatgpt/index.ts:22` | 数值预算；依赖卫生由 Fallow 负责 |
+| B20 | `unicorn/no-useless-undefined` | 108 | 测试/host stub 里的 `() => undefined`、`return undefined` | 纯风格：显式 `undefined` 在 stub 里表达“没有值”的意图；自动修复有 13 处与 `Promise<T \| undefined>` / `Promise<void>` 签名冲突（去掉实参直接 `tsc` 报错），且 62 处是测试桩，改与不改没有质量差别 |
 
 #### C. 插件与范围（三项）
 
@@ -339,13 +340,13 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 
 ## 6. 批准清单
 
-逐项批准/否决即可（例如“A1-A13 全部批准，但 B15 保留启用”）。
+逐项批准/否决即可（例如“A1-A19 全部批准，但 B15 保留启用”）。
 
 | # | 待批准项 | 建议 |
 | --- | --- | --- |
 | A1 | `style` 整类 off + 采纳 6 条 | 批准 |
 | A2 | `restriction` 整类 off + 采纳 13 条 | 批准 |
-| A3 | 规则级排除 B1–B19（表 3.4-B） | 批准 |
+| A3 | 规则级排除 B1–B20（表 3.4-B） | 批准 |
 | A4 | 不启用 `jest`/`jsdoc`/`nextjs`/`vue`/`react-perf` 插件（C1、C3） | 批准 |
 | A5 | 类型感知规则对 JS 全关（C2） | 批准 |
 | A6 | Oxfmt 排除 Markdown（5.2） | 批准 |
@@ -359,6 +360,9 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 | A14 | 给 `handoff/src/selection.ts:195` 的 `await llm.listModels(...)` 加一条带理由的 `oxlint-disable-next-line typescript/await-thenable`（tsgolint 误报，`tsc` 证明该调用返回 Promise） | 批准 |
 | A15 | `handoff/src/client/index.tsx` 的 `autoFocus={!COARSE}` 加一条带理由的抑制（AGENTS 明确：autoFocus 只作桌面增强、`pointer: coarse` 时关闭） | 批准 |
 | A16 | `remote-exec/src/display.ts` 与 `auto-env/src/direnv.ts` 的 ANSI 正则加两条带理由的 `no-control-regex` 抑制（正则本身就是要匹配控制字符） | 批准 |
+| A17 | `oauth-providers/src/transport.ts:19` 的 `promisify(execFile)` 加一条带理由的 `strict-void-return` 抑制（tsgolint 对 promisify 重载的误报；显式标注类型无效，`tsc` 通过） | 批准 |
+| A18 | `no-duplicate-imports` 设 `allowSeparateTypeImports: true`：81 条里有 54 条是 `import type {…}` 与同模块值导入并存，而 `typescript/consistent-type-imports` 要求类型导入单独成句，两条规则当前互相打架 | 批准 |
+| A19 | 剩余 9 条 correctness 的处理授权：优先按语义修正；凡修正会改变 UI 结构或可观察行为的（`set-state-in-effect` 5、`prefer-tag-over-role` 2、`no-callback-in-promise` 1），改为一条带理由的抑制并在提交说明里写明为什么不能改 | 批准 |
 
 若希望更严：`require-unicode-regexp`（228）、`prefer-strict-equal` 与
 `prefer-to-be-truthy/falsy`（vitest 风格，606）、`strict-boolean-expressions`（B2）
@@ -375,7 +379,22 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 - **已知工具误报 1 处**：`typescript/await-thenable` 对 `for (const x of await llm.listModels(…))` 报“await 非 Promise”，但 `tsc` 明确该调用返回 `Promise<…>`（删掉 `await` 会报 TS2488）。这是 tsgolint 在 for-of 头部解析上的缺陷，需要一条带理由的抑制（加入待批准项）。
 - 纯排版层已落地：228 个文件、+13479/-5137 行；`format:check` 现在通过。详见 5.2。
 
-## 8. 后续分层
+## 8. 当前状态与后续分层
+
+截至最近一次实测（`pnpm check:quality`）：
+
+| 步骤 | 状态 |
+| --- | --- |
+| format / types / build / tests / smoke / client / pack / storybook | ✅ 8 步全绿 |
+| lint | ❌ 1708 条（其中 9 条 correctness 需人工判断，其余是 style/restriction 采纳项与 pedantic 规则） |
+| dead-code | ❌ 3 条（2 个只有 `.mjs` 调用点的成员 + 1 个未使用的公开 getter，见 A12/A13） |
+| 远端 CI | ⏳ workflow 已写，**从未运行**；分支保护未设置 |
+
+需要用户先裁决的完整清单就是第 6 节的 A1–A18 与 3.4-B 的 B1–B20；它们决定 lint 的最终范围。
+与规则无关的清理（死模块、重复契约、循环依赖、无用导出、未声明依赖、游离 smoke 接线、排版）
+已经全部落地。
+
+## 8.1 后续分层
 
 1. **本层（当前）**：工具 + 配置 + 扫描 + 本文批准清单。
 2. ~~纯排版层~~（已完成）：228 个文件单独一层，未夹带语义修复；`typecheck`/`build`/`test`/`check:smoke`/`check:client`/`check:pack`/`build:storybook` 全部通过。

@@ -185,7 +185,7 @@ function shorten(m: unknown): string {
   let s = asText(m)
   const cut = s.indexOf(' — ')
   if (cut > 0) s = s.slice(0, cut)
-  return s.length > 140 ? s.slice(0, 140) + '…' : s
+  return s.length > 140 ? `${s.slice(0, 140)}…` : s
 }
 
 function relTime(t: Translate, at: number): string {
@@ -473,7 +473,9 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
       size="sm"
       variant={provider.signedIn || status.kind === 'ok' ? 'default' : 'secondary'}
       disabled={busy}
-      onClick={discover}
+      onClick={() => {
+        void discover()
+      }}
     >
       {busy ? t('working') : t('refresh')}
     </Button>

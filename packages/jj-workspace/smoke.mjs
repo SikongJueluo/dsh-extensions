@@ -63,8 +63,12 @@ const subprocess = {
     })
     const out = []
     const err = []
-    child.stdout.on('data', (chunk) => out.push(chunk))
-    child.stderr.on('data', (chunk) => err.push(chunk))
+    child.stdout.on('data', (chunk) => {
+      out.push(chunk)
+    })
+    child.stderr.on('data', (chunk) => {
+      err.push(chunk)
+    })
     const done = new Promise((resolveDone, reject) => {
       child.on('error', reject)
       child.on('close', (code, signal) => resolveDone({ exitCode: code, signal }))

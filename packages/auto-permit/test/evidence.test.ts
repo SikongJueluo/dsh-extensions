@@ -524,7 +524,7 @@ describe('execution context: workdir, effective cwd, and session workspace', () 
   })
 
   it('treats an over-long workdir as unresolved and clips it for display', () => {
-    const workdir = '/' + 'x'.repeat(MAX_PATH_CHARS * 2)
+    const workdir = `/${'x'.repeat(MAX_PATH_CHARS * 2)}`
     const evidence = collectEvidence(
       sessionOf([ptcStart(1, 'root:ptc:1', { command: 'podman build .', workdir })], {
         cwd: '/home/u/app',
@@ -569,7 +569,7 @@ describe('unchanged policy around the fold', () => {
   })
 
   it('never clips the complete command: hard rules and the allowlist must see all of it', () => {
-    const long = 'uv sync ' + 'x'.repeat(MAX_COMMAND_CHARS)
+    const long = `uv sync ${'x'.repeat(MAX_COMMAND_CHARS)}`
     const evidence = collectEvidence(
       sessionOf([ptcStart(1, 'root:ptc:1', { command: long })]),
       'root:ptc:1',

@@ -297,7 +297,7 @@ function fold(events: readonly SessionEvent[]): Folded {
 }
 
 function clip(text: string, max: number): string {
-  return text.length > max ? text.slice(0, max) + '…[truncated]' : text
+  return text.length > max ? `${text.slice(0, max)}…[truncated]` : text
 }
 
 interface TaskSection {

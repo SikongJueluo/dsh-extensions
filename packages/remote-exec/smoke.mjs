@@ -1090,8 +1090,12 @@ esac
             child.stdin.end(spec.stdio.stdin.data)
             const out = []
             const err = []
-            child.stdout.on('data', (chunk) => out.push(chunk))
-            child.stderr.on('data', (chunk) => err.push(chunk))
+            child.stdout.on('data', (chunk) => {
+              out.push(chunk)
+            })
+            child.stderr.on('data', (chunk) => {
+              err.push(chunk)
+            })
             const done = new Promise((resolve) => {
               child.on('close', (code, signal) => resolve({ exitCode: code, signal }))
               spec.signal?.addEventListener(

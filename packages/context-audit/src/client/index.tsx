@@ -114,30 +114,28 @@ function template(text: string, vars: Record<string, unknown>) {
 
 function fmtTokens(n: number) {
   if (typeof n !== 'number' || !isFinite(n)) return '—'
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B'
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K'
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`
   return String(Math.round(n))
 }
 
 function fmtDuration(ms: number) {
   if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) return '—'
-  if (ms >= 60000) return (ms / 60000).toFixed(1) + 'm'
-  if (ms >= 1000) return (ms / 1000).toFixed(1) + 's'
-  return Math.round(ms) + 'ms'
+  if (ms >= 60000) return `${(ms / 60000).toFixed(1)}m`
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.round(ms)}ms`
 }
 
 function fmtClock(ms: number) {
   const d = new Date(ms)
   const p = (n: number) => String(n).padStart(2, '0')
-  return (
-    p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
-  )
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 function fmtHit(cacheRead: number, uncached: number) {
   const total = cacheRead + uncached
-  return total === 0 ? '—' : ((cacheRead / total) * 100).toFixed(1) + '%'
+  return total === 0 ? '—' : `${((cacheRead / total) * 100).toFixed(1)}%`
 }
 
 interface ModelRoute {
@@ -192,18 +190,18 @@ function callReport(days: number | undefined): Promise<Report> {
   rpcSeq += 1
   const payload: Record<string, number> = {}
   if (typeof days === 'number') payload.days = days
-  return fetch(RPC_BASE + '/report', {
+  return fetch(`${RPC_BASE}/report`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       type: 'client-request',
-      rpcId: 'context-audit-' + String(rpcSeq),
+      rpcId: `context-audit-${String(rpcSeq)}`,
       method: 'report',
       payload,
     }),
   })
     .then((res) => {
-      if (!res.ok) throw new Error('HTTP ' + res.status)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return res.json()
     })
     .then((envelope: ReportEnvelope) => {
@@ -246,8 +244,8 @@ function RoutesTable({ t, rows }: { t: Translate; rows: ModelRoute[] }) {
         </TableHeader>
         <TableBody>
           {rows.map((m) => (
-            <TableRow key={m.provider + '/' + m.model}>
-              <TableCell className={TD_L}>{m.provider + '/' + m.model}</TableCell>
+            <TableRow key={`${m.provider}/${m.model}`}>
+              <TableCell className={TD_L}>{`${m.provider}/${m.model}`}</TableCell>
               <TableCell className={TD_R}>{m.requests}</TableCell>
               <TableCell className={TD_R}>{fmtTokens(m.uncachedInput + m.cacheRead)}</TableCell>
               <TableCell className={TD_R}>{fmtTokens(m.cacheRead)}</TableCell>
@@ -287,7 +285,7 @@ function ToolsTable({ t, rows }: { t: Translate; rows: ToolStat[] }) {
               <TableCell className={TD_R}>
                 {tool.completed === 0
                   ? '—'
-                  : ((tool.errors / tool.completed) * 100).toFixed(1) + '%'}
+                  : `${((tool.errors / tool.completed) * 100).toFixed(1)}%`}
               </TableCell>
               <TableCell className={TD_R}>
                 {tool.completed === 0 ? '—' : fmtDuration(tool.totalDurationMs / tool.completed)}
@@ -323,7 +321,7 @@ function SessionsTable({ t, rows }: { t: Translate; rows: SessionStat[] }) {
           {rows.map((s) => (
             <TableRow key={s.id}>
               <TableCell className={TD_L}>{s.title || s.id.slice(0, 12)}</TableCell>
-              <TableCell className={TD_L}>{fmtClock(s.first) + '→' + fmtClock(s.last)}</TableCell>
+              <TableCell className={TD_L}>{`${fmtClock(s.first)}→${fmtClock(s.last)}`}</TableCell>
               <TableCell className={TD_L}>{(s.routes || []).slice(0, 2).join(' + ')}</TableCell>
               <TableCell className={TD_R}>{s.requests}</TableCell>
               <TableCell className={TD_R}>{fmtTokens(s.uncachedInput)}</TableCell>
@@ -399,9 +397,9 @@ function ContextAuditPage({ t }: { t: Translate }) {
                 <span className="dshx:text-fg-muted">{t('errorCodes')}</span>
                 {withCodes.map((tool) => (
                   <Badge key={tool.name} variant="outline" className="dshx:my-0.5 dshx:mr-1.5">
-                    {tool.name +
-                      ': ' +
-                      (tool.errorCodes ?? []).map((pair) => pair[0] + '×' + pair[1]).join(', ')}
+                    {`${tool.name}: ${(tool.errorCodes ?? [])
+                      .map((pair) => pair[0] + '×' + pair[1])
+                      .join(', ')}`}
                   </Badge>
                 ))}
               </div>

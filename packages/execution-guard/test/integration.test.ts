@@ -397,7 +397,7 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
         },
       },
     )
-    const pre = wrapPre(fixture, () => ({ kind: 'allow' }))
+    const pre = wrapPre(fixture, () => {})
     const onResult = resultListener(fixture)
 
     // First occurrence: deny + final invalid -> count 1, NO hint yet.
@@ -450,7 +450,7 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
     const fixture = makeFixture()
     await initFixture(fixture)
     pushStep(fixture, 'c2', '{"file_path":"b"}', 1, 1)
-    const pre = wrapPre(fixture, () => ({ kind: 'allow' }))
+    const pre = wrapPre(fixture, () => {})
     const onResult = resultListener(fixture)
     const aborted = {
       isError: true as const,

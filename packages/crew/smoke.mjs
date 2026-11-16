@@ -521,14 +521,12 @@ function pendingActivation({ log } = {}) {
   const wired = makeApplyCtx({
     activate: (spec, childId, record) => {
       const outcome = deferred()
-      setTimeout(
-        () =>
-          outcome.resolve({
-            stopReason: 'completed',
-            output: [{ type: 'text', text: 'race winner' }],
-          }),
-        2,
-      )
+      setTimeout(() => {
+        outcome.resolve({
+          stopReason: 'completed',
+          output: [{ type: 'text', text: 'race winner' }],
+        })
+      }, 2)
       return {
         childId,
         messageId: 'message-1',

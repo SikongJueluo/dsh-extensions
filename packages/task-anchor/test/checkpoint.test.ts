@@ -163,7 +163,11 @@ describe('AnchorStore', () => {
 
   it('returns undefined for a missing anchor without reporting a problem', async () => {
     const problems: string[] = []
-    const store = new AnchorStore(await tempDir(), { onProblem: (m) => problems.push(m) })
+    const store = new AnchorStore(await tempDir(), {
+      onProblem: (m) => {
+        problems.push(m)
+      },
+    })
     expect(await store.load('none')).toBeUndefined()
     expect(problems).toEqual([])
   })
@@ -171,7 +175,11 @@ describe('AnchorStore', () => {
   it('reports corrupt and unsupported anchors through onProblem, not silently', async () => {
     const problems: string[] = []
     const dir = await tempDir()
-    const store = new AnchorStore(dir, { onProblem: (m) => problems.push(m) })
+    const store = new AnchorStore(dir, {
+      onProblem: (m) => {
+        problems.push(m)
+      },
+    })
     await store.save(anchor())
     const target = store.pathFor('s1')
     await writeFile(target, '{ corrupt')

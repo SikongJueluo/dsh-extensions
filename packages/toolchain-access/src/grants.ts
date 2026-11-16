@@ -352,7 +352,7 @@ function joinDir(base: string, segment: string): string {
 export function defaultBaseTrees(env: GrantEnv): readonly string[] {
   const bases = [
     joinDir(env.home, '.cache'),
-    joinDir(env.home, '.local' + sep + 'share'),
+    joinDir(env.home, `.local${sep}share`),
     env.xdgCacheHome ?? '',
     env.xdgDataHome ?? '',
     env.xdgConfigHome ?? '',
@@ -440,7 +440,7 @@ function derivePaths(
   const named: NamedPath[] = []
   const issues: GrantIssue[] = []
   const cacheBase = env.xdgCacheHome ?? joinDir(env.home, '.cache')
-  const dataBase = env.xdgDataHome ?? joinDir(env.home, '.local' + sep + 'share')
+  const dataBase = env.xdgDataHome ?? joinDir(env.home, `.local${sep}share`)
   const pnpmHomeBase = env.pnpmHome ?? joinDir(dataBase, 'pnpm')
 
   const push = (
