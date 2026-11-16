@@ -17,7 +17,7 @@ import {
   coercePresetChoice,
   type ModelChoice,
   type PresetChoice,
-} from './brief.js'
+} from './choice.js'
 import type { HandoffTarget } from './workspace.js'
 
 /** The durable record of one handoff attempt. */

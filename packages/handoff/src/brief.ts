@@ -1,137 +1,14 @@
 /**
- * The brief lifecycle: instruction prompt, completion watching, and the
- * bootstrap prompt for the fresh session.
+ * The brief lifecycle: the instruction prompt, completion watching, and the
+ * failure report for the origin session.
  *
  * @module dsh-handoff/brief
  */
 import { readFile } from 'node:fs/promises'
-import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { Config } from './index.js'
 import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
-import type { HandoffChannel } from './channel.js'
-import type { PreferenceStore } from './preferences.js'
-import type { HandoffTarget } from './workspace.js'
+import type { HandoffRuntime, PendingHandoff } from './pending.js'
 import { spawnHandoff } from './spawn.js'
-
-/** Which model route the fresh session should use. */
-export type ModelChoice =
-  | { kind: 'inherit' }
-  | { kind: 'default' }
-  | { kind: 'model'; provider: string; model: string; reasoningEffort?: string }
-
-/** Narrow an untrusted value (browser payload, sidecar meta JSON) into a choice. */
-export function coerceModelChoice(value: unknown): ModelChoice | undefined {
-  if (typeof value !== 'object' || value === null) return undefined
-  const record = value as Record<string, unknown>
-  if (record.kind === 'inherit') return { kind: 'inherit' }
-  if (record.kind === 'default') return { kind: 'default' }
-  if (record.kind === 'model') {
-    const provider = record.provider
-    const model = record.model
-    if (typeof provider !== 'string' || provider.length === 0) return undefined
-    if (typeof model !== 'string' || model.length === 0) return undefined
-    const effort = record.reasoningEffort
-    if (effort !== undefined && (typeof effort !== 'string' || effort.length === 0))
-      return undefined
-    return {
-      kind: 'model',
-      provider,
-      model,
-      ...(effort === undefined ? {} : { reasoningEffort: effort }),
-    }
-  }
-  return undefined
-}
-
-/**
- * Which agent preset the fresh session should mount. Separate from the model
- * choice on purpose: the two must combine freely ("inherit preset + a cheaper
- * remembered model" is the common case). `inherit` means the origin session's
- * live preset — or no preset at all when the origin runs none; it never means
- * the deployment default.
- */
-export type PresetChoice = { kind: 'inherit' } | { kind: 'preset'; id: string }
-
-/** Narrow an untrusted value (browser payload, sidecar meta JSON) into a preset choice. */
-export function coercePresetChoice(value: unknown): PresetChoice | undefined {
-  if (typeof value !== 'object' || value === null) return undefined
-  const record = value as Record<string, unknown>
-  if (record.kind === 'inherit') return { kind: 'inherit' }
-  if (record.kind === 'preset' && typeof record.id === 'string' && record.id.length > 0) {
-    return { kind: 'preset', id: record.id }
-  }
-  return undefined
-}
-
-/** One in-flight handoff, keyed by the origin agent's session id. */
-export interface PendingHandoff {
-  /** The agent (and session) that writes the brief. */
-  readonly agent: Agent
-  /** Absolute origin workspace cwd the brief is written under. */
-  readonly cwd: string
-  /** Where the fresh session spawns (origin cwd or a picked workspace). */
-  readonly target: HandoffTarget
-  /** True when the target lies outside the origin workspace. */
-  readonly crossWorkspace: boolean
-  /** Absolute path the brief must be written to (always origin-side). */
-  readonly briefPath: string
-  /** The verbatim task description from the command line. */
-  readonly task: string
-  /**
-   * Who the brief's context came from. Fresh handoffs leave it unset (the
-   * origin agent is the source); retries set it from the sidecar meta so the
-   * bootstrap prompt stays truthful when a different session picks up.
-   */
-  readonly originLabel?: string
-  /** Model route chosen in the dialog or via --model. */
-  readonly choice: ModelChoice
-  /**
-   * Preset intent for the fresh session. Independent of {@link choice}: the
-   * default inherits the origin session's live preset, and an explicit pick
-   * rides this attempt (and its retry) only — it is not remembered as a
-   * default for later handoffs.
-   */
-  readonly preset: PresetChoice
-  /**
-   * Whether {@link choice} may become the remembered default once the fresh
-   * session exists. A `--model` flag is a one-off override and never
-   * overwrites the long-term preference.
-   */
-  readonly rememberModel: boolean
-  /**
-   * The auto-review opt-in: bind a dsh-triggers loop (this origin reviews,
-   * the fresh session executes) before the first prompt. Absent = plain
-   * handoff, exactly the pre-review behavior.
-   */
-  readonly review?: { readonly maxRounds: number }
-  /** Epoch milliseconds when the command ran. */
-  readonly startedAt: number
-  /** Stops the watch (idempotent). Assigned by {@link startHandoffWatch}. */
-  stop: () => void
-}
-
-/** Per-apply plugin state. */
-export interface HandoffRuntime {
-  readonly ctx: Context
-  readonly config: Config
-  /** Resolved config derived once, in chars. */
-  readonly maxBriefChars: number
-  /** Resolved config derived once, in ms. */
-  readonly timeoutMs: number
-  /** Resolved config derived once, in ms. */
-  readonly pollMs: number
-  /** How long the browser's model picker may stay open before the command gives up (ms). */
-  readonly pickTimeoutMs: number
-  readonly notifyFailure: boolean
-  /** In-flight handoffs keyed by origin session id. */
-  readonly pending: Map<string, PendingHandoff>
-  /** Browser pick channel; absent only when the composition has no connection/web server. */
-  readonly channel?: HandoffChannel
-  /** Durable remembered model; absent only when the plugin was built without it. */
-  readonly preferences?: PreferenceStore
-}
 
 /** `20260928-153012` style slug for brief file names. */
 export function timestampSlug(date: Date): string {
@@ -211,36 +88,6 @@ export function continueInstruction(
     ...instructionTail(task, maxBriefChars),
   ].join('\n')
 }
-
-/** The executor-side loop rules a review-loop handoff must carry up front. */
-function reviewBootstrapSection(runId: string, maxRounds: number): string {
-  return [
-    '',
-    '---',
-    `[triggers] 本次任务带自动审核循环（预算 ${maxRounds} 轮）：每轮实现与自查（含测试/构建验证）完成后，直接以最终回复交付——写明改了什么、如何验证、证据在哪里，正常结束回合即自动送审，无需调用工具（也可显式调用 trigger_signal 提交 deliver）。`,
-    `需要用户决定时，调用 trigger_signal 工具提交（runId=${runId}、outcome=needs_user、summary 写明所需决定），此时不要正常收尾——正常结束会被当作交付。审核意见会作为下一条用户消息送达；返工意见只处理阻塞本轮目标的部分。`,
-  ].join('\n')
-}
-
-/** The first prompt of the fresh session: the brief plus bootstrap guidance. */
-export function bootstrapPrompt(
-  pending: PendingHandoff,
-  brief: string,
-  review?: { runId: string; maxRounds: number },
-): string {
-  const crossNote = pending.crossWorkspace
-    ? `本次交接来自另一个工作区（${pending.cwd}）：简报中的原路径对你只读，写入一律在当前工作区进行；简报与当前工作区不符时以当前工作区为准。`
-    : ''
-  return [
-    `[handoff] 你是新会话，无历史；上一会话的全部上下文在下方简报中（源 ${pending.originLabel ?? String(pending.agent.id)}，文件 ${pending.briefPath}）。${crossNote}直接开始执行 Task：按 Next steps 推进；仅对简报未覆盖且无法查证的信息询问用户。`,
-    '',
-    '---',
-    brief,
-    '---',
-    ...(review === undefined ? [] : [reviewBootstrapSection(review.runId, review.maxRounds)]),
-  ].join('\n')
-}
-
 /** Report a failed handoff: log, and optionally a visible notice turn on the origin session. */
 function reportFailure(rt: HandoffRuntime, pending: PendingHandoff, reason: string): void {
   rt.ctx.logger(PACKAGE_NAME).warn('handoff failed', { reason, briefPath: pending.briefPath })

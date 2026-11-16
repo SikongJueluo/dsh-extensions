@@ -174,7 +174,7 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 `reportUnusedDisableDirectives: error` 已开：当前 1 处已无用（`oauth-providers/src/client/index.tsx:246`）。
 这 7 处按“逐处审查”处理，不自动迁移成新豁免。
 
-### 3.7 修复积压（2153 条，分层计划）
+### 3.7 修复积压（2149 条，分层计划）
 
 | 层 | 内容 | 数量 |
 | --- | --- | --- |
@@ -271,15 +271,16 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 
 ### 4.3 扫描结果（`fallow dead-code`）
 
-**5 条 error 级、35 条 warn 级。** error 级构成：
+**3 条 error 级、35 条 warn 级。** error 级构成：
 
 | 类别 | 数量 | 性质 |
 | --- | --- | --- |
 | unused class members | 3 | 见 4.2：2 个只有 `.mjs` smoke 调用点，1 个是未使用的公开 getter |
-| circular dependencies | 2 | `handoff` 的 `brief→spawn`（2 环）与 `brief→spawn→meta`（3 环），与 Oxlint `import/no-cycle` 的 4 处命中一致 |
 
 已清零的类别（各自在独立层完成）：unused files（4 个 `task-anchor` 拆分遗留模块）、
-unused exports（64）、unused types（9）、unlisted dependencies（5）、duplicate exports（3）。
+unused exports（64）、unused types（9）、unlisted dependencies（5）、duplicate exports（3）、
+circular dependencies（2：`handoff` 的 `brief↔spawn` 与 `brief→spawn→meta`，已把 `brief` 拆成
+`choice` / `pending` / `prompt` / `brief` 四个单向模块）。
 `unused exports`/`unused types` 的处理方式是“能删的删、只在本文件用的去掉 `export` 关键字”，
 过程中顺带暴露出 7 个连本文件都不用的符号，一并删除。
 
@@ -338,7 +339,7 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 
 ## 6. 批准清单
 
-逐项批准/否决即可（例如“A1-A11 全部批准，但 B15 保留启用”）。
+逐项批准/否决即可（例如“A1-A13 全部批准，但 B15 保留启用”）。
 
 | # | 待批准项 | 建议 |
 | --- | --- | --- |
@@ -353,6 +354,8 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 | A9 | 7 处存量 `react-hooks/exhaustive-deps` 抑制在修复层逐处处理（3.6） | 批准 |
 | A10 | 根 `engines.node >= 24`（2） | 批准 |
 | A11 | `check:smoke` 排除 `search-integrator/scripts/smoke-research.mjs`（需要真实 API key 与外网），保留为人工验证 | 批准 |
+| A12 | 给 `WaitSpool.set` 与 `DirenvLoader.snapshot` 加两条带理由的 `fallow-ignore` 内联抑制（它们只在 `.mjs` smoke 里被调用，静态图无法归属类型） | 批准 |
+| A13 | 删除 `RewriteCache.size`（未使用的公开 getter）。它是已发布包导出的类表面，删除属 API 收窄 | 批准 |
 
 若希望更严：`require-unicode-regexp`（228）、`prefer-strict-equal` 与
 `prefer-to-be-truthy/falsy`（vitest 风格，606）、`strict-boolean-expressions`（B2）
@@ -373,7 +376,7 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 1. **本层（当前）**：工具 + 配置 + 扫描 + 本文批准清单。
 2. ~~纯排版层~~（已完成）：228 个文件单独一层，未夹带语义修复；`typecheck`/`build`/`test`/`check:smoke`/`check:client`/`check:pack`/`build:storybook` 全部通过。
 3. 类型与语义修复层：先机械类（import/模板/无用导出），再类型逃生口（714 条，逐处判定契约），最后语义类（浮空 Promise、`consistent-return` 等，涉及行为时先问）。
-4. Fallow 建模与清理层：补 `implements QuotaSource`、处理 4 个孤儿源文件与 64 个多余导出、解 2 个环（未声明依赖已在打包修复层清零）。
+4. Fallow 清理层：只剩 3 个类成员（2 个需要内联抑制、1 个公开 getter 需 API 取舍）；其余类别已清零。
 5. 统一入口层：把 `format:check`、`lint`、`fallow`、现有测试/smoke、`check:pack`、Storybook build 聚合进 `pnpm check`；skip 必须可见且不能替代必需项。
 6. CI 层：GitHub Actions 复用同一入口；远端成功记录与平台保护设置分开报告。
 7. 升级流程：每次升 oxlint/oxfmt/fallow，列出新增规则 → 已启用/不适用/待决定，并记录默认值与行为变化。

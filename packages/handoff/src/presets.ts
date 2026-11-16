@@ -15,7 +15,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
-import type { PresetChoice } from './brief.js'
+import type { PresetChoice } from './choice.js'
 import { PACKAGE_NAME } from './identity.js'
 
 /** One registered preset as a picker shows it. */

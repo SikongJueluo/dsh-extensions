@@ -17,7 +17,7 @@ import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 // Type-only: pull the `Context.sessionController` augmentation in.
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { PACKAGE_NAME } from './identity.js'
-import type { ModelChoice } from './brief.js'
+import type { ModelChoice } from './choice.js'
 
 /** A provider/model pair plus the reasoning effort in force, as the UI describes it. */
 export interface RouteSummary {

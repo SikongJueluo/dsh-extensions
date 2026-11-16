@@ -12,16 +12,9 @@ import type {} from '@deepseek-ai/dsh-user-questions'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { spawnHandoff } from './spawn.js'
 import { COMMAND_NAME, COMPLETE_MARKER, DEFAULT_BRIEF_DIR, PACKAGE_NAME } from './identity.js'
-import {
-  briefInstruction,
-  continueInstruction,
-  startHandoffWatch,
-  timestampSlug,
-  type HandoffRuntime,
-  type ModelChoice,
-  type PendingHandoff,
-  type PresetChoice,
-} from './brief.js'
+import { briefInstruction, continueInstruction, startHandoffWatch, timestampSlug } from './brief.js'
+import type { ModelChoice, PresetChoice } from './choice.js'
+import type { HandoffRuntime, PendingHandoff } from './pending.js'
 import { findLatestUnspawned, metaPathFor, writeMeta, type RecoveredHandoff } from './meta.js'
 import type { ReviewPick, WorkspacePick, WorkspaceWire } from './channel.js'
 import {

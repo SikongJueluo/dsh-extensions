@@ -19,7 +19,7 @@ import type {} from '@deepseek-ai/dsh-storage-domain'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
-import type { ModelChoice } from './brief.js'
+import type { ModelChoice } from './choice.js'
 import { PACKAGE_NAME } from './identity.js'
 
 /** Domain unit name (storage-domain unit names admit no hyphens). */

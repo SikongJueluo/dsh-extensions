@@ -22,7 +22,7 @@ import {
   coercePresetChoice,
   type ModelChoice,
   type PresetChoice,
-} from './brief.js'
+} from './choice.js'
 
 /** One endpoint segment of the channel (same grammar as connection RPC). */
 const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/

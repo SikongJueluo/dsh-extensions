@@ -20,7 +20,7 @@ import { COMMAND_NAME, DEFAULT_BRIEF_DIR, PACKAGE_NAME, PLUGIN_NAME } from './id
 import { handoffCommandDefinition } from './command.js'
 import { registerHandoffChannel } from './channel.js'
 import { createPreferenceStore } from './preferences.js'
-import type { HandoffRuntime } from './brief.js'
+import type { HandoffRuntime } from './pending.js'
 
 export { PACKAGE_NAME, PLUGIN_NAME, COMMAND_NAME } from './identity.js'
 
