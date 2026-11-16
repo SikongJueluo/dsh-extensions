@@ -13,7 +13,7 @@
  * @module dsh-search-integrator/integrate
  */
 import type { LlmPort, LlmUsage } from './llm.js'
-import type { PointStatus, ResearchPoint } from './types.js'
+import type { ConflictSide, PointStatus, ResearchPoint } from './types.js'
 
 /** Maximum seed queries the tool accepts / the planner may emit. */
 export const MAX_QUERIES = 4
@@ -49,12 +49,6 @@ const INTEGRATOR_SYSTEM = [
   '- followup: needed=true only when an additional search has a concrete target and could change the answer. Prefer searching identifiable primary sources (official release notes, model catalogs, changelogs). Never repeat an existing query, and never search merely to gather more links.',
   '- Synthesize; do not paste long excerpts into text. Numbers, dates, versions, and negations must match the evidence exactly. Treat undated sources as unknown recency.',
 ].join('\n')
-
-/** One attributed position inside a conflict point. */
-export interface ConflictSide {
-  readonly text: string
-  readonly sources: readonly number[]
-}
 
 /** The integrator's raw contract, before citation validation. */
 export interface RawIntegration {

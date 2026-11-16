@@ -17,17 +17,10 @@
  * @module dsh-plan-usage/sources/openai
  */
 import type { QuotaSnapshot } from '../types.js'
+import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
 /** The ChatGPT backend usage endpoint Codex clients poll. */
 export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage'
-
-/** Minimal logger surface this source uses. */
-export interface SourceLogger {
-  warn(message: string, ...args: unknown[]): void
-}
-
-/** Fetch implementation shape (global fetch compatible). */
-export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 
 /** Token provider — typically `() => ctx.get('oauthProviders')?.token('chatgpt')`. */
 export type TokenProvider = () => Promise<{ access: string; accountId?: string } | undefined>
@@ -96,7 +89,7 @@ export function parseCodexUsage(
  * The OpenAI usage source for the `chatgpt` route: one authenticated GET per
  * fetch, `undefined` on any failure (never throws).
  */
-export class OpenAiUsageSource {
+export class OpenAiUsageSource implements QuotaSource {
   readonly id = 'openai-codex'
   readonly routes = ['chatgpt'] as const
 

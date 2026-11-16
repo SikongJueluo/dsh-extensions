@@ -17,20 +17,13 @@
  * @module dsh-plan-usage/sources/opencode
  */
 import type { QuotaSnapshot } from '../types.js'
+import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
 /** The OpenCode Go usage endpoint. */
 export const OPENCODE_GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage'
 
 /** Env var holding the API key (matching the pi-ai provider config). */
 const ENV_KEY = 'OPENCODE_API_KEY'
-
-/** Minimal logger surface this source uses. */
-export interface SourceLogger {
-  warn(message: string, ...args: unknown[]): void
-}
-
-/** Fetch implementation shape (global fetch compatible). */
-export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 
 export interface OpenCodeGoSourceOptions {
   fetchImpl?: FetchLike
@@ -122,7 +115,7 @@ export function parseOpenCodeGoUsage(body: unknown): OpenCodeGoWindows | OpenCod
  * `OPENCODE_API_KEY` env var: one authenticated GET per fetch, `undefined`
  * on any failure (never throws).
  */
-export class OpenCodeGoSource {
+export class OpenCodeGoSource implements QuotaSource {
   readonly id = 'opencode-go'
   readonly routes = ['opencode-go'] as const
 

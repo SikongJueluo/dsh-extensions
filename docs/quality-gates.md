@@ -254,32 +254,31 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
   的导出仍报 unused-export（`scripts/check-client.mjs` 未导入它），属真实可清理项。
 - `cordis.patch.yml` 被当入口，避免把 bundle 清单误判为死文件。
 
-### 4.2 运行时合同建模（需批准，见 6-A7）
+### 4.2 运行时合同建模
 
-静态图看不见 Cordis 的两类调用，`.fallowrc.jsonc` 用 `usedClassMembers` 声明：
+静态图看不见 Cordis 的服务调用，`.fallowrc.jsonc` 用 `usedClassMembers` 声明：
 
 - `{ "extends": "Service", "members": ["*"] }`、`{ "extends": "SandboxPolicyService", "members": ["*"] }`：
   服务类的方法与静态 `Config`/`inject` 由宿主经 `ctx.<name>` 代理调用，没有静态调用边。
-- `{ "implements": "QuotaSource", "members": ["*"] }`：配额源经 `QuotaSource` 接口分派
-  （`source.routes` / `ready` / `get`）。目前只有 `GlmSource` 写了 `implements`，其余 4 个
-  结构匹配未声明，所以这条规则现在只警告“未匹配到成员”——修复层给这 4 个类补
-  `implements QuotaSource`（本身也是类型收益）后即生效。
 
-建模前后：`unused-class-members` 38 → 19。剩余 19 条 = 4 个配额源（补 `implements` 解决）
-+ 3 条静态图限制（`WaitSpool.set`、`DirenvLoader.snapshot` 只在 `.mjs` 里调用，
-Fallow 无法给 JS 调用点归属类型；`RewriteCache.size` 是真死代码）。
+配额源不再需要单独的例外：`QuotaSource` 合同原先埋在 `service.ts` 里，4 个源看不到它，
+现在合同搬进 `sources/contracts.ts`，5 个源都写 `implements QuotaSource`，Fallow 通过接口
+本身就能给成员记引用——所以那条 `usedClassMembers` 规则已删除，少一条配置、少一条告警。
+
+建模前后：`unused-class-members` 38 → 3。剩余 3 条：`WaitSpool.set` 与
+`DirenvLoader.snapshot` 只在 `.mjs` smoke 里调用（Fallow 无法给 JS 调用点归属类型），
+`RewriteCache.size` 是未被使用的公开 getter（属于已发布的类表面，删除要先确认 API 取舍）。
 
 ### 4.3 扫描结果（`fallow dead-code`）
 
-98 条 error 级、35 条 warn 级。error 级构成：
+78 条 error 级、35 条 warn 级。error 级构成：
 
 | 类别 | 数量 | 性质 |
 | --- | --- | --- |
 | unused exports | 64 | 多数是“只在本文件使用却写了 `export`”，去掉关键字即可；少数是重复导出 |
-| unused types | 10 | 同上 |
-| unused class members | 19 | 见 4.2 |
+| unused types | 9 | 同上 |
+| unused class members | 3 | 见 4.2 |
 | unused files | 0 | `task-anchor` 拆分遗留的 4 个模块已删除（`execution-guard/src/{checkpoint,goal-evidence,jj}.ts`、`auto-permit/src/identity.ts`），构建产物逐字节不变 |
-| duplicate exports | 3 | `ConflictSide`、`FetchLike`、`SourceLogger` 各定义两份 |
 | circular dependencies | 2 | `handoff` 的 `brief→spawn`（2 环）与 `brief→spawn→meta`（3 环），与 Oxlint `import/no-cycle` 的 4 处命中一致 |
 
 warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 是有意的

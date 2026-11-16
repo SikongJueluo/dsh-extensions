@@ -22,6 +22,7 @@ import { Service } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from './shims.js'
 import { SERVICE_NAME } from './identity.js'
+import type { QuotaSource } from './sources/contracts.js'
 import type { QuotaSnapshot } from './types.js'
 import { CommandCodeSource } from './sources/commandcode.js'
 import type { CommandCodeMonitorSettings } from './sources/commandcode.js'
@@ -47,17 +48,6 @@ export interface PlanUsageGetOptions {
   maxAgeMs?: number
   /** Bypass the cache for this read. */
   force?: boolean
-}
-
-/** One vendor quota source behind the service. */
-interface QuotaSource {
-  id: string
-  /** Provider route ids this source serves. */
-  readonly routes: readonly string[]
-  /** Whether the route's credential is resolvable right now (sync). */
-  ready(route: string): boolean
-  /** One route's snapshot; `undefined` on any failure. Never throws. */
-  get(route: string, options: { force?: boolean }): Promise<QuotaSnapshot | undefined>
 }
 
 /** GLM coding-plan monitor wrapped as a source (keeps its shared per-monitor cache). */

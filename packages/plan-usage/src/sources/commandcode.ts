@@ -13,6 +13,7 @@
  * @module dsh-plan-usage/sources/commandcode
  */
 import type { QuotaSnapshot, QuotaWindow } from '../types.js'
+import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
 /** Canonical Command Code API origin (billing routes live here, not under /provider). */
 export const COMMAND_CODE_API_BASE = 'https://api.commandcode.ai'
@@ -32,14 +33,6 @@ const PLANS: Record<string, readonly [string, number]> = {
   'individual-ultra': ['Ultra', 300],
   'teams-pro': ['Teams Pro', 40],
 }
-
-/** Minimal logger surface this source uses. */
-export interface SourceLogger {
-  warn(message: string, ...args: unknown[]): void
-}
-
-/** Fetch implementation shape (global fetch compatible). */
-export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 
 export interface CommandCodeSourceOptions {
   fetchImpl?: FetchLike
@@ -242,7 +235,7 @@ interface JsonResult {
  * `CMD_API_KEY` / `COMMAND_CODE_API_KEY`: up to three authenticated GETs per
  * fetch, `undefined` on any failure (never throws).
  */
-export class CommandCodeSource {
+export class CommandCodeSource implements QuotaSource {
   readonly id = 'command-code'
   readonly routes = ['command-code'] as const
 

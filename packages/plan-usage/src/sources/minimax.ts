@@ -16,6 +16,7 @@
  * @module dsh-plan-usage/sources/minimax
  */
 import type { QuotaSnapshot } from '../types.js'
+import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
 /** Region endpoints keyed by provider route id. */
 const HOSTS: Record<string, string> = {
@@ -28,14 +29,6 @@ const ENV_KEYS: Record<string, string> = {
   minimax: 'MINIMAX_API_KEY',
   'minimax-cn': 'MINIMAX_CN_API_KEY',
 }
-
-/** Minimal logger surface this source uses. */
-export interface SourceLogger {
-  warn(message: string, ...args: unknown[]): void
-}
-
-/** Fetch implementation shape (global fetch compatible). */
-export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 
 export interface MiniMaxSourceOptions {
   fetchImpl?: FetchLike
@@ -160,7 +153,7 @@ export function parseMiniMaxRemains(body: unknown): MiniMaxWindows | MiniMaxErro
  * The MiniMax usage source for the `minimax` / `minimax-cn` routes, keyed by
  * each route's region host and env API key.
  */
-export class MiniMaxSource {
+export class MiniMaxSource implements QuotaSource {
   readonly id = 'minimax'
   readonly routes = Object.keys(HOSTS)
   /** Live host per route — flips once when the key turns out to belong to the other region (2049). */

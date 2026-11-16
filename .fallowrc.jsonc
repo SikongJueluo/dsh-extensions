@@ -28,9 +28,5 @@
     // every call.
     { "extends": "Service", "members": ["*"] },
     { "extends": "SandboxPolicyService", "members": ["*"] },
-    // Quota sources are dispatched through the `QuotaSource` interface
-    // (`source.routes` / `source.ready` / `source.get`), which the static graph
-    // does not follow.
-    { "implements": "QuotaSource", "members": ["*"] },
   ],
 }

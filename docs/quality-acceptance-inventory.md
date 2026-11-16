@@ -81,7 +81,7 @@ Fallow 的入口来自 `package.json` 脚本与框架插件，不解析 `check-s
 | --- | --- | --- | --- |
 | 1 | format | `format:check` | ✓ 228 个文件已排版 |
 | 2 | lint | `lint` | ✗ 2153 条待修 |
-| 3 | dead-code | `fallow` | ✗ 98 条 error 级 |
+| 3 | dead-code | `fallow` | ✗ 78 条 error 级 |
 | 4 | types | `typecheck` | ✓ |
 | 5 | build | `build` | ✓ |
 | 6 | tests | `test` | ✓ |

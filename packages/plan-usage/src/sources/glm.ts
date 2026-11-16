@@ -17,6 +17,7 @@
  */
 
 import type { QuotaSnapshot, QuotaWindow } from '../types.js'
+import type { FetchLike, SourceLogger } from './contracts.js'
 
 /** Window facts parsed from one GLM monitor response (no provider/fetch time). */
 export interface GlmWindows extends Pick<
@@ -214,18 +215,10 @@ export function parseQuotaBody(body: unknown): GlmWindows | null {
   return parsed
 }
 
-/** Minimal logger surface this module uses. */
-export interface QuotaLogger {
-  warn(message: string, ...args: unknown[]): void
-}
-
-/** Fetch implementation shape (global fetch compatible). */
-export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
-
 export interface QuotaMonitorOptions {
   fetchImpl?: FetchLike
   now?: () => number
-  logger?: QuotaLogger
+  logger?: SourceLogger
   /** Request timeout per quota call. */
   timeoutMs?: number
   /** Optional external key resolver (dsh-more-providers' `providerKeys`). */
@@ -251,7 +244,7 @@ function monitorCacheKey(monitor: MonitorConfig, apiKey: string): string {
 export class QuotaMonitor {
   private readonly fetchImpl: FetchLike
   private readonly now: () => number
-  private readonly logger: QuotaLogger | undefined
+  private readonly logger: SourceLogger | undefined
   private readonly timeoutMs: number
   private readonly resolveKey:
     | ((provider: string, monitor: MonitorConfig) => string | undefined)
