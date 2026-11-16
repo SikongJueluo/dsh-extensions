@@ -285,7 +285,9 @@ async function completeBrief() {
   await mkdir(dirname(briefPath), { recursive: true })
   await writeFile(briefPath, `# Goal\nsmoke\n<!-- handoff:complete -->\n`, 'utf8')
   for (let i = 0; i < 200 && created === null; i += 1)
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
   if (created === null) throw new Error('the watcher never spawned the fresh session')
   return { briefPath, briefText }
 }
@@ -303,7 +305,10 @@ async function runHandoff(rawInput, choice) {
   for (let i = 0; i < 40 && pick === null; i += 1) {
     const listed = await channel('pending', {})
     if (listed.requests.length > 0) pick = listed.requests[0]
-    else await new Promise((resolve) => setTimeout(resolve, 10))
+    else
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10)
+      })
   }
   if (pick === null) throw new Error(`"${rawInput}": the command never published a pending pick`)
   const chosen = await channel('choose', { requestId: pick.id, choice })
@@ -358,7 +363,10 @@ let pending = null
 for (let i = 0; i < 40 && pending === null; i += 1) {
   const listed = await channel('pending', {})
   if (listed.requests.length > 0) pending = listed.requests[0]
-  else await new Promise((resolve) => setTimeout(resolve, 10))
+  else
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
 }
 if (pending === null) throw new Error('the command never published a pending pick')
 console.log('pending pick:', JSON.stringify(pending))
@@ -417,7 +425,9 @@ await mkdir(dirname(briefPath), { recursive: true })
 await writeFile(briefPath, `# Goal\nsmoke\n<!-- handoff:complete -->\n`, 'utf8')
 
 for (let i = 0; i < 200 && created === null; i += 1)
-  await new Promise((resolve) => setTimeout(resolve, 10))
+  await new Promise((resolve) => {
+    setTimeout(resolve, 10)
+  })
 if (created === null) throw new Error('the watcher never spawned the fresh session')
 if (
   created.agentOptions.provider !== 'picked-provider' ||
@@ -579,7 +589,10 @@ let slowPick = null
 for (let i = 0; i < 40 && slowPick === null; i += 1) {
   const listed = await channel('pending', {})
   if (listed.requests.length > 0) slowPick = listed.requests[0]
-  else await new Promise((resolve) => setTimeout(resolve, 10))
+  else
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
 }
 if (slowPick === null) throw new Error('slow cycle never published a pick')
 await channel('choose', {
@@ -602,7 +615,10 @@ let notice = null
 for (let i = 0; i < 450 && notice === null; i += 1) {
   if (followups.length >= 2 && followups[1].content[0].text.includes('交接未完成'))
     notice = followups[1]
-  else await new Promise((resolve) => setTimeout(resolve, 10))
+  else
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
 }
 if (notice === null) throw new Error('the timed-out watcher never queued the failure notice')
 if (!notice.content[0].text.includes('不带参数的 /handoff')) {
@@ -620,7 +636,10 @@ let retryPick = null
 for (let i = 0; i < 40 && retryPick === null; i += 1) {
   const listed = await channel('pending', {})
   if (listed.requests.length > 0) retryPick = listed.requests[0]
-  else await new Promise((resolve) => setTimeout(resolve, 10))
+  else
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
 }
 if (retryPick === null) throw new Error('bare /handoff never published a pick')
 if (
@@ -659,7 +678,9 @@ await writeFile(
   'utf8',
 )
 for (let i = 0; i < 200 && created === null; i += 1)
-  await new Promise((resolve) => setTimeout(resolve, 10))
+  await new Promise((resolve) => {
+    setTimeout(resolve, 10)
+  })
 if (created === null) throw new Error('the retried watcher never spawned')
 if (renamed !== 'Handoff: slow cycle') throw new Error(`retry spawn title wrong: ${renamed}`)
 slowMeta = JSON.parse(await readFile(slowMetaPath, 'utf8'))
@@ -683,7 +704,10 @@ let lostPick = null
 for (let i = 0; i < 40 && lostPick === null; i += 1) {
   const listed = await channel('pending', {})
   if (listed.requests.length > 0) lostPick = listed.requests[0]
-  else await new Promise((resolve) => setTimeout(resolve, 10))
+  else
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
 }
 if (lostPick === null) throw new Error('lost-watch cycle never published a pick')
 await channel('choose', {
@@ -697,11 +721,15 @@ const lostBriefPath = followups[0].content[0].text.match(/\S+handoff\.md/)?.[0]
 await mkdir(dirname(lostBriefPath), { recursive: true })
 await writeFile(lostBriefPath, '# Goal\nlost\n', 'utf8')
 for (let i = 0; i < 450 && followups.length < 2; i += 1) {
-  await new Promise((resolve) => setTimeout(resolve, 10))
+  await new Promise((resolve) => {
+    setTimeout(resolve, 10)
+  })
 }
 if (followups.length < 2) throw new Error('lost-watch cycle never timed out')
 await writeFile(lostBriefPath, '# Goal\nlost\n<!-- handoff:complete -->\n', 'utf8')
-await new Promise((resolve) => setTimeout(resolve, 100))
+await new Promise((resolve) => {
+  setTimeout(resolve, 100)
+})
 if (created !== null) throw new Error('no watcher should be alive after the timeout')
 
 followups.length = 0

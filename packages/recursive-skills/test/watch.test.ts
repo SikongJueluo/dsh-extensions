@@ -197,7 +197,9 @@ describe('hot refresh', () => {
       fs.missedRoot = harness.skillsRoot
       const first = await catalogNames(harness.ctx)
       expect(first.sort()).toEqual(['first', 'missed'])
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      await new Promise((resolve) => {
+        setTimeout(resolve, 500)
+      })
       expect((await catalogNames(harness.ctx)).sort()).toEqual(['first', 'missed'])
     } finally {
       await harness.dispose()
@@ -220,7 +222,9 @@ describe('hot refresh', () => {
       const disposal = harness.ctx.fiber.dispose().then(() => {
         disposalResolved = true
       })
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50)
+      })
       expect(disposalResolved).toBe(false)
 
       fs.releaseGate()

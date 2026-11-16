@@ -719,7 +719,7 @@ async function resolveChoice(input: ResolveChoiceInput): Promise<AskOutcome> {
     if (model.kind === 'cancel') return model
     if (!needWorkspace) {
       const review = reviewAsk
-        ? await askReviewCard(ctx, agent, reviewWire!.defaultRounds)
+        ? await askReviewCard(ctx, agent, reviewWire.defaultRounds)
         : undefined
       return finish(
         model.choice,
@@ -730,9 +730,7 @@ async function resolveChoice(input: ResolveChoiceInput): Promise<AskOutcome> {
     }
     const workspace = await askWorkspaceCard(ctx, agent, roster)
     if (workspace.kind === 'cancel') return workspace
-    const review = reviewAsk
-      ? await askReviewCard(ctx, agent, reviewWire!.defaultRounds)
-      : undefined
+    const review = reviewAsk ? await askReviewCard(ctx, agent, reviewWire.defaultRounds) : undefined
     return finish(
       model.choice,
       workspace.pick,
@@ -745,14 +743,12 @@ async function resolveChoice(input: ResolveChoiceInput): Promise<AskOutcome> {
   // be asked when they are open.
   const baseChoice: ModelChoice = { kind: 'inherit' }
   if (!needWorkspace) {
-    const review = reviewAsk
-      ? await askReviewCard(ctx, agent, reviewWire!.defaultRounds)
-      : undefined
+    const review = reviewAsk ? await askReviewCard(ctx, agent, reviewWire.defaultRounds) : undefined
     return finish(baseChoice, 'origin', review?.enabled === true ? review : undefined, false)
   }
   const workspace = await askWorkspaceCard(ctx, agent, roster)
   if (workspace.kind === 'cancel') return workspace
-  const review = reviewAsk ? await askReviewCard(ctx, agent, reviewWire!.defaultRounds) : undefined
+  const review = reviewAsk ? await askReviewCard(ctx, agent, reviewWire.defaultRounds) : undefined
   return finish(baseChoice, workspace.pick, review?.enabled === true ? review : undefined, false)
 }
 

@@ -42,15 +42,18 @@ const BASIC_ENTITIES: Record<string, string> = {
 
 function decodeEntities(text: string): string {
   return text
-    .replace(/&#(\d+);/g, (_, code: string) => {
+    .replaceAll(/&#(\d+);/g, (_, code: string) => {
       const num = Number(code)
       return Number.isFinite(num) ? String.fromCodePoint(num) : ''
     })
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => {
+    .replaceAll(/&#x([0-9a-f]+);/gi, (_, hex: string) => {
       const num = Number.parseInt(hex, 16)
       return Number.isFinite(num) ? String.fromCodePoint(num) : ''
     })
-    .replace(/&([a-z]+);/gi, (match, name: string) => BASIC_ENTITIES[name.toLowerCase()] ?? match)
+    .replaceAll(
+      /&([a-z]+);/gi,
+      (match, name: string) => BASIC_ENTITIES[name.toLowerCase()] ?? match,
+    )
 }
 
 /**
@@ -61,14 +64,14 @@ function decodeEntities(text: string): string {
 export function htmlToExcerpt(html: string, cap: number): string {
   const text = decodeEntities(
     html
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(BLOCK_TAGS, ' ')
-      .replace(BREAK_OPEN, '\n')
-      .replace(BLOCK_CLOSE, '\n')
-      .replace(/<[^>]+>/g, ' '),
+      .replaceAll(/<!--[\s\S]*?-->/g, ' ')
+      .replaceAll(BLOCK_TAGS, ' ')
+      .replaceAll(BREAK_OPEN, '\n')
+      .replaceAll(BLOCK_CLOSE, '\n')
+      .replaceAll(/<[^>]+>/g, ' '),
   )
-    .replace(/[ \t\f\v]+/g, ' ')
-    .replace(/\n\s*\n+/g, '\n')
+    .replaceAll(/[ \t\f\v]+/g, ' ')
+    .replaceAll(/\n\s*\n+/g, '\n')
     .trim()
   return text.length > cap ? `${text.slice(0, cap)}…` : text
 }

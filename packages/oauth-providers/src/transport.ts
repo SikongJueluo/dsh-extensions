@@ -149,7 +149,7 @@ async function detectWindowsSystemProxy(): Promise<string | null> {
 function parseGsettingsString(stdout: string): string | null {
   const match = /^'((?:[^'\\]|\\.)*)'\s*$/.exec(stdout.trim())
   if (!match) return null
-  return match[1]!.replace(/\\(.)/g, '$1')
+  return match[1]!.replaceAll(/\\(.)/g, '$1')
 }
 
 /** Parse a gsettings integer value into a number. */
@@ -259,8 +259,8 @@ export async function createFetch(proxyUrl?: string): Promise<FetchLike> {
   if (!proxy) return undiciFetch as unknown as FetchLike
   const dispatcher = new ProxyAgent({ uri: proxy })
   type UndiciInit = Parameters<typeof undiciFetch>[1]
-  return ((url: string, init?: RequestInit) =>
-    undiciFetch(url, { ...init, dispatcher } as UndiciInit)) as FetchLike
+  return (url: string, init?: RequestInit) =>
+    undiciFetch(url, { ...init, dispatcher } as UndiciInit)
 }
 
 /**
@@ -288,5 +288,5 @@ export async function readJson(response: Response, what: string): Promise<unknow
 }
 
 function snippet(text: string): string {
-  return text.replace(/\s+/g, ' ').slice(0, 200)
+  return text.replaceAll(/\s+/g, ' ').slice(0, 200)
 }

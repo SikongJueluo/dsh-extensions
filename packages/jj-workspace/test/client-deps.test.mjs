@@ -89,7 +89,10 @@ class LocaleService extends Service {
   }
 }
 
-const tick = () => new Promise((resolve) => setTimeout(resolve, 10))
+const tick = () =>
+  new Promise((resolve) => {
+    setTimeout(resolve, 10)
+  })
 const originalFetch = globalThis.fetch
 let statusCalls
 

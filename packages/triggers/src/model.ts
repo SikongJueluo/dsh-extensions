@@ -37,7 +37,7 @@ import {
  * touching validation behavior.
  */
 function triggerTable<K extends string, V>(schema: z.ZodType<V, any, any>): DomainTableSpec<K, V> {
-  return domainTable<K, V>(schema as unknown as Parameters<typeof domainTable<K, V>>[0])
+  return domainTable<K, V>(schema)
 }
 
 /** Structured handoff verdicts the model can emit through `trigger_signal`. */

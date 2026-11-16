@@ -30,7 +30,7 @@ function escalationDefaults(file: string): EscalationDefaults {
   return {
     allow: allow[1]!
       .split(',')
-      .map((entry) => entry.trim().replace(/^['"]|['"]$/gu, ''))
+      .map((entry) => entry.trim().replaceAll(/^['"]|['"]$/gu, ''))
       .filter((entry) => entry !== ''),
     maxMode: maxMode[1]!,
   }

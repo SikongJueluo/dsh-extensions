@@ -30,7 +30,8 @@ const SESSIONS = {
 
 const t = (key, vars) => {
   let text = T.zh[key] ?? key
-  if (vars !== undefined) text = text.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ''))
+  if (vars !== undefined)
+    text = text.replaceAll(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ''))
   return text
 }
 

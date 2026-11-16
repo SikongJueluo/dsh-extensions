@@ -458,7 +458,7 @@ const ANSI_PATTERN = /\x1b\[[0-9;?]*[A-Za-z]/g
 
 function firstLine(text: string): string | undefined {
   // direnv colorizes stderr when it believes a terminal is attached.
-  const line = text.replace(ANSI_PATTERN, '').split('\n', 1)[0]?.trim()
+  const line = text.replaceAll(ANSI_PATTERN, '').split('\n', 1)[0]?.trim()
   return line === undefined || line.length === 0 ? undefined : line
 }
 

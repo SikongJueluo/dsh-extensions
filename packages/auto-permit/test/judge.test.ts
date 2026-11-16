@@ -758,7 +758,9 @@ describe('request cancellation and deadline cover every phase', () => {
     const llm = {
       stream: () =>
         (async function* () {
-          await new Promise((resolve) => setTimeout(resolve, 35))
+          await new Promise((resolve) => {
+            setTimeout(resolve, 35)
+          })
           yield {
             type: 'text-delta',
             index: 0,
@@ -800,7 +802,7 @@ describe('native replay metadata', () => {
         { type: 'finish', reason: { kind: 'tool-calls' }, replayState },
       ],
       (request) => {
-        second = request as unknown as typeof second
+        second = request
         return textChunks('VERDICT: allow\nREASON: inspected\nEVIDENCE: scripts/build.sh:1')
       },
     ])

@@ -97,7 +97,10 @@ check('empty overlay returns the spec untouched', mergeOverlay(spec, {}) === spe
 
 // ── Part 3: DirenvLoader against a scripted fake direnv ───────────────────
 const spawns = []
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const sleep = (ms) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
 function fakeHandle(done, stdout, stderr) {
   return {
     done,
@@ -130,7 +133,10 @@ const stubCtx = {
       if (readOptional(join(rc, 'hang')) !== undefined) {
         return fakeHandle(
           new Promise((resolve) => {
-            if (request.signal?.aborted) return resolve({ exitCode: null, signal: 'SIGKILL' })
+            if (request.signal?.aborted) {
+              resolve({ exitCode: null, signal: 'SIGKILL' })
+              return
+            }
             request.signal?.addEventListener(
               'abort',
               () => resolve({ exitCode: null, signal: 'SIGKILL' }),
@@ -175,7 +181,10 @@ function scenario(name, files) {
   return dir
 }
 mkdirSync(join(root, 'xdg-data', 'direnv', 'allow'), { recursive: true })
-const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const sleepMs = (ms) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
 
 const loader = new DirenvLoader(stubCtx, {
   direnvPath: 'direnv',

@@ -325,7 +325,7 @@ function preflightRejects(
   }
   const effective =
     missing.length === 0
-      ? resolved!
+      ? resolved
       : `${resolved === '/' ? '' : resolved}${sep}${missing.join(sep)}`
   const refusal =
     mode === 'mount-point'

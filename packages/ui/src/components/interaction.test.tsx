@@ -116,21 +116,27 @@ describe('Dialog', () => {
     setup()
     await act(async () => {
       root.render(<DialogDemo />)
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0)
+      })
     })
 
     const trigger = container.querySelector<HTMLButtonElement>('#open-scope')!
     trigger.focus()
     await act(async () => {
       trigger.click()
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0)
+      })
     })
     expect(container.textContent).toContain('Write scope')
     expect(container.textContent).toContain('Extra writable directories')
 
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0)
+      })
     })
     expect(container.textContent).not.toContain('Extra writable directories')
     expect(document.activeElement).toBe(trigger)
@@ -142,7 +148,9 @@ describe('Select', () => {
     setup()
     await act(async () => {
       root.render(<GhostSelectDemo />)
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0)
+      })
     })
     const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!
     expect(trigger.className).toContain('dshx:bg-transparent')
@@ -154,14 +162,18 @@ describe('Select', () => {
     setup()
     await act(async () => {
       root.render(<SelectDemo />)
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0)
+      })
     })
 
     const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!
     expect(trigger).not.toBeNull()
     await act(async () => {
       trigger.click()
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0)
+      })
     })
 
     const listbox = container.querySelector('[role="listbox"]')
@@ -170,7 +182,9 @@ describe('Select', () => {
     expect(options.map((option) => option.textContent)).toEqual(['Model A', 'Model B'])
     await act(async () => {
       options[1]!.click()
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0)
+      })
     })
     expect(trigger.textContent).toContain('Model B')
   })

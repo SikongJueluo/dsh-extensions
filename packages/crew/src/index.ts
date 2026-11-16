@@ -263,7 +263,7 @@ async function settleForegroundRun(
         if (error !== undefined) throw new Error(withDiagnosticAndPartialText(error, result))
         return {
           kind: 'foreground' as const,
-          runId: activation.childId as string,
+          runId: activation.childId,
           // ContentBlocks travel the session log as lossless JSON; the output
           // schema types them as the broader JsonValue[].
           output: [...result.output] as unknown as JsonValue[],
@@ -382,7 +382,7 @@ export function callConfigOf(target: RouteTarget): LlmCallConfig {
 /** A short, single-line rendering of a preflight failure. */
 function failureDetail(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
-  const single = message.replace(/\s+/g, ' ').trim()
+  const single = message.replaceAll(/\s+/g, ' ').trim()
   return single.length > 200 ? `${single.slice(0, 197)}…` : single
 }
 
@@ -517,7 +517,7 @@ async function startTierChild(
   if (!spec.runInForeground) {
     return {
       background: true,
-      childId: activation.childId as string,
+      childId: activation.childId,
       ...(notice !== undefined ? { notice } : {}),
     }
   }
@@ -665,7 +665,7 @@ export function apply(ctx: Context, config: Config) {
               },
               exec,
             )
-            const agentId = outcome.background ? outcome.childId : (outcome.value.runId as string)
+            const agentId = outcome.background ? outcome.childId : outcome.value.runId
             const notice = outcome.notice
             return {
               kind: 'created' as const,

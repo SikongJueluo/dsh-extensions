@@ -358,7 +358,7 @@ function asText(value: unknown): string {
 }
 
 function template(text: string, vars: Record<string, unknown>): string {
-  return String(text).replace(/\{(\w+)\}/g, (_, key: string) => asText(vars[key]))
+  return String(text).replaceAll(/\{(\w+)\}/g, (_, key: string) => asText(vars[key]))
 }
 
 function messageOf(error: unknown): string {
@@ -394,7 +394,7 @@ function shortId(id: string): string {
 }
 
 function safeId(value: string): string {
-  return String(value).replace(/[^A-Za-z0-9_-]/g, '-')
+  return String(value).replaceAll(/[^A-Za-z0-9_-]/g, '-')
 }
 
 function sessionLabel(t: Translate, sessionsById: SessionsById, id: string | undefined): string {

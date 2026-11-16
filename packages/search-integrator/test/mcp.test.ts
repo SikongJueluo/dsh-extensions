@@ -222,12 +222,12 @@ describe('zhipu adapter over MCP', () => {
       settings,
       { zhipu: 'k' },
       {
-        postJson: (async () => {
+        postJson: async () => {
           throw new Error('postJson not expected')
-        }) as never,
-        getJson: (async () => {
+        },
+        getJson: async () => {
           throw new Error('getJson not expected')
-        }) as never,
+        },
         rawPost: post,
       },
     )
@@ -266,12 +266,12 @@ describe('zhipu adapter over MCP', () => {
       settings,
       { zhipu: 'k' },
       {
-        postJson: (async () => {
+        postJson: async () => {
           throw new Error('postJson not expected')
-        }) as never,
-        getJson: (async () => {
+        },
+        getJson: async () => {
           throw new Error('getJson not expected')
-        }) as never,
+        },
         rawPost: post,
       },
     )
@@ -287,12 +287,12 @@ describe('zhipu adapter over MCP', () => {
       settings,
       { zhipu: 'bad' },
       {
-        postJson: (async () => {
+        postJson: async () => {
           throw new Error('postJson not expected')
-        }) as never,
-        getJson: (async () => {
+        },
+        getJson: async () => {
           throw new Error('getJson not expected')
-        }) as never,
+        },
         rawPost: post,
       },
     )

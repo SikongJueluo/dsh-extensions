@@ -172,7 +172,7 @@ export class AnchorStore {
 
   /** Anchor path for one session (no I/O). */
   pathFor(sessionId: string): string {
-    return join(this.dir, 'anchors', `${sessionId.replace(/[^A-Za-z0-9._-]/g, '_')}.json`)
+    return join(this.dir, 'anchors', `${sessionId.replaceAll(/[^A-Za-z0-9._-]/g, '_')}.json`)
   }
 
   /**

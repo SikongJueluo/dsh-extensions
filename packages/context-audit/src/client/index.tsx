@@ -109,7 +109,7 @@ function asText(value: unknown): string {
 }
 
 function template(text: string, vars: Record<string, unknown>) {
-  return String(text).replace(/\{(\w+)\}/g, (_, key: string) => asText(vars[key]))
+  return String(text).replaceAll(/\{(\w+)\}/g, (_, key: string) => asText(vars[key]))
 }
 
 function fmtTokens(n: number) {

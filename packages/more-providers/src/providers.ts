@@ -382,7 +382,7 @@ export function buildAdapter(
   keyOf: (provider: string) => string | undefined,
 ): PiAiAdapter {
   return new PiAiAdapter({
-    profiles: () => profiles as Map<string, ResolvedPiAiProviderProfile>,
+    profiles: () => profiles,
     resolveApiKey: async (provider) => {
       const key = keyOf(provider)
       return key

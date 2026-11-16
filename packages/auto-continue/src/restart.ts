@@ -134,9 +134,9 @@ export function registerRestartResume(
       if (controller !== undefined || lifetime.signal.aborted || Date.now() >= deadline) {
         return controller ?? undefined
       }
-      await new Promise((resolve) =>
-        setTimeout(resolve, options.controllerPollMs ?? CONTROLLER_POLL_MS),
-      )
+      await new Promise((resolve) => {
+        setTimeout(resolve, options.controllerPollMs ?? CONTROLLER_POLL_MS)
+      })
     }
   }
 
@@ -204,7 +204,9 @@ export function registerRestartResume(
       )
     if (fresh.length === 0) return
     // Let the composition settle, then resume one session at a time.
-    await new Promise((resolve) => setTimeout(resolve, settleMs))
+    await new Promise((resolve) => {
+      setTimeout(resolve, settleMs)
+    })
     for (const entry of fresh) {
       if (lifetime.signal.aborted) return
       try {
@@ -212,7 +214,9 @@ export function registerRestartResume(
       } catch (error) {
         ctx.logger.warn('auto-continue: restart-resume of "%s" failed: %o', entry.sessionId, error)
       }
-      await new Promise((resolve) => setTimeout(resolve, staggerMs))
+      await new Promise((resolve) => {
+        setTimeout(resolve, staggerMs)
+      })
     }
     // One-shot: consume once the pass has finished, so a not-yet-ready
     // composition (or a mid-pass crash) leaves the mirror for the next boot.

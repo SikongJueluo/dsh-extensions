@@ -72,7 +72,7 @@ const HANDOFF_DOMAIN = defineDomain({
 function preferenceKey(environment: NodeJS.ProcessEnv = process.env): string {
   const raw = environment.DSH_PROFILE?.trim() ?? ''
   const base = raw.length > 0 ? raw : DEFAULT_PROFILE_KEY
-  return base.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || DEFAULT_PROFILE_KEY
+  return base.replaceAll(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || DEFAULT_PROFILE_KEY
 }
 
 /** The small surface the command and spawn paths consume. */

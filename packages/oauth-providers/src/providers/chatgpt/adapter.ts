@@ -531,7 +531,7 @@ export class OpenAiOauthAdapter extends LlmAdapter {
           error?: Record<string, unknown>
           detail?: unknown
         }
-        providerError = parsed?.error ?? (parsed as Record<string, unknown>)
+        providerError = parsed?.error ?? parsed
         if (typeof parsed?.detail === 'string') message = parsed.detail
         else if (providerError?.message)
           message =

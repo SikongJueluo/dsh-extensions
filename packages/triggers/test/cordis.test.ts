@@ -142,7 +142,7 @@ async function boot(options: { queueFails?: boolean } = {}) {
   root.provide('sessionController', host.ctx.sessionController as never)
   root.provide('sessionQuery', host.ctx.sessionQuery as never)
   root.provide('storageDomain', host.ctx.storageDomain as never)
-  await root.plugin(triggersPlugin, {} as never)
+  await root.plugin(triggersPlugin, {})
   return { root, host }
 }
 
@@ -155,7 +155,9 @@ function emit(root: Context, sessionId: string, event: { type: string; data: unk
 async function until(condition: () => boolean, what: string): Promise<void> {
   for (let i = 0; i < 200; i += 1) {
     if (condition()) return
-    await new Promise((resolve) => setTimeout(resolve, 5))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5)
+    })
   }
   throw new Error(`timeout waiting for ${what}`)
 }
@@ -262,7 +264,9 @@ describe('cross-plugin service through the Cordis proxy', () => {
     // A replayed turn/end (restart replay) must not re-deliver: the reply
     // text was consumed with the first event.
     emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
-    await new Promise((resolve) => setTimeout(resolve, 30))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30)
+    })
     expect(host.prompts).toHaveLength(1)
     // (no root.dispose in cordis 4.0.4; fibers clean up with the context)
   })
@@ -296,7 +300,9 @@ describe('cross-plugin service through the Cordis proxy', () => {
       },
     })
     emit(root, EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
-    await new Promise((resolve) => setTimeout(resolve, 30))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30)
+    })
     expect(host.prompts).toHaveLength(0) // no premature delivery, and no nudge either
 
     emit(root, EXECUTOR, {
@@ -340,7 +346,9 @@ describe('cross-plugin service through the Cordis proxy', () => {
     // The reviewer happens to be on its own turn 1 and ends it first: the
     // executor has NOT ended; nothing may advance.
     emit(root, PARENT, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
-    await new Promise((resolve) => setTimeout(resolve, 30))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30)
+    })
     expect(host.prompts).toHaveLength(0)
     expect((host.rows('runs') as RunRecord[])[0]!.phase).toBe('awaiting-delivery')
 
@@ -460,11 +468,11 @@ describe('cross-plugin service through the Cordis proxy', () => {
       })
       if (request.sessionId === PARENT) {
         emit(root, PARENT, { type: 'turn/start', data: { turn: 5 } })
-        inlineAnswer = (await svc.signal(PARENT, {
+        inlineAnswer = await svc.signal(PARENT, {
           runId: bound.runId,
           outcome: 'pass',
           summary: '即时通过',
-        })) as { ok: boolean }
+        })
       }
       return { accepted: true as const }
     }

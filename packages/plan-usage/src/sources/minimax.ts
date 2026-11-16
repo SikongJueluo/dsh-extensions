@@ -118,7 +118,7 @@ export function parseMiniMaxRemains(body: unknown): MiniMaxWindows | MiniMaxErro
       .map((row): Record<string, unknown> | null => asRecord(row))
       .find((row) => row !== null && row.model_name !== 'video')
   if (general === undefined || general === null)
-    return { error: 'minimax: response carried no usable model bucket' } as MiniMaxError
+    return { error: 'minimax: response carried no usable model bucket' }
 
   const parsed: MiniMaxWindows = {}
   const intervalRemaining = general.current_interval_remaining_percent
@@ -144,7 +144,7 @@ export function parseMiniMaxRemains(body: unknown): MiniMaxWindows | MiniMaxErro
     parsed.weekly = weekly
   }
   if (parsed.fiveHour === undefined && parsed.weekly === undefined) {
-    return { error: 'minimax: general bucket carried no percentages' } as MiniMaxError
+    return { error: 'minimax: general bucket carried no percentages' }
   }
   return parsed
 }

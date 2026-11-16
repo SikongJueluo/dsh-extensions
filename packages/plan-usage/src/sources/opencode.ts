@@ -105,7 +105,7 @@ export function parseOpenCodeGoUsage(body: unknown): OpenCodeGoWindows | OpenCod
     parsed.weekly === undefined &&
     parsed.monthly === undefined
   ) {
-    return { error: 'opencode: usage carried no usable windows' } as OpenCodeGoError
+    return { error: 'opencode: usage carried no usable windows' }
   }
   return parsed
 }

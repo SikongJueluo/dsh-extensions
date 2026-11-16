@@ -65,7 +65,7 @@ function cutTail(text: string): string {
 }
 
 function clean(text: string): string {
-  const withoutAnsi = text.replace(ANSI_PATTERN, '')
+  const withoutAnsi = text.replaceAll(ANSI_PATTERN, '')
   const lines = withoutAnsi.split('\n').map(collapseCarriage)
   return dedupe(lines).join('\n')
 }

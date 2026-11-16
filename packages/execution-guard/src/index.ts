@@ -244,10 +244,7 @@ function preflightDecision(
 
 export function apply(ctx: Context, config: Config): void {
   const logger = ctx.logger
-  const cache = new SchemaCache(
-    (agent) =>
-      ctx.tools.schemas(agent as never) as unknown as { name: string; parameters: unknown }[],
-  )
+  const cache = new SchemaCache((agent) => ctx.tools.schemas(agent))
   ctx.on('tools/change', () => cache.bump())
 
   ctx.on(

@@ -1508,7 +1508,7 @@ export class TriggerService extends Service implements TriggerBindingsService {
     const binding = store.bindings.get(bindingId)
     if (binding === undefined) throw new Error('规则组不存在。')
     if (!binding.enabled) throw new Error('规则组已停用；请先启用。')
-    return this.startRunFor(store, binding, task?.trim().length ? task!.trim() : binding.name, true)
+    return this.startRunFor(store, binding, task?.trim().length ? task.trim() : binding.name, true)
   }
 
   /** Pause / resume / cancel / extend / redeliver one run. */

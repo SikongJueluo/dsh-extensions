@@ -184,7 +184,7 @@ function optionalCompat(
 ): PiAiCompatProfile | undefined {
   const value = raw[key]
   if (value === undefined || value === null) return undefined
-  return asRecord(value, `${path}.${key}`) as PiAiCompatProfile
+  return asRecord(value, `${path}.${key}`)
 }
 
 function optionalUrl(
@@ -209,10 +209,10 @@ function optionalUrl(
 function optionalApi(raw: Record<string, unknown>, key: string, path: string): Api | undefined {
   const value = optionalString(raw, key, path)
   if (value === undefined) return undefined
-  if (!API_VALUES.has(value as Api)) {
+  if (!API_VALUES.has(value)) {
     fail(`${path}.${key}`, `expected one of ${[...API_VALUES].join(', ')}`)
   }
-  return value as Api
+  return value
 }
 
 function hasKeyFields(raw: Record<string, unknown>): boolean {
@@ -371,7 +371,7 @@ function parseProvider(providerId: string, value: unknown, secretDir: string): R
   if (kindRaw !== 'builtin' && kindRaw !== 'custom' && kindRaw !== 'command-code') {
     fail(`${path}.kind`, 'expected builtin, custom, or command-code')
   }
-  const kind = kindRaw as ProviderKind
+  const kind = kindRaw
   if (optionalBoolean(raw, 'enabled', path) === false) return []
   const displayName = optionalString(raw, 'displayName', path) ?? providerId
   const base = parseBaseFields(raw, path, providerId, kind)

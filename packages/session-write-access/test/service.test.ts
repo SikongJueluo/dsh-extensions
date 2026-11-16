@@ -246,7 +246,9 @@ describe('SessionWriteAccessPolicy live-child attribution', () => {
       settled = true
       return decision
     })
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20)
+    })
     expect(settled).toBe(false)
     releaseParent()
     expect((await pending).kind).toBe('enter')

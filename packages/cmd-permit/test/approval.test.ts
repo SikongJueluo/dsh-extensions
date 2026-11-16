@@ -56,7 +56,7 @@ function makeFixture(overrides: Partial<Record<keyof Config, unknown>> = {}): Fi
     allow: vol(['rtk', 'cargo']),
     allowPattern: vol([]),
     denyShape: vol([]),
-    maxMode: vol('danger-full-access' as MaxMode),
+    maxMode: vol('danger-full-access'),
     ...overrides,
   }
   const service = new CmdPermit(ctx as never, config as never)
@@ -145,7 +145,7 @@ describe('cmd-permit answerer over PTC evidence', () => {
   })
 
   it('defers when the requested mode is wider than maxMode', async () => {
-    const fixture = makeFixture({ maxMode: vol('workspace-write' as MaxMode) })
+    const fixture = makeFixture({ maxMode: vol('workspace-write') })
     ptcBash(fixture, 'root:ptc:1', {
       command: 'rtk sync',
       sandbox_permissions: 'danger-full-access',

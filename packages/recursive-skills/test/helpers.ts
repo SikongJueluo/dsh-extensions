@@ -122,7 +122,9 @@ export async function eventually(
         `timed out after ${timeoutMs}ms waiting for ${description}${lastError === undefined ? '' : `: ${lastError instanceof Error ? lastError.message : (JSON.stringify(lastError) ?? '')}`}`,
       )
     }
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 25)
+    })
   }
 }
 

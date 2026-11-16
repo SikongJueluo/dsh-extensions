@@ -56,7 +56,7 @@ function dshClientPlugin({ id }: DshClientOptions): Plugin {
 
       const stylesheet = css
         .join('\n')
-        .replace(/\/\*# sourceMappingURL=[^*]*\*\/\s*/g, '')
+        .replaceAll(/\/\*# sourceMappingURL=[^*]*\*\/\s*/g, '')
         .trim()
 
       for (const output of Object.values(bundle)) {

@@ -516,7 +516,7 @@ export function formatReport(report: AuditReport): string {
     lines.push('|---|---|---|---:|---:|---:|')
     for (const session of report.sessions) {
       const title =
-        session.title === undefined ? session.id.slice(0, 12) : session.title.replace(/\|/g, '丨')
+        session.title === undefined ? session.id.slice(0, 12) : session.title.replaceAll('|', '丨')
       lines.push(
         `| ${title} | ${formatClock(session.first)}→${formatClock(session.last)} | ${session.routes.slice(0, 2).join(' + ')}${session.routes.length > 2 ? ' +…' : ''} | ${session.requests} | ${formatTokens(session.uncachedInput)} | ${hitRate(session.cacheRead, session.uncachedInput)} |`,
       )

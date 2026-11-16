@@ -13,7 +13,10 @@ import { Context } from '@deepseek-ai/cordis'
 import * as handoffPlugin from '../lib/index.js'
 
 const COMPLETE = '<!-- handoff:complete -->'
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const sleep = (ms) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
 async function until(fn, ms, what) {
   const t0 = Date.now()
   while (Date.now() - t0 < ms) {

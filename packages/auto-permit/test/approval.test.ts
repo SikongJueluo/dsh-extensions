@@ -89,14 +89,11 @@ function makeFixture(
       },
     },
   }
-  apply(
-    ctx as unknown as Context,
-    {
-      enabled: vol(true),
-      provider: vol('test-provider'),
-      model: vol('test-model'),
-    } as Config,
-  )
+  apply(ctx as unknown as Context, {
+    enabled: vol(true),
+    provider: vol('test-provider'),
+    model: vol('test-model'),
+  })
   const answer = (
     callId: string,
     toolName = 'bash',

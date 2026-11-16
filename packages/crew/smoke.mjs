@@ -316,7 +316,9 @@ function deferred() {
 async function until(condition, what) {
   for (let i = 0; i < 200; i += 1) {
     if (condition()) return
-    await new Promise((settle) => setTimeout(settle, 2))
+    await new Promise((settle) => {
+      setTimeout(settle, 2)
+    })
   }
   throw new Error(`smoke: timed out waiting for ${what}`)
 }
@@ -440,7 +442,9 @@ function pendingActivation({ log } = {}) {
         record.disposals.push(childId)
         log?.push('dispose')
         // Teardown is observable: the result settles only after the stop lands.
-        await new Promise((settle) => setTimeout(settle, 5))
+        await new Promise((settle) => {
+          setTimeout(settle, 5)
+        })
         outcome.resolve({ stopReason: 'aborted', output: [] })
         log?.push('stopped')
       },
@@ -561,7 +565,9 @@ function pendingActivation({ log } = {}) {
     .get('subagent_quick')
     .execute(delegationArgs, { agent: { id: 'parent' }, signal: controller.signal })
   controller.abort()
-  await new Promise((settle) => setTimeout(settle, 20))
+  await new Promise((settle) => {
+    setTimeout(settle, 20)
+  })
   check(
     'a background delegation returns without waiting for the child',
     value.kind === 'continuable',

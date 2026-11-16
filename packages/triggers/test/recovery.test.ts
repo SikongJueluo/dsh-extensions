@@ -79,7 +79,10 @@ function createFakeHost() {
     afterPrompt?: (requestId: string) => void
   } = {}
 
-  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+  const sleep = (ms: number) =>
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, ms)
+    })
 
   const tableFor = (name: keyof typeof tables) => ({
     get: (key: string) => tables[name].get(key),
@@ -175,7 +178,10 @@ function createFakeHost() {
     for (const listener of listeners.get('session/event') ?? []) listener({ id: sessionId }, event)
   }
   const flush = async (): Promise<void> => {
-    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+    for (let i = 0; i < 5; i++)
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5)
+      })
   }
   /** A fresh plugin instance over the SAME tables/logs: a restart. Kills the old listeners. */
   const service = (): TriggerService => {
@@ -708,7 +714,9 @@ describe('boot handoff: live events during a frozen session-log read', () => {
     const svc = host.service()
     // While init is blocked reading the (frozen, pre-goal) log, the session
     // starts a goal and a turn — live feed only.
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
     host.emit(EXECUTOR, {
       type: 'goal/change',
       data: {
@@ -759,7 +767,9 @@ describe('boot handoff: live events during a frozen session-log read', () => {
     })
     host.setReadGate(gate)
     const svc2 = host.service()
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
     // A turn opens while init is still blocked reading the log.
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 4 } })
     release()
@@ -1199,7 +1209,9 @@ describe('round 3: a cold goal in the log must gate boot-time turn ends', () => 
     host.setReadGate(gate)
     // Restart: init blocks reading the (frozen) executor log.
     const svc2 = host.service()
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
     // While init is blocked, the executor works and finishes a turn — live
     // feed only. The empty pre-seed cache must not freeze goalActive=false.
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 9 } })
@@ -1320,7 +1332,9 @@ describe('round 4: seeding must not mistake a transient live fold for a seeded o
       executorSession: EXECUTOR,
       parentSession: PARENT,
     })
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
     // A turn opens while the read is in flight — buffered by the seeding.
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 7 } })
     release()
@@ -1431,18 +1445,24 @@ describe('round 5: seeding is shared and buffer timing is point-in-time', () => 
       executorSession: EXECUTOR,
       parentSession: PARENT,
     })
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
     const bindB = svc.bindReviewLoop({
       task: 'B',
       executorSession: EXECUTOR,
       parentSession: 'sess-parent-2',
     })
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
     // The seed is still in flight: bind B must NOT have returned with a run
     // built against a baseline that never landed.
     const outcome = await Promise.race([
       bindB.then(() => 'returned' as const),
-      new Promise<'waiting'>((resolve) => setTimeout(() => resolve('waiting'), 30)),
+      new Promise<'waiting'>((resolve) => {
+        setTimeout(() => resolve('waiting'), 30)
+      }),
     ])
     expect(outcome).toBe('waiting')
     // A turn opens while the read is frozen — it lands in the seed buffer.
@@ -1492,7 +1512,9 @@ describe('round 5: seeding is shared and buffer timing is point-in-time', () => 
     // Resume: the run chain seeds the executor BEFORE reviving the run — and
     // the read is frozen, so the resume is parked mid-seed.
     const resumed = svc2.controlRun(bound.runId, 'resume')
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10)
+    })
     // The buffered sequence: turn 7 finishes while the goal is still ACTIVE,
     // the goal then settles, turn 8 carries the actual final.
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 7 } })

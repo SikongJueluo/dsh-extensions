@@ -97,7 +97,10 @@ function createFakeHost() {
     for (const listener of listeners.get('session/event') ?? []) listener({ id: sessionId }, event)
   }
   const flush = async (): Promise<void> => {
-    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+    for (let i = 0; i < 5; i++)
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5)
+      })
   }
   const service = (): TriggerService => new TriggerService(ctx as never, {})
   return { tables, prompts, queue, emit, flush, service }
@@ -678,7 +681,7 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
     expect(nudgeForSecond).toBeDefined()
     // …and must NOT carry the standing auto rules, whose "a normal turn end
     // delivers itself" promise would cancel the only recovery path.
-    for (const nudge of [nudgeForFirst!, nudgeForSecond!]) {
+    for (const nudge of [nudgeForFirst, nudgeForSecond]) {
       expect(nudge.text).not.toContain('无需调用工具')
       expect(nudge.text).not.toContain('正常结束回合即自动送审')
       expect(nudge.text).not.toContain('即视为交付')

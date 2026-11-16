@@ -119,16 +119,16 @@ const COMMAND_GROUPS = new Set([
 
 /** Strip shell quotes a token may carry (the shell removes them before exec). */
 function bare(token: string): string {
-  return token.trim().replace(/^["']+|["']+$/g, '')
+  return token.trim().replaceAll(/^["']+|["']+$/g, '')
 }
 
 /** Mount sources may be quoted per component; drop every quote there. */
 function barePath(value: string): string {
-  return value.replace(/["']/g, '')
+  return value.replaceAll(/["']/g, '')
 }
 
 function engineNameOf(token: string): string | undefined {
-  const name = bare(token).replace(/^[<($]+|[)>)]+$/g, '')
+  const name = bare(token).replaceAll(/^[<($]+|[)>)]+$/g, '')
   const base = name.split('/').pop() ?? name
   if (base === 'podman' || base === 'docker') return base
   if (base === 'podman-remote') return base
@@ -244,11 +244,11 @@ function sensitiveSource(raw: string): boolean {
   // Strip the slash spellings that don't change the named directory
   // (`/home/u/`, `//home/u`, `/home/u/.`). A `..` segment is not resolved
   // textually (symlinks decide it), so it goes to the human.
-  const collapsed = raw.replace(/\/{2,}/g, '/')
+  const collapsed = raw.replaceAll(/\/{2,}/g, '/')
   const trimmed = collapsed.length > 1 ? collapsed.replace(/\/+$/, '') : collapsed
   const value = trimmed === '' ? '/' : trimmed
   if (/(?:^|\/)\.\.(?:\/|$)/.test(value)) return true
-  const source = value.replace(/\/\.(?=\/|$)/g, '')
+  const source = value.replaceAll(/\/\.(?=\/|$)/g, '')
   // `/.` normalizes to the host root.
   if (source === '') return true
   if (source === '~' || source.startsWith('~/')) return true

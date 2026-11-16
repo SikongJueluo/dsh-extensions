@@ -74,7 +74,10 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
       clearTimeout(timer)
       reject(signal.reason ?? new Error('aborted'))
     }
-    if (signal.aborted) return onAbort()
+    if (signal.aborted) {
+      onAbort()
+      return
+    }
     signal.addEventListener('abort', onAbort, { once: true })
   })
 }

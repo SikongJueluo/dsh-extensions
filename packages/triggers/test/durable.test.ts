@@ -189,7 +189,10 @@ async function boot(root: string, options: { queueFails?: boolean } = {}) {
 
 /** Settle queued promise chains (bounded), like the cordis tests' `until`. */
 async function settle(): Promise<void> {
-  for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+  for (let i = 0; i < 10; i++)
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5)
+    })
 }
 
 const DIRS: string[] = []

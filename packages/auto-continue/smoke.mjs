@@ -167,9 +167,9 @@ check('no retry event for non-owned failure', events.length === 0)
   setTimeout(() => ctrl.abort(), 20)
   const action = await Promise.race([
     pending,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('recovery did not settle')), 5000),
-    ),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('recovery did not settle')), 5000)
+    }),
   ])
   check('cancelled probe wait returns undefined (terminal)', action === undefined)
   check(
@@ -242,11 +242,15 @@ check('no retry event for non-owned failure', events.length === 0)
     },
     async () => undefined,
   )
-  await new Promise((r) => setTimeout(r, 40))
+  await new Promise((r) => {
+    setTimeout(r, 40)
+  })
   ctrl.abort()
   await pending
   check('aborted wait record kept with future retryAt', sp.get('sess-cr') !== undefined)
-  await new Promise((r) => setTimeout(r, 300))
+  await new Promise((r) => {
+    setTimeout(r, 300)
+  })
   check(
     're-armed wait resumes in-process after abort',
     sent.length === 1 && sp.get('sess-cr') === undefined,
@@ -310,9 +314,9 @@ check('no retry event for non-owned failure', events.length === 0)
   setTimeout(() => ctrl.abort(), 20)
   const action = await Promise.race([
     pending,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('recovery did not settle')), 5000),
-    ),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('recovery did not settle')), 5000)
+    }),
   ])
   check('snapshot-less service degrades to probe', action === undefined)
 }
@@ -394,7 +398,9 @@ await rm(spoolDir, { recursive: true, force: true })
     },
     async () => undefined,
   )
-  await new Promise((r) => setTimeout(r, 60))
+  await new Promise((r) => {
+    setTimeout(r, 60)
+  })
   check('wait record persisted before sleeping', cancelSpool.get('sess-c') !== undefined)
   ctrl.abort()
   await pendingCancel
@@ -421,7 +427,9 @@ await rm(spoolDir, { recursive: true, force: true })
     },
     async () => undefined,
   )
-  await new Promise((r) => setTimeout(r, 60))
+  await new Promise((r) => {
+    setTimeout(r, 60)
+  })
   check('record in flight before disposal', disposeSpool.get('sess-d') !== undefined)
   await disposeCtx.effects[0]()()
   await pendingDispose
@@ -433,7 +441,10 @@ await rm(spoolDir, { recursive: true, force: true })
 
 // ── resume adopter ───────────────────────────────────────────────────────────
 {
-  const settle = (ms = 80) => new Promise((r) => setTimeout(r, ms))
+  const settle = (ms = 80) =>
+    new Promise((r) => {
+      setTimeout(r, ms)
+    })
 
   // expired record is pruned at boot
   {
@@ -534,7 +545,10 @@ await rm(spoolDir, { recursive: true, force: true })
 
 // ── adoption countdown notice + cancel ───────────────────────────────────────
 {
-  const settle = (ms = 120) => new Promise((r) => setTimeout(r, ms))
+  const settle = (ms = 120) =>
+    new Promise((r) => {
+      setTimeout(r, ms)
+    })
   const noticeEvents = []
   const noticeAgent = {
     status: 'idle',
@@ -641,12 +655,16 @@ await rm(spoolDir, { recursive: true, force: true })
     },
     async () => undefined,
   )
-  await new Promise((r) => setTimeout(r, 40))
+  await new Promise((r) => {
+    setTimeout(r, 40)
+  })
   check('wait armed before cancel', cancelSpool.get('sess-w') !== undefined)
   cancelled.add('sess-w')
   await cancelSpool.delete('sess-w')
   const action = await pendingWake
-  await new Promise((r) => setTimeout(r, 60))
+  await new Promise((r) => {
+    setTimeout(r, 60)
+  })
   check('cancelled recovery returns terminal without retry', action === undefined)
   check(
     'cancelled recovery records no retry-started',
@@ -657,7 +675,10 @@ await rm(spoolDir, { recursive: true, force: true })
 // ── restart-resume: mirror + boot adoption ──────────────────────────────────
 {
   const { registerRestartResume, defaultMirrorPath } = await import('./lib/index.js')
-  const settleFast = (ms = 60) => new Promise((r) => setTimeout(r, ms))
+  const settleFast = (ms = 60) =>
+    new Promise((r) => {
+      setTimeout(r, ms)
+    })
   const mirrorPath = join(await mkdtemp(join(tmpdir(), 'ac-rr-')), 'running.json')
   const statusListeners = []
   const sent = []

@@ -91,7 +91,7 @@ function makeFixture(overrides: Partial<Config> = {}): Fixture {
 async function initFixture(fixture: Fixture, overrides: Partial<Config> = {}): Promise<void> {
   fixture.tempDir = await mkdtemp(join(tmpdir(), 'guard-it-'))
   fixture.session.header.cwd = fixture.tempDir
-  apply(fixture.ctx as Context, { preflight: true, repeatHints: true, ...overrides })
+  apply(fixture.ctx, { preflight: true, repeatHints: true, ...overrides })
 }
 
 const tempRoots: string[] = []

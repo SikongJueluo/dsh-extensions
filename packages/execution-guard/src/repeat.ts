@@ -22,7 +22,7 @@ export const MAX_FINGERPRINTS = 64
  */
 export function fingerprint(tool: string, violations: readonly string[]): string {
   const normalized = violations
-    .map((line) => line.replace(/[0-9]+/g, '#').replace(/"[^"]*"/g, '"…"'))
+    .map((line) => line.replaceAll(/[0-9]+/g, '#').replaceAll(/"[^"]*"/g, '"…"'))
     .sort()
   return `${tool}\u0000${normalized.join('\u0001')}`
 }

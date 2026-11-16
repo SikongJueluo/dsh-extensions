@@ -111,7 +111,7 @@ async function initFixture(fixture: Fixture, overrides: Partial<Config> = {}): P
     resumeNotice: true,
     ...overrides,
   }
-  apply(fixture.ctx as Context, config, { exec: fakeExec, jjPath: 'jj-fake' })
+  apply(fixture.ctx, config, { exec: fakeExec, jjPath: 'jj-fake' })
 }
 
 const tempRoots: string[] = []
@@ -192,7 +192,7 @@ describe('adapter: checkpoint_task through the real defineTool', () => {
       vcs: { changeId: 'change-AAA', parentChangeIds: ['change-PPP'] },
       goal: { goalId: 'g1', revision: 4, phase: 'active', proof: 'fold-agrees' },
     })
-    const blocks = tool.output.render({ phase: 'implement' } as never, result as never)
+    const blocks = tool.output.render({ phase: 'implement' }, result as never)
     expect(blocks[0]).toMatchObject({ type: 'text' })
     for (const call of fixture.execCalls) {
       expect(call.args).toContain('--ignore-working-copy')

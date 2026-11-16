@@ -174,11 +174,11 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 `reportUnusedDisableDirectives: error` 已开：当前 1 处已无用（`oauth-providers/src/client/index.tsx:246`）。
 这 7 处按“逐处审查”处理，不自动迁移成新豁免。
 
-### 3.7 修复积压（2039 条，分层计划）
+### 3.7 修复积压（1810 条，分层计划）
 
 | 层 | 内容 | 数量 |
 | --- | --- | --- |
-| 类型逃生口 | `no-unsafe-type-assertion` 462、`no-non-null-assertion` 189、`no-unsafe-*`（member/call/assign/return/argument）54、`no-explicit-any` 5 | 710 |
+| 类型逃生口 | `no-unsafe-type-assertion` 442、`no-non-null-assertion` 181、`no-unsafe-*`（member/call/assign/return/argument）55、`no-explicit-any` 5 | 683 |
 | 机械可改 | 有建议修复的其余条目，如 `require-unicode-regexp` 228、`no-useless-undefined` 108、`prefer-template` 90、`no-duplicate-imports` 83 | ~1300 |
 | 语义需判断 | `no-floating-promises` 16、`consistent-return` 10、`unbound-method` 10、`prefer-nullish-coalescing` 54、`no-array-sort` 38、`promise/always-return` 36 等 | ~150 |
 
@@ -186,7 +186,7 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 都改变运行时行为，须逐处确认；`no-void`、`no-floating-promises` 更不允许靠加 `void`
 或空 `.catch()` 消音。
 
-#### 3.7.1 类型逃生口按区域分布
+#### 3.7.1 类型逃生口按区域分布（接入时快照；当前总量见 3.7）
 
 | 规则 | src | client | test | 合计 |
 | --- | ---: | ---: | ---: | ---: |
@@ -204,7 +204,7 @@ TS/TSX 没有一个落空。分布（`OXC_LOG=debug` 的分配日志）：
 豁免——测试里的假类型同样会在重构时骗过编译器——但修复顺序应先生产后测试：生产侧的断言
 掩盖的是真实契约。
 
-#### 3.7.2 生产侧按写法分类（219 条）
+#### 3.7.2 生产侧按写法分类（接入时快照：219 条）
 
 | 写法 | 数量 | 例子 | 正确修法 |
 | --- | ---: | --- | --- |
@@ -379,7 +379,7 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 
 1. **本层（当前）**：工具 + 配置 + 扫描 + 本文批准清单。
 2. ~~纯排版层~~（已完成）：228 个文件单独一层，未夹带语义修复；`typecheck`/`build`/`test`/`check:smoke`/`check:client`/`check:pack`/`build:storybook` 全部通过。
-3. 类型与语义修复层：先机械类（import/模板/无用导出），再类型逃生口（710 条，逐处判定契约），最后语义类（浮空 Promise、`consistent-return` 等，涉及行为时先问）。
+3. 类型与语义修复层：先机械类（import/模板/无用导出），再类型逃生口（683 条，逐处判定契约），最后语义类（浮空 Promise、`consistent-return` 等，涉及行为时先问）。
 4. Fallow 清理层：只剩 3 个类成员（2 个需要内联抑制、1 个公开 getter 需 API 取舍）；其余类别已清零。
 5. 统一入口层：把 `format:check`、`lint`、`fallow`、现有测试/smoke、`check:pack`、Storybook build 聚合进 `pnpm check`；skip 必须可见且不能替代必需项。
 6. CI 层：GitHub Actions 复用同一入口；远端成功记录与平台保护设置分开报告。

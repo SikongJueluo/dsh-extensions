@@ -500,7 +500,7 @@ export function extendBudget(run: RunRecord, newMaxRounds: number, now: number):
 
 /** Replace `{{key}}` slots in a template body; unknown keys stay visible. */
 export function renderTemplate(body: string, vars: Readonly<Record<string, string>>): string {
-  return body.replace(/\{\{(\w+)\}\}/g, (whole, key: string) =>
+  return body.replaceAll(/\{\{(\w+)\}\}/g, (whole, key: string) =>
     Object.hasOwn(vars, key) ? vars[key]! : whole,
   )
 }

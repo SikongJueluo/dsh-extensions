@@ -84,15 +84,15 @@ function fakeHost(overrides: Partial<ToolHost> = {}): ToolHost {
       },
     }),
     postJson: fakePostJson,
-    getJson: (async () => {
+    getJson: async () => {
       throw new Error('getJson not expected in this test')
-    }) as never,
-    rawPost: (async () => {
+    },
+    rawPost: async () => {
       throw new Error('rawPost not expected in this test')
-    }) as never,
-    chatgptToken: (async () => {
+    },
+    chatgptToken: async () => {
       throw new Error('chatgptToken not expected in this test')
-    }) as never,
+    },
     warn: () => {},
     ...overrides,
   }
@@ -168,17 +168,14 @@ describe('makeResearchTool', () => {
       { question: 'the question', queries: ['q'] },
       execStub(),
     )) as never
-    const blocks = tool.output.render({ question: 'the question' } as never, value)
+    const blocks = tool.output.render({ question: 'the question' }, value)
     expect(blocks).toHaveLength(1)
     expect(blocks[0]?.type).toBe('text')
     const text = (blocks[0] as { text: string }).text
     expect(text).toContain('Tool-level answer.')
     expect(text).toContain('Sources:')
     expect(text).toContain('untrusted data')
-    const meta = tool.output.presentationMeta?.({ question: 'x' } as never, value) as Record<
-      string,
-      unknown
-    >
+    const meta = tool.output.presentationMeta?.({ question: 'x' }, value) as Record<string, unknown>
     expect(meta.status).toBe('ok')
     expect(meta.searched).toEqual(['tavily'])
   })
@@ -201,9 +198,9 @@ describe('makeResearchTool', () => {
       { question: 'the question', queries: ['q'] },
       execStub(),
     )) as never
-    const text = (tool.output.render({ question: 'x' } as never, value)[0] as { text: string }).text
+    const text = (tool.output.render({ question: 'x' }, value)[0] as { text: string }).text
     expect(text).toContain('Audit: /tmp/dsh-spill-x/session-1/audit.txt')
-    const meta = tool.output.presentationMeta?.({ question: 'x' } as never, value) as {
+    const meta = tool.output.presentationMeta?.({ question: 'x' }, value) as {
       audit?: { locator: string }
     }
     expect(meta.audit?.locator).toBe('/tmp/dsh-spill-x/session-1/audit.txt')
