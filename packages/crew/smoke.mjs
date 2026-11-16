@@ -1,17 +1,21 @@
-/* Runtime smoke test for dsh-crew: tier-route selection with its fallback
- * ladder (route preflight failure, exhausted coding-plan window, no usable
- * fallback), and the delegation path end to end against stub services —
- * asserting the agentOptions the subagent provider actually receives. */
+/* Runtime smoke test for dsh-crew: crew.yaml validation, ordered candidate
+ * fallback (unavailable route / exhausted plan window / all candidates down),
+ * the real apply() delegation path against stub services, per-step route table,
+ * fail-closed invalid config, hot reload and the revision guard. */
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
+import { LlmAdapter, LlmRuntime } from '@deepseek-ai/dsh-llm'
+import { resolveChildAgentOptions } from '@deepseek-ai/dsh-subagent'
 import {
-  name,
-  inject,
-  Config,
   apply,
-  fallbackTarget,
-  anyWindowExhausted,
   callConfigOf,
+  inject,
+  name,
+  parseCrewPolicy,
   routeName,
-  selectTierRoute,
+  selectRoute,
 } from './lib/index.js'
 
 let failures = 0
@@ -24,248 +28,387 @@ function check(label, condition) {
   }
 }
 
-// ── defaults ─────────────────────────────────────────────────────────────────
-const config = Config({})
-console.log('plugin:', name, '| inject:', inject)
+function throwsConfig(fn, fragment, label) {
+  try {
+    fn()
+  } catch (error) {
+    check(label, error instanceof Error && error.message.includes(fragment))
+    return
+  }
+  check(label, false)
+}
+
+async function until(condition, what, attempts = 400) {
+  for (let i = 0; i < attempts; i += 1) {
+    if (condition()) return
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5)
+    })
+  }
+  throw new Error(`timed out waiting for ${what}`)
+}
+
+const sleep = (ms) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+
+// The real LLM service materializes the model's default effort when a caller
+// omits one; the stubs below do the same so the delegation path is exercised
+// with the config the host would actually produce.
+const MODEL_DEFAULT_EFFORT = 'model-default'
+
+// Every fake plugin context shares one status server: the host hub serves one
+// aggregate route per plugin path, not one per apply() call.
+const statusRoutes = []
+function registerStatusRoute(route) {
+  statusRoutes.push(route)
+  return () => {
+    const index = statusRoutes.indexOf(route)
+    if (index >= 0) statusRoutes.splice(index, 1)
+  }
+}
+
+// ── policy validation ───────────────────────────────────────────────────────
+const VALID = `routes:
+  execute:
+    desc: 用于代码实现、文件修改和常规执行任务。
+    candidates:
+      - provider: provider-a
+        model: model-a
+        reasoningEffort: high
+      - provider: provider-b
+        model: model-b
+  review:
+    desc: 用于审查、设计讨论和复杂推理。
+    candidates:
+      - provider: provider-c
+        model: model-c
+`
+check('plugin:', name === 'dsh-crew')
 check(
-  'quick pinned to opencode-go/deepseek-v4.1-flash@max',
-  config.quick.provider === 'opencode-go' &&
-    config.quick.model === 'deepseek-v4.1-flash' &&
-    config.quick.reasoningEffort === 'max',
-)
-check(
-  'quick falls back to deepseek-official/deepseek-flash@max',
-  fallbackTarget(config.quick)?.provider === 'deepseek-official' &&
-    fallbackTarget(config.quick)?.model === 'deepseek-flash' &&
-    fallbackTarget(config.quick)?.reasoningEffort === 'max',
-)
-check(
-  'workhorse/smart name no fallback',
-  fallbackTarget(config.workhorse) === undefined && fallbackTarget(config.smart) === undefined,
-)
-check(
-  'workhorse and smart routes unchanged',
-  routeName(config.workhorse) === 'zai-coding-cn/glm-5.3' &&
-    routeName(config.smart) === 'openai-codex/gpt-6.1-sol',
+  'inject covers the delegation services',
+  inject.includes('tools') && inject.includes('subagents'),
 )
 
-// ── window exhaustion ────────────────────────────────────────────────────────
-const now = 1_790_000_000_000
-check('no snapshot is not exhausted', anyWindowExhausted(undefined, now) === false)
-check(
-  'below-limit windows are not exhausted',
-  anyWindowExhausted(
-    { fiveHour: { percent: 99.5, resetAt: now + 1000 }, weekly: { percent: 10 } },
-    now,
-  ) === false,
-)
-check(
-  '100% with a future reset is exhausted',
-  anyWindowExhausted({ fiveHour: { percent: 100, resetAt: now + 1000 } }, now) === true,
-)
-check(
-  'already-reset window is not exhausted',
-  anyWindowExhausted({ weekly: { percent: 100, resetAt: now - 1000 } }, now) === false,
-)
-check(
-  'percent without a reset counts as exhausted',
-  anyWindowExhausted({ monthly: { percent: 100 } }, now) === true,
-)
-check(
-  'the monthly MCP window is considered too',
-  anyWindowExhausted({ monthlyMcp: { percent: 100, resetAt: now + 1 } }, now) === true,
-)
-
-// ── call config shaping ──────────────────────────────────────────────────────
-const withEffort = callConfigOf({
-  provider: 'opencode-go',
-  model: 'deepseek-v4.1-flash',
-  reasoningEffort: 'max',
+const policy = parseCrewPolicy({
+  routes: {
+    execute: {
+      desc: 'execution',
+      candidates: [
+        { provider: 'provider-a', model: 'model-a', reasoningEffort: 'high' },
+        { provider: 'provider-b', model: 'model-b' },
+      ],
+    },
+    review: { desc: 'review', candidates: [{ provider: 'provider-c', model: 'model-c' }] },
+  },
 })
+check('two routes parse in order', Object.keys(policy.routes).join(',') === 'execute,review')
+check('candidate order is preserved', policy.routes.execute?.candidates[1]?.model === 'model-b')
 check(
-  'callConfigOf carries the pinned route and effort',
-  withEffort.provider === 'opencode-go' && withEffort.reasoningEffort === 'max',
-)
-check(
-  'an empty effort is omitted',
-  callConfigOf({ provider: 'p', model: 'm', reasoningEffort: '' }).reasoningEffort === undefined,
+  'an omitted effort stays omitted',
+  policy.routes.execute?.candidates[1]?.reasoningEffort === undefined,
 )
 
-// ── route selection matrix ───────────────────────────────────────────────────
+throwsConfig(
+  () => parseCrewPolicy({ routes: {} }),
+  'at least one route',
+  'an empty routes map is rejected',
+)
+throwsConfig(
+  () => parseCrewPolicy({ routes: { execute: { candidates: [] } } }),
+  'desc',
+  'a missing desc is rejected',
+)
+throwsConfig(
+  () => parseCrewPolicy({ routes: { execute: { desc: 'x', candidates: [] } } }),
+  'at least one candidate',
+  'an empty candidate list is rejected',
+)
+throwsConfig(
+  () => parseCrewPolicy({ routes: { 'Bad Id': { desc: 'x', candidates: [] } } }),
+  'route id',
+  'an invalid route id is rejected',
+)
+throwsConfig(
+  () => parseCrewPolicy({ routes: { constructor: { desc: 'x', candidates: [] } } }),
+  'not a usable route id',
+  'a prototype key is rejected as a route id',
+)
+throwsConfig(
+  () =>
+    parseCrewPolicy({
+      routes: { execute: { desc: 'x', candidates: [{ provider: 'p', model: 'm', extra: 1 }] } },
+    }),
+  'unknown key',
+  'unknown candidate keys are rejected',
+)
+throwsConfig(
+  () =>
+    parseCrewPolicy({
+      routes: {
+        execute: { desc: 'x', candidates: [{ provider: 'p', model: 'm', reasoningEffort: '' }] },
+      },
+    }),
+  'reasoningEffort',
+  'an empty effort is rejected rather than silently dropped',
+)
+throwsConfig(
+  () => parseCrewPolicy({ routes: {}, extra: true }),
+  'unknown key',
+  'unknown root keys are rejected',
+)
+
+// ── route selection ─────────────────────────────────────────────────────────
 function makeSelectionCtx({ failFor = [], plan, planThrows = false } = {}) {
   const warnings = []
   const calls = []
+  const quotaCalls = []
   const ctx = {
     llm: {
       async resolveCallConfig(callConfig) {
         calls.push(routeName(callConfig))
-        if (failFor.includes(callConfig.provider))
+        if (failFor.includes(callConfig.provider)) {
           throw new Error(`llm: provider route "${callConfig.provider}" is not registered`)
-        return callConfig
+        }
+        return {
+          ...callConfig,
+          reasoningEffort: callConfig.reasoningEffort ?? MODEL_DEFAULT_EFFORT,
+        }
       },
     },
     logger: { warn: (message, ...args) => warnings.push([message, ...args].join(' ')) },
     get: (serviceName) =>
       serviceName === 'planUsage' && (plan !== undefined || planThrows)
         ? {
-            get: async () => {
+            get: async (provider) => {
+              quotaCalls.push(provider)
               if (planThrows) throw new Error('quota backend down')
-              return plan
+              return typeof plan === 'function' ? plan(provider) : plan
             },
           }
         : undefined,
   }
-  return { ctx, warnings, calls }
+  return { ctx, warnings, calls, quotaCalls }
 }
 
-const tier = config.quick
-const healthy = makeSelectionCtx()
-const healthyPick = await selectTierRoute(healthy.ctx, tier, new AbortController().signal)
-check(
-  'healthy primary needs no fallback',
-  healthyPick.target.provider === 'opencode-go' && healthyPick.notice === undefined,
-)
-check(
-  'healthy primary preflights exactly its own route',
-  healthy.calls.length === 1 && healthy.calls[0] === 'opencode-go/deepseek-v4.1-flash',
-)
-
-const unavailable = makeSelectionCtx({ failFor: ['opencode-go'] })
-const fallbackPick = await selectTierRoute(unavailable.ctx, tier, new AbortController().signal)
-check(
-  'unavailable primary falls back',
-  fallbackPick.target.provider === 'deepseek-official' &&
-    fallbackPick.target.model === 'deepseek-flash',
-)
-check(
-  'fallback is preflighted before use',
-  unavailable.calls.join(',') ===
-    'opencode-go/deepseek-v4.1-flash,deepseek-official/deepseek-flash',
-)
-check(
-  'fallback is announced and logged',
-  (fallbackPick.notice ?? '').includes('deepseek-official/deepseek-flash') &&
-    unavailable.warnings.length === 1,
-)
-check('notice names the cause', (fallbackPick.notice ?? '').includes('route unavailable'))
-
-const exhaustedPlan = makeSelectionCtx({
-  plan: { fiveHour: { percent: 100, resetAt: Date.now() + 3600_000 }, weekly: { percent: 12 } },
-})
-const exhaustedPick = await selectTierRoute(exhaustedPlan.ctx, tier, new AbortController().signal)
-check('exhausted plan window falls back', exhaustedPick.target.provider === 'deepseek-official')
-check(
-  'exhaustion notice names the window condition',
-  (exhaustedPick.notice ?? '').includes('coding-plan window exhausted'),
-)
-
-const freshPlan = makeSelectionCtx({
-  plan: { fiveHour: { percent: 40, resetAt: Date.now() + 3600_000 } },
-})
-check(
-  'a live plan window stays on the primary',
-  (await selectTierRoute(freshPlan.ctx, tier, new AbortController().signal)).target.provider ===
-    'opencode-go',
-)
-const brokenPlan = makeSelectionCtx({ planThrows: true })
-check(
-  'a failing planUsage read stays on the primary',
-  (await selectTierRoute(brokenPlan.ctx, tier, new AbortController().signal)).target.provider ===
-    'opencode-go',
-)
+{
+  const healthy = makeSelectionCtx()
+  const picked = await selectRoute(healthy.ctx, policy, 'execute', new AbortController().signal)
+  check(
+    'the first candidate serves a healthy route',
+    picked.target.provider === 'provider-a' && picked.skipped.length === 0,
+  )
+  check('the resolved config keeps the pinned effort', picked.config.reasoningEffort === 'high')
+  check('only the first candidate is preflighted', healthy.calls.length === 1)
+}
 
 {
-  // A cold quota cache can hit the upstream API; the routing hint must not
-  // delay the delegation behind it.
-  const hangingCtx = {
-    llm: { resolveCallConfig: async (callConfig) => callConfig },
+  const fallback = makeSelectionCtx({ failFor: ['provider-a'] })
+  const picked = await selectRoute(fallback.ctx, policy, 'execute', new AbortController().signal)
+  check(
+    'an unavailable candidate falls through to the next approved one',
+    picked.target.provider === 'provider-b' && picked.skipped.length === 1,
+  )
+  check(
+    'an unpinned candidate resolves the model default',
+    picked.config.reasoningEffort === MODEL_DEFAULT_EFFORT,
+  )
+  check(
+    'the skip names the unavailable candidate and its cause',
+    picked.skipped[0]?.reason.includes('route unavailable') === true,
+  )
+}
+
+{
+  const exhaustedWindow = { fiveHour: { percent: 100, resetAt: Date.now() + 3_600_000 } }
+  const exhausted = makeSelectionCtx({
+    plan: (provider) =>
+      provider === 'provider-a' ? exhaustedWindow : { fiveHour: { percent: 5 } },
+  })
+  const picked = await selectRoute(exhausted.ctx, policy, 'execute', new AbortController().signal)
+  check(
+    'an exhausted coding-plan window skips that candidate',
+    picked.target.provider === 'provider-b' &&
+      picked.skipped[0]?.reason === 'coding-plan window exhausted',
+  )
+  check(
+    'each distinct provider is read once',
+    exhausted.quotaCalls.join(',') === 'provider-a,provider-b',
+  )
+
+  const sharedProvider = {
+    routes: {
+      execute: {
+        desc: 'shared provider',
+        candidates: [
+          { provider: 'provider-a', model: 'model-a' },
+          { provider: 'provider-a', model: 'model-a2' },
+          { provider: 'provider-b', model: 'model-b' },
+        ],
+      },
+    },
+  }
+  const deduped = makeSelectionCtx({
+    plan: (provider) =>
+      provider === 'provider-a' ? exhaustedWindow : { fiveHour: { percent: 5 } },
+  })
+  const dedupedPick = await selectRoute(
+    deduped.ctx,
+    sharedProvider,
+    'execute',
+    new AbortController().signal,
+  )
+  check(
+    'two candidates on one provider share a single quota read',
+    dedupedPick.target.provider === 'provider-b' &&
+      deduped.quotaCalls.join(',') === 'provider-a,provider-b',
+  )
+}
+
+{
+  const fresh = makeSelectionCtx({ plan: { fiveHour: { percent: 40 } } })
+  const picked = await selectRoute(fresh.ctx, policy, 'execute', new AbortController().signal)
+  check('a live window keeps the first candidate', picked.target.provider === 'provider-a')
+}
+
+{
+  const broken = makeSelectionCtx({ planThrows: true })
+  const picked = await selectRoute(broken.ctx, policy, 'execute', new AbortController().signal)
+  check('a failed quota read is unknown, not exhausted', picked.target.provider === 'provider-a')
+}
+
+{
+  const hanging = {
+    llm: {
+      resolveCallConfig: async (callConfig) => ({
+        ...callConfig,
+        reasoningEffort: callConfig.reasoningEffort ?? MODEL_DEFAULT_EFFORT,
+      }),
+    },
     logger: { warn() {} },
     get: () => ({ get: () => new Promise(() => {}) }),
   }
   const startedAt = Date.now()
-  const picked = await selectTierRoute(hangingCtx, tier, new AbortController().signal)
+  const picked = await selectRoute(hanging, policy, 'execute', new AbortController().signal)
   const elapsed = Date.now() - startedAt
+  check('a hanging quota read does not block selection', picked.target.provider === 'provider-a')
+  check('the shared quota budget bounds the wait', elapsed >= 1_900 && elapsed < 4_000)
+}
+
+{
+  const bothDown = makeSelectionCtx({ failFor: ['provider-a', 'provider-b'] })
+  let error
+  try {
+    await selectRoute(bothDown.ctx, policy, 'execute', new AbortController().signal)
+  } catch (failure) {
+    error = failure
+  }
   check(
-    'a hanging planUsage read falls through to the primary',
-    picked.target.provider === 'opencode-go' && picked.notice === undefined,
+    'every candidate down fails with both reasons',
+    error instanceof Error &&
+      error.message.includes('provider-a/model-a') &&
+      error.message.includes('provider-b/model-b'),
   )
-  check('the quota read budget bounds the wait', elapsed >= 1900 && elapsed < 4000)
 }
 
-const noFallbackTier = { ...config.workhorse }
-let noFallbackError
-try {
-  await selectTierRoute(
-    makeSelectionCtx({ failFor: ['zai-coding-cn'] }).ctx,
-    noFallbackTier,
-    new AbortController().signal,
+{
+  const aborted = new AbortController()
+  aborted.abort()
+  const cancelled = makeSelectionCtx({ failFor: ['provider-a'] })
+  let error
+  try {
+    await selectRoute(cancelled.ctx, policy, 'execute', aborted.signal)
+  } catch (failure) {
+    error = failure
+  }
+  check(
+    'an aborted delegation never degrades to another candidate',
+    error instanceof Error && cancelled.calls.length === 1,
   )
-} catch (error) {
-  noFallbackError = error
 }
+
+{
+  const ctx = makeSelectionCtx()
+  let error
+  try {
+    await selectRoute(ctx.ctx, policy, 'missing', new AbortController().signal)
+  } catch (failure) {
+    error = failure
+  }
+  check(
+    'an unknown route reports the available routes',
+    error instanceof Error && error.message.includes('execute, review'),
+  )
+}
+
 check(
-  'a tier without a fallback still fails loud',
-  noFallbackError instanceof Error && noFallbackError.message.includes('not registered'),
+  'callConfigOf carries effort only when pinned',
+  callConfigOf({ provider: 'p', model: 'm', reasoningEffort: 'high' }).reasoningEffort === 'high' &&
+    callConfigOf({ provider: 'p', model: 'm' }).reasoningEffort === undefined,
 )
 
-const bothDown = makeSelectionCtx({ failFor: ['opencode-go', 'deepseek-official'] })
-let bothDownError
-try {
-  await selectTierRoute(bothDown.ctx, tier, new AbortController().signal)
-} catch (error) {
-  bothDownError = error
-}
-check(
-  'both routes down reports both',
-  bothDownError instanceof Error &&
-    bothDownError.message.includes('opencode-go/deepseek-v4.1-flash') &&
-    bothDownError.message.includes('deepseek-official/deepseek-flash'),
-)
+// ── apply(): tools, fail-closed, fallback, lifecycle, hot reload ─────────────
+const directory = await mkdtemp(join(tmpdir(), 'dsh-crew-smoke-'))
+const configPath = join(directory, 'crew.yaml')
+await writeFile(configPath, VALID)
 
-const aborted = new AbortController()
-aborted.abort()
-const cancelled = makeSelectionCtx({ failFor: ['opencode-go'] })
-let abortError
-try {
-  await selectTierRoute(cancelled.ctx, tier, aborted.signal)
-} catch (error) {
-  abortError = error
-}
-check(
-  'an aborted delegation never degrades to the fallback',
-  abortError instanceof Error && cancelled.calls.length === 1,
-)
-
-// ── delegation path against stub services ────────────────────────────────────
-/**
- * Minimal Cordis-shaped context covering exactly what crew's apply() touches.
- * `activate(spec, childId)` replaces the default already-completed activation so
- * a test can model a child that only stops when disposed.
- */
-function makeApplyCtx({ plan, failFor = [], activate } = {}) {
+function makeApplyCtx({ activate, plan, fillDefault = true, llm } = {}) {
   const registered = new Map()
   const warnings = []
+  const infos = []
+  const errors = []
   const starts = []
-  const activations = []
   const disposals = []
+  const effects = []
+  const routes = statusRoutes
+  const createdSelections = []
+  const listeners = new Map()
+  let section
   const provider = {
     name: 'spawn',
     capabilities: { agentOptions: true },
     prepareContinuable: () => {},
   }
-  const record = { disposals }
+  const log = {
+    info: (message, ...args) => infos.push([message, ...args].join(' ')),
+    warn: (message, ...args) => warnings.push([message, ...args].join(' ')),
+    error: (message, ...args) => errors.push([message, ...args].join(' ')),
+  }
   const ctx = {
-    logger: { info() {}, warn: (message, ...args) => warnings.push([message, ...args].join(' ')) },
+    logger: () => log,
     get: (serviceName) =>
       serviceName === 'planUsage' && plan !== undefined ? { get: async () => plan } : undefined,
-    on: () => () => {},
-    effect: () => () => {},
-    inject: (_deps, fn) => void fn,
-    llm: {
+    on: (event, listener) => {
+      const subscribers = listeners.get(event) ?? []
+      subscribers.push(listener)
+      listeners.set(event, subscribers)
+      return () => {
+        const index = subscribers.indexOf(listener)
+        if (index >= 0) subscribers.splice(index, 1)
+      }
+    },
+    effect: (callback) => {
+      const dispose = callback()
+      if (typeof dispose === 'function') effects.push(dispose)
+    },
+    inject: (_dependencies, callback) => {
+      callback({
+        effect: (run) => {
+          const dispose = run()
+          if (typeof dispose === 'function') effects.push(dispose)
+        },
+        webServer: { register: registerStatusRoute },
+      })
+    },
+    llm: llm ?? {
       async resolveCallConfig(callConfig) {
-        if (failFor.includes(callConfig.provider))
-          throw new Error(`llm: provider route "${callConfig.provider}" is not registered`)
-        return callConfig
+        return fillDefault
+          ? {
+              ...callConfig,
+              reasoningEffort: callConfig.reasoningEffort ?? MODEL_DEFAULT_EFFORT,
+            }
+          : callConfig
       },
     },
     tools: {
@@ -279,12 +422,18 @@ function makeApplyCtx({ plan, failFor = [], activate } = {}) {
       getProvider: (providerName) => (providerName === 'spawn' ? provider : undefined),
       resolveMaxDepth: () => undefined,
       startActivation: async (spec) => {
-        // The child's own request (prompt + parent + agentOptions) sits inside
-        // the activation spec; `delivery` decides who receives the result.
-        starts.push(spec.request)
-        activations.push(spec)
-        const childId = `child-${starts.length}`
-        if (activate !== undefined) return activate(spec, childId, record)
+        starts.push(spec)
+        const childId = spec.childId ?? `child-${starts.length}`
+        // Model the host's agent/created boundary: listeners run before the
+        // queued prompt's first step.
+        const agent = {
+          id: childId,
+          model: {
+            select: (selection) => createdSelections.push(selection),
+          },
+        }
+        for (const listener of listeners.get('agent/created') ?? []) listener({ agent })
+        if (activate !== undefined) return activate(spec, childId)
         return {
           childId,
           messageId: 'message-1',
@@ -298,285 +447,418 @@ function makeApplyCtx({ plan, failFor = [], activate } = {}) {
         }
       },
     },
-    systemPrompt: { getSectionOrder: () => 0, section: () => () => {} },
+    systemPrompt: {
+      getSectionOrder: () => 0,
+      section: (value) => {
+        section = value
+        return () => {}
+      },
+    },
   }
-  return { ctx, registered, warnings, starts, activations, disposals }
-}
-
-/** A promise plus its resolvers, for tests that need to hold an outcome open. */
-function deferred() {
-  let resolve
-  const promise = new Promise((settle) => {
-    resolve = settle
-  })
-  return { promise, resolve }
-}
-
-/** Spin the microtask/timer queue until `condition` holds (bounded). */
-async function until(condition, what) {
-  for (let i = 0; i < 200; i += 1) {
-    if (condition()) return
-    await new Promise((settle) => {
-      setTimeout(settle, 2)
-    })
+  return {
+    ctx,
+    registered,
+    warnings,
+    infos,
+    errors,
+    starts,
+    createdSelections,
+    disposals,
+    effects,
+    routes,
+    listeners,
+    section: () => section,
   }
-  throw new Error(`smoke: timed out waiting for ${what}`)
 }
 
-/** Settle a promise into `{ ok, value|error }` without letting rejections escape. */
-const settled = (promise) =>
-  promise.then(
-    (value) => ({ ok: true, value }),
-    (error) => ({ ok: false, error }),
-  )
+function subagentExec() {
+  return {
+    agent: { id: 'parent-agent' },
+    signal: new AbortController().signal,
+    deferContext() {},
+    concludeTurn() {},
+  }
+}
 
-const exec = { agent: { id: 'parent' }, signal: new AbortController().signal }
-const delegationArgs = { description: 'two word label', prompt: 'do the thing' }
-
-{
-  const wired = makeApplyCtx()
-  apply(wired.ctx, config)
-  check(
-    'all four tools register',
-    ['subagent_quick', 'subagent', 'subagent_smart', 'create_agent'].every((toolName) =>
-      wired.registered.has(toolName),
-    ),
-  )
-  const value = await wired.registered.get('subagent_quick').execute(delegationArgs, exec)
-  check(
-    'healthy quick delegates on opencode-go',
-    value.kind === 'continuable' && wired.starts[0].agentOptions.provider === 'opencode-go',
-  )
-  check(
-    'a background child delivers its result to the parent',
-    wired.activations[0].delivery === 'parent',
-  )
-  check(
-    'a background child stays resident (not disposed by the tool)',
-    wired.disposals.length === 0,
-  )
-  check('healthy quick records no notice', value.notice === undefined)
-  check(
-    'the child inherits the pinned effort',
-    wired.starts[0].agentOptions.reasoningEffort === 'max',
-  )
+async function executeTool(tool, args) {
+  return tool.execute(args, subagentExec())
 }
 
 {
-  const wired = makeApplyCtx({
-    plan: { fiveHour: { percent: 100, resetAt: Date.now() + 3600_000 } },
+  const app = makeApplyCtx()
+  await apply(app.ctx, { provider: 'spawn', configFile: configPath })
+  const subagent = app.registered.get('subagent')
+  const createAgent = app.registered.get('create_agent')
+  check(
+    'subagent and create_agent are registered',
+    subagent !== undefined && createAgent !== undefined,
+  )
+  check(
+    'route is a required plain string parameter',
+    subagent.parameters.properties.route.type === 'string' &&
+      subagent.parameters.required.includes('route') &&
+      subagent.parameters.properties.route.enum === undefined,
+  )
+  check(
+    'the old tier tools are gone',
+    app.registered.has('subagent_quick') === false &&
+      app.registered.has('subagent_smart') === false,
+  )
+  check(
+    'startup logs the loaded routes',
+    app.infos.some((line) => line.includes('loaded 2 delegation route(s)')),
+  )
+  const healthyStatus = await (
+    await app.routes.find((route) => route.path === '/dsh-crew/config-status').resource()
+  ).json()
+  const healthyInstance = healthyStatus.instances.find((instance) => instance.file === configPath)
+  check(
+    'the status route reports a valid policy and automatic recovery',
+    healthyInstance?.state === 'valid' && healthyInstance.recovery === 'auto',
+  )
+
+  const autoActivate = (spec, childId) => ({
+    childId,
+    messageId: 'message-1',
+    result: Promise.resolve({
+      stopReason: 'completed',
+      output: [{ type: 'text', text: 'child answer' }],
+    }),
+    dispose: async () => {
+      foregroundApp.disposals.push(childId)
+    },
   })
-  apply(wired.ctx, config)
-  const value = await wired.registered.get('subagent_quick').execute(delegationArgs, exec)
+  const foregroundApp = makeApplyCtx({ activate: autoActivate })
+  await apply(foregroundApp.ctx, { provider: 'spawn', configFile: configPath })
+  const foreground = await executeTool(foregroundApp.registered.get('subagent'), {
+    route: 'execute',
+    description: 'run the task',
+    prompt: 'do it',
+    run_in_background: false,
+  })
+  check('a foreground delegation returns the child output', foreground.kind === 'foreground')
   check(
-    'an exhausted Go window delegates on deepseek-official',
-    value.kind === 'continuable' && wired.starts[0].agentOptions.provider === 'deepseek-official',
+    'the result reports the route and the serving model',
+    foreground.route === 'execute' &&
+      foreground.provider === 'provider-a' &&
+      foreground.model === 'model-a',
   )
+  check('a first-candidate run has no notice', foreground.notice === undefined)
   check(
-    'the notice reaches the tool output',
-    typeof value.notice === 'string' && value.notice.includes('deepseek-official/deepseek-flash'),
+    'the child receives the pinned agent options',
+    foregroundApp.starts[0]?.request.agentOptions.provider === 'provider-a',
   )
-  check(
-    'the fallback is logged',
-    wired.warnings.some((line) => line.includes('coding-plan window exhausted')),
-  )
-  const rendered = wired.registered.get('subagent_quick').output.render(delegationArgs, value)
-  check(
-    'the rendered text carries the notice',
-    rendered[0].text.includes('[crew]') &&
-      rendered[0].text.includes('deepseek-official/deepseek-flash'),
-  )
-}
+  check('a finished foreground child is disposed', foregroundApp.disposals.length === 1)
 
-{
-  const wired = makeApplyCtx({ failFor: ['opencode-go'] })
-  apply(wired.ctx, config)
-  const value = await wired.registered
-    .get('create_agent')
-    .execute({ description: 'role agent', role: 'reviewer' }, exec)
-  check(
-    'create_agent follows the same ladder',
-    value.kind === 'created' && wired.starts[0].agentOptions.provider === 'deepseek-official',
-  )
-}
-
-{
-  const wired = makeApplyCtx({ failFor: ['opencode-go'] })
-  apply(wired.ctx, config)
-  const value = await wired.registered
-    .get('subagent_quick')
-    .execute({ ...delegationArgs, run_in_background: false }, exec)
-  check(
-    'a foreground fallback settles the child run',
-    value.kind === 'foreground' && value.runId === 'child-1',
-  )
-  check(
-    'a foreground child returns its result to the caller only',
-    wired.activations[0].delivery === 'caller',
-  )
-  check('a foreground child is disposed by the tool call', wired.disposals.length === 1)
-  check(
-    'the foreground child ran on the fallback',
-    wired.starts[0].agentOptions.provider === 'deepseek-official',
-  )
-  const rendered = wired.registered.get('subagent_quick').output.render(delegationArgs, value)
-  check(
-    'the foreground render keeps the child text and appends the notice',
-    rendered[0].text.includes('child answer') && rendered[0].text.includes('[crew]'),
-  )
-}
-
-// ── foreground cancellation after acceptance ─────────────────────────────────
-// 0.2.2's start signal owns publication only; after acceptance the caller must
-// dispose() to stop the child. These cases pin that lifecycle.
-
-/** A foreground child whose result only settles once dispose() stops it. */
-function pendingActivation({ log } = {}) {
-  return (spec, childId, record) => {
-    const outcome = deferred()
-    return {
+  const backgroundApp = makeApplyCtx({
+    activate: (spec, childId) => ({
       childId,
       messageId: 'message-1',
-      result: outcome.promise,
+      result: new Promise(() => {}),
       dispose: async () => {
-        record.disposals.push(childId)
-        log?.push('dispose')
-        // Teardown is observable: the result settles only after the stop lands.
-        await new Promise((settle) => {
-          setTimeout(settle, 5)
-        })
-        outcome.resolve({ stopReason: 'aborted', output: [] })
-        log?.push('stopped')
+        backgroundApp.disposals.push(childId)
       },
-    }
+    }),
+  })
+  await apply(backgroundApp.ctx, { provider: 'spawn', configFile: configPath })
+  const background = await executeTool(backgroundApp.registered.get('subagent'), {
+    route: 'review',
+    description: 'review the change',
+    prompt: 'review it',
+  })
+  check('a background delegation returns its subagent id', background.kind === 'continuable')
+  check(
+    'an omitted effort is materialized as the model default',
+    backgroundApp.starts[0]?.request.agentOptions.reasoningEffort === MODEL_DEFAULT_EFFORT,
+  )
+  check(
+    'a materialized default needs no child selection override',
+    backgroundApp.starts[0]?.childId === undefined && backgroundApp.createdSelections.length === 0,
+  )
+  check(
+    'the result reports the effort that actually serves the child',
+    background.reasoningEffort === MODEL_DEFAULT_EFFORT,
+  )
+  check('a background child is not disposed by the tool call', backgroundApp.disposals.length === 0)
+
+  const created = await executeTool(app.registered.get('create_agent'), {
+    route: 'review',
+    description: 'reviewer',
+    role: 'review code',
+  })
+  check(
+    'create_agent reports the route, model and default effort',
+    created.kind === 'created' &&
+      created.route === 'review' &&
+      created.model === 'model-c' &&
+      created.reasoningEffort === MODEL_DEFAULT_EFFORT,
+  )
+
+  // The SDK merges parent options into the child and only clears the parent's
+  // effort when the route changes. Naming the resolved default explicitly is
+  // what keeps a same-route child off the parent's effort.
+  const parent = {
+    options: {},
+    session: {
+      requestHeader: () => ({
+        config: { provider: 'provider-a', model: 'model-a', reasoningEffort: 'high' },
+      }),
+    },
   }
+  const merged = resolveChildAgentOptions(parent, backgroundApp.starts[0]?.request.agentOptions, 1)
+  check(
+    'an explicit default effort wins over parent inheritance on the same route',
+    merged.reasoningEffort === MODEL_DEFAULT_EFFORT,
+  )
+
+  const section = app.section()
+  check('the system prompt section is registered', section !== undefined)
+  const table = section.text({})
+  check(
+    'the route table lists names and descriptions',
+    table.includes('- execute:') && table.includes('- review:') && table.includes('用于审查'),
+  )
+  check('the route table asks for a route name', table.includes('require `route`'))
 }
 
+// Fallback noticed in a real tool result.
 {
-  // Accept-then-cancel: the tool call must dispose, wait for teardown, and only
-  // then report the aborted run.
-  const controller = new AbortController()
-  const log = []
-  const wired = makeApplyCtx({ activate: pendingActivation({ log }) })
-  apply(wired.ctx, config)
-  const pending = wired.registered
-    .get('subagent_quick')
-    .execute(
-      { ...delegationArgs, run_in_background: false },
-      { agent: { id: 'parent' }, signal: controller.signal },
-    )
-  await until(() => wired.activations.length === 1, 'activation acceptance')
-  controller.abort()
-  log.push('abort')
-  const outcome = await settled(pending)
+  const app = makeApplyCtx({
+    activate: (spec, childId) => ({
+      childId,
+      messageId: 'message-1',
+      result: Promise.resolve({
+        stopReason: 'completed',
+        output: [{ type: 'text', text: 'fallback answer' }],
+      }),
+      dispose: async () => {},
+    }),
+  })
+  app.ctx.llm.resolveCallConfig = async (callConfig) => {
+    if (callConfig.provider === 'provider-a') throw new Error('provider-a is not registered')
+    return callConfig
+  }
+  await apply(app.ctx, { provider: 'spawn', configFile: configPath })
+  const result = await executeTool(app.registered.get('subagent'), {
+    route: 'execute',
+    description: 'fallback run',
+    prompt: 'do it',
+    run_in_background: false,
+  })
   check(
-    'an accepted foreground child is disposed when the tool call is aborted',
-    wired.disposals.length === 1,
+    'a fallback run reports the serving candidate',
+    result.provider === 'provider-b' && result.model === 'model-b',
   )
   check(
-    'the abort disposes rather than waiting for the child to finish',
-    outcome.ok === false && /cancelled/u.test(String(outcome.error)),
+    'a fallback run carries the skip reason',
+    (result.notice ?? '').includes('provider-a/model-a'),
   )
-  check('the tool call ends only after teardown settled', log.join(',') === 'abort,dispose,stopped')
-  check('an aborted foreground child is not reported as output', outcome.ok === false)
+  check(
+    'a fallback is logged',
+    app.warnings.some((line) => line.includes('after skipping')),
+  )
 }
 
+// A resolver may legitimately materialize no default effort. The SDK merge
+// then inherits the parent's effort on an identical route, so the child's own
+// model selection must clear it.
 {
-  // Already-cancelled race: the signal aborted while the activation published.
-  const controller = new AbortController()
-  const wired = makeApplyCtx({
-    activate: (spec, childId, record) => {
-      controller.abort()
-      const outcome = deferred()
+  const samePath = join(directory, 'same.yaml')
+  await writeFile(
+    samePath,
+    'routes:\n  same:\n    desc: same route\n    candidates:\n      - provider: provider-a\n        model: model-a\n',
+  )
+  const app = makeApplyCtx({ fillDefault: false })
+  await apply(app.ctx, { provider: 'spawn', configFile: samePath })
+  const result = await executeTool(app.registered.get('subagent'), {
+    route: 'same',
+    description: 'same route run',
+    prompt: 'work',
+  })
+  check(
+    'a resolver without a default effort reserves the child identity',
+    app.starts[0]?.childId !== undefined,
+  )
+  check(
+    'the child selection names the same route without an effort',
+    app.createdSelections.length === 1 &&
+      app.createdSelections[0].provider === 'provider-a' &&
+      app.createdSelections[0].model === 'model-a' &&
+      app.createdSelections[0].reasoningEffort === undefined,
+  )
+  const parent = {
+    options: {},
+    session: {
+      requestHeader: () => ({
+        config: { provider: 'provider-a', model: 'model-a', reasoningEffort: 'high' },
+      }),
+    },
+  }
+  const merged = resolveChildAgentOptions(parent, app.starts[0]?.request.agentOptions, 1)
+  check(
+    'the SDK merge alone still inherits the parent effort on an identical route',
+    merged.reasoningEffort === 'high',
+  )
+  check(
+    'the child selection overrides that inheritance',
+    app.createdSelections[0]?.reasoningEffort === undefined,
+  )
+  check(
+    'the result reports no effort for the unpinned candidate',
+    result.reasoningEffort === undefined,
+  )
+}
+
+// The same regression against the real LLM runtime: this adapter declares
+// reasoning efforts but no defaultEffort, so resolveCallConfig returns the
+// route without an effort. Crew must still keep the child off the parent's
+// effort on an identical route.
+{
+  class NoDefaultEffort extends LlmAdapter {
+    async resolveModel(provider, model) {
       return {
-        childId,
-        messageId: 'message-1',
-        result: outcome.promise,
-        dispose: async () => {
-          record.disposals.push(childId)
-          outcome.resolve({ stopReason: 'aborted', output: [] })
+        provider,
+        id: model,
+        name: model,
+        reasoning: {
+          efforts: [
+            { id: 'low', name: 'Low' },
+            { id: 'high', name: 'High' },
+          ],
         },
       }
-    },
+    }
+    // The smoke never dispatches a request.
+    async *stream() {}
+  }
+
+  const root = new Context()
+  const llm = new LlmRuntime(root)
+  llm.registerAdapter(['provider-a'], new NoDefaultEffort())
+  const realPath = join(directory, 'real-resolver.yaml')
+  await writeFile(
+    realPath,
+    'routes:\n  same:\n    desc: same route\n    candidates:\n      - provider: provider-a\n        model: model-a\n',
+  )
+  const app = makeApplyCtx({ llm })
+  await apply(app.ctx, { provider: 'spawn', configFile: realPath })
+  const result = await executeTool(app.registered.get('subagent'), {
+    route: 'same',
+    description: 'real resolver run',
+    prompt: 'work',
   })
-  apply(wired.ctx, config)
-  const outcome = await settled(
-    wired.registered
-      .get('subagent_quick')
-      .execute(
-        { ...delegationArgs, run_in_background: false },
-        { agent: { id: 'parent' }, signal: controller.signal },
-      ),
+  check(
+    'the real resolver returns no effort when the model has no default',
+    app.starts[0]?.request.agentOptions.provider === 'provider-a' &&
+      app.starts[0]?.request.agentOptions.model === 'model-a' &&
+      app.starts[0]?.request.agentOptions.reasoningEffort === undefined,
   )
   check(
-    'an abort that landed during publication still disposes the child',
-    wired.disposals.length === 1,
+    'the real-resolver child selection also carries no effort',
+    app.createdSelections.length === 1 &&
+      app.createdSelections[0].provider === 'provider-a' &&
+      app.createdSelections[0].model === 'model-a' &&
+      app.createdSelections[0].reasoningEffort === undefined,
   )
-  check('the publication-race cancellation reports a failed call', outcome.ok === false)
+  check('the real-resolver result reports no effort', result.reasoningEffort === undefined)
+  await root.fiber.dispose()
 }
 
+// Invalid config is fail-closed, then hot reload recovers.
 {
-  // Cancel/complete race: the child finished just before the abort landed.
-  const controller = new AbortController()
-  const wired = makeApplyCtx({
-    activate: (spec, childId, record) => {
-      const outcome = deferred()
-      setTimeout(() => {
-        outcome.resolve({
-          stopReason: 'completed',
-          output: [{ type: 'text', text: 'race winner' }],
-        })
-      }, 2)
-      return {
-        childId,
-        messageId: 'message-1',
-        result: outcome.promise,
-        dispose: async () => {
-          record.disposals.push(childId)
-        },
-      }
-    },
-  })
-  apply(wired.ctx, config)
-  const pending = wired.registered
-    .get('subagent_quick')
-    .execute(
-      { ...delegationArgs, run_in_background: false },
-      { agent: { id: 'parent' }, signal: controller.signal },
-    )
-  await until(() => wired.activations.length === 1, 'activation acceptance')
-  controller.abort()
-  const outcome = await settled(pending)
+  const brokenPath = join(directory, 'broken.yaml')
+  await writeFile(brokenPath, 'routes: [oops\n')
+  const app = makeApplyCtx()
+  await apply(app.ctx, { provider: 'spawn', configFile: brokenPath })
+  check('invalid config still registers the tools', app.registered.has('subagent'))
+  check('invalid config is logged as an error', app.errors.length > 0)
+  const brokenStatus = await (
+    await app.routes.find((route) => route.path === '/dsh-crew/config-status').resource()
+  ).json()
+  const brokenInstance = brokenStatus.instances.find((instance) => instance.file === brokenPath)
   check(
-    'a completed foreground child wins the cancel/complete race',
-    outcome.ok === true && outcome.value.runId === 'child-1',
+    'the status route reports the current error and automatic recovery',
+    brokenInstance?.state === 'invalid' &&
+      brokenInstance.recovery === 'auto' &&
+      brokenInstance.error.includes('invalid YAML'),
   )
-  check('the racing completion still releases exactly once', wired.disposals.length === 1)
+  check(
+    'the route table explains the disabled state',
+    app.section().text({}).includes('Delegation is disabled'),
+  )
+  let error
+  try {
+    await executeTool(app.registered.get('subagent'), {
+      route: 'execute',
+      description: 'blocked',
+      prompt: 'blocked',
+    })
+  } catch (failure) {
+    error = failure
+  }
+  check(
+    'an invalid config refuses new delegations',
+    error instanceof Error && error.message.includes('not usable'),
+  )
+
+  await writeFile(brokenPath, VALID)
+  await until(() => app.section().text({}).includes('- execute:'), 'hot reload to recover')
+  const recovered = await executeTool(app.registered.get('subagent'), {
+    route: 'execute',
+    description: 'after recovery',
+    prompt: 'work',
+  })
+  check('fixing the file recovers without a restart', recovered.kind === 'continuable')
+  check(
+    'recovery is logged',
+    app.infos.some((line) => line.includes('valid again')),
+  )
 }
 
+// A policy change while a delegation is preparing refuses that call.
 {
-  // Background children are untouched by their own tool call's later abort.
-  const controller = new AbortController()
-  const wired = makeApplyCtx({ activate: pendingActivation() })
-  apply(wired.ctx, config)
-  const value = await wired.registered
-    .get('subagent_quick')
-    .execute(delegationArgs, { agent: { id: 'parent' }, signal: controller.signal })
-  controller.abort()
-  await new Promise((settle) => {
-    setTimeout(settle, 20)
+  const racingPath = join(directory, 'racing.yaml')
+  await writeFile(racingPath, VALID)
+  const app = makeApplyCtx({
+    activate: (spec, childId) => ({
+      childId,
+      messageId: 'message-1',
+      result: Promise.resolve({ stopReason: 'completed', output: [] }),
+      dispose: async () => {},
+    }),
   })
+  await apply(app.ctx, { provider: 'spawn', configFile: racingPath })
+  const original = app.ctx.llm.resolveCallConfig
+  let rewritten = false
+  app.ctx.llm.resolveCallConfig = async (callConfig) => {
+    if (!rewritten) {
+      rewritten = true
+      await writeFile(racingPath, VALID.replace('provider-a', 'provider-renamed'))
+      // Let the watcher publish the new revision before this selection returns.
+      await sleep(400)
+    }
+    return original(callConfig)
+  }
+  let error
+  try {
+    await executeTool(app.registered.get('subagent'), {
+      route: 'execute',
+      description: 'raced',
+      prompt: 'raced',
+    })
+  } catch (failure) {
+    error = failure
+  }
   check(
-    'a background delegation returns without waiting for the child',
-    value.kind === 'continuable',
+    'a policy change during preparation rejects the delegation',
+    error instanceof Error && error.message.includes('changed while preparing'),
   )
-  check(
-    'a later abort never disposes a background child from this tool call',
-    wired.disposals.length === 0,
-  )
+  check('no child was started for the rejected delegation', app.starts.length === 0)
 }
+
+await rm(directory, { recursive: true, force: true })
 
 console.log(
-  failures === 0 ? '\nall crew smoke checks passed' : `\n${failures} crew smoke check(s) failed`,
+  failures === 0 ? '\ncrew smoke: all checks passed' : `\ncrew smoke: ${failures} failure(s)`,
 )
 process.exit(failures === 0 ? 0 : 1)

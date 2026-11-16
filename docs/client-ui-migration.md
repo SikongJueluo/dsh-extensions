@@ -1,6 +1,6 @@
 # Client UI migration
 
-八个浏览器半插件（auto-permit、context-audit、handoff、jj-workspace、oauth-providers、plan-usage、session-write-access、triggers）已从手写 `client/client.js` 工厂迁到 TSX + 共享 UI。业务协议、slot 契约、config 字段与 RPC 不变。
+八个浏览器半插件（auto-permit、context-audit、handoff、jj-workspace、oauth-providers、plan-usage、session-write-access、triggers）已从手写 `client/client.js` 工厂迁到 TSX + 共享 UI。2026-11-16 起 crew 与 more-providers 也各带一个浏览器半插件（共 10 个），复用共享 `ConfigStatusToast` 汇报外部 YAML 配置错误。业务协议、slot 契约、config 字段与 RPC 不变。
 
 ## 结构
 

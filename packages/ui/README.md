@@ -21,7 +21,7 @@ they serve Storybook and the jsdom tests and never reach a production bundle.
 
 | Path | Purpose |
 | --- | --- |
-| `src/components/*.tsx` | shadcn-style components (Button, Input, Field, Card, Badge, Alert, Progress, Spinner, Switch, Select, Dialog, Table) |
+| `src/components/*.tsx` | shadcn-style components (Button, Input, Field, Card, Badge, Alert, Progress, Spinner, Switch, Select, Dialog, Table, Toast) |
 | `src/theme.css` | `@theme inline` mappings from `--dsw-alias-*` tokens, scoped base rules |
 | `src/lib/cn.ts` | `clsx` + `tailwind-merge`, configured for the `dshx:` utility prefix |
 | `src/types.ts` | the client-half context contract (`apply(ctx)` surface) |
@@ -40,7 +40,20 @@ they serve Storybook and the jsdom tests and never reach a production bundle.
 3. **Prefix every utility with `dshx:`.** Variants come after the prefix:
    `dshx:hover:bg-surface-2`, `dshx:pointer-coarse:min-h-11`,
    `dshx:data-[checked]:bg-brand`.
-4. **Interactive controls are Base UI by default.** `Switch`, `Select`, and
+4. **Notices render in place and share one viewport.** `ConfigStatusToast`
+   wraps Base UI Toast in a `Root` and renders the viewport inline in the slot
+   subtree; it never portals to `document.body`. Every plugin bundle registers
+   its status URL in one page-wide coordinator (a `globalThis` property), and
+   the first mounted component renders the single viewport and polls all URLs,
+   so two broken configs stack instead of covering each other. It shows the
+   current error on mount, does not repeat a dismissed error within one DSH
+   connection generation, and re-announces current errors only after a new
+   generation is established (never on loss) and the fresh status confirms
+   they are still present.
+   Recovery is announced only for a real invalid → valid transition of a
+   plugin file; a changed error updates the open notice, and a plugin that
+   unloads is removed silently.
+5. **Interactive controls are Base UI by default.** `Switch`, `Select`, and
    `Dialog` are the shared wrappers. Their popups portal into a container inside
    the component subtree, not `document.body`, so theme inheritance and slot DOM
    ownership stay intact. Dialogs keep Base UI's focus trap, Escape handling,
@@ -55,10 +68,10 @@ they serve Storybook and the jsdom tests and never reach a production bundle.
    portals one inert `aria-hidden` `[data-menu-backing]` decoration to the body
    (removed on close/unmount); that host-managed node is the only approved body
    exception, and plugin code must not add body nodes itself.
-5. **Touch first.** Click handlers only; hover is an enhancement. Shared
+6. **Touch first.** Click handlers only; hover is an enhancement. Shared
    controls add `pointer-coarse` minimum targets. Tests for a new component
    should cover disabled, loading/empty, error, and long-content states.
-6. **Styles follow the bundle.** `vite.config.ts` inlines the extracted CSS
+7. **Styles follow the bundle.** `vite.config.ts` inlines the extracted CSS
    into the factory and inserts a `<style data-plugin="<package>">` element
    while the module materializes; the DSH loader claims that tag and removes
    it when the plugin is disabled or reloaded. Do not ship a CSS asset next to

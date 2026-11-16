@@ -1,7 +1,7 @@
 {
   "name": "dsh-crew",
   "version": "0.2.0",
-  "description": "DSH crew plugin: fixed-tier delegation tools (quick / workhorse / smart) plus create_agent for persistent role agents — tier semantics live in the tool descriptions so the model picks cost-appropriately",
+  "description": "DSH crew plugin: user-configured delegation routes from crew.yaml plus create_agent for persistent role agents — routes and ordered fallback candidates live in YAML, the model only picks a route name",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",
@@ -12,32 +12,45 @@
       "default": "./lib/index.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./client": "./lib/client.js"
   },
   "files": [
     "lib",
     "cordis.patch.yml",
     "dev.patch.yml",
-    "README.md"
+    "README.md",
+    "example.yaml"
   ],
   "scripts": {
-    "build": "tsdown",
-    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsdown && vite build --config vite.client.config.ts",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
     "clean": "rm -rf lib",
-    "prepare": "tsdown",
+    "prepare": "tsdown && vite build --config vite.client.config.ts",
     "smoke": "node smoke.mjs"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection"
+      ]
     }
+  },
+  "dependencies": {
+    "yaml": "^2.4.2"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.1.0",
     "@deepseek-ai/dsh-subagent": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-tools": "^0.2.2-rc.1",
     "@deepseek-ai/schemastery": "^3.19.0",
-    "@deepseek-ai/dsh-llm": "^0.2.2-rc.1"
+    "@deepseek-ai/dsh-llm": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-home-paths": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-session": "^0.2.2-rc.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "catalog:",
@@ -47,6 +60,18 @@
     "@deepseek-ai/dsh-system-prompt": "catalog:",
     "@deepseek-ai/dsh-tools": "catalog:",
     "@deepseek-ai/dsh-util-values": "catalog:",
-    "@deepseek-ai/schemastery": "catalog:"
+    "@deepseek-ai/schemastery": "catalog:",
+    "@dsh-extensions/config": "workspace:*",
+    "@deepseek-ai/dsh-home-paths": "catalog:",
+    "@dsh-extensions/ui": "workspace:*",
+    "@tailwindcss/vite": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "tailwindcss": "catalog:",
+    "vite": "catalog:",
+    "@deepseek-ai/dsh-client-connection": "catalog:",
+    "@deepseek-ai/dsh-session": "catalog:"
   }
 }

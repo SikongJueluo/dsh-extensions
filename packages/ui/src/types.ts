@@ -18,6 +18,21 @@ import type { ComponentType, ReactNode } from 'react'
 export interface DshClientServices {
   /** Host workspace UI client (`dsh-client-ui-workspace`), when mounted. */
   readonly uiWorkspace?: WorkspaceClientLike
+  /** Host connection service (`dsh-client-connection`), when mounted. */
+  readonly connection?: ConnectionClientLike
+}
+
+/**
+ * The connection surface a notice consumer reads: one identity per established
+ * Host generation. `subscribe` fires on establishment, replacement, and loss,
+ * which is the page-level "reconnected" signal — the browser's `online` event
+ * is not a DSH reconnection.
+ */
+export interface ConnectionClientLike {
+  readonly generation: {
+    getSnapshot(): { readonly id: number } | undefined
+    subscribe(listener: () => void): () => void
+  }
 }
 
 /** The host workspace UI client surface this repo calls. */

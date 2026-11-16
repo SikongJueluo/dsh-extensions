@@ -1,0 +1,20 @@
+# crew.yaml 示例：复制到 $DSH_HOME/crew.yaml 后按需修改。
+#
+# 每条路由 = 一个模型可见的名字 + 一句给模型看的选择说明 + 一组**显式批准**的
+# 模型候选（按顺序降级）。模型只能选路由名，不能选 provider/model。
+# 这里的 provider/model 只是占位符，请换成你实际批准的路由。
+routes:
+  execute:
+    desc: 用于代码实现、文件修改和常规执行任务；结果可以直接验证时优先用它。
+    candidates:
+      - provider: provider-a
+        model: model-a
+        reasoningEffort: high
+      - provider: provider-b
+        model: model-b
+
+  review:
+    desc: 成本较高，用于代码审查、设计讨论和复杂推理；不要用它做机械性工作。
+    candidates:
+      - provider: provider-c
+        model: model-c

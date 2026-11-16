@@ -1,5 +1,9 @@
 # 计划/记录：crew 插件上线 + 默认委派工具屏蔽
 
+> **已被 [plan-crew-routes.md](plan-crew-routes.md) 取代（2026-11-16）。** 三档
+> quick/workhorse/smart 与固定 fallback 已删除；路由改由 `$DSH_HOME/crew.yaml`
+> 配置。本文保留为历史部署记录，部署步骤以新文档为准。
+
 状态：插件本体在 `packages/crew/`（`pnpm check` 通过）；preset 覆盖已扩展到
 **standard + cordis**（03:15 二轮发现：新会话落在 cordis 预设，只盖 standard
 无效），修复版已离线组合验证，待 rebuild 生效。nix 侧 jj

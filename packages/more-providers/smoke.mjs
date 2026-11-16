@@ -396,6 +396,65 @@ const missingLlm = new StubLlm(missingContext)
 await apply(missingContext, Config({ configFile: join(root, 'missing.yaml') }))
 check('missing config does not throw or register', missingLlm.registrations.length === 0)
 
+// ── config status route ────────────────────────────────────────────────────
+class StubWebServer extends Service {
+  constructor(ctx) {
+    super(ctx, 'webServer')
+    this.routes = []
+  }
+  register(route) {
+    this.routes.push(route)
+    return () => {}
+  }
+}
+const statusContext = new Context()
+const statusServer = new StubWebServer(statusContext)
+const statusLlm = new StubLlm(statusContext)
+const brokenPath = join(root, 'broken.yaml')
+writeFileSync(brokenPath, 'providers:\n  p:\n    kind: builtin\n')
+await apply(statusContext, Config({ configFile: brokenPath }))
+const statusRoute = statusServer.routes.find(
+  (route) => route.path === '/dsh-more-providers/config-status',
+)
+check('an invalid config still serves its status route', statusRoute !== undefined)
+const brokenStatus = await (await statusRoute.resource()).json()
+const brokenInstance = brokenStatus.instances.find((instance) => instance.file === brokenPath)
+check(
+  'the status reports the error and the restart requirement',
+  brokenInstance?.state === 'invalid' &&
+    brokenInstance.recovery === 'restart' &&
+    brokenInstance.error.includes('no key source'),
+)
+check('no provider was registered from the broken config', statusLlm.registrations.length === 0)
+await statusContext.fiber.dispose()
+
+// A document can validate yet still fail provider construction (an unknown
+// builtin catalog). That failure must reach the status route too, not leave it
+// lying "valid" while no adapter was registered.
+process.env.REVIEW_FAKE_KEY = 'review-value'
+const badCatalogPath = join(root, 'bad-catalog.yaml')
+writeFileSync(
+  badCatalogPath,
+  'providers:\n  wrong:\n    kind: builtin\n    catalog: definitely-not-a-real-catalog\n    apiKeyEnv: REVIEW_FAKE_KEY\n',
+)
+const catalogContext = new Context()
+const catalogServer = new StubWebServer(catalogContext)
+const catalogLlm = new StubLlm(catalogContext)
+await apply(catalogContext, Config({ configFile: badCatalogPath }))
+const catalogRoute = catalogServer.routes.find(
+  (route) => route.path === '/dsh-more-providers/config-status',
+)
+const catalogStatus = await (await catalogRoute.resource()).json()
+const catalogInstance = catalogStatus.instances.find((instance) => instance.file === badCatalogPath)
+check(
+  'a provider build failure is reported through the config status',
+  catalogInstance?.state === 'invalid' &&
+    catalogInstance.recovery === 'restart' &&
+    catalogInstance.error.includes('unknown builtin catalog'),
+)
+check('the failed build registered no adapter', catalogLlm.registrations.length === 0)
+delete process.env.REVIEW_FAKE_KEY
+
 rmSync(root, { recursive: true, force: true })
 if (failures > 0) {
   console.error(`${failures} check(s) failed`)

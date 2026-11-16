@@ -1,32 +1,40 @@
 /**
- * dsh-crew — 固定路由的委派工具组（quick / workhorse / smart 三档 +
- * create_agent 常驻角色代理）。
+ * dsh-crew — user-configured delegation routes plus a persistent role agent.
  *
- * 背景：`@deepseek-ai/dsh-tool-subagent` 的工具描述是 `providerWording()` 的
- * 固定文案，多个实例一字不差，模型选型时 schema 里没有任何成本/能力信号，
- * 只能靠名字猜——实测（2026-10-03/04 所有 workspace 的 tool/call 事件）主力档
- * 被选 14 次、最贵 smart 档 4 次、便宜 quick 档仅 2 次：系统性 over-escalation。
+ * The routing policy lives in one external YAML file (`$DSH_HOME/crew.yaml` by
+ * default, or the plugin row's `configFile`). Every route is a user-named
+ * choice with a short description and an ordered list of explicitly approved
+ * model candidates. The model sees the route table in its system prompt and
+ * passes a route name; it can neither name a provider/model nor invent a
+ * fallback. Before each child starts, candidates are tried in order: routes the
+ * LLM registry cannot resolve and coding-plan windows that are known to be
+ * spent are skipped, and the first usable candidate wins. All candidates being
+ * unusable fails the delegation; there is no unapproved escape hatch.
  *
- * 本插件自己注册工具，把档位语义写进各自的 description（工具定义是选型时
- * 最强的信号）；路由在配置层钉死，模型只能"选档位"，不能选模型。行为对齐
- * stock 的 continuable 配置：后台默认（`run_in_background: false` 才前台等待），
- * depth 读宿主 `subagent.maxDepth` 设置。每档可再声明一条 fallback：创建子代理
- * 前预检钉死路由，路由不可用（provider/模型/effort 解析失败）或其套餐窗口用尽
- * （`planUsage` 软依赖）时改走 fallback，两边都不行才报错。
+ * The tools keep one stable name/schema per process (`subagent`,
+ * `create_agent`); only the route table changes between steps. A configuration
+ * change therefore never re-registers a tool in the middle of a step. The
+ * policy is read once per delegation and a revision check before the child is
+ * created rejects the call when the file changed during preparation.
  *
- * create_agent 起一个常驻角色代理：bootstrap 提示词让子代理确认角色后待命，
- * 后续任务经 send_message 投递（配套控制面 tool-subagent-control /
- * tool-subagent-list-agents 提供 send_message / interrupt_agent / list_agents）。
+ * Invalid configuration is fail-closed: the tools stay visible but every new
+ * delegation is refused until the file validates again. With `watch` enabled
+ * the plugin reloads on save (including atomic replacement and symlink swaps)
+ * and recovers without a restart.
  *
- * 挂载本插件的 profile 应 disable stock 委派工具行（tool-subagent /
- * tool-subagent-fork / tool-workflow / workflow-ptc）：既防 `subagent` 工具
- * 重名，也堵住 fork（继承父模型）与 workflow（脚本自由选路）两条旁路。
+ * The profile mounting this plugin should disable the stock delegation rows
+ * (`tool-subagent`, `tool-subagent-fork`, `tool-workflow`, `workflow-ptc`):
+ * they would collide with `subagent` or open an unapproved model-selection
+ * bypass. The stock control plane (`send_message` / `list_agents` /
+ * `interrupt_agent`) stays.
  *
  * @module dsh-crew
  */
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
+import { randomUUID } from 'node:crypto'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { ReasoningEffortId, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type {
   SubagentActivation,
@@ -35,13 +43,39 @@ import type {
 } from '@deepseek-ai/dsh-subagent'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import {
+  ConfigError,
+  registerConfig,
+  registerConfigStatusRoute,
+  type ConfigState,
+  type ConfigStore,
+} from '@dsh-extensions/config'
 
-export const name = 'crew'
+export const name = 'dsh-crew'
 export const inject = ['tools', 'subagents', 'llm', 'systemPrompt']
 
-/** One exact LLM route a delegation can run on. */
+const PACKAGE_NAME = 'dsh-crew'
+const CONFIG_FILE_NAME = 'crew.yaml'
+const STATUS_PREFIX = '/dsh-crew'
+
+/** Plugin-row configuration: the subagent backend plus an optional policy path. */
+export interface Config {
+  /** The `ctx.subagents` provider name to start runs on (e.g. `spawn`). */
+  provider: string
+  /** Policy path; empty uses `$DSH_HOME/crew.yaml`. */
+  configFile?: string
+}
+
+export const Config = Schema.object({
+  provider: Schema.string().default('spawn'),
+  configFile: Schema.string().description(
+    'Delegation policy path; empty uses $DSH_HOME/crew.yaml.',
+  ),
+})
+
+/** One explicitly approved model route for a delegation. */
 export interface RouteTarget {
-  /** Registered LLM provider route for every child of this tier. */
+  /** Registered LLM provider route. */
   provider: string
   /** Provider-owned exact model id. */
   model: string
@@ -49,131 +83,293 @@ export interface RouteTarget {
   reasoningEffort?: string
 }
 
-/** One fixed delegation tier: a model-facing tool name plus its pinned LLM route. */
-export interface TierRoute extends RouteTarget {
-  /** Model-facing tool name; must be distinct across tiers. */
-  toolName: string
+/** One user-named delegation route: what it is for, and what may serve it. */
+export interface DelegationRoute {
+  /** Short guidance the model uses to pick this route. */
+  desc: string
+  /** Approved candidates in preference order; the first usable one wins. */
+  candidates: readonly RouteTarget[]
+}
+
+/** The whole `crew.yaml` document. */
+export interface CrewPolicy {
+  routes: Record<string, DelegationRoute>
+}
+
+const ROOT_KEYS = new Set(['routes'])
+const ROUTE_KEYS = new Set(['desc', 'candidates'])
+const CANDIDATE_KEYS = new Set(['provider', 'model', 'reasoningEffort'])
+const ROUTE_ID = /^[a-z][a-z0-9_-]*$/u
+const MAX_ROUTE_ID_LENGTH = 40
+const FORBIDDEN_ROUTE_IDS = new Set(['__proto__', 'constructor', 'prototype'])
+
+function fail(path: string, message: string): never {
+  throw new ConfigError(`${path}: ${message}`)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function asRecord(value: unknown, path: string): Record<string, unknown> {
+  if (!isRecord(value)) return fail(path, 'expected an object')
+  return value
+}
+
+function rejectUnknown(raw: Record<string, unknown>, allowed: Set<string>, path: string): void {
+  for (const key of Object.keys(raw)) {
+    if (!allowed.has(key)) fail(path, `unknown key "${key}"`)
+  }
+}
+
+function requiredString(raw: Record<string, unknown>, key: string, path: string): string {
+  const value = raw[key]
+  if (typeof value !== 'string' || value.trim() === '') {
+    return fail(`${path}.${key}`, 'expected a non-empty string')
+  }
+  return value.trim()
+}
+
+function optionalString(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
+): string | undefined {
+  const value = raw[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string' || value.trim() === '') {
+    return fail(`${path}.${key}`, 'expected a non-empty string')
+  }
+  return value.trim()
+}
+
+/** Validate one YAML document into a delegation policy. Throws {@link ConfigError}. */
+export function parseCrewPolicy(document: unknown): CrewPolicy {
+  const root = asRecord(document, 'config')
+  rejectUnknown(root, ROOT_KEYS, 'config')
+  const rawRoutes = asRecord(root.routes, 'config.routes')
+  const entries = Object.entries(rawRoutes)
+  if (entries.length === 0) fail('config.routes', 'needs at least one route')
+  const routes: Record<string, DelegationRoute> = {}
+  for (const [id, routeValue] of entries) {
+    const path = `config.routes.${id}`
+    if (!ROUTE_ID.test(id) || id.length > MAX_ROUTE_ID_LENGTH) {
+      fail(
+        'config.routes',
+        `route id "${id}" must start with a lowercase letter and contain only lowercase letters, digits, "_" or "-" (at most ${MAX_ROUTE_ID_LENGTH} characters)`,
+      )
+    }
+    if (FORBIDDEN_ROUTE_IDS.has(id)) fail(path, `"${id}" is not a usable route id`)
+    const raw = asRecord(routeValue, path)
+    rejectUnknown(raw, ROUTE_KEYS, path)
+    const desc = requiredString(raw, 'desc', path)
+    const rawCandidates = raw.candidates
+    if (!Array.isArray(rawCandidates) || rawCandidates.length === 0) {
+      fail(`${path}.candidates`, 'needs at least one candidate')
+    }
+    const candidates = rawCandidates.map((candidate, index) => {
+      const candidatePath = `${path}.candidates[${index}]`
+      const record = asRecord(candidate, candidatePath)
+      rejectUnknown(record, CANDIDATE_KEYS, candidatePath)
+      const provider = requiredString(record, 'provider', candidatePath)
+      const model = requiredString(record, 'model', candidatePath)
+      const reasoningEffort = optionalString(record, 'reasoningEffort', candidatePath)
+      const target: RouteTarget = { provider, model }
+      if (reasoningEffort !== undefined) target.reasoningEffort = reasoningEffort
+      return target
+    })
+    routes[id] = { desc, candidates }
+  }
+  return { routes }
+}
+
+/** A short, single-line rendering of a preflight failure. */
+function failureDetail(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const single = message.replaceAll(/\s+/gu, ' ').trim()
+  return single.length > 200 ? `${single.slice(0, 197)}…` : single
+}
+
+/** `<provider>/<model>`, for messages. */
+export function routeName(target: RouteTarget): string {
+  return `${target.provider}/${target.model}`
+}
+
+/** One target as an LLM call config. */
+export function callConfigOf(target: RouteTarget): LlmCallConfig {
+  return {
+    provider: target.provider,
+    model: target.model,
+    ...(target.reasoningEffort === undefined || target.reasoningEffort === ''
+      ? {}
+      : { reasoningEffort: ReasoningEffortId(target.reasoningEffort) }),
+  }
+}
+
+/** Quota window facts as dsh-plan-usage reports them. */
+interface PlanUsageWindowShim {
+  percent?: number
+  resetAt?: number
+}
+
+/** One provider's quota snapshot as dsh-plan-usage reports it. */
+interface PlanUsageSnapshotShim {
+  fiveHour?: PlanUsageWindowShim
+  weekly?: PlanUsageWindowShim
+  monthly?: PlanUsageWindowShim
+  monthlyMcp?: PlanUsageWindowShim
+}
+
+/** Minimal `planUsage` surface consumed by route selection; absent plugin reads as `undefined`. */
+interface PlanUsageServiceShim {
+  get(
+    provider: string,
+    options?: { maxAgeMs?: number; force?: boolean },
+  ): Promise<PlanUsageSnapshotShim | undefined>
+}
+
+/** The context surface route selection reads — structurally satisfied by Context, narrowed so tests can stub it. */
+export interface RouteSelectionContext {
+  llm: { resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig> }
+  logger: { warn(message: string, ...args: unknown[]): void }
+  get(name: string): unknown
+}
+
+/** Whether any reported window sits at its limit with the reset still ahead. */
+export function anyWindowExhausted(
+  snapshot: PlanUsageSnapshotShim | undefined,
+  now: number,
+): boolean {
+  if (snapshot === undefined) return false
+  return [snapshot.fiveHour, snapshot.weekly, snapshot.monthly, snapshot.monthlyMcp].some(
+    (window) => {
+      if (window === undefined || typeof window.percent !== 'number' || window.percent < 100)
+        return false
+      return window.resetAt === undefined || window.resetAt > now
+    },
+  )
+}
+
+/** A quota read may serve from cache; older than this it refetches upstream. */
+const PLAN_SNAPSHOT_MAX_AGE_MS = 60_000
+/** A routing hint must never delay the delegation it routes: all quota reads share this budget. */
+const PLAN_READ_BUDGET_MS = 2_000
+
+/** Narrow the optional `planUsage` service without an assertion. */
+function isPlanUsageService(value: unknown): value is PlanUsageServiceShim {
+  return (
+    typeof value === 'object' && value !== null && 'get' in value && typeof value.get === 'function'
+  )
+}
+
+/** A provider is exhausted only on a known full window; absence, failure, and timeout are unknown. */
+async function providerExhausted(
+  ctx: RouteSelectionContext,
+  provider: string,
+  deadline: number,
+): Promise<boolean> {
+  const planUsage = ctx.get('planUsage')
+  if (!isPlanUsageService(planUsage)) return false
+  const remaining = deadline - Date.now()
+  if (remaining <= 0) return false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const budget = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), remaining)
+    })
+    const snapshot = await Promise.race([
+      planUsage.get(provider, { maxAgeMs: PLAN_SNAPSHOT_MAX_AGE_MS }),
+      budget,
+    ])
+    return anyWindowExhausted(snapshot, Date.now())
+  } catch {
+    return false
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/** One candidate that could not serve this delegation, and why. */
+export interface SkippedCandidate {
+  target: RouteTarget
+  reason: string
+}
+
+/** The candidate one delegation runs on, plus the candidates skipped before it. */
+export interface RouteSelection {
+  /** The approved candidate that served the delegation. */
+  target: RouteTarget
   /**
-   * Route used when the pinned route cannot serve a delegation (unregistered
-   * route, unknown model, or an exhausted coding-plan window). An empty
-   * `provider`/`model` disables it and restores the fail-loud behaviour.
+   * The LLM service's resolved call config for that candidate. When it names
+   * no effort (the model declares no default), `startChild` clears any effort
+   * inherited from a parent on the same route through the child's own model
+   * selection, before its first step runs.
    */
-  fallback?: RouteTarget
+  config: LlmCallConfig
+  skipped: readonly SkippedCandidate[]
 }
-
-/** Config: the subagents backend plus the three pinned tier routes. */
-export interface Config {
-  /** The `ctx.subagents` provider name to start runs on (e.g. `spawn`). */
-  provider: string
-  /** Cheap & fast tier — the default delegation target. */
-  quick: TierRoute
-  /** Capable general-purpose tier. */
-  workhorse: TierRoute
-  /** Strongest, most expensive tier — reserved for genuinely hard work. */
-  smart: TierRoute
-}
-
-/** One tier's fallback as a fresh Schema.object; empty strings mean "no fallback". */
-const tierFallback = (defaults: RouteTarget | undefined) =>
-  Schema.object({
-    provider: Schema.string().default(defaults?.provider ?? ''),
-    model: Schema.string().default(defaults?.model ?? ''),
-    reasoningEffort: Schema.string().default(defaults?.reasoningEffort ?? ''),
-  }).default({
-    provider: defaults?.provider ?? '',
-    model: defaults?.model ?? '',
-    reasoningEffort: defaults?.reasoningEffort ?? '',
-  })
-
-/** One tier's defaults as a fresh Schema.object (schemastery schemas are not safely shareable across fields). */
-const tierRoute = (defaults: TierRoute) =>
-  Schema.object({
-    toolName: Schema.string().default(defaults.toolName),
-    provider: Schema.string().default(defaults.provider),
-    model: Schema.string().default(defaults.model),
-    reasoningEffort: Schema.string().default(defaults.reasoningEffort ?? 'max'),
-    fallback: tierFallback(defaults.fallback),
-  }).default(defaults)
-
-export const Config = Schema.object({
-  provider: Schema.string().default('spawn'),
-  quick: tierRoute({
-    toolName: 'subagent_quick',
-    provider: 'opencode-go',
-    model: 'deepseek-v4.1-flash',
-    reasoningEffort: 'max',
-    fallback: { provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'max' },
-  }),
-  workhorse: tierRoute({
-    toolName: 'subagent',
-    provider: 'zai-coding-cn',
-    model: 'glm-5.3',
-    reasoningEffort: 'max',
-  }),
-  smart: tierRoute({
-    toolName: 'subagent_smart',
-    provider: 'openai-codex',
-    model: 'gpt-6.1-sol',
-    reasoningEffort: 'xhigh',
-  }),
-})
 
 /**
- * Tier-specific tool descriptions — the whole point of this plugin. Each states
- * its own selection rule; the escalation ladder reads bottom-up and is
- * failure-driven (models judge "the previous result was insufficient" far more
- * reliably than "the upcoming task is simple").
+ * Pick the candidate one delegation runs on.
+ *
+ * Candidates are preflighted in their configured order; a route the LLM
+ * registry cannot resolve or a provider whose coding-plan window is known to
+ * be spent is skipped. Exhausting every candidate throws — the caller never
+ * falls back to an unapproved model, and an aborted call never degrades.
  */
-const TIER_DESCRIPTIONS = {
-  quick:
-    "Delegate a self-contained task to a fast, economical subagent (a separate agent that works in its own context). This is the default tier for delegation: mechanical subtasks, retrieval, counting, formatting, batch checks over many items — any focused work whose result you can verify directly. Escalate to a stronger tier only when this tier's result proves insufficient. The subagent returns its result, not its intermediate steps. It runs in the background by default and returns a subagent id you can continue with `send_message`; you are notified when the run settles.",
-  workhorse:
-    'Delegate a self-contained task to a capable general-purpose subagent (a separate agent that works in its own context). Use this tier when the work needs real engineering depth — multi-file implementation, careful analysis, design work — that subagent_quick cannot handle; prefer subagent_quick for mechanical work. The subagent returns its result, not its intermediate steps. It runs in the background by default and returns a subagent id you can continue with `send_message`; you are notified when the run settles.',
-  smart:
-    'Delegate a self-contained task to the strongest and most expensive subagent (a separate agent that works in its own context). Reserve this tier for genuinely hard reasoning — architecture decisions, adversarial review, subtle cross-cutting bugs — or when subagent and subagent_quick both returned inadequate results. Never use it for work a cheaper tier can do. The subagent returns its result, not its intermediate steps. It runs in the background by default and returns a subagent id you can continue with `send_message`; you are notified when the run settles.',
-} as const
+export async function selectRoute(
+  ctx: RouteSelectionContext,
+  policy: CrewPolicy,
+  routeId: string,
+  signal: AbortSignal,
+): Promise<RouteSelection> {
+  const route = Object.hasOwn(policy.routes, routeId) ? policy.routes[routeId] : undefined
+  if (route === undefined) {
+    const available = Object.keys(policy.routes).join(', ')
+    throw new Error(
+      `crew: unknown delegation route "${routeId}"${available === '' ? '' : `; available routes: ${available}`}`,
+    )
+  }
+  const deadline = Date.now() + PLAN_READ_BUDGET_MS
+  const quota = new Map<string, Promise<boolean>>()
+  const exhausted = (provider: string): Promise<boolean> => {
+    const cached = quota.get(provider)
+    if (cached !== undefined) return cached
+    const read = providerExhausted(ctx, provider, deadline)
+    quota.set(provider, read)
+    return read
+  }
+  const skipped: SkippedCandidate[] = []
+  for (const target of route.candidates) {
+    let config: LlmCallConfig
+    try {
+      config = await ctx.llm.resolveCallConfig(callConfigOf(target), signal)
+    } catch (error) {
+      // Cancellation is the caller's own decision, never a routing signal.
+      if (signal.aborted) throw error
+      skipped.push({ target, reason: `route unavailable (${failureDetail(error)})` })
+      continue
+    }
+    if (await exhausted(target.provider)) {
+      skipped.push({ target, reason: 'coding-plan window exhausted' })
+      continue
+    }
+    return { target, config, skipped }
+  }
+  const detail = skipped.map((skip) => `${routeName(skip.target)} (${skip.reason})`).join(', ')
+  throw new Error(
+    `crew: no approved candidate for route "${routeId}" can serve this delegation: ${detail}`,
+  )
+}
 
-const CREATE_AGENT_DESCRIPTION =
-  'Create a persistent named agent with a standing role and get its id. The agent confirms its role, then idles until you send it tasks with `send_message`; reuse it for repeated work of the same kind instead of re-stating context on every delegation. `tier` selects the pinned route: quick (default — cheap and fast), workhorse (engineering depth), smart (strongest and most expensive; reserve it). `list_agents` shows your live agents; `interrupt_agent` stops one.'
-
-const PROMPT_PARAMETER_DESCRIPTION =
-  "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
-
-/** Shared output contract of the delegation tools: a continuable child id, or the collected foreground output. `as const` keeps the discriminant literals for InferValue. */
-const delegationOutputSchema = {
-  oneOf: [
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        kind: { type: 'string', required: true, const: 'continuable' },
-        subagentId: { type: 'string', required: true },
-        notice: { type: 'string', description: 'Present when the tier ran on its fallback route' },
-      },
-    },
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        kind: { type: 'string', required: true, const: 'foreground' },
-        runId: { type: 'string', required: true },
-        output: { type: 'array', required: true, items: { type: 'json' } },
-        notice: { type: 'string', description: 'Present when the tier ran on its fallback route' },
-      },
-    },
-  ],
-} as const
-
-/** Output contract of `create_agent`: the created agent's id. */
-const createAgentOutputSchema = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    kind: { type: 'string', required: true, const: 'created' },
-    agentId: { type: 'string', required: true },
-    notice: { type: 'string', description: 'Present when the tier ran on its fallback route' },
-  },
-} as const
+/** One route's fallback reason as the tool result's notice. */
+function selectionNotice(routeId: string, selection: RouteSelection): string | undefined {
+  if (selection.skipped.length === 0) return undefined
+  const skipped = selection.skipped
+    .map((skip) => `${routeName(skip.target)} (${skip.reason})`)
+    .join(', ')
+  return `route "${routeId}" ran on ${routeName(selection.target)} after skipping ${skipped}`
+}
 
 /** Render text blocks from the canonical JSON block array without trusting arbitrary values. */
 function outputValueText(values: readonly unknown[]): string {
@@ -287,221 +483,53 @@ async function settleForegroundRun(
   }
 }
 
-// ── Route selection ──────────────────────────────────────────────────────────
-// A pinned route can be unusable for reasons the LLM registry alone cannot
-// answer: the route may vanish from the adapter topology, its model may be
-// renamed, or its coding-plan window may already be spent. The first two fail
-// the `resolveCallConfig` preflight; the third is visible only through the
-// `planUsage` service (dsh-plan-usage), read optionally. Whenever the tier
-// names a fallback, a blocked delegation runs there instead of failing.
+/** What one delegation start produced: a background child id, or the settled foreground result. */
+type ChildOutcome =
+  | { background: true; childId: string; selection: RouteSelection }
+  | { background: false; value: ForegroundResult; selection: RouteSelection }
 
-/** Quota window facts as dsh-plan-usage reports them. */
-interface PlanUsageWindowShim {
-  percent?: number
-  resetAt?: number
-}
-
-/** One provider's quota snapshot as dsh-plan-usage reports it. */
-interface PlanUsageSnapshotShim {
-  fiveHour?: PlanUsageWindowShim
-  weekly?: PlanUsageWindowShim
-  monthly?: PlanUsageWindowShim
-  monthlyMcp?: PlanUsageWindowShim
-}
-
-/** Minimal `planUsage` surface consumed by route selection; absent plugin reads as `undefined`. */
-interface PlanUsageServiceShim {
-  get(
-    provider: string,
-    options?: { maxAgeMs?: number; force?: boolean },
-  ): Promise<PlanUsageSnapshotShim | undefined>
-}
-
-/** The context surface route selection reads — structurally satisfied by Context, narrowed so tests can stub it. */
-export interface RouteSelectionContext {
-  llm: { resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig> }
-  logger: { warn(message: string, ...args: unknown[]): void }
-  get(name: string): unknown
-}
-
-/** Why the pinned route cannot serve a delegation. */
-interface RouteBlocker {
-  /** `unavailable` is a hard preflight failure; `exhausted` only means "spend the fallback first". */
-  kind: 'unavailable' | 'exhausted'
-  detail: string
-  /** The preflight failure, rethrown when no fallback is configured. */
-  error?: unknown
-}
-
-/** The route one delegation should run on, plus why the pinned one was skipped. */
-export interface RouteSelection {
-  target: RouteTarget
-  /** Model-facing one-liner recorded on the delegation's output when the fallback was used. */
-  notice?: string
-}
-
-/** The tier's fallback, when both halves are named. */
-export function fallbackTarget(tier: TierRoute): RouteTarget | undefined {
-  const fallback = tier.fallback
-  if (fallback === undefined || fallback.provider === '' || fallback.model === '') return undefined
-  return fallback
-}
-
-/** Whether any reported window sits at its limit with the reset still ahead. */
-export function anyWindowExhausted(
-  snapshot: PlanUsageSnapshotShim | undefined,
-  now: number,
-): boolean {
-  if (snapshot === undefined) return false
-  return [snapshot.fiveHour, snapshot.weekly, snapshot.monthly, snapshot.monthlyMcp].some(
-    (window) => {
-      if (window === undefined || typeof window.percent !== 'number' || window.percent < 100)
-        return false
-      return window.resetAt === undefined || window.resetAt > now
-    },
+/** The error a delegation reports while the policy file is not usable. */
+function unusablePolicyError(state: ConfigState<CrewPolicy>): Error {
+  const reason = state.error ?? 'it has not been read yet'
+  return new Error(
+    `crew: the delegation configuration ${state.file} is not usable (${reason}); fix that file and retry — no new delegation is allowed until it validates`,
   )
-}
-
-/** `<provider>/<model>`, for messages. */
-export function routeName(target: RouteTarget): string {
-  return `${target.provider}/${target.model}`
-}
-
-/** One target as an LLM call config. */
-export function callConfigOf(target: RouteTarget): LlmCallConfig {
-  return {
-    provider: target.provider,
-    model: target.model,
-    ...(target.reasoningEffort !== undefined && target.reasoningEffort !== ''
-      ? { reasoningEffort: ReasoningEffortId(target.reasoningEffort) }
-      : {}),
-  }
-}
-
-/** A short, single-line rendering of a preflight failure. */
-function failureDetail(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
-  const single = message.replaceAll(/\s+/gu, ' ').trim()
-  return single.length > 200 ? `${single.slice(0, 197)}…` : single
-}
-
-/** A quota read may serve from cache; older than this it refetches upstream. */
-const PLAN_SNAPSHOT_MAX_AGE_MS = 60_000
-/** A routing hint must never delay the delegation it routes: a quota read gets this budget. */
-const PLAN_READ_BUDGET_MS = 2_000
-
-/** Narrow the optional `planUsage` service without an assertion. */
-function isPlanUsageService(value: unknown): value is PlanUsageServiceShim {
-  return (
-    typeof value === 'object' && value !== null && 'get' in value && typeof value.get === 'function'
-  )
-}
-
-/** Read the pinned route's coding-plan snapshot; any failure or overrun reads as "no quota data". */
-async function planSnapshotOf(
-  ctx: RouteSelectionContext,
-  provider: string,
-): Promise<PlanUsageSnapshotShim | undefined> {
-  const planUsage = ctx.get('planUsage')
-  if (!isPlanUsageService(planUsage)) return undefined
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    const budget = new Promise<undefined>((resolve) => {
-      timer = setTimeout(() => resolve(undefined), PLAN_READ_BUDGET_MS)
-    })
-    return await Promise.race([
-      planUsage.get(provider, { maxAgeMs: PLAN_SNAPSHOT_MAX_AGE_MS }),
-      budget,
-    ])
-  } catch {
-    return undefined
-  } finally {
-    if (timer !== undefined) clearTimeout(timer)
-  }
-}
-
-/** Why the pinned route cannot serve a delegation right now, or `undefined` when it can. */
-async function pinnedRouteBlocker(
-  ctx: RouteSelectionContext,
-  tier: TierRoute,
-  signal: AbortSignal,
-): Promise<RouteBlocker | undefined> {
-  try {
-    await ctx.llm.resolveCallConfig(callConfigOf(tier), signal)
-  } catch (error) {
-    // Cancellation is the caller's own decision, never a routing signal.
-    if (signal.aborted) throw error
-    return { kind: 'unavailable', detail: `route unavailable (${failureDetail(error)})`, error }
-  }
-  const snapshot = await planSnapshotOf(ctx, tier.provider)
-  if (anyWindowExhausted(snapshot, Date.now()))
-    return { kind: 'exhausted', detail: 'coding-plan window exhausted' }
-  return undefined
 }
 
 /**
- * Pick the route one delegation runs on: the tier's pinned route, or its
- * fallback when the pinned route is unavailable or its coding-plan window is
- * spent. Without a usable fallback the pinned route is preflighted and any
- * failure is rethrown (fail loud); an exhausted window without a fallback
- * stays on the pinned route, where dsh-auto-continue resumes it at the reset.
+ * Start one child on the requested route.
+ *
+ * The policy revision is captured before route selection and re-checked before
+ * the child exists: if the file changed while this call was preparing, the
+ * call fails and the caller retries against the new policy instead of running
+ * a stale one. A change after the child exists does not touch it.
  */
-export async function selectTierRoute(
-  ctx: RouteSelectionContext,
-  tier: TierRoute,
-  signal: AbortSignal,
-): Promise<RouteSelection> {
-  const blocker = await pinnedRouteBlocker(ctx, tier, signal)
-  if (blocker === undefined) return { target: tier }
-  const fallback = fallbackTarget(tier)
-  if (fallback === undefined) {
-    if (blocker.kind === 'unavailable') throw blocker.error
-    ctx.logger.warn(
-      'crew: %s is %s and this tier names no fallback — delegating anyway',
-      routeName(tier),
-      blocker.detail,
-    )
-    return { target: tier }
-  }
-  try {
-    await ctx.llm.resolveCallConfig(callConfigOf(fallback), signal)
-  } catch (error) {
-    if (signal.aborted) throw error
-    // Built first so the blocker's preflight failure (when present) stays the
-    // cause; `throw failure` keeps that chain identical.
-    const failure = new Error(
-      `crew: neither ${routeName(tier)} (${blocker.detail}) nor its fallback ${routeName(fallback)} (route unavailable: ${failureDetail(error)}) can serve this delegation`,
-      { cause: blocker.error ?? error },
-    )
-    throw failure
-  }
-  const notice = `${routeName(tier)} ${blocker.detail} — ran on the fallback ${routeName(fallback)}`
-  ctx.logger.warn('crew: %s', notice)
-  return { target: fallback, notice }
-}
-
-/** What one tier-child start produced: a background continuable child id, or the settled foreground result. */
-type TierChildOutcome =
-  | { background: true; childId: string; notice?: string }
-  | { background: false; value: ForegroundResult; notice?: string }
-
-/** Start one child on a pinned tier route: select the route (with its fallback), then run continuable-in-background or settle in the foreground. */
-async function startTierChild(
+async function startChild(
   ctx: Context,
   config: Config,
   subagentProvider: SubagentProvider,
-  tier: TierRoute,
-  spec: { label: string; promptText: string; runInForeground: boolean },
+  store: ConfigStore<CrewPolicy>,
+  log: { warn(message: string, ...args: unknown[]): void },
+  spec: { route: string; label: string; promptText: string; runInForeground: boolean },
   exec: ToolRunContext,
-): Promise<TierChildOutcome> {
+): Promise<ChildOutcome> {
   const parent = exec.agent
   if (!parent) throw new Error('crew tool requires a calling agent (exec.agent was undefined)')
+  const before = store.state()
+  if (before.value === undefined) throw unusablePolicyError(before)
   exec.signal.throwIfAborted()
-  const selection = await selectTierRoute(ctx, tier, exec.signal)
-  const agentOptions = callConfigOf(selection.target)
+  const selection = await selectRoute(ctx, before.value, spec.route, exec.signal)
+  // Use the resolved config, not the candidate as written: the resolver
+  // materializes the model's default effort, which is what keeps a
+  // same-provider/same-model child from inheriting the parent's effort.
+  const agentOptions = selection.config
   if (ctx.subagents.getProvider(config.provider) !== subagentProvider)
     throw new Error(
       `subagent provider "${config.provider}" changed while resolving the child LLM route; retry the delegation`,
+    )
+  if (store.state().revision !== before.revision)
+    throw new Error(
+      'crew: the delegation route policy changed while preparing this delegation; retry it',
     )
   const maxDepth = ctx.subagents.resolveMaxDepth()
   const request = {
@@ -510,30 +538,50 @@ async function startTierChild(
     agentOptions,
     ...(maxDepth !== undefined ? { maxDepth } : {}),
   }
-  const notice = selection.notice
-  // One activation API for both modes: only the result recipient (and therefore
-  // whether the model is notified) differs. Background children stay resident
-  // and are released through the host's control plane — this tool call's end,
-  // including a later abort of its signal, never touches them. A foreground
-  // child is settled and disposed by this call itself.
-  const activation = await ctx.subagents.startActivation({
-    provider: config.provider,
-    label: spec.label,
-    request,
-    signal: exec.signal,
-    delivery: spec.runInForeground ? 'caller' : 'parent',
-  })
+  const notice = selectionNotice(spec.route, selection)
+  if (notice !== undefined) log.warn('crew: %s', notice)
+  // When the resolver has no default effort to materialize, the SDK's child
+  // merge would inherit the parent's effort on an identical provider/model
+  // route. The supported way to express "adapter default, not the previous
+  // effort" is the child's own model selection: omit the effort there. The
+  // creation listener runs before the queued prompt's first step, so this is
+  // the selection the child actually uses.
+  const clearInheritedEffort = selection.config.reasoningEffort === undefined
+  const childId = clearInheritedEffort ? SessionId(randomUUID()) : undefined
+  const stopCreated = clearInheritedEffort
+    ? ctx.on('agent/created', ({ agent }) => {
+        if (agent.id !== childId) return
+        agent.model.select({
+          provider: selection.config.provider,
+          model: selection.config.model,
+        })
+      })
+    : undefined
+  let activation: SubagentActivation
+  try {
+    // One activation API for both modes: only the result recipient (and
+    // therefore whether the model is notified) differs. Background children
+    // stay resident and are released through the host's control plane — this
+    // tool call's end, including a later abort of its signal, never touches
+    // them. A foreground child is settled and disposed by this call itself.
+    activation = await ctx.subagents.startActivation({
+      provider: config.provider,
+      ...(childId === undefined ? {} : { childId }),
+      label: spec.label,
+      request,
+      signal: exec.signal,
+      delivery: spec.runInForeground ? 'caller' : 'parent',
+    })
+  } finally {
+    stopCreated?.()
+  }
   if (!spec.runInForeground) {
-    return {
-      background: true,
-      childId: activation.childId,
-      ...(notice !== undefined ? { notice } : {}),
-    }
+    return { background: true, childId: activation.childId, selection }
   }
   return {
     background: false,
     value: await settleForegroundRun(activation, exec.signal),
-    ...(notice !== undefined ? { notice } : {}),
+    selection,
   }
 }
 
@@ -547,141 +595,264 @@ function assertProviderConfiguration(subagentProvider: SubagentProvider) {
     )
 }
 
+/** Verified route metadata echoed by every delegation result. */
+const routeResultFields = {
+  route: { type: 'string', required: true, description: 'The route the caller asked for.' },
+  provider: { type: 'string', required: true, description: 'LLM provider that serves the child.' },
+  model: { type: 'string', required: true, description: 'Exact model that serves the child.' },
+  reasoningEffort: { type: 'string', description: 'Reasoning effort when the candidate pins one.' },
+  notice: {
+    type: 'string',
+    description: 'Present when an earlier approved candidate was skipped.',
+  },
+} as const
+
+/** Shared output contract of the delegation tools: a continuable child id, or the collected foreground output. */
+const delegationOutputSchema = {
+  oneOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        kind: { type: 'string', required: true, const: 'continuable' },
+        subagentId: { type: 'string', required: true },
+        ...routeResultFields,
+      },
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        kind: { type: 'string', required: true, const: 'foreground' },
+        runId: { type: 'string', required: true },
+        output: { type: 'array', required: true, items: { type: 'json' } },
+        ...routeResultFields,
+      },
+    },
+  ],
+} as const
+
+/** Output contract of `create_agent`: the created agent's id and the serving route. */
+const createAgentOutputSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    kind: { type: 'string', required: true, const: 'created' },
+    agentId: { type: 'string', required: true },
+    ...routeResultFields,
+  },
+} as const
+
+const CREATE_AGENT_DESCRIPTION =
+  'Create a persistent named agent with a standing role and get its id. The agent confirms its role, then idles until you send it tasks with `send_message`; reuse it for repeated work of the same kind instead of re-stating context on every delegation. `route` is required and names one route from the delegation route table in your system prompt; the configuration decides the model. `list_agents` shows your live agents; `interrupt_agent` stops one.'
+
+const SUBAGENT_DESCRIPTION =
+  'Delegate a self-contained task to a subagent (a separate agent that works in its own context) and get its result. `route` is required and names one route from the delegation route table in your system prompt; pick the route whose description matches the task. The configuration decides the model and may run an explicitly approved fallback candidate. The subagent returns its result, not its intermediate steps. It runs in the background by default and returns a subagent id you can continue with `send_message`; you are notified when the run settles.'
+
+const ROUTE_PARAMETER_DESCRIPTION =
+  'Required. One route name from the delegation route table in your system prompt.'
+
+const PROMPT_PARAMETER_DESCRIPTION =
+  "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
+
+/** One route table entry: a name plus one line of user-authored guidance. */
+function routeLine(id: string, desc: string): string {
+  return `- ${id}: ${desc.replaceAll(/\s+/gu, ' ').trim()}`
+}
+
+/** The per-step system-prompt section: the current route table, or why delegation is disabled. */
+export function renderRouteTable(state: ConfigState<CrewPolicy>): string {
+  if (!state.loaded) return ''
+  if (state.value === undefined) {
+    return `Delegation is disabled: the crew configuration ${state.file} is not usable (${state.error ?? 'unknown error'}). The delegation tools will refuse every call; tell the user to fix that file.`
+  }
+  return [
+    "Delegation routes from the user's crew configuration. `subagent` and `create_agent` require `route`: pick the route whose description matches the task. The model, and any approved fallback, is fixed by the configuration; you cannot choose or override it.",
+    ...Object.entries(state.value.routes).map(([id, route]) => routeLine(id, route.desc)),
+    'Start independent delegations together in one assistant message and continue useful work while they run.',
+  ].join('\n')
+}
+
 /** Install the crew delegation composition. */
-export function apply(ctx: Context, config: Config) {
-  const tiers = [
-    { route: config.quick, description: TIER_DESCRIPTIONS.quick },
-    { route: config.workhorse, description: TIER_DESCRIPTIONS.workhorse },
-    { route: config.smart, description: TIER_DESCRIPTIONS.smart },
-  ]
-  const tierRoutes = { quick: config.quick, workhorse: config.workhorse, smart: config.smart }
-  const toolNames = new Set([...tiers.map((tier) => tier.route.toolName), 'create_agent'])
-  if (toolNames.size !== 4) throw new Error('crew: tier toolNames must be distinct')
+export async function apply(ctx: Context, config: Config): Promise<void> {
+  const log = ctx.logger(PACKAGE_NAME)
+  const store = registerConfig(ctx, {
+    filename: CONFIG_FILE_NAME,
+    configFile: config.configFile,
+    validate: parseCrewPolicy,
+    watch: true,
+    logger: log,
+  })
+  registerConfigStatusRoute(ctx, {
+    prefix: STATUS_PREFIX,
+    title: 'crew 委派路由',
+    recovery: 'auto',
+    store,
+  })
+
+  let lastValid: boolean | undefined
+  store.subscribe((state) => {
+    if (state.value === undefined) {
+      log.error(
+        'crew: %s is not usable: %s — new delegations are refused until it is fixed',
+        state.file,
+        state.error ?? 'unknown error',
+      )
+    } else if (lastValid === false) {
+      log.info('crew: %s is valid again; delegations resumed', state.file)
+    } else {
+      log.info(
+        `crew: loaded ${Object.keys(state.value.routes).length} delegation route(s) from ${state.file}`,
+      )
+    }
+    lastValid = state.value !== undefined
+  })
+  await store.ready
 
   let mounted: (() => void)[] | undefined
   const mount = (subagentProvider: SubagentProvider) => {
     assertProviderConfiguration(subagentProvider)
-    const disposers = tiers.map(({ route: tier, description }) =>
-      ctx.tools.register(
-        defineTool({
-          name: tier.toolName,
-          description,
-          parameters: {
-            description: {
-              type: 'string',
-              required: true,
-              description: 'A short (3-5 word) description of the delegated task, for display.',
-            },
-            prompt: {
-              type: 'string',
-              required: true,
-              description: PROMPT_PARAMETER_DESCRIPTION,
-            },
-            run_in_background: {
-              type: 'boolean',
-              description:
-                'Defaults to true. Set false only when your next action depends on the result.',
-            },
+    const subagentTool = defineTool({
+      name: 'subagent',
+      description: SUBAGENT_DESCRIPTION,
+      parameters: {
+        route: {
+          type: 'string',
+          required: true,
+          description: ROUTE_PARAMETER_DESCRIPTION,
+        },
+        description: {
+          type: 'string',
+          required: true,
+          description: 'A short (3-5 word) description of the delegated task, for display.',
+        },
+        prompt: {
+          type: 'string',
+          required: true,
+          description: PROMPT_PARAMETER_DESCRIPTION,
+        },
+        run_in_background: {
+          type: 'boolean',
+          description:
+            'Defaults to true. Set false only when your next action depends on the result.',
+        },
+      },
+      output: {
+        schema: delegationOutputSchema,
+        render: (_args, value) => [
+          {
+            type: 'text',
+            text: [
+              value.kind === 'continuable'
+                ? `started subagent ${value.subagentId}`
+                : outputValueText(value.output),
+              ` on route "${value.route}" (${value.provider}/${value.model})`,
+              value.notice === undefined ? '' : `\n[crew] ${value.notice}`,
+            ].join(''),
           },
-          output: {
-            schema: delegationOutputSchema,
-            render: (_args, value) => [
-              {
-                type: 'text',
-                text:
-                  (value.kind === 'continuable'
-                    ? `started subagent ${value.subagentId}`
-                    : outputValueText(value.output)) +
-                  (value.notice === undefined ? '' : `\n[crew] ${value.notice}`),
-              },
-            ],
+        ],
+      },
+      isConcurrencySafe: () => true,
+      async execute(args, exec) {
+        const outcome = await startChild(
+          ctx,
+          config,
+          subagentProvider,
+          store,
+          log,
+          {
+            route: args.route,
+            label: args.description,
+            promptText: args.prompt,
+            runInForeground: args.run_in_background === false,
           },
-          isConcurrencySafe: () => true,
-          async execute(args, exec) {
-            const outcome = await startTierChild(
-              ctx,
-              config,
-              subagentProvider,
-              tier,
-              {
-                label: args.description,
-                promptText: args.prompt,
-                runInForeground: args.run_in_background === false,
-              },
-              exec,
-            )
-            const notice = outcome.notice
-            if (outcome.background) {
-              return {
-                kind: 'continuable' as const,
-                subagentId: outcome.childId,
-                ...(notice !== undefined ? { notice } : {}),
-              }
-            }
-            return { ...outcome.value, ...(notice !== undefined ? { notice } : {}) }
+          exec,
+        )
+        const selection = outcome.selection
+        const notice = selectionNotice(args.route, selection)
+        const meta = {
+          route: args.route,
+          provider: selection.config.provider,
+          model: selection.config.model,
+          ...(selection.config.reasoningEffort === undefined
+            ? {}
+            : { reasoningEffort: selection.config.reasoningEffort }),
+          ...(notice === undefined ? {} : { notice }),
+        }
+        if (outcome.background) {
+          return { kind: 'continuable' as const, subagentId: outcome.childId, ...meta }
+        }
+        return { ...outcome.value, ...meta }
+      },
+    })
+
+    const createAgentTool = defineTool({
+      name: 'create_agent',
+      description: CREATE_AGENT_DESCRIPTION,
+      parameters: {
+        route: {
+          type: 'string',
+          required: true,
+          description: ROUTE_PARAMETER_DESCRIPTION,
+        },
+        description: {
+          type: 'string',
+          required: true,
+          description: 'A short (3-5 word) label for the agent, for display.',
+        },
+        role: {
+          type: 'string',
+          required: true,
+          description:
+            "The agent's standing responsibility — its charter for every later task. Keep it specific: scope, favored tools, expected output format.",
+        },
+      },
+      output: {
+        schema: createAgentOutputSchema,
+        render: (_args, value) => [
+          {
+            type: 'text',
+            text: [
+              `created agent ${value.agentId} on route "${value.route}" (${value.provider}/${value.model})`,
+              value.notice === undefined ? '' : `\n[crew] ${value.notice}`,
+            ].join(''),
           },
-        }),
-      ),
-    )
-    mounted = [
-      ...disposers,
-      ctx.tools.register(
-        defineTool({
-          name: 'create_agent',
-          description: CREATE_AGENT_DESCRIPTION,
-          parameters: {
-            description: {
-              type: 'string',
-              required: true,
-              description: 'A short (3-5 word) label for the agent, for display.',
-            },
-            role: {
-              type: 'string',
-              required: true,
-              description:
-                "The agent's standing responsibility — its charter for every later task. Keep it specific: scope, favored tools, expected output format.",
-            },
-            tier: {
-              type: 'string',
-              enum: ['quick', 'workhorse', 'smart'],
-              description: 'Pinned route tier: quick (default), workhorse, or smart.',
-            },
+        ],
+      },
+      isConcurrencySafe: () => true,
+      async execute(args, exec) {
+        const outcome = await startChild(
+          ctx,
+          config,
+          subagentProvider,
+          store,
+          log,
+          {
+            route: args.route,
+            label: args.description,
+            promptText: `Take on this standing role:\n\n${args.role}\n\nReply with a one-line confirmation that you are ready, then wait for tasks delivered as messages.`,
+            runInForeground: false,
           },
-          output: {
-            schema: createAgentOutputSchema,
-            render: (_args, value) => [
-              {
-                type: 'text',
-                text: `created agent ${value.agentId}${value.notice === undefined ? '' : `\n[crew] ${value.notice}`}`,
-              },
-            ],
-          },
-          isConcurrencySafe: () => true,
-          async execute(args, exec) {
-            const tier = tierRoutes[args.tier ?? 'quick']
-            const outcome = await startTierChild(
-              ctx,
-              config,
-              subagentProvider,
-              tier,
-              {
-                label: args.description,
-                promptText: `Take on this standing role:\n\n${args.role}\n\nReply with a one-line confirmation that you are ready, then wait for tasks delivered as messages.`,
-                runInForeground: false,
-              },
-              exec,
-            )
-            const agentId = outcome.background ? outcome.childId : outcome.value.runId
-            const notice = outcome.notice
-            return {
-              kind: 'created' as const,
-              agentId,
-              ...(notice !== undefined ? { notice } : {}),
-            }
-          },
-        }),
-      ),
-    ]
+          exec,
+        )
+        const agentId = outcome.background ? outcome.childId : outcome.value.runId
+        const selection = outcome.selection
+        const notice = selectionNotice(args.route, selection)
+        return {
+          kind: 'created' as const,
+          agentId,
+          route: args.route,
+          provider: selection.config.provider,
+          model: selection.config.model,
+          ...(selection.config.reasoningEffort === undefined
+            ? {}
+            : { reasoningEffort: selection.config.reasoningEffort }),
+          ...(notice === undefined ? {} : { notice }),
+        }
+      },
+    })
+
+    mounted = [ctx.tools.register(subagentTool), ctx.tools.register(createAgentTool)]
   }
   const unmount = () => {
     if (mounted === undefined) return
@@ -699,17 +870,16 @@ export function apply(ctx: Context, config: Config) {
   const present = ctx.subagents.getProvider(config.provider)
   if (present !== undefined) mount(present)
   else
-    ctx.logger.info(
+    log.info(
       `subagent provider "${config.provider}" not registered yet; the crew tools will register when it appears`,
     )
 
   ctx.systemPrompt.section({
     name: 'tool:crew',
     order: ctx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
-    text: (context) =>
-      mounted === undefined ||
-      tiers.some((tier) => ctx.tools.get(tier.route.toolName, context.scope) === undefined)
-        ? ''
-        : 'Start independent subagent delegations together in one assistant message and continue useful work while they run.',
+    // Route descriptions are literal user text; `{{...}}` in them is not a
+    // prompt variable.
+    interpolate: false,
+    text: () => (mounted === undefined ? '' : renderRouteTable(store.state())),
   })
 }

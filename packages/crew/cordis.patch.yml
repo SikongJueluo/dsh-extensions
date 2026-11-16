@@ -1,9 +1,9 @@
 # dsh-crew bundle layer.
 #
-# 固定路由的委派工具组(quick/workhorse/smart 三档 + create_agent 常驻角色
-# 代理),档位语义写进各自的工具 description(选型时最强的信号),路由由插件
-# Config 钉死,模型只能"选档位",不能选模型。路由默认值在 src/index.ts 的
-# Config 里;要覆盖就以后层 patch 按 id 改写整个 config(或直接改默认值)。
+# 用户配置的委派工具组(subagent + create_agent)。路由、用途说明与批准模型
+# 候选全部来自 $DSH_HOME/crew.yaml(或插件行的 configFile);模型只选路由名,
+# 不能选 provider/model。改 YAML 会热加载并自动恢复,插件行不再有三档配置。
+# 示例与字段规则见 README.md / example.yaml。
 #
 # 按行 id 关闭 stock 委派行:宿主把它们放在顶层还是 preset 的 delegation
 # 组内都能命中。保留 tool-subagent-control(send_message / interrupt_agent /

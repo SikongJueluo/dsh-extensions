@@ -11,10 +11,9 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
-import { ConfigError, loadConfig, resolveConfigPath } from './config.js'
-import type { KeySource } from './keys.js'
+import { registerConfig, registerConfigStatusRoute } from '@dsh-extensions/config'
+import { ConfigError, resolveConfig } from './config.js'
 import { ProviderKeys } from './keys.js'
-import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import { buildAdapter, buildProviders } from './providers.js'
 import { PACKAGE_NAME, PLUGIN_NAME } from './identity.js'
 
@@ -56,25 +55,53 @@ export const inject = ['llm']
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const log = ctx.logger(PACKAGE_NAME)
-  const path = resolveConfigPath(config.configFile)
-  let profiles = new Map<string, ResolvedPiAiProviderProfile>()
-  let keys = new Map<string, KeySource>()
-  try {
-    const resolved = await loadConfig(path)
-    const built = await buildProviders(resolved, log)
-    profiles = built.profiles
-    keys = built.keys
-  } catch (error) {
-    const reason = error instanceof ConfigError ? error.message : String(error)
-    log.error('more-providers: config %s is unusable: %s', path, reason)
+  const store = registerConfig(ctx, {
+    filename: 'more-providers.yaml',
+    configFile: config.configFile,
+    validate: resolveConfig,
+    logger: log,
+  })
+  // Provider rows are registered once at startup, so a fixed file still needs
+  // a restart; the status route says so and keeps the error visible to the UI.
+  registerConfigStatusRoute(ctx, {
+    prefix: '/dsh-more-providers',
+    title: 'more-providers',
+    recovery: 'restart',
+    store,
+  })
+  const state = await store.ready
+  if (state.value === undefined) {
+    log.error(
+      'more-providers: config %s is unusable: %s — fix it and restart dsh',
+      state.file,
+      state.error ?? 'unknown error',
+    )
+    return
   }
 
+  let built
+  try {
+    built = await buildProviders(state.value, log)
+  } catch (error) {
+    const reason = error instanceof ConfigError ? error.message : String(error)
+    // The document validated, but provider construction rejected it (an
+    // unknown builtin catalog, for example). Surface that failure through the
+    // same status the browser half reads instead of leaving it "valid".
+    store.reportFailure(reason)
+    log.error(
+      'more-providers: config %s is unusable: %s — fix it and restart dsh',
+      state.file,
+      reason,
+    )
+    return
+  }
+  const { profiles, keys } = built
   const keyService = new ProviderKeys(ctx, keys)
   if (profiles.size === 0) {
-    log.warn('more-providers: no provider routes registered (see the config error above)')
+    log.warn('more-providers: no provider routes registered (see the config above)')
     return
   }
   const adapter = buildAdapter(profiles, (provider) => keyService.key(provider))
   ctx.llm.registerAdapter([...profiles.keys()], adapter)
-  log.info('more-providers: registered %d route(s) from %s', profiles.size, path)
+  log.info('more-providers: registered %d route(s) from %s', profiles.size, state.file)
 }

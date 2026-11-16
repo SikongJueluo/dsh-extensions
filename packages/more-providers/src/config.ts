@@ -10,12 +10,12 @@
  */
 import type { Api } from '@earendil-works/pi-ai'
 import type { PiAiCompatProfile } from '@deepseek-ai/dsh-llm-pi-ai'
-import { readFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
-import { parse } from 'yaml'
+import { isAbsolute, join } from 'node:path'
+import { ConfigError, readConfigFile, resolveConfigFile } from '@dsh-extensions/config'
 import { isRecord } from './record.js'
 import type { KeySource } from './keys.js'
+
+export { ConfigError }
 
 /** One loaded model descriptor from the YAML file. */
 export interface ModelConfig {
@@ -45,8 +45,6 @@ export interface ResolvedProvider {
   zdr?: boolean
   keySource: KeySource
 }
-
-export class ConfigError extends Error {}
 
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-]*$/u
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
@@ -513,34 +511,10 @@ export function defaultSecretDir(): string {
 
 /** The YAML path: an explicit plugin-row value or `$DSH_HOME/more-providers.yaml`. */
 export function resolveConfigPath(explicit?: string): string {
-  const configured = explicit?.trim()
-  if (configured !== undefined && configured !== '') {
-    return isAbsolute(configured) ? configured : resolve(configured)
-  }
-  const home = process.env.DSH_HOME?.trim()
-  return join(
-    home !== undefined && home !== '' ? home : join(homedir(), '.dsh'),
-    'more-providers.yaml',
-  )
+  return resolveConfigFile({ filename: 'more-providers.yaml', configFile: explicit })
 }
 
 /** Read and validate the YAML file. Throws ConfigError on any problem. */
 export async function loadConfig(path: string): Promise<ResolvedProvider[]> {
-  let text: string
-  try {
-    text = await readFile(path, 'utf8')
-  } catch (error) {
-    throw new ConfigError(
-      `cannot read ${path}: ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
-  let value: unknown
-  try {
-    value = parse(text)
-  } catch (error) {
-    throw new ConfigError(
-      `invalid YAML in ${path}: ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
-  return resolveConfig(value)
+  return readConfigFile(path, resolveConfig)
 }

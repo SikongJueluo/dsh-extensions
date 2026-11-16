@@ -16,6 +16,7 @@ dsh plugin --profile web add ./packages/more-providers
 ```
 
 2. 创建 `$DSH_HOME/more-providers.yaml`（默认 `~/.dsh/more-providers.yaml`）。
+   插件行的 `configFile` 可指定别的路径：相对路径以进程 cwd 为基准，支持 `~/` 展开。
 3. 删除/清空 `~/.config/nixos/home/ai/dsh/providers.nix` 里的 `programs.dsh.piAiProviders`；
    否则 stock row 虽然被禁用，配置仍会留在组合里。
 4. `home-manager switch` / `nixos-rebuild` 后重启：
@@ -150,12 +151,19 @@ apiKeyEnv: MDKJ_STABLE_GPT_API_KEY                           # 环境变量
 
 ### 校验与运行时
 
-- **配置错误整份 fail-fast**：未知字段、非法 `kind`/`api`、缺 `baseURL`、空 `accounts`、
-  没有任何 key source、重复 route id 等，会让整份 YAML 不生效；插件只 log error、不崩 dsh。
+- **配置错误整份 fail-closed**：未知字段、非法 `kind`/`api`、缺 `baseURL`、空 `accounts`、
+  没有任何 key source、重复 route id 等，会让整份 YAML 不生效；插件只 log error、不崩 dsh，
+  并且不注册任何 provider 行。
+- **Web 错误提示**：Host 在 `/dsh-more-providers/config-status` 暴露当前状态（文件、错误、
+  revision、恢复方式），浏览器半插件经 `shell.overlay` 显示 toast。多个 preset 实例共享同一
+  条路由并聚合返回 `instances`，不会因宿主拒绝重复路由而丢失通知。页面加载或重连后仍会看到
+  当前错误；同一连接内同一错误不会因重复读取反复弹出。
 - **运行时目录失败按 provider 隔离**：`modelsURL` 超时/非 2xx/坏 JSON/空列表时用静态 `models`
   fallback；没有 fallback 才跳过该 provider，其他 provider 照常注册。
 - **key 缺失**是正常休眠，不算配置错误。
-- 改完 YAML 需要重启 dsh；v1 不做文件监听。
+- **改完 YAML 需要重启 dsh**：provider 行只在启动时注册，本插件刻意不做文件监听或
+  provider 热更新。修好文件后，页面上的错误提示仍会保留（并明确写「修好后需重启 dsh」），
+  直到重启后重新读取。
 
 ## `providerKeys` 服务
 
@@ -198,7 +206,8 @@ pnpm -C packages/more-providers smoke
 ```
 
 `smoke.mjs` 覆盖 YAML 校验/继承、key 优先级、文件 mtime、builtin + custom 构建、目录发现与
-fallback、Command Code 三协议映射、`providerKeys` 服务和 `apply` 注册路径；不访问网络。
+fallback、Command Code 三协议映射、`providerKeys` 服务和 `apply` 注册路径；不访问网络。共享
+配置库自身的路径、watch、原子替换与状态路由契约由 `packages/config` 的 Vitest 覆盖。
 
 ## 已知限制
 
