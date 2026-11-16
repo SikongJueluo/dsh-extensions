@@ -349,15 +349,23 @@ const en: Record<string, string> = {
   histNudge: 'nudge',
 }
 
+/** Render one unknown template parameter as text, never as `[object Object]`. */
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (value === undefined || value === null) return ''
+  return JSON.stringify(value) ?? ''
+}
+
 function template(text: string, vars: Record<string, unknown>): string {
-  return String(text).replace(/\{(\w+)\}/g, (_, key: string) =>
-    vars[key] === undefined ? '' : String(vars[key]),
-  )
+  return String(text).replace(/\{(\w+)\}/g, (_, key: string) => asText(vars[key]))
 }
 
 function messageOf(error: unknown): string {
+  if (typeof error === 'string') return error
   const candidate = error as { message?: unknown } | undefined | null
-  return candidate && candidate.message ? String(candidate.message) : String(error)
+  if (typeof candidate?.message === 'string') return candidate.message
+  return asText(error)
 }
 
 function fmtTime(ms: number): string {
@@ -1433,8 +1441,7 @@ interface TriggersViewProps {
 // --- the fetch/poll wrapper; TriggerListView stays pure for tests ---------
 function TriggersView(props: TriggersViewProps) {
   const { t } = props
-  const sessionId =
-    props.sessionId === undefined || props.sessionId === null ? '' : String(props.sessionId)
+  const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
   const sessionsById = props.useSessions((state) => state.byId)
   const [state, setState] = useState<{
     sessionId: string

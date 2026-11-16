@@ -161,8 +161,16 @@ interface RpcResult<T> {
   error?: { message?: string }
 }
 
+/** Render an unknown error payload as text, never as `[object Object]`. */
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (value === undefined || value === null) return ''
+  return JSON.stringify(value) ?? ''
+}
+
 function classify(message: unknown): Classification {
-  const m = String(message || '')
+  const m = asText(message)
   if (/no sign-in stored|not signed in|AUTH_MISSING|AUTH_INVALID/i.test(m))
     return { key: 'statusNotSignedIn' }
   if (/refresh failed|invalid_refresh_token|re-authenticate|sign in again/i.test(m))
@@ -174,7 +182,7 @@ function classify(message: unknown): Classification {
 }
 
 function shorten(m: unknown): string {
-  let s = String(m || '')
+  let s = asText(m)
   const cut = s.indexOf(' — ')
   if (cut > 0) s = s.slice(0, cut)
   return s.length > 140 ? s.slice(0, 140) + '…' : s

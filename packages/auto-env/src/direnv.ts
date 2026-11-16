@@ -447,7 +447,8 @@ export function sanitizeDirenvDump(dump: Record<string, unknown>): EnvOverlay {
   const overlay: Record<string, string | undefined> = {}
   for (const [key, value] of Object.entries(dump)) {
     if (key.startsWith('DSH_') || key.startsWith('DIRENV_')) continue
-    overlay[key] = value === null ? undefined : String(value)
+    overlay[key] =
+      value === null ? undefined : typeof value === 'string' ? value : JSON.stringify(value)
   }
   return Object.freeze(overlay)
 }

@@ -187,9 +187,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
       return {
         sessionId,
         ...(header.cwd === undefined ? {} : { cwd: header.cwd }),
-        ...(header.parentSession === undefined
-          ? {}
-          : { parentSessionId: String(header.parentSession) }),
+        ...(header.parentSession === undefined ? {} : { parentSessionId: header.parentSession }),
         ...(header.origin === undefined ? {} : { origin: header.origin }),
       }
     } catch {
@@ -203,7 +201,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
    */
   private async attributeSession(
     sessionId: string,
-    header: { cwd?: string; parentSession?: unknown; origin?: 'subagent'; isSeeded: boolean },
+    header: { cwd?: string; parentSession?: SessionId; origin?: 'subagent'; isSeeded: boolean },
   ): Promise<void> {
     const access = this.access
     if (access === undefined)
@@ -211,9 +209,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
     const facts: SessionFacts = {
       sessionId,
       ...(header.cwd === undefined ? {} : { cwd: header.cwd }),
-      ...(header.parentSession === undefined
-        ? {}
-        : { parentSessionId: String(header.parentSession) }),
+      ...(header.parentSession === undefined ? {} : { parentSessionId: header.parentSession }),
       ...(header.origin === undefined ? {} : { origin: header.origin }),
     }
     try {

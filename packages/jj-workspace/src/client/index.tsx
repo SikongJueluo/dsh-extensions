@@ -198,11 +198,11 @@ function blockerText(t: Translate, blocker: string | null): string {
 
 type ToggleFace = {
   t: Translate
-  status(sessionId: string, signal?: AbortSignal): Promise<VcsStatus | null>
-  follow(signal?: AbortSignal): AsyncIterable<PanelFrame>
-  branches(): Promise<BranchesResult>
-  request(from: string | null): Promise<OperationResult>
-  cancel(): Promise<OperationResult>
+  status: (sessionId: string, signal?: AbortSignal) => Promise<VcsStatus | null>
+  follow: (signal?: AbortSignal) => AsyncIterable<PanelFrame>
+  branches: () => Promise<BranchesResult>
+  request: (from: string | null) => Promise<OperationResult>
+  cancel: () => Promise<OperationResult>
 }
 
 interface ToggleProps extends ToggleFace {

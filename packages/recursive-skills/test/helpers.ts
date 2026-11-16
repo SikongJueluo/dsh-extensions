@@ -119,7 +119,7 @@ export async function eventually(
     }
     if (Date.now() >= deadline) {
       throw new Error(
-        `timed out after ${timeoutMs}ms waiting for ${description}${lastError === undefined ? '' : `: ${String(lastError)}`}`,
+        `timed out after ${timeoutMs}ms waiting for ${description}${lastError === undefined ? '' : `: ${lastError instanceof Error ? lastError.message : (JSON.stringify(lastError) ?? '')}`}`,
       )
     }
     await new Promise((resolve) => setTimeout(resolve, 25))

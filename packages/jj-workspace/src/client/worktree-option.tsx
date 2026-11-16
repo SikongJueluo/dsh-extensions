@@ -34,8 +34,8 @@ export interface WorktreeOptionProps {
   choices: WorktreeChoice[]
   selected: string
   error: string
-  onCheckedChange(checked: boolean): void
-  onPick(value: string): void
+  onCheckedChange: (checked: boolean) => void
+  onPick: (value: string) => void
 }
 
 /** Geometry of the stock Forge worktree option, on DSH theme tokens. */

@@ -156,7 +156,9 @@ describe('default derivation', () => {
     // against the pre-creation spelling. The fixture lives under the
     // workspace (not os.tmpdir): host /tmp is a floor prefix by design.
     const { mkdtempSync, mkdirSync, symlinkSync, rmSync, statSync } = await import('node:fs')
-    const { join, dirname } = await import('node:path')
+    const path = await import('node:path')
+    const join = path.join.bind(path)
+    const dirname = path.dirname.bind(path)
     const { fileURLToPath } = await import('node:url')
     const { nodeGrantFs, resolveGrants: resolve } = await import('../src/index.js')
     const workspace = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
@@ -331,7 +333,8 @@ describe('fail-closed validation', () => {
   it('real filesystem: symlinked HOME cannot be granted whole (reviewer fixture)', async () => {
     const { mkdtempSync, mkdirSync, symlinkSync, rmSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
-    const { join } = await import('node:path')
+    const path = await import('node:path')
+    const join = path.join.bind(path)
     const { nodeGrantFs, resolveGrants: resolve } = await import('../src/index.js')
     const root = mkdtempSync(join(tmpdir(), 'tca-home-'))
     try {

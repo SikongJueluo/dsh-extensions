@@ -533,7 +533,11 @@ export class OpenAiOauthAdapter extends LlmAdapter {
         }
         providerError = parsed?.error ?? (parsed as Record<string, unknown>)
         if (typeof parsed?.detail === 'string') message = parsed.detail
-        else if (providerError?.message) message = String(providerError.message)
+        else if (providerError?.message)
+          message =
+            typeof providerError.message === 'string'
+              ? providerError.message
+              : (JSON.stringify(providerError.message) ?? '')
       } catch {
         // non-JSON error body: keep the HTTP-level message
       }

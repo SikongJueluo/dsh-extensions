@@ -100,10 +100,16 @@ const zh = {
   moreRows: '…还有 {n} 项',
 }
 
+/** Render one unknown template parameter as text, never as `[object Object]`. */
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (value === undefined || value === null) return ''
+  return JSON.stringify(value) ?? ''
+}
+
 function template(text: string, vars: Record<string, unknown>) {
-  return String(text).replace(/\{(\w+)\}/g, (_, key: string) => {
-    return vars[key] === undefined ? '' : String(vars[key])
-  })
+  return String(text).replace(/\{(\w+)\}/g, (_, key: string) => asText(vars[key]))
 }
 
 function fmtTokens(n: number) {
