@@ -1,0 +1,44 @@
+{
+  // Lint-only program for TypeScript that the per-package `tsconfig.json`
+  // files do not own: build configs, `test/*.ts`, repo scripts, Storybook and
+  // the shared build tooling. `pnpm typecheck` still runs the real
+  // per-package configs; this file exists because Oxlint's type-aware half
+  // assigns each file to the nearest config named `tsconfig.json` and
+  // otherwise falls back to an inferred project with the wrong compiler
+  // options.
+  //
+  // JavaScript is deliberately absent (`allowJs` off): every type-aware rule
+  // is disabled for `*.{js,mjs,cjs}` in `.oxlintrc.json`, because TypeScript
+  // only infers `any`/error types for unannotated code. JS files still get the
+  // full syntax-level rule set and show up as "unmatched" in the typed-lint
+  // assignment log, which is the honest state.
+  //
+  // Do not hand this file to `tsc`: it deliberately mixes Node and DOM libs so
+  // that one program can cover scripts, tests and Storybook.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [
+    "scripts",
+    "tooling",
+    // Dot-directories are skipped by `include` globs; name the files.
+    ".storybook/main.ts",
+    ".storybook/preview.tsx",
+    "packages/*/*.config.ts",
+    "packages/*/test"
+  ],
+  "exclude": ["node_modules", "storybook-static", "repo", ".tmp"]
+}

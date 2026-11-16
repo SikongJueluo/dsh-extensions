@@ -23,6 +23,13 @@ catalog:
   tsdown: ^0.23.0
   typescript: ^7.0.2
   vite: ^7.3.7
+  # Quality gates. Exact versions, never `latest`: these tools decide whether a
+  # change passes, so a floating range would silently change the standard mid
+  # review. Upgrades are explicit commits that audit newly added rules.
+  oxlint: 1.93.0
+  oxlint-tsgolint: 7.0.2007
+  oxfmt: 0.78.0
+  fallow: 3.43.1
   # DSH 0.2.2-rc.1 baseline. Dev dependencies stay exact so typechecking and
   # smoke tests see the runtime the pinned host actually installs; published
   # peerDependencies keep their compatible ranges.

@@ -1,0 +1,28 @@
+{
+  // Fallow owns the cross-file graph: dead code, dependency hygiene and the
+  // import cycles Oxlint cannot see across package boundaries. The defaults
+  // stay as they are; this file only teaches Fallow about the two runtime
+  // contracts a static import graph cannot express.
+  "$schema": "./node_modules/fallow/schema.json",
+  "ignorePatterns": [
+    // Untracked nested repository of unknown origin; never part of this project.
+    "repo/**",
+  ],
+  "ignoreBinaries": [
+    // Every jj-workspace code path shells out to the user's `jj`; the binary is
+    // provided by the NixOS profile, not by a node_modules package.
+    "jj",
+  ],
+  "usedClassMembers": [
+    // Cordis services are reached through `ctx.<name>` proxies whose type is
+    // resolved at runtime, so a public method or static `Config`/`inject` on a
+    // service class has no static caller even when the host dispatches it on
+    // every call.
+    { "extends": "Service", "members": ["*"] },
+    { "extends": "SandboxPolicyService", "members": ["*"] },
+    // Quota sources are dispatched through the `QuotaSource` interface
+    // (`source.routes` / `source.ready` / `source.get`), which the static graph
+    // does not follow.
+    { "implements": "QuotaSource", "members": ["*"] },
+  ],
+}

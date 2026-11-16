@@ -1,0 +1,32 @@
+{
+  // Oxfmt owns layout only. It runs over the whole repository, so a formatting
+  // drift can never be papered over per file; the settings below mirror the
+  // style the codebase already uses instead of introducing a new one.
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "singleQuote": true,
+  "jsxSingleQuote": false,
+  "semi": false,
+  "tabWidth": 2,
+  "printWidth": 100,
+  "trailingComma": "all",
+  "arrowParens": "always",
+  "bracketSpacing": true,
+  "endOfLine": "lf",
+  "insertFinalNewline": true,
+  // Sorting is deliberately off in every form: import order, Tailwind class
+  // order and package.json key order are separate decisions with their own
+  // review cost, and `sortPackageJson` defaults to on.
+  "sortImports": false,
+  "sortPackageJson": false,
+  "sortTailwindcss": false,
+  // `jsdoc` rewrites comment prose; the codebase writes its own comment style.
+  "jsdoc": false,
+  "ignorePatterns": [
+    // Untracked nested repository of unknown origin; never part of this project.
+    "repo/",
+    // Markdown is prose, not code: Oxfmt re-pads every table column using
+    // character counts, which mis-measures the double-width CJK glyphs this
+    // repository documents in and makes those tables worse, not better.
+    "**/*.md"
+  ]
+}

@@ -1,0 +1,176 @@
+{
+  // Oxlint is the correctness/type-quality gate. Layout belongs to Oxfmt
+  // (.oxfmtrc.json), and codebase-level graph questions (unused exports,
+  // dependency hygiene, duplication, complexity budgets) belong to Fallow.
+  //
+  // Policy: everything that can be judged mechanically is ON at "error" —
+  // correctness, suspicious, pedantic and perf categories run in full and are
+  // narrowed only by the explicit `rules` entries below, each of which carries
+  // its reason in docs/quality-gates.md. `style` and `restriction` are OFF as
+  // categories because most of their rules restate formatting (Oxfmt) or ban
+  // language features this codebase uses deliberately; the rules worth keeping
+  // are adopted one by one further down.
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "node"],
+  "env": {
+    "builtin": true,
+    "node": true
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error",
+    "style": "off",
+    "restriction": "off"
+  },
+  "options": {
+    "typeAware": true,
+    "reportUnusedDisableDirectives": "error"
+  },
+  "ignorePatterns": [
+    // Untracked nested repository of unknown origin; never part of this project.
+    "repo/**"
+  ],
+  "rules": {
+    // --- adopted from `style`: rules that constrain structure, not layout ---
+    "prefer-const": "error",
+    "object-shorthand": "error",
+    "prefer-template": "error",
+    "no-duplicate-imports": "error",
+    "typescript/consistent-type-imports": "error",
+    "typescript/array-type": "error",
+
+    // --- adopted from `restriction`: project invariants, not taste ---
+    // Type escape hatches are banned by policy; existing occurrences are debt
+    // to be reviewed one by one, never silently suppressed.
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-invalid-void-type": "error",
+    "typescript/use-unknown-in-catch-callback-variable": "error",
+    "import/no-cycle": "error",
+    "no-alert": "error",
+    "no-empty": "error",
+    "no-param-reassign": "error",
+    "no-return-assign": "error",
+    "no-sequences": "error",
+    "promise/catch-or-return": "error",
+    "unicorn/prefer-number-properties": "error",
+
+    // --- exclusions from `pedantic` (the list awaiting approval in
+    // docs/quality-gates.md §6) ---
+    // Immutability annotation style: flags every parameter whose type is not
+    // `readonly`, which is not a defect and is not required by the compiler.
+    "typescript/prefer-readonly-parameter-types": "off",
+    // Truthiness checks: tsc already rejects ambiguous operand types; this
+    // rule additionally bans `if (value)` on legitimately boolean-ish values.
+    "typescript/strict-boolean-expressions": "off",
+    // `async` without `await` is how the plugin contracts return promises;
+    // rewriting it changes function identity and therefore dispatch.
+    "require-await": "off",
+    "typescript/require-await": "off",
+    // Returning a void expression from an arrow (React handlers) is idiomatic.
+    "typescript/no-confusing-void-expression": "off",
+    "no-negated-condition": "off",
+    "unicorn/no-negated-condition": "off",
+    // Trailing `// ...` comments are used to justify adjacent constants.
+    "no-inline-comments": "off",
+    // Numeric size budgets: reported by `fallow health`, not gated per line.
+    "max-lines": "off",
+    "max-lines-per-function": "off",
+    "max-statements": "off",
+    "max-depth": "off",
+    "max-classes-per-file": "off",
+    "max-params": "off",
+    "max-expects": "off",
+    "vitest/max-expects": "off",
+    "unicorn/max-nested-calls": "off",
+    // Sequential awaits are deliberate (ordered FS/JJ mutations, backpressure);
+    // parallelising them would change observable ordering.
+    "no-await-in-loop": "off",
+
+    // --- rule options, not relaxations ---
+    // Stylesheet imports exist only for their side effect on the bundle.
+    "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }]
+  },
+  "overrides": [
+    {
+      // Browser halves and the shared UI package: React + accessibility rules,
+      // DOM globals, and no Node globals (importing `node:fs` here would only
+      // fail at runtime in the browser).
+      "files": ["packages/*/src/client/**", "packages/ui/src/**", ".storybook/**"],
+      "env": { "browser": true, "node": false },
+      "plugins": [
+        "eslint",
+        "typescript",
+        "unicorn",
+        "oxc",
+        "import",
+        "promise",
+        "react",
+        "jsx-a11y"
+      ],
+      "rules": {
+        // React 18 automatic JSX runtime: components never need `React` in
+        // scope, so the classic-runtime rule reports the bundler's job.
+        "react/react-in-jsx-scope": "off",
+        // Every <button> must carry an explicit type; the default is "submit".
+        "react/button-has-type": "error"
+      }
+    },
+    {
+      // Test runners. `vitest` covers packages that run Vitest; `node:test`
+      // files share the glob and are unaffected because the rules key off
+      // Vitest's own globals. Console output is the interface of smoke
+      // scripts, so the console ban is lifted here and only here.
+      "files": ["**/test/**", "**/*.test.*", "**/smoke.mjs", "packages/*/scripts/**", "scripts/**"],
+      "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "node", "vitest"],
+      "env": { "vitest": true },
+      "rules": {
+        "no-console": "off"
+      }
+    },
+    {
+      // JavaScript has no annotations: type-aware rules there report what
+      // TypeScript inferred for untyped code (`null`-initialised variables
+      // become `any`), not what the code does. Every `*.{js,mjs,cjs}` file
+      // still gets the full syntax-level rule set above.
+      "files": ["**/*.{js,mjs,cjs}"],
+      "rules": {
+        "typescript/await-thenable": "off",
+        "typescript/consistent-return": "off",
+        "typescript/no-base-to-string": "off",
+        "typescript/no-deprecated": "off",
+        "typescript/no-duplicate-type-constituents": "off",
+        "typescript/no-floating-promises": "off",
+        "typescript/no-misused-promises": "off",
+        "typescript/no-misused-spread": "off",
+        "typescript/no-redundant-type-constituents": "off",
+        "typescript/no-unnecessary-boolean-literal-compare": "off",
+        "typescript/no-unnecessary-template-expression": "off",
+        "typescript/no-unnecessary-type-arguments": "off",
+        "typescript/no-unnecessary-type-assertion": "off",
+        "typescript/no-unnecessary-type-conversion": "off",
+        "typescript/no-unnecessary-type-parameters": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-return": "off",
+        "typescript/no-unsafe-type-assertion": "off",
+        "typescript/no-unsafe-unary-minus": "off",
+        "typescript/only-throw-error": "off",
+        "typescript/prefer-includes": "off",
+        "typescript/prefer-nullish-coalescing": "off",
+        "typescript/prefer-promise-reject-errors": "off",
+        "typescript/prefer-readonly": "off",
+        "typescript/prefer-regexp-exec": "off",
+        "typescript/restrict-template-expressions": "off",
+        "typescript/return-await": "off",
+        "typescript/switch-exhaustiveness-check": "off",
+        "typescript/unbound-method": "off",
+        "typescript/use-unknown-in-catch-callback-variable": "off"
+      }
+    }
+  ]
+}

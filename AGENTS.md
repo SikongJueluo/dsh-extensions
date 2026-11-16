@@ -4,16 +4,28 @@ dsh-extensions —— out-of-tree DeepSeek Harness 插件 bundle 集。每个 `p
 
 ## 命令
 
-前置：Node ≥ 20、pnpm ≥ 10、`dsh` CLI。
+前置：Node ≥ 24（开发与 CI）、pnpm ≥ 10、`dsh` CLI。产物目标仍是 Node 20。
 
 ```sh
 pnpm install        # 各包 prepare 自动完成首次构建
 pnpm build          # 宿主 tsdown → lib/index.js；客户端 Vite → lib/client.js
 pnpm typecheck      # 各包 tsc --noEmit（含 src/client 的 DOM/JSX 检查）
+pnpm lint           # oxlint + oxlint-tsgolint（.oxlintrc.json）
+pnpm lint:fix       # 同上，自动修可修的；修完必须复跑 typecheck/build
+pnpm format         # oxfmt 全仓改写（.oxfmtrc.json）
+pnpm format:check   # 只检查
+pnpm fallow         # fallow dead-code：死代码、依赖卫生、循环依赖（阻塞）
+pnpm fallow:health  # 复杂度报告（不阻塞）
+pnpm fallow:dupes   # 重复度报告（不阻塞）
 pnpm check          # typecheck + build + client 产物检查
 pnpm check:client   # 校验 packages/*/lib/client.js：DSH factory 包装、注册 id、外部请求、内联样式、apply/render
 pnpm clean
 ```
+
+质量门禁的职责划分、类型感知覆盖方式与已批准的例外清单一律以
+[docs/quality-gates.md](docs/quality-gates.md) 为准；**降级任何规则、扩大 ignore、加内联豁免
+都要先改那份文档并获用户批准**，不要直接改配置。扫描数据见
+[docs/quality-scan-baseline.md](docs/quality-scan-baseline.md)。
 
 `pnpm-workspace.yaml` 的 `nodeLinker: hoisted` 是刻意的：本机 pnpm 12 的 isolated store 曾对带 peer 的 `@deepseek-ai/*` 生成悬空链接。勿改回。
 
