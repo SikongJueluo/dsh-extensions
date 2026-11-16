@@ -272,6 +272,8 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 | A8 | 复杂度/重复只报告、不阻塞（4.4） | 批准 |
 | A9 | 7 处存量 `react-hooks/exhaustive-deps` 抑制在修复层逐处处理（3.6） | 批准 |
 | A10 | 根 `engines.node >= 24`（2） | 批准 |
+| A11 | `check:smoke` 排除 `context-audit/smoke.mjs`，直到它改用 fixture `$DSH_HOME`（它现在读真实会话日志） | 批准 |
+| A12 | `check:smoke` 排除 `search-integrator/scripts/smoke-research.mjs`（需要真实 API key 与外网），保留为人工验证 | 批准 |
 
 若希望更严：`require-unicode-regexp`（228）、`prefer-strict-equal` 与
 `prefer-to-be-truthy/falsy`（vitest 风格，606）、`strict-boolean-expressions`（B2）
@@ -280,7 +282,7 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 ## 7. 未验证 / 缺口
 
 - CI 尚未建立：没有 `.github/workflows`，本地与远端共用入口、远端成功记录、平台必需检查都还是待办（需要推送授权）。
-- 现有测试/smoke 的真实范围已逐项实测并列在 [quality-acceptance-inventory.md](quality-acceptance-inventory.md)：`pnpm test` 只覆盖声明了 `test` 的 12 个包（9 个包没有测试入口），12 个 smoke 脚本全部未接线（三个失效脚本已在本轮修复，见该文档第 3 节），`notice-order.mjs` 未被 Vitest 收集。接线在“验收聚合”层处理。
+- 现有测试/smoke 的真实范围已逐项实测并列在 [quality-acceptance-inventory.md](quality-acceptance-inventory.md)：`pnpm test` 只覆盖声明了 `test` 的 12 个包（9 个包没有测试入口），12 个 smoke 脚本现在由 `pnpm check:smoke` 统一执行（10 个可无人值守、2 个显式排除并打印理由），`notice-order.mjs` 未被 Vitest 收集。接线在“验收聚合”层处理。
 - `context-audit` smoke 读取 `$DSH_HOME` 真会话日志（本次实测扫了 62 个日志），需在聚合时改为 fixture 隔离，不能直接进门禁。
 - Node 20 产物兼容性尚未验证（本次只跑 Node 24 的 typecheck/build/lint）。
 - 需要 profile/凭据/交互的验证（如 session-write-access 的手工 recipe）不在脚本覆盖内。

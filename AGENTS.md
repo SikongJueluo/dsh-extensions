@@ -18,6 +18,7 @@ pnpm fallow         # fallow dead-code：死代码、依赖卫生、循环依赖
 pnpm fallow:health  # 复杂度报告（不阻塞）
 pnpm fallow:dupes   # 重复度报告（不阻塞）
 pnpm check          # typecheck + build + client 产物检查
+pnpm check:smoke    # 跑 10 个可无人值守的 smoke；2 个需凭据/真实 $DSH_HOME 的显式排除并打印理由
 pnpm check:client   # 校验 packages/*/lib/client.js：DSH factory 包装、注册 id、外部请求、内联样式、apply/render
 pnpm clean
 ```

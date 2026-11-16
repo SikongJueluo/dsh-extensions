@@ -33,13 +33,14 @@ search-integrator  session-write-access  task-anchor  toolchain-access  triggers
 `more-providers`、`oauth-providers`、`plan-usage`、`remote-exec`、`rtk-rewrite`
 （其中多数只靠 `smoke.mjs`）。
 
-已知未收集的测试文件：
+原本未收集的测试文件现已接线：
 
-- `packages/auto-permit/test/notice-order.mjs`：不在 `vitest run` 的收集范围内，只能手动
-  `node` 跑；Fallow 也把它报成“未被任何入口引用的文件”。聚合时要给它一个 `node --test`
-  或显式命令，否则等于不存在。
+- `packages/auto-permit/test/notice-order.mjs` 是带断言的复现 harness（PRE-FIX 路径必须
+  违反 tool-call/result 配对，FIXED 路径必须不违反），但不在 `vitest run` 的收集范围内。
+  已加进该包的 `test` 脚本（`vitest run && node test/notice-order.mjs`），不再是“存在但
+  永不执行”的文件。
 
-## 3. smoke 脚本（12 个，全部没有接进任何 `package.json` 脚本）
+## 3. smoke 脚本（12 个，由 `pnpm check:smoke` 统一执行 10 个、显式排除 2 个）
 
 | 脚本 | 结果 | 说明 |
 | --- | --- | --- |
@@ -56,9 +57,14 @@ search-integrator  session-write-access  task-anchor  toolchain-access  triggers
 | `auto-continue/smoke.mjs` | ✅ 0 | 曾打印 `smoke OK` 后不退出（4 个未拆除 lifetime 的 retry timer）；脚本现在显式 `process.exit(0)`，未拆除的 lifetime 留给 vitest 覆盖 |
 | `search-integrator/scripts/smoke-research.mjs` | ⚠️ 0 | 默认 `--providers`；无 API key 时无输出、空转成功，**不是真实检查**；有凭据时才打真实端点 |
 
-此前三个脚本已随 SDK/配置演进而失效或根本不退出，这一层已修复；它们仍然没有接进任何
-`package.json` 脚本，所以依旧不会在 `pnpm test` / `pnpm check` 里自动执行。Fallow 的
-“未被任何入口引用”仍是同一问题的另一面，接线放在聚合层。
+此前三个脚本已随 SDK/配置演进而失效或根本不退出，已修复。现在由
+`node scripts/check-smoke.mjs`（`pnpm check:smoke`）统一发现并串行执行：**不允许静默跳过**
+——发现的脚本必须要么执行、要么在 `EXCLUDED` 里写明理由，理由指向的文件消失也会让运行失败。
+当前 10 个执行、2 个显式排除（见第 4 节），整套约 14 秒。
+
+Fallow 仍会把 `context-audit` 以外的三个根目录脚本报成“未被入口引用”（它的入口来自
+`package.json` 脚本，不解析 `check-smoke.mjs` 的发现逻辑）；这是静态图与运行器的差别，
+不影响执行。
 
 ## 4. 需要环境、凭据或交互，不能进自动门禁
 
@@ -74,7 +80,7 @@ search-integrator  session-write-access  task-anchor  toolchain-access  triggers
 2. `typecheck`
 3. `build`（此后所有 `lib/` 消费者才有意义）
 4. `pnpm -r run test`
-5. smoke：先做外部程序预检（`jj`、`fish`、`mkfifo`、`tar`），缺一个就 **fail**，不 skip
+5. `pnpm check:smoke`：先预检 `git`/`jj`，缺一个就 **fail**；两个环境相关脚本显式排除并打印理由
 6. `check:client` → `check:pack` → `build:storybook`
 7. `fallow health` / `fallow dupes`：只输出报告，不影响退出码
 

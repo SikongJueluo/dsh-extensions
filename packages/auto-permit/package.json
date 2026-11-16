@@ -23,7 +23,7 @@
   "scripts": {
     "build": "tsdown && vite build --config vite.client.config.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
-    "test": "vitest run",
+    "test": "vitest run && node test/notice-order.mjs",
     "clean": "rm -rf lib",
     "prepare": "tsdown && vite build --config vite.client.config.ts"
   },
