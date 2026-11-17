@@ -1,12 +1,5 @@
 /**
  * Model-facing rendering: compact, budgeted, conclusions first.
- *
- * Layout discipline for the downstream 8k tool-result pruner: summary →
- * points with citation numbers → unknowns → source list → coverage/audit
- * footnote. When the budget tightens, point detail and unknowns shrink
- * first; sources never disappear entirely — the citation numbers must stay
- * resolvable — they degrade to URL-only lines.
- *
  * @module dsh-search-integrator/render
  */
 import type { ResearchResult } from './types.js'
@@ -29,7 +22,6 @@ function pointLine(point: ResearchResult['points'][number]): string {
       : point.sources.length > 0 && point.status !== 'supported'
         ? ` (${STATUS_LABEL[point.status] ?? point.status})`
         : ''
-  // Attributed conflict sides render per side; the flat tail cites every side.
   const sides =
     point.sides !== undefined && point.sides.length > 1
       ? ` ${point.sides.map((side) => `${side.text} ${cite(side.sources)}`).join('; ')}`
@@ -69,8 +61,6 @@ function takeWhile(lines: readonly string[], budget: number): { kept: string[]; 
   let used = 0
   for (const line of lines) {
     if (used + line.length + 1 > budget) {
-      // Trim the overflowing line instead of dropping it silently when it
-      // fits truncated; otherwise stop here.
       const room = budget - used - 1
       if (kept.length === 0 && room > 80) {
         kept.push(`${line.slice(0, room)}…`)
@@ -86,7 +76,6 @@ function takeWhile(lines: readonly string[], budget: number): { kept: string[]; 
 
 /**
  * Render the model-facing text for one result, honoring the character budget.
- *
  * @param result - canonical tool value.
  * @param maxChars - render budget (settings `maxRenderChars`).
  */
@@ -114,7 +103,6 @@ export function renderResearch(result: ResearchResult, maxChars: number): string
     )
     push(result.summary)
     push('')
-    // Evidence digest: keep snippets while budget allows.
     const rich = result.sources.slice(0, 8).map((source) => {
       const base = sourceLine(source)
       return source.snippet === undefined ? base : `${base}\n    ${source.snippet}`
@@ -128,7 +116,6 @@ export function renderResearch(result: ResearchResult, maxChars: number): string
     return out.join('\n')
   }
 
-  // ok
   push(UNTRUSTED_NOTE)
   push(result.summary)
   push('')
@@ -164,11 +151,7 @@ export function renderResearch(result: ResearchResult, maxChars: number): string
   return out.join('\n')
 }
 
-/**
- * Compact presentation metadata for top-level calls: sources and coverage for
- * UI/persistence without re-serializing the whole result. A type alias (not
- * an interface) so it satisfies the JsonValue index-signature contract.
- */
+/** Compact presentation metadata for top-level calls: sources and coverage for UI/persistence without re-serializing the whole result. A type alias (not an interface) so it satisfies the JsonValue index-signature contract. */
 export type ResearchMeta = {
   readonly status: string
   readonly rounds: number

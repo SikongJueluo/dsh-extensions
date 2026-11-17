@@ -26,6 +26,8 @@ export { Select, type SelectOption, type SelectGroup, type SelectProps } from '.
 export { Dialog, type DialogProps } from './components/dialog'
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from './components/table'
 export type {
+  ClientLogger,
+  ClientLoggerService,
   DshClientContext,
   DshClientServices,
   SlotsService,

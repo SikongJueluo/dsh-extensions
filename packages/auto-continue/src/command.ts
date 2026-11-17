@@ -1,13 +1,3 @@
-/**
- * `/ac-cancel` and `/ac-status`: the operator's window into auto-continue.
- *
- * `/ac-status` reports the current session's pending wait (provider, fire
- * time); `/ac-cancel` stands it down — dropping the persisted record, the
- * armed resumption timer, and any in-flight recovery sleep — so "keep
- * waiting" stays a choice rather than a commitment.
- *
- * @module dsh-auto-continue/command
- */
 import type { CommandDefinition, CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ResumeHandle } from './resume.js'
@@ -28,7 +18,6 @@ function fireTime(retryAt: number): string {
   return new Date(retryAt).toLocaleString('zh-CN', { hour12: false })
 }
 
-/** `/ac-cancel` — stand the current session's auto-continue wait down. */
 function cancelDefinition(
   adopter: ResumeHandle,
   spool: WaitSpool,
@@ -42,7 +31,7 @@ function cancelDefinition(
       const entry = spool.get(sessionId)
       const dropped = await adopter.cancel(sessionId)
       if (entry === undefined && !dropped) return fail('当前会话没有等待中的 auto-continue。')
-      // Also disarm an in-flight in-process recovery sleep (open-turn wait).
+
       cancelled.add(sessionId)
       return ok(
         `已取消：${entry?.provider ?? 'provider'} 的等待已解除，到达重置时间后不再自动续跑。`,
@@ -51,7 +40,6 @@ function cancelDefinition(
   }
 }
 
-/** `/ac-status` — report the current session's pending wait. */
 function statusDefinition(spool: WaitSpool): CommandDefinition {
   return {
     name: STATUS_COMMAND,
@@ -67,7 +55,6 @@ function statusDefinition(spool: WaitSpool): CommandDefinition {
   }
 }
 
-/** Register both commands once the host command registry exists. */
 export function registerCommands(
   ctx: Context,
   deps: { adopter: ResumeHandle; spool: WaitSpool; cancelled: Set<string> },

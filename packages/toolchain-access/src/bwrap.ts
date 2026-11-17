@@ -1,41 +1,10 @@
 /**
- * The pinned bwrap argv contract of `@deepseek-ai/dsh-sandbox-local`
- * 0.2.2-rc.1, and the one edit this package ever makes to it.
- *
- * `LocalSandboxProvider.confine()` returns, for the stock Linux bwrap rung,
- * exactly:
- *
- * ```text
- * bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent
- *       [--tmpfs /tmp (--bind <root> <root>)...]   # workspace-write only
- *       -- <caller argv verbatim>
- * ```
- *
- * Under `workspace-write` the bound roots are `workspaceWritableRoots(policy)`
- * — the canonical workspace root followed by every `additionalWritableRoots`
- * entry, in policy order, deduplicated — so the per-root bind is repeated once
- * per root. The expected profile is derived through that same SDK helper
- * rather than restated here: a policy that grants more roots must not look
- * like a layout drift.
- *
- * Grant binds must land AFTER `--ro-bind / /` (later mounts stack on top —
- * verified on-host: an appended `--bind` makes exactly that subtree writable
- * while its parent and siblings stay EROFS) and BEFORE the `--` separator.
- * `insertGrantBinds` verifies the whole expected layout element-by-element
- * and splices the binds in; ANY deviation — a configured `runnerCommand`
- * wrapper, the Landlock/Seatbelt/ACL rungs, a profile change in some future
- * dsh release — fails closed instead of guessing at an unfamiliar layout.
- *
- * The pin is deliberate: this file is the single place to update when a dsh
- * upgrade changes the stock profile, and its tests pin the current shape so
- * the drift surfaces here rather than as a silently weaker sandbox.
- *
+ * The pinned bwrap argv contract of `@deepseek-ai/dsh-sandbox-local` 0.2.2-rc.1, and the one edit this package ever makes to it.
  * @module dsh-toolchain-access/bwrap
  */
 import { workspaceWritableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 
-/** The stock bwrap profile head, identical for both confined modes. */
 const STOCK_PROFILE_HEAD: readonly string[] = Object.freeze([
   '--ro-bind',
   '/',
@@ -48,10 +17,7 @@ const STOCK_PROFILE_HEAD: readonly string[] = Object.freeze([
   '--die-with-parent',
 ])
 
-/**
- * The expected stock profile arguments for one policy (everything between
- * the runner name and the `--` separator), mirroring `bwrapProfileArgs`.
- */
+/** The expected stock profile arguments for one policy (everything between the runner name and the `--` separator), mirroring `bwrapProfileArgs`. */
 export function expectedStockProfileArgs(policy: SandboxPolicy): string[] {
   const args = [...STOCK_PROFILE_HEAD]
   if (policy.mode === 'workspace-write') {
@@ -82,25 +48,12 @@ function describe(item: string): string {
 }
 
 /**
- * Verify the confined argv against the pinned stock layout and return it
- * with the grant binds spliced in before the `--` separator.
- *
- * The check is structural, not heuristic: argv[0] must be exactly `bwrap`
- * (a configured `runnerCommand` or another rung fails here), every profile
- * element must equal the expected one at its exact index, and everything
- * after `--` must equal the caller's original argv verbatim — so a command
- * argument that happens to contain `--` or bwrap-looking flags cannot move
- * the splice point.
- *
+ * Verify the confined argv against the pinned stock layout and return it with the grant binds spliced in before the `--` separator.
  * @param confined - the argv `super.confine()` produced.
  * @param original - the exact argv that was passed to confine.
  * @param policy - the policy the wrap was built for.
- * @param binds - the validated grant binds. Ordinary grants mount a path onto
- *   itself; a private-state shadow (semgrep) mounts a writable cache
- *   directory at a different sandbox destination — both are the same
- *   `--bind source destination` shape.
- * @returns the confined argv with `--bind source destination` pairs appended
- *   after the stock profile, before `--`.
+ * @param binds - the validated grant binds. Ordinary grants mount a path onto itself; a private-state shadow (semgrep) mounts a writable cache directory at a different sandbox destination - both are the same `--bind source destination` shape.
+ * @returns the confined argv with `--bind source destination` pairs appended after the stock profile, before `--`.
  * @throws GrantArgvError on any deviation from the pinned layout.
  */
 export function insertGrantBinds(

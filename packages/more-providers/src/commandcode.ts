@@ -1,13 +1,5 @@
 /**
- * The Command Code wire rules: one route whose catalog spans
- * anthropic-messages, openai-responses, and openai-completions.
- *
- * The model list comes from `GET /provider/v1/models`. The route is built by
- * the registry, which supplies the route id, display name, base URL, and key.
- * The per-model protocol, base URL, adaptive-thinking, developer-role, and
- * ZDR-header rules mirror the official pi provider at
- * https://github.com/CommandCodeAI/pi-commandcode-provider.
- *
+ * The Command Code wire rules: one route whose catalog spans anthropic-messages, openai-responses, and openai-completions.
  * @module dsh-more-providers/commandcode
  */
 import type { Api, Model, Provider } from '@earendil-works/pi-ai'
@@ -19,26 +11,20 @@ import {
 } from '@earendil-works/pi-ai/compat'
 import { isRecord } from './record.js'
 
-/** Provider API root; the Anthropic SDK appends `/v1/messages` itself. */
 export const DEFAULT_BASE_URL = 'https://api.commandcode.ai/provider'
 
-/** OpenAI-compatible base; `/responses` and `/chat/completions` hang off it. */
 const DEFAULT_OPENAI_BASE_URL = `${DEFAULT_BASE_URL}/v1`
 
-/** Unauthenticated model catalog. */
 export const DEFAULT_MODELS_URL = `${DEFAULT_OPENAI_BASE_URL}/models`
 
-/** Request header that enforces zero-data-retention routing. */
 export const ZDR_HEADER = 'x-cmd-zdr'
 
 const FALLBACK_CONTEXT_WINDOW = 131_072
 const FALLBACK_MAX_TOKENS = 32_768
 
-/** Claude models from Opus/Sonnet 4.6 and Fable 5 onward require adaptive thinking. */
 const ADAPTIVE_THINKING =
   /(opus[-.](4[-.]6|4[-.]7|4[-.]8|5)|sonnet[-.](4[-.]6|5)|fable[-.]5|mythos[-.]5)/u
 
-/** Vision-capable families while the catalog reports no modalities. */
 const VISION_FAMILIES = [/^claude-/u, /^gpt-/u, /^google\//u]
 
 /** One entry from `GET /provider/v1/models`. */
@@ -77,11 +63,7 @@ function isCatalogItem(value: unknown): value is CommandCodeCatalogItem {
   return record !== undefined && typeof record.id === 'string'
 }
 
-/**
- * Parse a `/provider/v1/models` body. Accepts the standard `{ data: [...] }`
- * envelope and a bare array; malformed entries are dropped rather than
- * failing the whole catalog.
- */
+/** Parse a `/provider/v1/models` body. Accepts the standard `{ data: [...] }` envelope and a bare array; malformed entries are dropped rather than failing the whole catalog. */
 export function parseCatalog(body: unknown): CommandCodeCatalogItem[] {
   const data = Array.isArray(body) ? body : asRecord(body)?.data
   if (!Array.isArray(data))
@@ -119,10 +101,7 @@ function costOf(item: CommandCodeCatalogItem): Model<Api>['cost'] {
   }
 }
 
-/**
- * Map catalog entries to pi-ai models. Entries whose endpoints this provider
- * cannot serve, or that the catalog does not route, are skipped.
- */
+/** Map catalog entries to pi-ai models. Entries whose endpoints this provider cannot serve, or that the catalog does not route, are skipped. */
 export function toPiModels(
   items: readonly CommandCodeCatalogItem[],
   options: { baseURL: string; provider: string },
@@ -135,7 +114,6 @@ export function toPiModels(
     if (api === undefined) continue
     const model: Model<Api> = {
       id: item.id,
-      // An empty catalog name means "no display name" (kept from the old `||`).
       name: item.name !== undefined && item.name !== '' ? item.name : item.id,
       api,
       provider: options.provider,
@@ -143,7 +121,6 @@ export function toPiModels(
       reasoning: item.reasoning ?? true,
       input: inputOf(item),
       cost: costOf(item),
-      // Zero/absent fall back to the defaults (kept from the old `||`).
       contextWindow:
         item.context_length !== undefined && item.context_length !== 0
           ? item.context_length

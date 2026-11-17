@@ -2,7 +2,6 @@
 import { cn } from '../lib/cn'
 
 export interface ProgressProps {
-  /** 0–100; `null` renders an indeterminate empty track. */
   value: number | null
   tone?: 'brand' | 'warn' | 'danger'
   label?: string

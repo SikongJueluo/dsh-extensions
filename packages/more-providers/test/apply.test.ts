@@ -1,8 +1,5 @@
 /**
- * Startup contract of the merged plugin: default-on ChatGPT, strict
- * fail-closed configuration, preserved host surfaces, and the status route
- * that keeps serving the error to the browser half.
- *
+ * Startup contract of the merged plugin: default-on ChatGPT, strict fail-closed configuration, preserved host surfaces, and the status route that keeps serving the error to the browser half.
  * @module dsh-more-providers/test/apply
  */
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
@@ -41,11 +38,9 @@ describe('apply: ChatGPT default-on and API-key routes', () => {
     await awaitMount(harness)
 
     expect(adapterFor(harness.llm, 'chatgpt')).toBeDefined()
-    // The oauthProviders service stays a host surface for plan-usage.
     const oauth = harness.ctx.get('oauthProviders') as OAuthProvidersService
     expect(oauth).toBeInstanceOf(OAuthProvidersService)
     expect(oauth.providers()).toEqual(['chatgpt'])
-    // No API-key routes exist, and none were registered.
     expect(harness.llm.adapters).toHaveLength(1)
     expect(harness.llm.discoveries.has('more-providers')).toBe(true)
   })
@@ -85,7 +80,6 @@ describe('apply: ChatGPT default-on and API-key routes', () => {
     const harness = await createHarness({
       yaml: `providers:\n  chatgpt:\n    enabled: false\n`,
     })
-    // Give the credentials injection a chance to fire and prove it will not.
     await new Promise((settle) => {
       setTimeout(settle, 50)
     })

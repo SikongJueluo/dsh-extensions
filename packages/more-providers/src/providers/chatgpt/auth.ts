@@ -1,15 +1,5 @@
 /**
  * ChatGPT OAuth grant store over the harness credential seam.
- *
- * The sign-in flow commits an {@link OAuthGrant} into the credential record
- * `openai/chatgpt`; this store hands out usable access tokens and refreshes
- * the grant when it is close to expiry. Rotation happens inside
- * `credentials.modifyRecord`, whose exclusive write window serializes
- * concurrent refreshes across processes, so two racing readers never burn the
- * rotating refresh token.
- *
- * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
- *
  * @module dsh-more-providers/providers/chatgpt/auth
  */
 import type { LoggerService } from '@deepseek-ai/cordis'
@@ -19,7 +9,6 @@ import { refreshGrant } from './oauth.js'
 import type { OAuthGrant } from './oauth.js'
 import type { FetchLike } from '../../oauth/transport.js'
 
-/** Refresh once the access token is this close to expiry (default 24h). */
 export const DEFAULT_REFRESH_MARGIN_MS = 24 * 60 * 60 * 1000
 
 /** The credential-seam surface the store needs (satisfied by `ctx.credentials`). */
@@ -122,12 +111,7 @@ export class TokenStore {
     this.logger = logger
   }
 
-  /**
-   * Return a usable `{ access, accountId }` pair, refreshing the grant when
-   * the access token is expired or within the refresh margin. Concurrent
-   * callers share one refresh; concurrent processes serialize inside
-   * `modifyRecord`'s exclusive write window.
-   */
+  /** Return a usable `{ access, accountId }` pair, refreshing the grant when the access token is expired or within the refresh margin. Concurrent callers share one refresh; concurrent processes serialize inside `modifyRecord`'s exclusive write window. */
   async resolve(marginMs: number = DEFAULT_REFRESH_MARGIN_MS): Promise<ResolvedToken> {
     const grant = parseGrant(await this.credentials.readRecord(this.key))
     const needsRefresh = grant.expires <= Date.now() + marginMs
@@ -143,8 +127,6 @@ export class TokenStore {
   private async refresh(stale: OAuthGrant, marginMs: number): Promise<ResolvedToken> {
     try {
       const updated = await this.credentials.modifyRecord(this.key, async (current) => {
-        // Another process may have rotated the grant between our read and
-        // this exclusive window; a still-fresh record means their token wins.
         const asSeen = parseGrant(current)
         if (asSeen.expires > Date.now() + marginMs) return undefined
         const next = await refreshGrant(this.fetch, asSeen.refresh)

@@ -1,26 +1,3 @@
-# dsh-toolchain-access bundle layer.
-#
-# Replaces the stock sandbox provider: the `sandbox` row is disabled (patch
-# layers cannot rename a row, so the stock row goes dark and this one is
-# appended) and the `toolchain-sandbox` row mounts a LocalSandboxProvider
-# subclass that adds exact writable binds for enabled toolchain-cache
-# presets to every workspace-write wrap. Runner selection, probing,
-# enforcement reporting and the fail-closed path stay the stock class's.
-#
-# The `name` on the disable entry is a guard: if a later deployment already
-# swapped the sandbox row for something else, this patch skips itself
-# instead of disabling an unknown provider.
-#
-# `presets` is omitted on purpose: the plugin schema's default then enables
-# the seven ordinary cache/state presets (uv-cache, cargo-cache, pnpm-store,
-# pnpm-runtime-locks, gradle-cache, maven-cache, semgrep-state). Set
-# `presets: []` to fall back to the stock sandbox, or an explicit list to
-# replace the default; pnpm-engine and gradle-jdks (whole toolchain installs)
-# stay opt-in. semgrep-state mounts a private writable state directory over
-# semgrep's data folder, so the host's credential-bearing settings.yml never
-# becomes writable.
-# A later layer can override this row by id; config is replaced wholesale,
-# so restate `paths` (and `presets`, if you want one) when overriding.
 - id: sandbox
   name: '@deepseek-ai/dsh-sandbox-local'
   disabled: true

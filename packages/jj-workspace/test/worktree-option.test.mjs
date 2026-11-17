@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-/**
- * Interaction tests for the worktree option in the DOM. The host Menu owns the
- * list's keyboard walk and focus return, so these exercise the real component
- * rather than asserting class names: a request, an explicit base pick, Escape,
- * and withdrawal all have to go through it.
- */
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it } from 'vitest'
@@ -155,7 +149,6 @@ it('keeps menu content in the slot and removes the host body backing on close', 
   expect(backing).not.toBeNull()
   expect(backing.getAttribute('aria-hidden')).toBe('true')
   expect(backing.parentElement).toBe(document.body)
-  // The menu itself stays in the slot subtree, not under the body.
   const menu = container.querySelector('[role="menu"]')
   expect(menu).not.toBeNull()
   expect(container.contains(menu)).toBe(true)
@@ -165,7 +158,6 @@ it('keeps menu content in the slot and removes the host body backing on close', 
   })
   expect(document.querySelector('[data-menu-backing]')).toBeNull()
 
-  // Unmounting while open must remove the backing too.
   await act(async () => {
     anchor.click()
   })
@@ -188,7 +180,5 @@ it('surfaces a failed request as an alert next to the control', async () => {
 it('disables the checkbox while a request is in flight but keeps the branch tip readable', async () => {
   const { container } = await render({ requested: false, disabled: true })
   expect(container.querySelector('input').disabled).toBe(true)
-  // The stock control keeps the current-branch button focusable so its full
-  // name and tip stay reachable while creation runs.
   expect(container.querySelector('button[aria-label]').disabled).toBe(false)
 })

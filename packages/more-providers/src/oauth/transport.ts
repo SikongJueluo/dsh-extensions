@@ -1,15 +1,5 @@
 /**
  * Proxy-aware HTTP transport for the OpenAI OAuth adapter.
- *
- * Node's global `fetch` (undici) does not read the operating system proxy or
- * the standard `HTTPS_PROXY`/`HTTP_PROXY` environment variables by default, so
- * a direct fetch to `chatgpt.com` would hang behind a proxy. This module
- * resolves an outbound proxy the same way the Codex CLI does — explicit
- * config, then environment, then the operating system proxy (macOS, Windows,
- * or Linux) — and returns an undici `fetch` bound to the matching `ProxyAgent`.
- *
- * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
- *
  * @module dsh-more-providers/oauth/transport
  */
 import { ProxyAgent, fetch as undiciFetch } from 'undici'
@@ -25,13 +15,9 @@ export type FetchLike = (
   init?: Parameters<typeof undiciFetch>[1],
 ) => ReturnType<typeof undiciFetch>
 
-/** One-shot cache for the detected system proxy (`undefined` = not resolved yet, `null` = none). */
 let detectedProxy: string | null | undefined
 
-/**
- * Run a command best-effort and return its stdout, or `null` when the command
- * is missing, exits non-zero, or times out. Proxy detection never throws.
- */
+/** Run a command best-effort and return its stdout, or `null` when the command is missing, exits non-zero, or times out. Proxy detection never throws. */
 async function run(
   cmd: string,
   args: string[] = [],
@@ -45,7 +31,7 @@ async function run(
   }
 }
 
-/** `host:port` pair → proxy URL, guarding empty/loopback/wildcard hosts. */
+/** `host:port` pair -> proxy URL, guarding empty/loopback/wildcard hosts. */
 function buildProxyUrl(
   host: string | null | undefined,
   port: string | null | undefined,
@@ -62,12 +48,7 @@ function normalizeAddress(addr: string | null | undefined): string | null {
   return /^[a-z][a-z0-9+.-]*:\/\//iu.test(trimmed) ? trimmed : `http://${trimmed}`
 }
 
-// --- macOS (scutil) ---------------------------------------------------------
-
-/**
- * Parse `scutil --proxy` output into a proxy URL. Prefers the HTTPS proxy,
- * then the HTTP proxy; ignores disabled or wildcard entries.
- */
+/** Parse `scutil --proxy` output into a proxy URL. Prefers the HTTPS proxy, then the HTTP proxy; ignores disabled or wildcard entries. */
 function parseMacosProxy(stdout: string): string | null {
   let host: string | undefined
   let port: string | undefined
@@ -88,8 +69,6 @@ async function detectMacosSystemProxy(): Promise<string | null> {
   return stdout === null ? null : parseMacosProxy(stdout)
 }
 
-// --- Windows (registry) -----------------------------------------------------
-
 const WINDOWS_INTERNET_SETTINGS =
   'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'
 
@@ -108,11 +87,7 @@ function parseRegString(stdout: string): string | null {
   return match?.[1]?.trim() ?? null
 }
 
-/**
- * Parse the Windows `ProxyServer` value, which may be a bare `host:port`, a
- * `proto=host:port;...` list, or the reverse `host:port=proto,proto` form.
- * Prefers the `https` entry, then `http`, then the bare address.
- */
+/** Parse the Windows `ProxyServer` value, which may be a bare `host:port`, a `proto=host:port;...` list, or the reverse `host:port=proto,proto` form. Prefers the `https` entry, then `http`, then the bare address. */
 function parseWindowsProxyServer(value: string): string | null {
   if (!value) return null
   let bare: string | null = null
@@ -128,7 +103,6 @@ function parseWindowsProxyServer(value: string): string | null {
     }
     const left = part.slice(0, eq).trim().toLowerCase()
     const right = part.slice(eq + 1).trim()
-    // Reverse form: "server:port=http,https".
     if (/^[a-z][a-z0-9]*(\s*,\s*[a-z][a-z0-9]*)*$/iu.test(right) && !/^[a-z]+$/u.test(left)) {
       const protos = new Set(right.split(',').map((s) => s.trim().toLowerCase()))
       if (https === null && protos.has('https')) https = left
@@ -149,8 +123,6 @@ async function detectWindowsSystemProxy(): Promise<string | null> {
   if (serverOut === null) return null
   return parseWindowsProxyServer(parseRegString(serverOut) ?? '')
 }
-
-// --- Linux (GNOME gsettings / KDE) -------------------------------------------
 
 /** Parse a gsettings string value (`'quoted'`) into a plain string. */
 function parseGsettingsString(stdout: string): string | null {
@@ -189,14 +161,9 @@ async function detectGnomeSystemProxy(): Promise<string | null> {
   return buildProxyUrl(httpHost, httpPort === null ? null : String(httpPort))
 }
 
-/** KDE `ProxyType` values: 0=none, 1=manual, 2=PAC, 3=WPAD, 4=env, 5=auto. */
 const KDE_KIOSLAVERC_ARGS = ['--file', 'kioslaverc', '--group', 'Proxy Settings']
 
-/**
- * Read a manual KDE proxy. Returns a proxy URL when configured, `null` when the
- * config utility runs but reports "no proxy", or `undefined` when the command
- * is unavailable (so the caller can try the next `kreadconfig` version).
- */
+/** Read a manual KDE proxy. Returns a proxy URL when configured, `null` when the config utility runs but reports "no proxy", or `undefined` when the command is unavailable (so the caller can try the next `kreadconfig` version). */
 async function kdeProxy(cmd: string): Promise<string | null | undefined> {
   const typeOut = await run(cmd, [...KDE_KIOSLAVERC_ARGS, '--key', 'ProxyType'])
   if (typeOut === null) return undefined
@@ -208,7 +175,6 @@ async function kdeProxy(cmd: string): Promise<string | null | undefined> {
 }
 
 async function detectKdeSystemProxy(): Promise<string | null> {
-  // Plasma 6 ships `kreadconfig6`; Plasma 5 uses `kreadconfig5`.
   for (const cmd of ['kreadconfig6', 'kreadconfig5']) {
     const proxy = await kdeProxy(cmd)
     if (proxy) return proxy
@@ -222,13 +188,7 @@ async function detectLinuxSystemProxy(): Promise<string | null> {
   return (await detectGnomeSystemProxy()) ?? (await detectKdeSystemProxy())
 }
 
-// --- public API -------------------------------------------------------------
-
-/**
- * Detect the operating system proxy (macOS `scutil`, Windows registry, or
- * Linux GNOME/KDE settings). Best-effort: any failure resolves to `null`
- * (direct connection).
- */
+/** Detect the operating system proxy (macOS `scutil`, Windows registry, or Linux GNOME/KDE settings). Best-effort: any failure resolves to `null` (direct connection). */
 async function detectSystemProxy(): Promise<string | null> {
   if (process.platform === 'darwin') return detectMacosSystemProxy()
   if (process.platform === 'win32') return detectWindowsSystemProxy()
@@ -236,17 +196,13 @@ async function detectSystemProxy(): Promise<string | null> {
   return null
 }
 
-/**
- * Resolve the outbound proxy URL: explicit config, then environment, then the
- * operating system proxy.
- */
+/** Resolve the outbound proxy URL: explicit config, then environment, then the operating system proxy. */
 async function resolveProxy(
   explicit?: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | null> {
   if (explicit) return explicit
   if (detectedProxy !== undefined) return detectedProxy
-  // `||`-equivalent over the proxy env names: an empty value counts as absent.
   const fromEnv = [
     env.HTTPS_PROXY,
     env.https_proxy,
@@ -259,11 +215,7 @@ async function resolveProxy(
   return detectedProxy
 }
 
-/**
- * Build an undici fetch bound to the resolved proxy, or the plain undici fetch
- * for a direct connection. undici's own `fetch` is used (not the global) so
- * the `dispatcher` comes from the same undici instance.
- */
+/** Build an undici fetch bound to the resolved proxy, or the plain undici fetch for a direct connection. undici's own `fetch` is used (not the global) so the `dispatcher` comes from the same undici instance. */
 export async function createFetch(proxyUrl?: string): Promise<FetchLike> {
   const proxy = await resolveProxy(proxyUrl)
   if (!proxy) return undiciFetch
@@ -272,11 +224,7 @@ export async function createFetch(proxyUrl?: string): Promise<FetchLike> {
     undiciFetch(url, { ...init, dispatcher })
 }
 
-/**
- * Parse a response body as JSON, but never let a proxy/Cloudflare HTML page
- * surface as a raw `Unexpected token '<'` error. Non-JSON or unparseable
- * bodies raise a descriptive error with a short body snippet instead.
- */
+/** Parse a response body as JSON, but never let a proxy/Cloudflare HTML page surface as a raw `Unexpected token '<'` error. Non-JSON or unparseable bodies raise a descriptive error with a short body snippet instead. */
 export async function readJson(response: Response, what: string): Promise<unknown> {
   const contentType = response.headers.get('content-type') ?? ''
   const text = await response.text()

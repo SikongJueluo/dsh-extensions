@@ -92,8 +92,6 @@ describe('hot refresh', () => {
         'the first category after root creation',
       )
 
-      // The root watcher was opened in absent mode. A later category is only
-      // observed if the watcher is replaced once the root is a directory.
       await writeSkill(join(harness.skillsRoot, 'two', 'second'), [
         'name: second',
         'description: Second category after the root appeared',

@@ -305,6 +305,9 @@ catalogs:
     jsdom:
       specifier: ^31.0.1
       version: 31.0.1
+    jsonc-parser:
+      specifier: 3.3.1
+      version: 3.3.1
     katex:
       specifier: ^0.18.7
       version: 0.18.10
@@ -350,6 +353,9 @@ catalogs:
     micromark-util-types:
       specifier: ^2.0.2
       version: 2.0.3
+    oxc-parser:
+      specifier: 0.127.0
+      version: 0.127.0
     oxfmt:
       specifier: 0.78.0
       version: 0.78.0
@@ -359,6 +365,9 @@ catalogs:
     oxlint-tsgolint:
       specifier: 7.0.2007
       version: 7.0.2007
+    postcss:
+      specifier: 8.5.29
+      version: 8.5.29
     react:
       specifier: 18.3.1
       version: 18.3.1
@@ -392,6 +401,9 @@ catalogs:
     vite:
       specifier: ^7.3.7
       version: 7.3.7
+    yaml:
+      specifier: 2.9.1
+      version: 2.9.1
     zustand:
       specifier: ~4.5.7
       version: 4.5.7
@@ -418,6 +430,12 @@ importers:
       fallow:
         specifier: 'catalog:'
         version: 3.43.1
+      jsonc-parser:
+        specifier: 'catalog:'
+        version: 3.3.1
+      oxc-parser:
+        specifier: 'catalog:'
+        version: 0.127.0
       oxfmt:
         specifier: 'catalog:'
         version: 0.78.0
@@ -427,6 +445,9 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 7.0.2007
+      postcss:
+        specifier: 'catalog:'
+        version: 8.5.29
       react:
         specifier: 'catalog:'
         version: 18.3.1
@@ -448,6 +469,9 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 7.3.7(@types/node@24.19.0)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.1)
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.1
 
   packages/auto-continue:
     devDependencies:

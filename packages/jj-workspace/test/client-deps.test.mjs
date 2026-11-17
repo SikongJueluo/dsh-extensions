@@ -3,11 +3,6 @@ import TestRenderer, { act } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
 
-// Regression for the real Client dependency contract: this file mounts the
-// shipped client module on a real Cordis context. The Forge Remote namespace
-// (`remote.forgePanel`) is a Cordis service, not a plain property of `remote`;
-// the plugin must wait for it before registering the replacement worktree
-// control, which the plain-object mocks in client.test.mjs cannot enforce.
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 import { apply as applyClient, inject as clientInject } from '../src/client/index.tsx'
 const client = { apply: applyClient, inject: clientInject }
@@ -60,7 +55,6 @@ class SlotsService extends Service {
     this.entries = []
   }
 
-  // Mirror the real registry: the controller belongs to the caller's fiber.
   inject(_key, callback) {
     const dispose = this.ctx.effect(callback, 'test slots.inject')
     return () => dispose()

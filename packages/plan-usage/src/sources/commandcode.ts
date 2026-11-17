@@ -1,28 +1,15 @@
 /**
- * Command Code quota source: the alpha billing routes the Command Code CLI
- * uses for its usage view.
- *
- * `GET /alpha/whoami?limits=1` scopes the team org, then
- * `GET /alpha/billing/credits` reports the 5h/weekly rolling windows and the
- * included monthly credit balance, and `GET /alpha/billing/subscriptions`
- * supplies the plan id and billing-period end. All three take the same
- * `Authorization: Bearer <CMD_API_KEY>` and are undocumented alpha routes, so
- * every field is optional and a malformed window is dropped instead of
- * failing the whole snapshot.
- *
+ * Command Code quota source: the alpha billing routes the Command Code CLI uses for its usage view.
  * @module dsh-plan-usage/sources/commandcode
  */
 import type { QuotaSnapshot, QuotaWindow } from '../types.js'
 import { isRecord } from './contracts.js'
 import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
-/** Canonical Command Code API origin (billing routes live here, not under /provider). */
 export const COMMAND_CODE_API_BASE = 'https://api.commandcode.ai'
 
-/** Env vars accepted by the provider and the official pi extension. */
 const ENV_KEYS = ['CMD_API_KEY', 'COMMAND_CODE_API_KEY'] as const
 
-/** Plan id -> [display name, included monthly credits in USD]. */
 const PLANS: Record<string, readonly [string, number]> = {
   'individual-go': ['Go', 10],
   'individual-go-v1': ['Go', 10],
@@ -42,17 +29,13 @@ export interface CommandCodeSourceOptions {
   whoamiTimeoutMs?: number
   env?: NodeJS.ProcessEnv
   baseURL?: string
-  /** Extra env var to try first, matching the provider row's apiKeyEnv override. */
   apiKeyEnv?: string
-  /** Optional external key resolver (dsh-more-providers' `providerKeys`). */
   getKey?: (provider: string) => string | undefined
 }
 
 /** Plugin-row override for the Command Code monitor. */
 export interface CommandCodeMonitorSettings {
-  /** Env var holding the API key; the default names are still tried after it. */
   apiKeyEnv?: string
-  /** API origin override (staging). */
   baseURL?: string
 }
 
@@ -149,11 +132,7 @@ function planIdOf(
   return stringValue(credits?.planId) ?? stringValue(root?.planId)
 }
 
-/**
- * Monthly included-credit window, sized by the reported grant or the plan
- * table. The remaining balance alone is not enough to draw a meaningful bar,
- * so an unknown grant omits the window rather than inventing a denominator.
- */
+/** Monthly included-credit window, sized by the reported grant or the plan table. The remaining balance alone is not enough to draw a meaningful bar, so an unknown grant omits the window rather than inventing a denominator. */
 function monthlyOf(
   credits: Record<string, unknown> | undefined,
   root: Record<string, unknown> | undefined,
@@ -176,11 +155,7 @@ function monthlyOf(
   }
 }
 
-/**
- * Parse a `/alpha/billing/credits` body (optionally enriched with the
- * subscription's plan and period end). Pure; returns an in-band `{ error }`
- * when no window is usable.
- */
+/** Parse a `/alpha/billing/credits` body (optionally enriched with the subscription's plan and period end). Pure; returns an in-band `{ error }` when no window is usable. */
 export function parseCommandCodeCredits(
   creditsBody: unknown,
   subscriptionBody?: unknown,
@@ -229,11 +204,7 @@ interface JsonResult {
   body?: unknown
 }
 
-/**
- * The Command Code quota source for the `command-code` route, keyed by
- * `CMD_API_KEY` / `COMMAND_CODE_API_KEY`: up to three authenticated GETs per
- * fetch, `undefined` on any failure (never throws).
- */
+/** The Command Code quota source for the `command-code` route, keyed by `CMD_API_KEY` / `COMMAND_CODE_API_KEY`: up to three authenticated GETs per fetch, `undefined` on any failure (never throws). */
 export class CommandCodeSource implements QuotaSource {
   readonly id = 'command-code'
   readonly routes = ['command-code'] as const

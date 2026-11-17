@@ -7,11 +7,6 @@
 @source "./**/*.tsx";
 @source "../packages/jj-workspace/src/**/*.tsx";
 
-/*
- * Storybook-only stand-in for the host's public alias tokens, copied from the
- * pinned DSH 0.2.2-rc.1 theme package so stories render on the real palette.
- * Production CSS never defines these; it reads the live body variables.
- */
 .storybook-canvas[data-theme='light'] {
   --dsw-alias-bg-base: #ffffff;
   --dsw-alias-bg-layer-1: #ffffff;

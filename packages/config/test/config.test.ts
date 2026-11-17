@@ -305,7 +305,6 @@ interface StubRoute {
   resource: () => Promise<Response>
 }
 
-/** A real Cordis service implementing only what the status route registers. */
 class FakeWebServer extends Service {
   readonly routes = new Map<string, StubRoute>()
 
@@ -367,8 +366,6 @@ describe('status route across plugin instances', () => {
       'valid',
     ])
 
-    // The first instance owned the route; its unload must hand the same path to
-    // the survivor instead of leaving a hole.
     await first.dispose()
     await waitFor(() => server.routes.size === 1, 'the route handoff')
     const survivorRoute = server.routes.get('/dsh-test-multi/config-status')

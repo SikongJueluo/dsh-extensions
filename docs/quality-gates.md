@@ -1,9 +1,8 @@
 # 质量门禁（Oxfmt / Oxlint / Fallow）
 
-> **状态：候选基线，等待例外批准。** 工具已安装并锁定、配置已落地、全仓扫描已跑完；
-> 本文第 6 节的清单是本次接入**必须由用户批准**的部分。批准前这些条目只算提案，
-> 修复分层从第 8 节开始，最终 `pnpm check` 会等修复完成后才把它们并入门禁。
-> 逐条原始数据见 [quality-scan-baseline.md](quality-scan-baseline.md)。
+> **状态：基础门禁已接入，历史接入记录保留如下。** 当前验证快照见第 8 节；已批准的例外见第 6 节。
+> 2026-11-18 新增源码注释门禁，规范见 [源码注释规则](comment-policy.md)，接线见第 9 节。
+> 初次扫描原始数据见 [quality-scan-baseline.md](quality-scan-baseline.md)。
 
 ## 1. 职责分离
 
@@ -13,6 +12,7 @@
 | `oxfmt` | 纯排版：引号、分号、缩进、换行、行宽 | 语义、命名、导入顺序、Tailwind 顺序、manifest 字段顺序 |
 | `oxlint` + `oxlint-tsgolint` | 单文件正确性与类型规则（含不安全断言、浮空 Promise、hooks、a11y） | 跨文件可达性、依赖卫生、重复度 |
 | `fallow` | 跨文件图：死代码、依赖卫生、循环依赖、重复与复杂度报告 | 单文件语义规则，也不替代 `tsc` |
+| `check:comments` | 通过语言解析器检查源码注释的位置、格式、标签、行数、词数和 ASCII 字符范围 | 不能证明自然语言一定是英文，也不能完整判断说明是否有用；语义要求见 [源码注释规则](comment-policy.md) |
 
 排版规则不从 lint 里重复；Fallow 不承担“某行是否该加分号”这种判断。
 
@@ -26,7 +26,7 @@ oxfmt 0.78.0           fallow 3.43.1
 - 四个工具都在根 `devDependencies` 经 `catalog:` 精确钉版（无 `^`/`latest`）。升级是独立提交，须按第 8 节审查新增规则。
 - 开发与完整 CI 用 **Node 24 LTS**（根 `package.json` `engines.node >= 24`），pnpm 12.3.4。Node 24 以外的 Node 20 只用于**产物兼容性验证**，不跑开发工具。
 - 本机 Node 24.21.0 已实测：oxlint/oxfmt/fallow 三个原生二进制在 NixOS 上都能启动，`fallow --version` 自检签名通过；未新增系统依赖。
-- 自动检查需要的外部程序：`jj`、`git`、`fish`、`mkfifo`、`tar`。Fallow 把 `jj` 记为外部提供（`.fallowrc.jsonc` 的 `ignoreBinaries`），其余是常规 POSIX/工具链。
+- 自动检查需要的外部程序：`jj`、`git`、`fish`、`mkfifo`、`tar`、`python3`（Python 注释与文档字符串的语法分析）。Fallow 把 `jj` 记为外部提供（`.fallowrc.jsonc` 的 `ignoreBinaries`），其余是常规 POSIX/工具链。
 - 网络由 mihomo 管理，本次未改任何网络配置。
 
 ## 3. Oxlint
@@ -85,7 +85,7 @@ oxfmt 0.78.0           fallow 3.43.1
 | B5 | `typescript/no-confusing-void-expression` | 124 | `triggers/src/service.ts:194` | React 事件处理器 `() => setX()` 是惯用写法 |
 | B6 | `no-negated-condition` | 67 | `oauth-providers/.../discovery.ts:43` | `if (!x)` 早返回是本仓主流守卫写法 |
 | B7 | `unicorn/no-negated-condition` | 67 | 同上 | 同 B6 |
-| B8 | `no-inline-comments` | 42 | `search-integrator/test/fetch-page.test.ts:108` | 本仓用行尾注释解释相邻常量，属既定风格 |
+| B8 | `no-inline-comments` | 42（初次扫描） | `search-integrator/test/fetch-page.test.ts:108`（历史位置） | 2026-11-18 起由专用 `check:comments` 统一禁止行尾说明性注释，并识别必要工具指令；Oxlint 此规则保持 off，避免与新门禁重复建模。原“行尾解释是既定风格”的理由已废止 |
 | B9 | `max-lines` | 68 | `plan-usage/src/sources/commandcode.ts:317` | 数值预算，按第 8 节由 Fallow health 报告，不做逐行卡口 |
 | B10 | `max-lines-per-function` | 198 | `oauth-providers/.../login.ts:51` | 同 B9 |
 | B11 | `max-statements` | 414 | 同上 | 同 B9 |
@@ -106,7 +106,7 @@ oxfmt 0.78.0           fallow 3.43.1
 
 | # | 决定 | 理由 |
 | --- | --- | --- |
-| C1 | 不启用 `jest`、`jsdoc`、`nextjs`、`vue` 插件 | 本仓用 vitest + `node:test`，没有 Jest；没有 JSDoc `@param` 约定（文档在 README/`docs/`）；没有 Next.js/Vue 应用 |
+| C1 | 不启用 `jest`、`jsdoc`、`nextjs`、`vue` 插件 | 本仓用 vitest + `node:test`，没有 Jest 或 Next.js/Vue 应用；JSDoc 格式与可选 `@param` 契约由专用注释门禁检查，不要求全面补写 JSDoc |
 | C2 | 类型感知规则对 `*.{js,mjs,cjs}` 全关 | 无注解的 JS 只能推出 `any`/error 类型：实测 `handoff/smoke.mjs` 因 `let registered = null` 产生 857 条 `no-unsafe-member-access` 假阳性。JS 仍受全部语法级规则约束 |
 | C3 | 不启用 `react-perf` 插件（98 处命中） | `jsx-no-new-function-as-prop` 一类规则迫使到处 `useCallback`/`useMemo`，与“不为数值盲目抽象”的既定政策冲突，且无实测渲染成本证据 |
 
@@ -290,7 +290,7 @@ circular dependencies（2：`handoff` 的 `brief↔spawn` 与 `brief→spawn→m
 
 warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 是有意的
 测试/加载双入口）、`unused-dev-dependencies` 30（其中 `packages/ui` 的 20+ 个是
-`@deepseek-ai/dsh-client-ui-primitives` 的预览/测试依赖图，见 `pnpm-workspace.yaml` 注释；
+`@deepseek-ai/dsh-client-ui-primitives` 的预览/测试依赖图，理由见 [工具约束记录](comment-tooling-notes.md#root-configurations)；
 4 个是 CLI 工具本身）。
 
 ### 4.4 复杂度与重复：报告，不阻塞
@@ -427,3 +427,28 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 5. 统一入口层：把 `format:check`、`lint`、`fallow`、现有测试/smoke、`check:pack`、Storybook build 聚合进 `pnpm check`；skip 必须可见且不能替代必需项。
 6. CI 层：GitHub Actions 复用同一入口；远端成功记录与平台保护设置分开报告。
 7. 升级流程：每次升 oxlint/oxfmt/fallow，列出新增规则 → 已启用/不适用/待决定，并记录默认值与行为变化。
+
+## 9. 源码注释门禁（2026-11-18）
+
+用户已确认本仓库采用解析式静态检查，并在接入时清理存量；不扩展到全局代理配置，不保留历史违规基线。
+注释的允许位置、额度、英文与字符口径、标签、指令例外和人工审查边界以 [源码注释规则](comment-policy.md) 为唯一规范。
+本节替代 B8 原有的行尾解释风格，以及 C1 原有的“没有 JSDoc 参数约定”理由；不改动既有 lint 抑制的批准清单。
+
+- `pnpm check:comments` 解析手写源码、测试、脚本及配置；解析失败和注释违规都阻塞门禁。
+- `pnpm test:comments` 验证检查器的正反例和边界，不依赖插件构建产物。
+- `pnpm check:quality` 在 `format` 后、`lint` 前分别运行 `comments` 与 `comment-tests`；其余门禁继续保留，共 13 步。
+- GitHub Actions 仍运行同一个 `pnpm check:quality`，注释门禁无需另设一份 CI 规则。
+- Python 分析使用 `python3` 的标准库；本地与 CI 都需要该命令。工具不可用时不能静默跳过 Python 文件。
+
+指令注释的识别只免除说明性注释的结构限制，不授予新增 lint 豁免；`check:suppressions` 仍双向检查批准登记。
+放宽注释规则、扩大忽略范围或新增内联抑制，仍须先更新本文并取得用户批准。
+
+第 8 节的 11 步全绿是 2026-11-16 的历史验证结果，不是新增注释门禁的验证结论。
+
+### 9.1 本次验证
+
+2026-11-18 纯注释迁移阶段验证：注释扫描覆盖 424 个文件，检查器回归测试 26 项通过，独立边界验证 21 项通过；检查器独立审查未发现剩余阻塞。该阶段的 281 个修改文件与父层 `usmlpxwv` 的 AST 或配置值一致，工具指令保持；随后按用户要求增加的日志属于有意的可观察性变更，单独进行类型检查和失败路径测试。豁免登记器改用解析器识别实际注释，并覆盖行内、文件级和全部规则抑制，批准清单未扩展。
+
+完整 `pnpm check:quality` 的 13 步中，12 步通过，仅 lint 因 33 个既有 catch 删除说明注释后触发 `no-empty` 而失败。最后修正检查器后，format、comments、comment-tests、suppressions、dead-code 的定向复验仍通过。类型、构建、包测试、smoke、客户端产物、pack 与 Storybook 已在完整运行中通过；本次未推送远端 CI。
+
+用户要求为失败增加可观察性，已撤回空 catch 的规则放宽提案；`no-empty` 继续为 error。33 个位置按实际失败语义补充日志或已有诊断输出，保留原有恢复流程和原始错误。完整门禁将在这些修改完成后重新运行。

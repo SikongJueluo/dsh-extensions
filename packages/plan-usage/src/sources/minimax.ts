@@ -1,31 +1,16 @@
 /**
  * MiniMax Token Plan quota source: `GET /v1/token_plan/remains`.
- *
- * One row per model bucket (`general` = the text/coding pool this source
- * reports; `video` is ignored), each with a rolling interval window (5h for
- * general) and a weekly window. Four wire quirks, all verified against
- * ai-usagebar's live capture (MIT):
- *
- * 1. HTTP 200 always — auth failures arrive 200 with the real status in
- *    `base_resp.status_code` (1004 no key, 2049 wrong-region key).
- * 2. The percentages are what REMAINS, not what was consumed — inverted here.
- * 3. The interval length is per-bucket (general 5h, video 24h) — derived from
- *    each row's own start/end, never a constant.
- * 4. All timestamps are epoch milliseconds.
- *
  * @module dsh-plan-usage/sources/minimax
  */
 import type { QuotaSnapshot } from '../types.js'
 import { isRecord } from './contracts.js'
 import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
-/** Region endpoints keyed by provider route id. */
 const HOSTS: Record<string, string> = {
   minimax: 'https://api.minimax.io',
   'minimax-cn': 'https://api.minimaxi.com',
 }
 
-/** Env var holding each route's API key (matching the pi-ai providers). */
 const ENV_KEYS: Record<string, string> = {
   minimax: 'MINIMAX_API_KEY',
   'minimax-cn': 'MINIMAX_CN_API_KEY',
@@ -36,7 +21,6 @@ export interface MiniMaxSourceOptions {
   logger?: SourceLogger
   timeoutMs?: number
   env?: NodeJS.ProcessEnv
-  /** Optional external key resolver (dsh-more-providers' `providerKeys`). */
   getKey?: (provider: string) => string | undefined
 }
 
@@ -79,9 +63,7 @@ export interface MiniMaxWindows {
 /** In-band failure: stable status code plus the auth/wrong-region flag. */
 export interface MiniMaxError {
   error: string
-  /** `base_resp.status_code` when the envelope reported a failure. */
   statusCode?: number
-  /** true when the code means the key was rejected (1004 absent, 2049 wrong region). */
   authRejected?: boolean
 }
 
@@ -90,12 +72,7 @@ function isAuthStatusCode(code: number | undefined): boolean {
   return code === 1004 || code === 2049
 }
 
-/**
- * Parse a `token_plan/remains` body into the general bucket's windows.
- * Pure; `undefined` when the envelope reports failure or carries no usable
- * text bucket. Throws nothing; in-band failures return `{ error }` with the
- * stable numeric status code (never the upstream free-text message).
- */
+/** Parse a `token_plan/remains` body into the general bucket's windows. Pure; `undefined` when the envelope reports failure or carries no usable text bucket. Throws nothing; in-band failures return `{ error }` with the stable numeric status code (never the upstream free-text message). */
 export function parseMiniMaxRemains(body: unknown): MiniMaxWindows | MiniMaxError {
   const envelope = asRecord(body)
   if (envelope === null) return { error: 'minimax: response was not an object' }
@@ -148,14 +125,10 @@ export function parseMiniMaxRemains(body: unknown): MiniMaxWindows | MiniMaxErro
   return parsed
 }
 
-/**
- * The MiniMax usage source for the `minimax` / `minimax-cn` routes, keyed by
- * each route's region host and env API key.
- */
+/** The MiniMax usage source for the `minimax` / `minimax-cn` routes, keyed by each route's region host and env API key. */
 export class MiniMaxSource implements QuotaSource {
   readonly id = 'minimax'
   readonly routes = Object.keys(HOSTS)
-  /** Live host per route — flips once when the key turns out to belong to the other region (2049). */
   private readonly hostOverrides = new Map<string, string>()
 
   private readonly fetchImpl: FetchLike
@@ -200,7 +173,6 @@ export class MiniMaxSource implements QuotaSource {
   async get(route: string): Promise<QuotaSnapshot | undefined> {
     const first = await this.attempt(route)
     if (first.snapshot !== undefined || !first.retryOtherRegion) return first.snapshot
-    // The key belongs to the other region (2049); the flip is already recorded.
     return (await this.attempt(route)).snapshot
   }
 
@@ -225,8 +197,6 @@ export class MiniMaxSource implements QuotaSource {
         retryOtherRegion: false,
       }
     }
-    // A wrong-region key (2049) means the OTHER region's host serves this
-    // account: remember it and retry there once.
     if (parsed.authRejected === true && parsed.statusCode === 2049) {
       const other = this.fallbackHost(route, endpoint.host)
       if (other !== undefined) {

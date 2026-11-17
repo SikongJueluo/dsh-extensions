@@ -10,13 +10,11 @@ export interface SelectOption {
 }
 
 export interface SelectGroup {
-  /** Stable identity: the popup renders one list per group, so React needs a key. */
   id: string
   label: React.ReactNode
   options: SelectOption[]
 }
 
-/** Stable empty default: a fresh `[]` per render would churn list identity. */
 const EMPTY_OPTIONS: SelectOption[] = []
 
 export interface SelectProps {
@@ -30,9 +28,7 @@ export interface SelectProps {
   name?: string
   className?: string
   'aria-label'?: string
-  /** `ghost` is the DSH inline selector: transparent, borderless, compact. */
   variant?: 'default' | 'ghost'
-  /** Which trigger edge the popup follows; inline controls at the right use `end`. */
   align?: 'start' | 'end' | 'center'
 }
 
@@ -55,11 +51,7 @@ const renderItem = (option: SelectOption) => (
   </BaseSelect.Item>
 )
 
-/**
- * Base UI select styled as the shadcn trigger/popup pair. The popup portals
- * into a container inside this component's own subtree, not into `document.body`,
- * so it inherits the host theme and stays inside the slot's DOM ownership.
- */
+/** Base UI select styled as the shadcn trigger/popup pair. The popup portals into a container inside this component's own subtree, not into `document.body`, so it inherits the host theme and stays inside the slot's DOM ownership. */
 export function Select({
   value,
   onValueChange,
@@ -79,9 +71,7 @@ export function Select({
 
   return (
     <div className={cn('dshx:relative', variant === 'ghost' && 'dshx:inline-flex', className)}>
-      {/* A fixed, zero-size portal host keeps the popup out of the slot's
-          layout and scrollable overflow; the positioner still uses viewport
-          coordinates, so the popup cannot push the surrounding UI. */}
+      {}
       <div ref={setContainer} className="dshx:fixed dshx:left-0 dshx:top-0 dshx:h-0 dshx:w-0" />
       <BaseSelect.Root
         value={value === '' ? null : value}

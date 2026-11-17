@@ -1,15 +1,5 @@
 /**
  * The integrator: query planning and evidence synthesis over the LlmPort.
- *
- * Strictness rules that are product decisions, not conveniences:
- * - a call that did not finish `stop` is a failure regardless of emitted text;
- * - the JSON contract is validated, with ONE bounded repair attempt feeding
- *   the parse error back; after that the round fails;
- * - fabricated citation ids are stripped; a point left with no valid citation
- *   survives only with `citationFailed` so the render can label it honestly;
- * - accuracy is expressed as evidence-support labels (`supported` /
- *   `conflict` / `insufficient`) — never a confidence percentage.
- *
  * @module dsh-search-integrator/integrate
  */
 import { isRecord } from './types.js'
@@ -99,11 +89,7 @@ function addUsage(total: LlmUsage, more: LlmUsage | undefined): LlmUsage {
   }
 }
 
-/**
- * Extract the outermost JSON object from model text: strips markdown fences
- * and any prose around the object, then balances braces (string-aware).
- * Returns `undefined` when no complete object is found.
- */
+/** Extract the outermost JSON object from model text: strips markdown fences and any prose around the object, then balances braces (string-aware). Returns `undefined` when no complete object is found. */
 export function extractJsonObject(text: string): string | undefined {
   let body = text.trim()
   const fence = /^```[a-zA-Z]*\s*([\s\S]*?)\s*```$/u.exec(body)
@@ -146,7 +132,6 @@ function cleanStrings(value: unknown, cap: number): string[] {
 
 /**
  * Validate and citation-check the integrator contract.
- *
  * @param parsed - the parsed JSON value (shape unchecked).
  * @param sourceCount - highest valid evidence number.
  * @param options - caps for defensive bounding.
@@ -170,7 +155,6 @@ export function parseIntegration(
     const point = entry
     const rawText = typeof point.text === 'string' ? point.text.trim() : ''
     if (rawText === '' || !isPointStatus(point.status)) continue
-    // Citation validation: an id is valid only if the numbered source exists.
     const validIds = new Set(Array.from({ length: sourceCount }, (_, i) => i + 1))
     const rawSources: unknown[] = Array.isArray(point.sources) ? point.sources : []
     const cited = rawSources.filter(
@@ -179,7 +163,6 @@ export function parseIntegration(
     )
     const unique = [...new Set(cited)]
     const rawCount = rawSources.length
-    // Conflict sides: validated like the flat list, each attributed on its own.
     const sides: ConflictSide[] = []
     const rawSides: unknown[] = Array.isArray(point.sides) ? point.sides : []
     for (const side of rawSides) {
@@ -198,11 +181,8 @@ export function parseIntegration(
       if (sideSources.length === 0) continue
       sides.push({ text: scrubInvalidCitations(sideText, sourceCount), sources: sideSources })
     }
-    // A point with no valid citation is not kept as a claim: it moves to the
-    // unknowns so the loss is visible instead of silently trusted.
     if (unique.length === 0) {
       if (rawCount === 0 && sides.length > 0) {
-        // Flat list missing but sides carry valid attributions: accept them.
         const sideIds = [...new Set(sides.flatMap((side) => [...side.sources]))]
         points.push({
           text: scrubInvalidCitations(rawText, sourceCount),
@@ -237,11 +217,7 @@ export function parseIntegration(
   }
 }
 
-/**
- * Plan seed queries for a question. Any failure — including a malformed
- * answer or a port-level throw — returns undefined; the caller falls back to
- * the raw question, so planning is always an optimization, never a dependency.
- */
+/** Plan seed queries for a question. Any failure - including a malformed answer or a port-level throw - returns undefined; the caller falls back to the raw question, so planning is always an optimization, never a dependency. */
 export async function planQueries(
   llm: LlmPort,
   question: string,
@@ -277,12 +253,8 @@ function integrationUserMessage(question: string, digest: string, sourceCount: n
 }
 
 /**
- * Run one integration round: initial call plus at most one repair attempt
- * whose feedback names the exact failure. Citation validation is applied to
- * whatever parsed successfully.
- *
- * @param options.finalRound - marks the last available round: the model is
- *   told follow-up will not run, so residual gaps belong in `unknowns`.
+ * Run one integration round: initial call plus at most one repair attempt whose feedback names the exact failure. Citation validation is applied to whatever parsed successfully.
+ * @param options.finalRound - marks the last available round: the model is told follow-up will not run, so residual gaps belong in `unknowns`.
  */
 export async function runIntegration(
   llm: LlmPort,
@@ -326,9 +298,6 @@ export async function runIntegration(
     usage = addUsage(usage, outcome.usage)
     if (outcome.ok) rawOutputs.push(outcome.text)
     if (!outcome.ok) {
-      // Hard terminal states burn the round now: 'aborted' is cancellation,
-      // 'max-tokens' is deterministic under the same prompt. A generic adapter
-      // 'error' (or a stream that never finished) gets exactly one retry.
       const transient = outcome.finishKind === 'error' || outcome.finishKind === 'none'
       if (attempt === 1 && transient) {
         repairNote = outcome.error ?? 'model call failed'

@@ -1,5 +1,3 @@
-// Smoke checks for the pure pieces (run after `pnpm build`):
-//   node packages/rtk-rewrite/smoke.mjs
 import { RtkBashExecutor, Config, RewriteCache, rewrittenFromStdout } from './lib/index.js'
 
 let failed = 0

@@ -1,20 +1,5 @@
 /**
- * The `planUsage` host service: quota windows for coding-plan provider
- * routes, aggregated from per-vendor sources behind one read API.
- *
- * Sources today: the GLM coding-plan monitor (z.ai / bigmodel, API key), the
- * OpenAI Codex usage endpoint (ChatGPT OAuth via the `oauthProviders`
- * service), the MiniMax Token Plan endpoint (API key, both regions), and
- * the OpenCode Go usage endpoint (API key).
- * The provider routes surfaced are intersected with the process's live LLM
- * registry (`ctx.llm.listProviders()`, refreshed on `llm/adapters-updated`)
- * so the Settings page shows one card per route actually in use — the GLM
- * alias family collapses to the route the deployment configured.
- *
- * Registered as a Cordis service by dsh-plan-usage; consumers read it with
- * `ctx.get('planUsage')` and must treat `undefined` (plugin absent) as "no
- * quota data".
- *
+ * The `planUsage` host service: quota windows for coding-plan provider routes, aggregated from per-vendor sources behind one read API.
  * @module dsh-plan-usage/service
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -34,19 +19,14 @@ import type { ProviderMonitorSettings } from './sources/glm.js'
 
 /** Row configuration consumed by the service. */
 export interface PlanUsageConfig {
-  /** Quota fetch cache TTL (ms). */
   quotaCacheMs: number
-  /** Per-provider monitor overrides/additions keyed by provider route (GLM family). */
   providers: Record<string, ProviderMonitorSettings>
-  /** Command Code monitor overrides (env var / API origin). */
   commandCode?: CommandCodeMonitorSettings
 }
 
 /** Read options accepted by {@link PlanUsageService.get}. */
 export interface PlanUsageGetOptions {
-  /** Serve from cache while younger than this (default: the row's TTL). */
   maxAgeMs?: number
-  /** Bypass the cache for this read. */
   force?: boolean
 }
 
@@ -96,7 +76,6 @@ export class PlanUsageService extends Service {
   private readonly sources: QuotaSource[]
   private readonly cache = new Map<string, CacheEntry>()
   private readonly inflight = new Map<string, Promise<QuotaSnapshot | undefined>>()
-  /** Live LLM route ids, or undefined when the llm service is absent (show all). */
   private liveRoutes: string[] | undefined
 
   constructor(ctx: Context, config: PlanUsageConfig) {
@@ -138,11 +117,7 @@ export class PlanUsageService extends Service {
     return this.sources.find((source) => source.routes.includes(route))
   }
 
-  /**
-   * Provider routes worth surfacing: every known source route, intersected
-   * with the live LLM registry when that is available. The GLM alias family
-   * (zai-coding-cn / glm / zai / …) collapses to the configured route.
-   */
+  /** Provider routes worth surfacing: every known source route, intersected with the live LLM registry when that is available. The GLM alias family (zai-coding-cn / glm / zai / ...) collapses to the configured route. */
   providers(): string[] {
     const known = new Set(this.sources.flatMap((source) => source.routes))
     const live = this.liveRoutes
@@ -161,12 +136,7 @@ export class PlanUsageService extends Service {
     return this.sourceOf(route)?.ready(route) ?? false
   }
 
-  /**
-   * One provider's latest quota snapshot, or `undefined` when no source
-   * serves the route, its credential is missing, or the upstream fetch
-   * failed. Cached per route (shared by waiting recovery agents and the
-   * Settings page); `force` bypasses the cache. Never throws.
-   */
+  /** One provider's latest quota snapshot, or `undefined` when no source serves the route, its credential is missing, or the upstream fetch failed. Cached per route (shared by waiting recovery agents and the Settings page); `force` bypasses the cache. Never throws. */
   async get(
     provider: string,
     options: PlanUsageGetOptions = {},
@@ -199,7 +169,6 @@ export class PlanUsageService extends Service {
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    /** Provided by dsh-plan-usage; absent when that plugin is not mounted. */
     planUsage: PlanUsageService
   }
 }

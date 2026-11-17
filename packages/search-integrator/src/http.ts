@@ -1,9 +1,5 @@
 /**
  * Minimal JSON-over-HTTP plumbing for the provider adapters.
- *
- * Injectable on purpose: the adapters accept a `postJson` function so unit
- * tests script responses and failures without a network.
- *
  * @module dsh-search-integrator/http
  */
 
@@ -53,7 +49,7 @@ export async function getJson(
   return response.json()
 }
 
-/** Un-hide the OS-level cause of a fetch failure (ETIMEDOUT, ECONNRESET, …). */
+/** Un-hide the OS-level cause of a fetch failure (ETIMEDOUT, ECONNRESET, ...). */
 function attachCause(error: unknown): never {
   if (error instanceof TypeError && isRecord(error.cause)) {
     const note: unknown = error.cause.code ?? error.cause.message ?? 'unknown'
@@ -90,13 +86,9 @@ function retryableStatus(status: number): boolean {
 }
 
 /**
- * Run `fn` with a bounded retry: one extra attempt on a retryable HTTP status
- * or a network-level failure, with signal-aware backoff. Abort propagates
- * immediately and never retries.
- *
- * @param fn - the attempt runner; receives the 1-based attempt number.
- * @param retries - extra attempts after the first (default 1).
- * @param signal - cancellation shared with the caller's budget.
+ * Retries transient HTTP or transport failures within the caller's attempt and cancellation budget.
+ * @param fn - The attempt runner receives the 1-based attempt number.
+ * @param options - Extra attempts default to 1; signal shares the caller's cancellation budget.
  */
 export async function withRetry<T>(
   fn: (attempt: number) => Promise<T>,
@@ -110,7 +102,7 @@ export async function withRetry<T>(
     } catch (error) {
       if (signal.aborted) throw error
       const retryable =
-        error instanceof HttpError ? retryableStatus(error.status) : error instanceof TypeError // fetch() network failure
+        error instanceof HttpError ? retryableStatus(error.status) : error instanceof TypeError
       if (!retryable || attempt > retries) throw error
       lastError = error
       await sleep(400 * attempt + Math.floor(Math.random() * 200), signal)

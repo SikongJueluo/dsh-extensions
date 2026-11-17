@@ -1,12 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { WorktreeOption } from './worktree-option'
 
-/**
- * The new-session worktree option in its host states. The `Hero*` stories
- * reproduce the stock hero: the control sits in a vertically centred composer
- * inside the conversation scroll container, which is the layout the in-place
- * menu has to survive.
- */
 const meta = {
   title: 'jj-workspace/Worktree option',
   component: WorktreeOption,

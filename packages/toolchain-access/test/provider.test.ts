@@ -1,6 +1,5 @@
 /**
- * Provider integration tests with stock bwrap, pinned host env and a fake filesystem.
- * Cover schema-default grants, explicit overrides, passthrough and fail-closed behavior.
+ * Provider integration tests with stock bwrap, pinned host env and a fake filesystem. Cover schema-default grants, explicit overrides, passthrough and fail-closed behavior.
  * @module dsh-toolchain-access/provider.test
  */
 import { realpathSync } from 'node:fs'
@@ -66,7 +65,6 @@ const ENTRIES = {
   '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
 } as const
 
-/** Every path the seven default presets derive (HOME/XDG defaults, no overrides). */
 const DEFAULT_ENTRIES: Record<string, FakeEntry> = {
   ...ENTRIES,
   '/home/u/.cargo/.package-cache-mutate': { file: true, mode: 0o644 },
@@ -80,14 +78,11 @@ const DEFAULT_ENTRIES: Record<string, FakeEntry> = {
   ),
   '/home/u/.m2/repository': { dir: true },
   '/home/u/.m2/wrapper': { dir: true },
-  // semgrep-state: the writable private state dir, the version-check cache
-  // file, and the sandbox mount point that shadows the host's ~/.semgrep.
   '/home/u/.cache/semgrep-state': { dir: true },
   '/home/u/.cache/semgrep_version': { file: true, mode: 0o644 },
   '/home/u/.semgrep': { dir: true },
 }
 
-/** The binds the seven defaults produce, in derivation (preset) order. */
 const DEFAULT_BINDS: [source: string, destination: string][] = [
   ['/home/u/.cache/uv', '/home/u/.cache/uv'],
   ['/home/u/.cargo/registry', '/home/u/.cargo/registry'],
@@ -111,8 +106,6 @@ const DEFAULT_BINDS: [source: string, destination: string][] = [
   ['/home/u/.m2/repository', '/home/u/.m2/repository'],
   ['/home/u/.m2/wrapper', '/home/u/.m2/wrapper'],
   ['/home/u/.cache/semgrep_version', '/home/u/.cache/semgrep_version'],
-  // The shadow mount: the host's ~/.semgrep is never writable; the private
-  // state directory is what semgrep sees there.
   ['/home/u/.cache/semgrep-state', '/home/u/.semgrep'],
 ]
 
@@ -134,7 +127,6 @@ function mountedProvider(config: Config, entries: Record<string, FakeEntry> = EN
 const COMMAND = ['cargo', 'build']
 const WS_POLICY = { mode: 'workspace-write' as const, workspaceRoot: '/ws/proj' }
 const RO_POLICY = { mode: 'read-only' as const, workspaceRoot: '/ws/proj' }
-/** A real, symlink-free directory outside the system floors (this package's own). */
 const EXTRA_ROOT = realpathSync.native(process.cwd())
 
 describe('ToolchainAccessSandboxProvider.confine', () => {
@@ -214,8 +206,6 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
   })
 
   it('carries policy extra roots in the stock profile and splices grants after them', async () => {
-    // An existing, symlink-free directory: `workspaceWritableRoots` accepts a
-    // real extra root without this test writing anything into it.
     const root = EXTRA_ROOT
     {
       const provider = makeProvider(['uv-cache'])
@@ -253,9 +243,6 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
   })
 
   it('subtracts a grant the policy extra root already made writable', async () => {
-    // Grants cannot live under /tmp (a system floor), so the policy's extra
-    // root is a real directory here; the grant beneath it is hypothetical in
-    // the fake fs, which is enough for the subtraction.
     const root = EXTRA_ROOT
     const uv = join(root, '.cache', 'uv')
     {
@@ -267,8 +254,6 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
         ...WS_POLICY,
         additionalWritableRoots: [root],
       })
-      // The policy root is already the stock wrap's bind; a grant beneath it
-      // adds no capability, so it must not become a second mount.
       expect(result.argv).toEqual([
         'bwrap',
         '--ro-bind',
@@ -308,16 +293,12 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
   it('drops grants already covered by the workspace bind', async () => {
     const provider = makeProvider([], { uvCache: '/ws/proj/.uv-cache' })
     provider.grantPresets = ['uv-cache']
-    // The fake fs lacks the workspace path; point the override at a path
-    // inside the workspace that exists in the table via uv-cache default.
     provider.grantPaths = {}
     provider.grantFs = fakeGrantFs({ '/home/u/.cache/uv': { dir: true } })
     const result = await provider.confine(COMMAND, {
       mode: 'workspace-write',
       workspaceRoot: '/home/u',
     })
-    // HOME is the workspace root here: the uv grant is inside it, so the
-    // wrap must stay exactly stock.
     expect(result.argv).toEqual([
       'bwrap',
       '--ro-bind',

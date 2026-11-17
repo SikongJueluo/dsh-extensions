@@ -1,19 +1,4 @@
-/**
- * Durable-roundtrip tests over REAL storage machinery: a real Cordis
- * context, the real storage hub + domain layer packages, and a file backend
- * that publishes each unit with the host's own crash protocol (temp file →
- * fsync → atomic rename). The backend harness is local; everything ABOVE it
- * — the domain write chain, durable-read boundary, zod validation, and the
- * whole TriggerService — is the shipped code path.
- *
- * What this pins down that the Map fakes cannot: a committed transition and
- * its outbox land in the SAME run record in ONE durable write (visible by
- * parsing the unit file), a fresh process boot over the same directory reads
- * the state back whole, and restart recovery + manual redelivery behave on
- * the reloaded records.
- *
- * @module dsh-triggers/durable.test
- */
+/** @module dsh-triggers/durable.test */
 import { afterAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -28,7 +13,7 @@ import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import type { KvUnit, KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
 import type { RunRecord } from '../src/model.js'
 
-/** The host's crash-durable publish protocol (see dsh-storage-json): tmp → fsync → rename. */
+/** The host's crash-durable publish protocol (see dsh-storage-json): tmp -> fsync -> rename. */
 async function writeAtomic(path: string, data: string): Promise<void> {
   const tmp = join(path, '..', `.${randomUUID()}.tmp`)
   const handle = await open(tmp, 'wx', 0o600)
@@ -88,7 +73,6 @@ class FileUnit {
   async close(): Promise<void> {}
 }
 
-/** The local file backend plugin: registers `file` on the real storage hub. */
 const fileBackendPlugin = {
   name: 'file-backend',
   inject: ['storage'],
@@ -114,8 +98,6 @@ const fileBackendPlugin = {
       const unregister = ctx.storage.backend.register('file', backend)
       return () => unregister()
     })
-    // The domain plugin's ctx.inject waits on this service key — the same
-    // dual registration the host's json backend does.
     ctx.provide(storageBackendServiceKey('file'), backend)
   },
 }
@@ -154,7 +136,6 @@ async function boot(root: string, options: { queueFails?: boolean } = {}) {
     },
     list: async () => ({ items: [] }),
   })
-  // The host's session-log reader; recovery replays these durable rows.
   ctx.provide('sessionQuery', {
     readSession: async (sessionId: string) => ({
       session: { id: sessionId },
@@ -233,8 +214,6 @@ describe('atomic commit over the real domain + file medium', () => {
   it('a transition and its owed prompt are ONE record in ONE durable write; a fresh boot reads them back whole', async () => {
     const dir = freshDir()
     const first = await boot(dir)
-    // Handoff-style bind WITH the start prompt: run creation + owed start in
-    // one commit. The send fails (queue drill): the owed prompt must survive.
     first.queue.fail = true
     const bound = await first.svc.bindReviewLoop({
       task: 't',
@@ -244,12 +223,9 @@ describe('atomic commit over the real domain + file medium', () => {
     })
     await settle()
 
-    // THE atomicity evidence, from the medium itself: the run record and its
-    // outbox entry are the same JSON object in the same file write — there is
-    // no second write the crash could have split.
     const unit = readUnit(dir)
     const stored = readRun(dir, bound.runId)
-    expect(stored.status).toBe('paused-error') // a failed non-nudge send parks
+    expect(stored.status).toBe('paused-error')
     expect(stored.outbox).toHaveLength(1)
     const owed = present(stored.outbox, 'the committed outbox')
     const owedEntry = present(owed[0], 'the owed start entry')
@@ -257,8 +233,6 @@ describe('atomic commit over the real domain + file medium', () => {
     expect(owedEntry.state).toBe('failed')
     expect(present(unit.tables.deliveries, 'deliveries table')[owedEntry.id]).toBeDefined()
 
-    // Fresh process over the same directory: state reads back whole, the
-    // failed start is NOT auto-re-sent, manual redelivery works and resumes.
     const second = await boot(dir)
     await settle()
     expect(second.prompts).toHaveLength(0)
@@ -291,8 +265,6 @@ describe('atomic commit over the real domain + file medium', () => {
     await settle()
     expect(first.prompts).toHaveLength(1)
 
-    // Fresh boot: the review phase is read from the medium, the sent review
-    // is NOT re-sent (no pending outbox row), and the loop continues.
     const second = await boot(dir)
     await settle()
     const stored = readRun(dir, bound.runId)

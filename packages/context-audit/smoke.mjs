@@ -1,13 +1,3 @@
-/**
- * Smoke checks for dsh-context-audit (and the oauth-providers cache-affinity
- * wire shape it exists to measure). Run from the package dir: `node smoke.mjs`.
- *
- * 1. collectAudit + formatReport against a hermetic fixture home (compressed
- *    session log + projection-cache title), covering the per-route and per-tool
- *    aggregates. `--real` additionally scans $DSH_HOME, for a manual pass.
- * 2. serializeRequest stamps `prompt_cache_key` from the session id when
- *    affinity is on, omits it when off, and clamps >64-char ids.
- */
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
@@ -26,11 +16,6 @@ function check(name, condition) {
   }
 }
 
-// --- 1. Hermetic audit fixture -------------------------------------------
-// The real session logs are opt-in (`--real`): the gate must not depend on the
-// operator's machine, and it must not read their data. The fixture reproduces
-// the exact log shape the collector walks: a compressed `session.vN.jsonl.zstd`
-// under `sessions/<--cwd-->/<sessionId>/`, plus a projection-cache title.
 const now = Date.now()
 const fixtureRoot = await mkdtemp(joinPath(tmpdir(), 'context-audit-smoke-'))
 const sessionsRoot = joinPath(fixtureRoot, 'sessions')
@@ -144,7 +129,6 @@ check(
   text.includes('按 provider/model 汇总') && text.includes('按工具汇总') && text.includes('按会话'),
 )
 
-// --- 1b. Optional pass over the operator's real logs ---------------------
 if (process.argv.includes('--real')) {
   const home = process.env.DSH_HOME ?? joinPath(homedir(), '.dsh')
   const realRoot = joinPath(home, 'sessions')
@@ -168,7 +152,6 @@ if (process.argv.includes('--real')) {
   }
 }
 
-// --- 2. serializeRequest cache affinity ---------------------------------
 const sessionId = 'session-21537589-5751-4490-af91-ef25bced6b1f'
 const base = { provider: 'chatgpt', model: 'gpt-6.1-sol', messages: [] }
 const withId = serializeRequest({ ...base, sessionId }, undefined, { promptCacheKey: true })

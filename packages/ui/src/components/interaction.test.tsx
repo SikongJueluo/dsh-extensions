@@ -1,12 +1,4 @@
 // @vitest-environment jsdom
-/**
- * Shared primitive interaction tests.
- *
- * These run the real Base UI components in jsdom (React 18 + react-dom/client)
- * to prove the two host-page-critical behaviours the browser bundle relies on:
- * the Select/ Dialog popups portal into the component's own subtree, and the
- * Dialog closes on Escape and returns focus to the trigger.
- */
 import { act, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it } from 'vitest'

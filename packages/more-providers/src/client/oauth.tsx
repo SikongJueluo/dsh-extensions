@@ -1,6 +1,5 @@
 /**
- * OAuth sign-in cards backed by the stable /dsh-oauth-providers channel.
- * Derived from werifu/dsh-oai-oauth (MIT); see THIRD-PARTY-NOTICE.md.
+ * OAuth sign-in cards backed by the stable /dsh-oauth-providers channel. Derived from werifu/dsh-oai-oauth (MIT); see THIRD-PARTY-NOTICE.md.
  * @module dsh-more-providers/client/oauth
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
@@ -241,8 +240,6 @@ function Section({ operations, t }: SectionProps) {
   const [providers, setProviders] = useState<Provider[]>([])
   const aliveRef = useRef(true)
 
-  // Stable identity: the mount effect below must not re-run per render, and
-  // cards receive it as `refreshProviders`.
   const refreshChannelProviders = useCallback(
     () =>
       callRpc<{ providers?: Provider[] }>('providers')
@@ -292,7 +289,6 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
   const [paste, setPaste] = useState('')
   const aliveRef = useRef(true)
 
-  // Passive status from the shared catalog: groups carry models, failures carry reasons.
   function checkStatus() {
     setStatus({ kind: 'loading' })
     return operations
@@ -332,7 +328,6 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
       })
   }
 
-  // Active refresh: llm.discoverModels probes the sign-in and force-fetches models.
   function discover() {
     setBusy(true)
     setStatus({ kind: 'loading' })
@@ -358,8 +353,6 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
         setBusy(false)
       })
   }
-
-  // --- sign-in over the package's shared channel -------------------------
 
   function pollSignIn() {
     return callRpc<SignInState>('poll', { provider: id })
@@ -432,7 +425,6 @@ function ProviderCard({ provider, operations, t, refreshProviders }: ProviderCar
   function cancelSignIn() {
     callRpc('cancel', { provider: id })
       .then(() => {
-        /* poll picks up the settlement */
         return undefined
       })
       .catch((err: unknown) => {
@@ -621,16 +613,10 @@ function isRemoteLike(value: unknown): value is RemoteLike {
   )
 }
 
-/**
- * Mount the OAuth provider section into this plugin's client half. The locale
- * namespace, section id and channel prefix keep the `dsh-oauth-providers`
- * names the host half and the settings page already address.
- */
+/** Mount the OAuth provider section into this plugin's client half. The locale namespace, section id and channel prefix keep the `dsh-oauth-providers` names the host half and the settings page already address. */
 export function registerOAuthSettings(ctx: DshClientContext): void {
   ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'dsh-more-providers: oauth locale')
   const t = ctx.locale.bind(LOCALE_NS)
-  // Host operations stay in the apply world; the section and its cards only
-  // receive these bound callbacks plus the localized string binder.
   const operations: Operations = {
     modelCatalog() {
       const remote: unknown = ctx.remote

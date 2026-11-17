@@ -1,13 +1,8 @@
-// Client half of dsh-jj-workspace: the new-session worktree option replaced
-// with a VCS-aware control, plus a compact task-state pill in the Session
-// header. The control shadows the stock Forge toggle only in the slot cell
-// (`forge-panel.worktree`, priority -1), so unloading this plugin restores the
-// stock control. Requests still go through the stock Forge Remote, which keeps
-// the first-message hold, progress card, retry, and withdraw lifecycle.
 import { useEffect, useState } from 'react'
 import {
   Root,
   cn,
+  type ClientLogger,
   type DshClientContext,
   type SlotRegistration,
   type SlotsService,
@@ -19,7 +14,6 @@ const LOCALE_NS = 'jj-workspace'
 const RPC_BASE = '/dsh-jj-workspace'
 const TASK_REFRESH_MS = 10000
 const STATUS_RETRY_MS = 2000
-/** Non-empty stand-in for the native `<option value="">` (detached HEAD base). */
 const DETACHED = '__jjw-detached__'
 
 const en: Record<string, string> = {
@@ -153,11 +147,7 @@ interface ForgeScope {
   remote: Record<string, unknown> & { forgePanel: ForgePanelRemote }
 }
 
-/**
- * The client-half context with the runtime `inject` seat the shared type does
- * not pin; the Forge Remote namespace is a service, so the hero cell must wait
- * for it before registering.
- */
+/** The client-half context with the runtime `inject` seat the shared type does not pin; the Forge Remote namespace is a service, so the hero cell must wait for it before registering. */
 interface JjwClientContext extends DshClientContext {
   inject(deps: string[], callback: (scope: ForgeScope) => void): void
 }
@@ -169,11 +159,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/**
- * Pull the result out of one server-response envelope. A well-formed success
- * frame yields its `value` only when it has the shape the caller's predicate
- * accepts; every other frame folds into `null`.
- */
+/** Record one unexpected panel-stream end without letting a broken logger export skip the retry. */
+function debugStreamFailure(logger: ClientLogger, error: unknown): void {
+  try {
+    logger.debug('jj-workspace: panel stream ended; retrying', {
+      error: error instanceof Error ? error.name : typeof error,
+    })
+  } catch {
+    return undefined
+  }
+}
+
+/** Pull the result out of one server-response envelope. A well-formed success frame yields its `value` only when it has the shape the caller's predicate accepts; every other frame folds into `null`. */
 function unwrap<T>(envelope: unknown, is: (value: unknown) => value is T): T | null {
   if (!isRecord(envelope)) return null
   if (envelope.type !== 'server-response') return null
@@ -219,6 +216,7 @@ function blockerText(t: Translate, blocker: string | null): string {
 
 type ToggleFace = {
   t: Translate
+  logger: ClientLogger
   status: (sessionId: string, signal?: AbortSignal) => Promise<VcsStatus | null>
   follow: (signal?: AbortSignal) => AsyncIterable<PanelFrame>
   branches: () => Promise<BranchesResult>
@@ -234,6 +232,7 @@ interface ToggleProps extends ToggleFace {
 function Toggle({
   sessionId,
   t,
+  logger,
   status,
   follow,
   branches,
@@ -249,13 +248,11 @@ function Toggle({
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
 
-  // The panel stream carries the stock worktree state (editable, request,
-  // created, creation, blocker) and the checkout facts. It is the same
-  // public state the stock toggle reads.
   useEffect(() => {
     let alive = true
     let controller: AbortController | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
+    let failureReported = false
     const start = () => {
       if (!alive) return
       const current = new AbortController()
@@ -264,10 +261,14 @@ function Toggle({
         try {
           const stream = follow(current.signal)
           for await (const frame of stream) {
+            failureReported = false
             if (alive) setPanel(frame)
           }
-        } catch {
-          // A transport reset or a disposed Remote; retry while mounted.
+        } catch (streamError) {
+          if (alive && !current.signal.aborted && !failureReported) {
+            failureReported = true
+            debugStreamFailure(logger, streamError)
+          }
         }
         if (alive) timer = setTimeout(start, STATUS_RETRY_MS)
       })()
@@ -317,8 +318,6 @@ function Toggle({
         },
       )
     }
-    // Invalidate the old VCS/permission answer before asking again: a new
-    // directory, Session, or permission value must not keep old semantics.
     setStatusState(null)
     setBranchList(null)
     load()
@@ -343,9 +342,6 @@ function Toggle({
   const currentBranch = readyCheckout && readyCheckout.branch ? readyCheckout.branch : null
   const currentCommit = readyCheckout && readyCheckout.commit ? readyCheckout.commit : null
 
-  // Only the Git arm needs the stock branch list; the jj arm uses the
-  // status channel's local bookmark names. Keep this hook before every
-  // conditional return so the hook order never changes.
   useEffect(() => {
     if (kind !== 'git' || !requested || !usable || branchList !== null) return undefined
     let alive = true
@@ -555,7 +551,6 @@ function TaskPill({ sessionId, t, tasks }: TaskPillProps) {
 }
 
 type WorktreeCellOptions = Omit<SlotRegistration, 'inject'> & {
-  /** Overrides the stock Forge cell in the same slot position. */
   priority: number
   inject: (sessionId: string | undefined) => ToggleFace
 }
@@ -570,6 +565,7 @@ type TaskCellOptions = Omit<SlotRegistration, 'inject'> & {
 function apply(ctx: JjwClientContext) {
   ctx.effect(() => ctx.locale.register(LOCALE_NS, { en, zh }), 'dsh-jj-workspace: locale')
   const t = ctx.locale.bind(LOCALE_NS)
+  const logger = ctx.logger('jj-workspace')
 
   ctx.inject(['remote.forgePanel'], (scope) => {
     scope.slots.inject('conversation.hero.options', () => {
@@ -583,6 +579,7 @@ function apply(ctx: JjwClientContext) {
           const id = sessionId ?? ''
           return {
             t,
+            logger,
             status: (target, signal) => call(target, 'status', isVcsStatus, signal),
             follow: (signal) => scope.remote.forgePanel.follow(id, signal),
             branches: () => scope.remote.forgePanel.branches(id),

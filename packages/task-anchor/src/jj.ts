@@ -1,17 +1,5 @@
 /**
  * Read-only Jujutsu facts for the recovery anchor.
- *
- * Facts come from fixed-argv `jj` invocations (`--ignore-working-copy
- * --no-pager`), no shell, a hard timeout: one combined template read of the
- * working change id and its parents (FULL change ids — `.short()` abbreviations
- * vary and can collide as a repo grows), one workspace-root read, and a
- * second light re-read of the same combined template to detect drift. The
- * three processes are not atomic — that is exactly why the re-read exists:
- * a `jj new`/rebase landing between the reads produces mixed facts, and the
- * stability check turns that into an explicit `drift` failure instead of a
- * poisoned anchor. git is deliberately NOT used as a fallback: a non-jj root
- * reports `not-jj` and the checkpoint fails loudly.
- *
  * @module dsh-execution-guard/jj
  */
 import { execFile } from 'node:child_process'
@@ -19,11 +7,8 @@ import { isRecord } from './goal-evidence.js'
 
 /** The facts an anchor needs: working layer ids plus the workspace root. */
 export interface JjFacts {
-  /** Full (non-abbreviated) change id of the working copy commit. */
   readonly changeId: string
-  /** Full change ids of the working commit's parents, in template order. */
   readonly parentChangeIds: readonly string[]
-  /** Absolute jj workspace root — the repo root even when cwd is a subdirectory. */
   readonly workspaceRoot: string
 }
 
@@ -39,7 +24,7 @@ export type ExecFile = (
   options: { cwd: string; timeoutMs: number; signal?: AbortSignal },
 ) => Promise<{ stdout: string; stderr: string; code: number | null }>
 
-/** Default runner: `execFile` with argv only — no shell, ever. */
+/** Default runner: `execFile` with argv only - no shell, ever. */
 export const defaultExecFile: ExecFile = (file, args, options) =>
   new Promise((resolve, reject) => {
     const child = execFile(
@@ -65,11 +50,7 @@ export const defaultExecFile: ExecFile = (file, args, options) =>
 
 const JJ_GLOBAL = ['--ignore-working-copy', '--no-pager'] as const
 
-/**
- * Fixed argv reading the working change id AND its parents in ONE process:
- * full `change_id`s, parents space-joined (empty line for a parentless
- * root commit).
- */
+/** Fixed argv reading the working change id AND its parents in ONE process: full `change_id`s, parents space-joined (empty line for a parentless root commit). */
 export function workingLayerArgv(): readonly string[] {
   return [
     ...JJ_GLOBAL,
@@ -87,11 +68,7 @@ export function workspaceRootArgv(): readonly string[] {
   return [...JJ_GLOBAL, 'workspace', 'root']
 }
 
-/**
- * Shape of the failures the classifier reads. The predicate only proves it is
- * a record — the declared field types let the template below keep the exact
- * implicit-stringification behavior the classifier has always had.
- */
+/** Shape of the failures the classifier reads. The predicate only proves it is a record - the declared field types let the template below keep the exact implicit-stringification behavior the classifier has always had. */
 interface FailureLike {
   readonly killed?: boolean
   readonly message?: string
@@ -130,12 +107,6 @@ function parseLayer(stdout: string): LayerLine | undefined {
 }
 
 /**
- * Read the working layer, the workspace root, and re-verify the layer did
- * not move mid-read. Multi-parent merges are reported as an ordered list;
- * a parentless root yields an empty list. Drift between the first read and
- * the re-read fails as `drift` — never saved as mixed facts, never retried
- * (the caller surfaces the failure and the model re-checkpoints).
- *
  * @param root - absolute directory to run jj from (session cwd, realpath'd).
  * @param exec - injectable runner (tests pass a fake; no real process).
  * @param jjPath - executable to run; argv stays fixed regardless.

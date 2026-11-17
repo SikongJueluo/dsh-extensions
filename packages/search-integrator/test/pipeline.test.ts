@@ -135,6 +135,7 @@ async function run(
   const result = await runResearch(
     {
       configFailures: [],
+      warn: () => undefined,
       settings: baseSettings(),
       ...rest,
       audit: audit.port,
@@ -179,6 +180,38 @@ describe('runResearch', () => {
     expect(round.hitCount).toBe(4)
     expect(payload.llmRawOutputs).toHaveLength(1)
     expect(result.audit?.locator).toBe('spill://audit-1')
+  })
+
+  it('keeps the research result when the audit port and the warn destination both throw', async () => {
+    const warnings: { message: string; error: unknown }[] = []
+    const llm = fakeLlmPort([integrationJson()])
+    const result = await runResearch(
+      {
+        adapters: twoSources(),
+        configFailures: [],
+        llm: llm.port,
+        audit: {
+          async save() {
+            throw Object.assign(new Error('secret-audit-payload'), {
+              code: 'secret-response-body',
+            })
+          },
+        },
+        warn: (message, error) => {
+          warnings.push({ message, error })
+          throw new Error('secret-warn-destination')
+        },
+        settings: baseSettings(),
+      },
+      { question: 'q', queries: ['q'] },
+      new AbortController().signal,
+    )
+    expect(result.status).toBe('ok')
+    expect(result.audit).toBeUndefined()
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]?.message).toContain('audit save failed')
+    expect(warnings[0]?.error).toBe('Error')
+    expect(JSON.stringify(warnings)).not.toContain('secret')
   })
 
   it('continues when one source fails, recording the gap', async () => {
@@ -418,7 +451,7 @@ describe('runResearch', () => {
       { question: 'q', queries: ['q'] },
     )
     const text = renderResearch(result, 3000)
-    expect(text.length).toBeLessThanOrEqual(3400) // budget + small tolerance for the tail lines
+    expect(text.length).toBeLessThanOrEqual(3400)
     expect(text).toContain('Sources:')
   })
 })

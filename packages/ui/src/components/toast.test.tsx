@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-/**
- * Config-status toast tests: the real Base UI Toast in jsdom, a stubbed status
- * route, and the behaviours the host relies on — one shared viewport across
- * plugin bundles, no repeat within one connection generation, and a fresh
- * announcement after the user dismisses and the DSH connection reconnects.
- */
 import { act, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -171,6 +165,61 @@ describe('ConfigStatusToast', () => {
     expect(container.textContent).toBe('')
   })
 
+  it('logs one poll failure per source and resets after a successful read', async () => {
+    const calls: unknown[][] = []
+    const logger = {
+      debug(...args: unknown[]) {
+        calls.push(args)
+      },
+      info() {},
+      warn() {},
+      error() {},
+    }
+    globalThis.fetch = async () => {
+      throw new TypeError('fetch failed')
+    }
+    await render(
+      <ConfigStatusToast statusUrl="/dsh-crew/config-status" pollMs={60_000} logger={logger} />,
+    )
+    expect(calls).toHaveLength(1)
+    expect(String(calls[0]?.[0])).toContain('poll failed')
+
+    await refresh()
+    expect(calls).toHaveLength(1)
+
+    mockFetch()
+    await refresh()
+    globalThis.fetch = async () => {
+      throw new TypeError('fetch failed')
+    }
+    await refresh()
+    expect(calls).toHaveLength(2)
+  })
+
+  it('keeps polling when a logger export throws', async () => {
+    let polls = 0
+    globalThis.fetch = async () => {
+      polls += 1
+      throw new TypeError('fetch failed')
+    }
+    const logger = {
+      debug() {
+        throw new Error('export failed')
+      },
+      info() {},
+      warn() {},
+      error() {},
+    }
+    await render(
+      <ConfigStatusToast statusUrl="/dsh-crew/config-status" pollMs={60_000} logger={logger} />,
+    )
+    expect(polls).toBe(1)
+    expect(container.querySelectorAll('[data-config-toast-viewport]')).toHaveLength(1)
+
+    await refresh()
+    expect(polls).toBe(2)
+  })
+
   it('replaces the error with one recovery notice', async () => {
     routes.set('/dsh-crew/config-status', [invalid()])
     mockFetch()
@@ -226,8 +275,6 @@ describe('ConfigStatusToast', () => {
     await refresh()
     expect(container.textContent).toContain('crew 委派路由 配置已恢复')
 
-    // The same error recurring after a genuine recovery is a new failure and
-    // must surface again.
     routes.set('/dsh-crew/config-status', [invalid()])
     await refresh()
     expect(container.textContent).toContain('crew 委派路由 配置错误')
@@ -239,8 +286,6 @@ describe('ConfigStatusToast', () => {
     await render(<ConfigStatusToast statusUrl="/dsh-crew/config-status" pollMs={60_000} />)
     expect(container.textContent).toContain('配置错误')
 
-    // One generation becomes valid while another still reports the file as
-    // broken: the file is not recovered yet.
     routes.set('/dsh-crew/config-status', [invalid({ id: 1 }), valid({ id: 2, revision: 4 })])
     await refresh()
     expect(container.textContent).not.toContain('配置已恢复')
@@ -271,7 +316,6 @@ describe('ConfigStatusToast', () => {
     await render(<ConfigStatusToast statusUrl="/dsh-crew/config-status" pollMs={60_000} />)
     expect(container.textContent).toContain('配置错误')
 
-    // No instances means the plugin host unloaded, not that the file is fixed.
     routes.set('/dsh-crew/config-status', [])
     await refresh()
     expect(container.textContent).not.toContain('配置错误')
@@ -317,8 +361,6 @@ describe('ConfigStatusToast', () => {
     await flush()
     expect(container.textContent).not.toContain('配置错误')
 
-    // The Host fixed the file while the page was disconnected; the reconnect
-    // poll is still in flight.
     routes.set('/dsh-crew/config-status', [valid()])
     holdFetch = true
     reconnect()
@@ -351,11 +393,9 @@ describe('ConfigStatusToast', () => {
     await flush()
     expect(container.textContent).not.toContain('配置错误')
 
-    // A poll in the same connection generation must not re-open it.
     await refresh()
     expect(container.textContent).not.toContain('配置错误')
 
-    // A new DSH generation re-announces the still-current error.
     await act(async () => {
       reconnect()
     })

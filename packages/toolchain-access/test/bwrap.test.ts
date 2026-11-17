@@ -1,8 +1,5 @@
 /**
- * Pinned-layout tests for the bwrap splice: the exact stock profile shape
- * both confined modes must have, where grant binds land, and every way a
- * non-stock layout fails closed instead of being edited.
- *
+ * Pinned-layout tests for the bwrap splice: the exact stock profile shape both confined modes must have, where grant binds land, and every way a non-stock layout fails closed instead of being edited.
  * @module dsh-toolchain-access/bwrap.test
  */
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
@@ -55,7 +52,6 @@ describe('expectedStockProfileArgs', () => {
   })
 })
 
-/** Real directories: the SDK's own root derivation validates extras on the host fs. */
 const scratch = mkdtempSync(join(tmpdir(), 'toolchain-bwrap-'))
 const extraRoot = join(scratch, 'extra')
 const secondRoot = join(scratch, 'second')
@@ -148,8 +144,6 @@ describe('insertGrantBinds', () => {
   })
 
   it('a private-state shadow mounts its source at a different destination', () => {
-    // semgrep-state: the writable host dir is ~/.cache/semgrep-state, while
-    // the sandbox path it must appear at is ~/.semgrep. Same --bind shape.
     const command = ['semgrep', 'scan']
     const result = insertGrantBinds(stockConfined(POLICY, command), command, POLICY, [
       { source: '/home/u/.cache/semgrep-state', destination: '/home/u/.semgrep' },
@@ -171,9 +165,6 @@ describe('insertGrantBinds', () => {
     const command = ['printf', '--', '--ro-bind', '/etc', '/etc']
     const confined = stockConfined(POLICY, command)
     const result = insertGrantBinds(confined, command, POLICY, [BIND])
-    // The bind lands before the FIRST "--" only because the whole tail was
-    // verified to equal the command verbatim; the command's own "--" stays
-    // in place after it.
     expect(result).toEqual([
       'bwrap',
       ...HEAD,

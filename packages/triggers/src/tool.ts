@@ -1,16 +1,4 @@
-/**
- * The `trigger_signal` model tool: the structured way a loop participant
- * moves the loop. Verdicts (rework / pass / needs_user) ALWAYS go through
- * here; an explicit deliver does too, though autoDeliver runs (handoff binds)
- * additionally submit a normally-ended executor turn on their own.
- *
- * Identity comes from the execution context (`exec.agent`), never from model
- * arguments; a successful call ends the caller's turn (`concludeTurn`), so
- * the signal is always the session's last word and the loop advances only
- * after the normal `turn/end`.
- *
- * @module dsh-triggers/tool
- */
+/** @module dsh-triggers/tool */
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 import { SIGNAL_OUTCOMES } from './model.js'
@@ -74,7 +62,6 @@ export function registerSignalTool(ctx: Context, service: TriggerService): () =>
           args as { runId: unknown; outcome: unknown; summary: unknown },
         )
         if (!outcome.ok) throw new Error(outcome.error)
-        // The signal is this turn's last word: end it after the result lands.
         exec.concludeTurn()
         return { kind: 'accepted' as const, note: outcome.note }
       },

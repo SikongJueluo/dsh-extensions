@@ -1,33 +1,8 @@
-# dsh-cmd-permit bundle layer: a single host plugin row, one service.
-#
-# The plugin publishes the `cmdPermit` service (the shared high-risk oracle:
-# dsh-auto-permit's built-in shapes plus this row's denyShape regexes) and
-# registers one deterministic answerer on the `approval/request` waterfall
-# with prepend. Order is deliberately NOT load-bearing: dsh-auto-permit
-# (inject = llm) always starts after dependency-free plugins, so its
-# prepended answerer reliably leads the chain — and it consults this
-# plugin's `cmdPermit.claim()` between its high-risk guard and its
-# memory/judge paths. The deterministic sequence [high-risk → allowlist →
-# memory → judge] therefore holds regardless of row order; this plugin's
-# own answerer remains for compositions without dsh-auto-permit.
-#
-# All row config is volatile — a Settings edit commits without a remount.
 - insert:
     - id: cmd-permit
       name: dsh-cmd-permit
       config:
         enabled: true
-        # Seed audit 2026-10-21 (toolchain-access migration), tightened
-        # 2026-10-22 after review: the seed is now EMPTY. `cargo`/`direnv`
-        # existed only to bypass HOME cache writes — that job belongs to
-        # dsh-toolchain-access directory grants. `rtk` turned out to be the
-        # same exit in disguise: cmd-permit matches command HEADS, so
-        # `rtk cargo build` hit the rtk entry and got Full access before
-        # the v3 judge could see it — rtk proxies arbitrary commands, so
-        # trusting it by default is not narrower than trusting cargo.
-        # Add entries you have audited (Settings or a later layer); rtk's
-        # own state writes should be solved at the rtk layer (point its DB
-        # into the workspace, or a future preset), not by head-matching.
         allow: []
         allowPattern: []
         denyShape: []

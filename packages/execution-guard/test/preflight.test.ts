@@ -51,14 +51,10 @@ describe('checkCall', () => {
     expect(checkCall(noArgsSchema, { tool: 'list', callId: 'a', argsRaw: '' })).toEqual({
       kind: 'valid',
     })
-    // Blank whitespace is truthy on the host: JSON.parse throws and the
-    // schema sees a parse failure — strict parity, not a wider allowance.
     expect(checkCall(noArgsSchema, { tool: 'list', callId: 'a', argsRaw: '   ' })).toEqual({
       kind: 'invalid',
       violations: ['arguments: not valid JSON'],
     })
-    // Against a schema with required keys the empty form reports the
-    // missing property — proving it parsed as {} rather than as JSON junk.
     expect(checkCall(readSchema, { tool: 'read', callId: 'a', argsRaw: '' })).toMatchObject({
       kind: 'invalid',
     })

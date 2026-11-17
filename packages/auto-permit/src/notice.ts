@@ -1,22 +1,6 @@
-/**
- * Human-facing verdict notices: each judge decision is appended to the
- * requesting session's log as one user-role message whose source carries
- * `form: 'notice'` — the stock Web chat renders its `summary` as a collapsed
- * context row (persistent, replayable, no expansion needed), with the
- * one-line account beneath it.
- *
- * The notice's single text line does enter the model transcript (the
- * `model-selection` notice precedent): the agent learning that an escalation
- * was allowed or deferred is cheap (~one line) and useful. There is no
- * third-party channel into the chat flow that skips the transcript entirely.
- *
- * @module dsh-auto-permit/notice
- */
 import { boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 
-// Merge-extensible source registry: give our notice kind a first-class slot
-// (runtime consumers read `form`/`summary` duck-typed).
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     'auto-permit': {
@@ -27,7 +11,6 @@ declare module '@deepseek-ai/dsh-llm' {
   }
 }
 
-/** Why the request settled the way it did (mirrors the feed vocabulary). */
 export type NoticeOutcome =
   | 'allowed'
   | 'allowed-by-memory'
@@ -55,29 +38,17 @@ const BODY_PREFIX: Record<NoticeOutcome, string> = {
   'container-guard': '[auto-permit] routed this container escalation to the user',
 }
 
-/** The reason line's label per outcome (the judge is not the only decider). */
 const REASON_PREFIX: Partial<Record<NoticeOutcome, string>> = {
   'allowed-by-cmd-permit': 'rule',
   'container-guard': 'boundary',
 }
 
-/** Extra judge facts attached to a notice for auditability. */
 export interface NoticeDetail {
-  /** Stable defer category (`timeout`, `provider-error`, `policy`, …). */
   category?: string
-  /** Workspace-relative files/lines the judge relied on. */
+
   evidence?: readonly string[]
 }
 
-/**
- * Build one notice message for a settled approval request.
- *
- * @param outcome - how the request settled.
- * @param command - the command being escalated (already excerpted).
- * @param reason - the judge's reason line, when the model call produced one.
- * @param detail - judge category and evidence references, when available.
- * @returns the frozen user-role notice message.
- */
 export function buildNoticeMessage(
   outcome: NoticeOutcome,
   command: string,

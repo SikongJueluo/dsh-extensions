@@ -1,7 +1,3 @@
-/* Runtime smoke test for dsh-crew: crew.yaml validation, ordered candidate
- * fallback (unavailable route / exhausted plan window / all candidates down),
- * the real apply() delegation path against stub services, per-step route table,
- * fail-closed invalid config, hot reload and the revision guard. */
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -53,13 +49,8 @@ const sleep = (ms) =>
     setTimeout(resolve, ms)
   })
 
-// The real LLM service materializes the model's default effort when a caller
-// omits one; the stubs below do the same so the delegation path is exercised
-// with the config the host would actually produce.
 const MODEL_DEFAULT_EFFORT = 'model-default'
 
-// Every fake plugin context shares one status server: the host hub serves one
-// aggregate route per plugin path, not one per apply() call.
 const statusRoutes = []
 function registerStatusRoute(route) {
   statusRoutes.push(route)
@@ -69,7 +60,6 @@ function registerStatusRoute(route) {
   }
 }
 
-// ── policy validation ───────────────────────────────────────────────────────
 const VALID = `routes:
   execute:
     desc: 用于代码实现、文件修改和常规执行任务。
@@ -159,7 +149,6 @@ throwsConfig(
   'unknown root keys are rejected',
 )
 
-// ── route selection ─────────────────────────────────────────────────────────
 function makeSelectionCtx({ failFor = [], plan, planThrows = false } = {}) {
   const warnings = []
   const calls = []
@@ -348,7 +337,6 @@ check(
     callConfigOf({ provider: 'p', model: 'm' }).reasoningEffort === undefined,
 )
 
-// ── apply(): tools, fail-closed, fallback, lifecycle, hot reload ─────────────
 const directory = await mkdtemp(join(tmpdir(), 'dsh-crew-smoke-'))
 const configPath = join(directory, 'crew.yaml')
 await writeFile(configPath, VALID)
@@ -424,8 +412,7 @@ function makeApplyCtx({ activate, plan, fillDefault = true, llm } = {}) {
       startActivation: async (spec) => {
         starts.push(spec)
         const childId = spec.childId ?? `child-${starts.length}`
-        // Model the host's agent/created boundary: listeners run before the
-        // queued prompt's first step.
+
         const agent = {
           id: childId,
           model: {
@@ -594,9 +581,6 @@ async function executeTool(tool, args) {
       created.reasoningEffort === MODEL_DEFAULT_EFFORT,
   )
 
-  // The SDK merges parent options into the child and only clears the parent's
-  // effort when the route changes. Naming the resolved default explicitly is
-  // what keeps a same-route child off the parent's effort.
   const parent = {
     options: {},
     session: {
@@ -621,7 +605,6 @@ async function executeTool(tool, args) {
   check('the route table asks for a route name', table.includes('require `route`'))
 }
 
-// Fallback noticed in a real tool result.
 {
   const app = makeApplyCtx({
     activate: (spec, childId) => ({
@@ -659,9 +642,6 @@ async function executeTool(tool, args) {
   )
 }
 
-// A resolver may legitimately materialize no default effort. The SDK merge
-// then inherits the parent's effort on an identical route, so the child's own
-// model selection must clear it.
 {
   const samePath = join(directory, 'same.yaml')
   await writeFile(
@@ -709,10 +689,6 @@ async function executeTool(tool, args) {
   )
 }
 
-// The same regression against the real LLM runtime: this adapter declares
-// reasoning efforts but no defaultEffort, so resolveCallConfig returns the
-// route without an effort. Crew must still keep the child off the parent's
-// effort on an identical route.
 {
   class NoDefaultEffort extends LlmAdapter {
     async resolveModel(provider, model) {
@@ -728,7 +704,7 @@ async function executeTool(tool, args) {
         },
       }
     }
-    // The smoke never dispatches a request.
+
     async *stream() {}
   }
 
@@ -764,7 +740,6 @@ async function executeTool(tool, args) {
   await root.fiber.dispose()
 }
 
-// Invalid config is fail-closed, then hot reload recovers.
 {
   const brokenPath = join(directory, 'broken.yaml')
   await writeFile(brokenPath, 'routes: [oops\n')
@@ -815,7 +790,6 @@ async function executeTool(tool, args) {
   )
 }
 
-// A policy change while a delegation is preparing refuses that call.
 {
   const racingPath = join(directory, 'racing.yaml')
   await writeFile(racingPath, VALID)
@@ -834,7 +808,7 @@ async function executeTool(tool, args) {
     if (!rewritten) {
       rewritten = true
       await writeFile(racingPath, VALID.replace('provider-a', 'provider-renamed'))
-      // Let the watcher publish the new revision before this selection returns.
+
       await sleep(400)
     }
     return original(callConfig)

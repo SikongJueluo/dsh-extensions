@@ -1,31 +1,8 @@
 #!/usr/bin/env python3
-"""Repair session logs corrupted by malformed `llm/retry` events.
+"""Repair invalid `llm/retry` events in DSH session logs.
 
-Two corruption classes, both written by past dsh-auto-continue releases and
-both fatal at load time (the persistence reader refuses the whole log):
-
-1. Events outside their matching open step — a 2026-10-04 release appended
-   adoption notices as `llm/retry` outside a live open step
-   ("llm/retry does not match the current turn and step").
-2. Chain-numbering violations — a release numbered attempts with a
-   turn-scoped counter while the format chains them per
-   (turn, step, provider, policyKey), each chain starting at 1 and keeping
-   one retryId ("llm/retry skips its policy attempt sequence" / "must keep
-   one retryId per policy chain"). This fires when a turn retries at one
-   step, advances, and hits the limit again at a later step.
-
-This script walks every `session.v*.jsonl.zstd` under `$DSH_HOME/sessions`,
-drops any `llm/retry` event that does not sit inside its matching open step,
-renumbers the remaining chains (retry from 1, the chain's first retryId
-reused by later attempts), aligns every `llm/retry-started` with its chain's
-next unstarted attempt, renumbers the events' `seq` contiguously, and
-rewrites the log with per-line Zstandard frames (the store's framing). A
-`.bak-ac-repair` backup is left next to the first rewrite of every file;
-logs without offenders are untouched. Normalization is a no-op on valid
-logs, so running it over all sessions is safe.
-
-Run it with the dsh service stopped (or at least the affected sessions
-closed): python3 repair-llm-retry.py [--dry-run]
+Run with DSH stopped, or close affected sessions first.
+Use `--dry-run` to inspect changes without writing.
 """
 from __future__ import annotations
 
@@ -61,7 +38,7 @@ def repair_log(path: Path) -> tuple[int, int, int]:
     try:
         header = json.loads(lines[0])
     except json.JSONDecodeError:
-        return (0, 0, 0)  # not a session log
+        return (0, 0, 0)
     if header.get("type") != "session":
         return (0, 0, 0)
 
@@ -70,12 +47,11 @@ def repair_log(path: Path) -> tuple[int, int, int]:
         try:
             events.append(json.loads(line))
         except json.JSONDecodeError:
-            return (0, 0, 0)  # unexpected shape: leave alone
+            return (0, 0, 0)
 
     kept: list[dict] = []
     removed = normalized = 0
     open_step: tuple[int, int] | None = None
-    # One policy chain's state, keyed by (turn, step, provider, policyKey).
     chains: dict[tuple, dict] = {}
 
     def chain_key(data: dict) -> tuple:
@@ -96,7 +72,6 @@ def repair_log(path: Path) -> tuple[int, int, int]:
             key = chain_key(data)
             chain = chains.get(key)
             if chain is None:
-                # Fresh chain keeps its own retryId and starts at attempt 1.
                 chain = {"retryId": data.get("retryId"), "count": 0}
                 chains[key] = chain
             chain["count"] += 1
@@ -110,13 +85,12 @@ def repair_log(path: Path) -> tuple[int, int, int]:
             continue
 
         if kind == "llm/retry-started":
-            # Pair this start with its chain's next unstarted attempt.
             matches = [k for k, c in chains.items()
                        if k[0] == data.get("turn") and k[1] == data.get("step") and c["retryId"] == data.get("retryId")]
             key = matches[0] if matches else None
             chain = chains.get(key) if key is not None else None
             if chain is None or chain.get("started", 0) >= chain["count"]:
-                removed += 1  # pairs no scheduled attempt: unrepairable here
+                removed += 1
                 continue
             chain["started"] = chain.get("started", 0) + 1
             if data.get("retry") != chain["started"]:
@@ -131,7 +105,6 @@ def repair_log(path: Path) -> tuple[int, int, int]:
     if removed == 0 and normalized == 0:
         return (0, 0, 0)
 
-    # Renumber seq contiguously (first event keeps its original first seq).
     base = kept[0]["seq"] if kept and isinstance(kept[0].get("seq"), int) else 1
     renumbered = 0
     for i, event in enumerate(kept):
@@ -156,7 +129,7 @@ def main() -> int:
     for path in sorted(ROOT.glob("*/*/session.v*.jsonl.zstd")):
         try:
             removed, renumbered, normalized = repair_log(path)
-        except Exception as exc:  # noqa: BLE001 — report and continue with others
+        except Exception as exc:  # noqa: BLE001 -- report and continue with others
             print(f"ERROR {path}: {exc}")
             continue
         if removed or normalized:

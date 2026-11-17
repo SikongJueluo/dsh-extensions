@@ -1,18 +1,3 @@
-/* Runtime smoke test for dsh-handoff.
- *
- * Part 1 — plugin surface: load, config defaults, command registration, and
- * the argument-validation paths, against a minimal stub context.
- *
- * Part 2 — full flow: drive the browser channel (pending → choose), let the
- * handler queue its brief instruction and arm the watcher, drop a
- * completion-marked brief where the instruction asked for it, and assert the
- * fresh session is created on the chosen model with the brief as its first
- * prompt.
- *
- * Part 3 — bare /handoff retries: nothing-to-resume, timeout → continue the
- * partial brief in place, and complete-but-unspawned (a lost watch) → direct
- * spawn without a briefing turn.
- */
 import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -49,8 +34,6 @@ const ctx = {
     if (key === 'llm') return { listProviders: async () => [], listModels: async () => [] }
     return undefined
   },
-  // Optional-service acquisitions (connection/webServer, presets, …) simply
-  // never call back in this stub: the plugin must still apply cleanly.
   inject() {
     return () => {}
   },
@@ -70,13 +53,9 @@ if (registered === null || registered.name !== COMMAND_NAME)
   throw new Error('command not registered')
 console.log('registered command:', registered.name, '|', registered.description)
 
-// A bare /handoff is the retry entry: with no unfinished record in sight it
-// fails by naming the retry contract, not with a usage error.
 const part1Agent = {
   id: 'part1-session',
   session: { header: { cwd: '/nonexistent-smoke' } },
-  // The Agent owns the durable selection; the error paths below never read it,
-  // so the stub reports "no selection" by returning nothing.
   model: { current() {} },
   followup() {},
 }
@@ -86,7 +65,6 @@ if (result.kind !== 'error' || !result.text.includes('没有可重试')) {
   throw new Error('expected the no-retryable error for empty input')
 }
 
-// --retry and a task description reject each other up front.
 const retryClash = await registered.handler({
   rawInput: '--retry fix readme',
   agent: part1Agent,
@@ -115,10 +93,6 @@ console.log('flag-no-task result:', JSON.stringify(flagNoTask))
 if (flagNoTask.kind !== 'error' || !flagNoTask.text.includes('Usage'))
   throw new Error('expected flag+task usage error')
 
-// ---------------------------------------------------------------- part 2 ---
-// A full stub context: channel route captured, agents.create recorded, and a
-// writable workspace for the brief — plus a two-entry workspace registry so
-// the cross-workspace paths (picker payload, --workspace, target copy) run.
 const cwd = fileURLToPath(new URL('./.smoke-workspace', import.meta.url)).replace(/\/+$/u, '')
 const targetCwd = fileURLToPath(new URL('./.smoke-target', import.meta.url)).replace(/\/+$/u, '')
 await rm(cwd, { recursive: true, force: true })
@@ -129,9 +103,9 @@ await mkdir(targetCwd, { recursive: true })
 let route = null
 let created = null
 let renamed = null
-const followups = [] // the origin agent's queued prompt
-const spawnedFollowups = [] // the fresh agent's first prompt
-const attached = [] // [workspaceId, sessionId] attach records
+const followups = []
+const spawnedFollowups = []
+const attached = []
 const flowDisposers = []
 
 function stubWorkspace(id, title, path) {
@@ -182,8 +156,6 @@ const flowCtx = {
         },
       }
     if (key === 'workspaceRegistry') return registry
-    // The origin session's durable selection: what it is actually on, including
-    // the effort — deliberately different from the agent's creation options.
     if (key === 'sessionProjections') {
       return {
         stateOf: () => ({
@@ -253,8 +225,6 @@ async function channel(endpoint, payload) {
   return JSON.parse(text).result
 }
 
-// A browser polls once, which is also the liveness signal that makes the
-// command wait for a real picker.
 const before = await channel('pending', {})
 if (before.requests.length > 0) throw new Error('expected no pending picks before the command')
 
@@ -262,9 +232,6 @@ const agent = {
   id: 'origin-session',
   options: { provider: 'origin-provider', model: 'origin-model', maxTokens: 4096 },
   session: { header: { cwd } },
-  // `agent.model.current()` folds pending → last used → creation options, the
-  // same order the /model popup shows. The origin session's pending selection
-  // is what the fresh session must inherit, effort included.
   model: {
     current: () => ({
       provider: 'origin-provider',
@@ -277,11 +244,7 @@ const agent = {
   },
 }
 
-/**
- * Poll until the watcher spawns the fresh session (or gives up after ~2s);
- * the spawn lands via the `agents.create` stub when the watcher's timer
- * fires, so `created` is only ever observed here, never written.
- */
+/** Poll until the watcher spawns the fresh session (or gives up after ~2s); the spawn lands via the `agents.create` stub when the watcher's timer fires, so `created` is only ever observed here, never written. */
 async function waitForSpawn() {
   for (let i = 0; i < 200; i += 1) {
     if (created !== null) return
@@ -291,10 +254,7 @@ async function waitForSpawn() {
   }
 }
 
-/**
- * Write the completion-marked brief the instruction asked for and wait for
- * the watcher to spawn the fresh session.
- */
+/** Write the completion-marked brief the instruction asked for and wait for the watcher to spawn the fresh session. */
 async function completeBrief() {
   const briefText = followups[0].content[0].text
   const briefPath = briefText.match(/\S+handoff\.md/u)?.[0]
@@ -306,10 +266,7 @@ async function completeBrief() {
   return { briefPath, briefText }
 }
 
-/**
- * Run one complete handoff cycle through the browser dialog: start the
- * command, answer the pending pick, complete the brief, await the spawn.
- */
+/** Run one complete handoff cycle through the browser dialog: start the command, answer the pending pick, complete the brief, await the spawn. */
 async function runHandoff(rawInput, choice) {
   created = null
   followups.length = 0
@@ -342,9 +299,7 @@ async function runHandoff(rawInput, choice) {
   }
 }
 
-/**
- * Run one flag-resolved handoff cycle (no dialog is published at all).
- */
+/** Run one flag-resolved handoff cycle (no dialog is published at all). */
 async function runFlagged(rawInput) {
   created = null
   followups.length = 0
@@ -384,15 +339,12 @@ for (let i = 0; i < 40 && pending === null; i += 1) {
 }
 if (pending === null) throw new Error('the command never published a pending pick')
 console.log('pending pick:', JSON.stringify(pending))
-// Both base options must carry the effort their route is actually on: the
-// origin session's durable (pending) selection, and the deployment default.
 if (pending.inherited?.reasoningEffort !== 'medium') {
   throw new Error(`inherit route lost the session effort: ${JSON.stringify(pending.inherited)}`)
 }
 if (pending.fallback?.reasoningEffort !== 'low') {
   throw new Error(`global default lost its effort: ${JSON.stringify(pending.fallback)}`)
 }
-// The pick carries the workspace roster: origin first, others as the list.
 if (pending.origin?.path !== cwd || pending.origin?.title !== 'Origin Space') {
   throw new Error(`origin workspace missing from the pick: ${JSON.stringify(pending.origin)}`)
 }
@@ -429,7 +381,6 @@ if (!answer.text.includes('Target Space') || !answer.text.includes(targetCwd)) {
 if (followups.length !== 1)
   throw new Error('expected exactly one briefing turn on the origin agent')
 
-// Simulate the origin agent writing the brief it was asked for.
 const briefText = followups[0].content[0].text
 const briefPath = briefText.match(/\S+handoff\.md/u)?.[0]
 if (briefPath === undefined) throw new Error('brief instruction names no target file')
@@ -461,7 +412,6 @@ if (!attached.some(([id, sessionId]) => id === 'ws-target' && sessionId === crea
     `fresh session was not attached to the target workspace: ${JSON.stringify(attached)}`,
   )
 }
-// The full brief must exist as a readable copy inside the target workspace.
 const copyPath = `${targetCwd}/.dsh/handoff/${briefPath.split('/').pop()}`
 if (!(await fileExists(copyPath)))
   throw new Error(`no brief copy in the target workspace: ${copyPath}`)
@@ -481,10 +431,6 @@ console.log(
   copyPath,
 )
 
-// Inheriting the window must carry the session's durable effort (medium), not
-// the creation-option effort (absent), and must keep the origin output cap.
-// Picking the origin workspace keeps everything inside the origin cwd: no
-// target-side copy, attach goes to the origin workspace.
 await rm(`${targetCwd}/.dsh/handoff`, { recursive: true, force: true })
 const inherit = await runHandoff('inherited cycle', { kind: 'inherit', workspace: 'origin' })
 console.log('inherit spawn:', JSON.stringify(inherit.options))
@@ -516,7 +462,6 @@ if (!spawnedFollowups[0].content[0].text.includes('smoke')) {
   throw new Error('the brief was not handed to the fresh session as its first prompt')
 }
 
-// The deployment default must carry its own effort.
 const fallback = await runHandoff('default cycle', { kind: 'default', workspace: 'ws-target' })
 console.log('default spawn:', JSON.stringify(fallback.options))
 if (fallback.options.provider !== 'global-provider' || fallback.options.model !== 'global-model') {
@@ -529,9 +474,6 @@ if (fallback.meta.cwd !== targetCwd) {
   throw new Error(`default pick must honor the workspace verdict: ${JSON.stringify(fallback.meta)}`)
 }
 
-// `--workspace <title>` resolves the target without the browser step: the
-// published pick asks for no workspace verdict, and the flag wins regardless
-// of the (placeholder) workspace the browser sends back.
 const flagged = await runHandoff('--workspace Target Space flag cycle', { kind: 'inherit' })
 if (flagged.pick.pickWorkspace !== undefined && flagged.pick.pickWorkspace !== false) {
   throw new Error(
@@ -543,7 +485,6 @@ if (flagged.meta.cwd !== targetCwd) {
 }
 console.log('flag spawn cwd:', flagged.meta.cwd)
 
-// A --workspace spec that matches nothing fails up front with the candidates.
 const badFlag = await registered.handler({
   rawInput: '--workspace nosuch fix readme',
   agent,
@@ -554,7 +495,6 @@ if (badFlag.kind !== 'error' || !badFlag.text.includes('Target Space')) {
   throw new Error('bad --workspace spec must fail naming the candidates')
 }
 
-// Both flags together skip the dialog entirely; order is free.
 const ordered = await runFlagged(
   '--workspace Target Space --model picked-provider/picked-model ordered cycle',
 )
@@ -567,16 +507,12 @@ if (
 }
 console.log('ordered flags spawn:', ordered.meta.cwd)
 
-// --- part 3: bare /handoff retries ---------------------------------------
-// Every cycle above spawned, so every sidecar meta is spawn-marked: a bare
-// /handoff has nothing to resume.
 const bareIdle = await registered.handler({ rawInput: '', agent, signal: null })
 console.log('bare /handoff (all spawned):', JSON.stringify(bareIdle))
 if (bareIdle.kind !== 'error' || !bareIdle.text.includes('没有可重试')) {
   throw new Error('bare /handoff must fail when every record is spawned')
 }
 
-// The flagged cycle must have left a spawn-marked meta next to its brief.
 const orderedMeta = JSON.parse(
   await readFile(ordered.briefPath.replace(/\.md$/u, '.meta.json'), 'utf8'),
 )
@@ -589,9 +525,6 @@ if (
   throw new Error(`spawned cycle must leave a marked meta: ${JSON.stringify(orderedMeta)}`)
 }
 
-// A handoff whose brief never completes: the watcher times out, queues the
-// failure notice that teaches the bare-/handoff retry, and leaves the sidecar
-// unspawned next to a partial brief.
 followups.length = 0
 created = null
 renamed = null
@@ -637,9 +570,6 @@ if (!notice.content[0].text.includes('不带参数的 /handoff')) {
 }
 console.log('timeout notice queued')
 
-// Bare /handoff resumes it: the published pick carries the previous picks as
-// defaults, and the origin agent is told to CONTINUE the same file (no new
-// timestamp beside it).
 followups.length = 0
 created = null
 const retryHandled = registered.handler({ rawInput: '   ', agent, signal: null })
@@ -681,8 +611,6 @@ const resumeInstruction = followups[0].content[0].text
 if (!resumeInstruction.includes('补完') || !resumeInstruction.includes(slowBriefPath)) {
   throw new Error('retry must continue the same brief file in place')
 }
-// Completing the file now spawns as usual, and the meta gets its spawn mark
-// plus the re-resolved choice.
 await writeFile(
   slowBriefPath,
   '# Goal\nslow\n\n## Task\nslow cycle\n<!-- handoff:complete -->\n',
@@ -700,10 +628,6 @@ if (!spawnedFollowups[0].content[0].text.includes('origin-session')) {
 }
 console.log('retry (continue in place) spawned; meta marked')
 
-// A second timeout, then the brief completes AFTER the watcher died (a lost
-// watch / dsh restart): the file carries the marker while the meta stays
-// unspawned. A fully flagged retry then spawns straight from the file — no
-// dialog, no briefing turn.
 followups.length = 0
 created = null
 renamed = null

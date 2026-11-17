@@ -1,33 +1,16 @@
-/**
- * Browser ↔ host channel for the new-session jj option.
- *
- * The stock Forge option is only reachable from a Git checkout. This route
- * tells the client whether the Session's project is a jj workspace without a
- * Git checkout, which is exactly the case the stock option cannot render; the
- * client then drives the stock request/creation lifecycle through the Forge
- * panel Remote, so the workspace service (and its bookmark rules) stay shared.
- *
- * @module dsh-jj-workspace/channel
- */
+/** @module dsh-jj-workspace/channel */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { JjTaskState } from './jj.js'
 
-/** One endpoint segment of the channel (same grammar as connection RPC). */
 const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
-/** Status requests are tiny; anything bigger is a misbehaving client. */
 const MAX_CHANNEL_BODY_BYTES = 8 * 1024
 
-/** The channel prefix the browser posts the connection envelope to. */
 const RPC_CHANNEL = '/dsh-jj-workspace'
 
-/**
- * Whether a decoded JSON value is an object read field by field. The stock
- * connection grammar treats any non-null object (arrays included) as a
- * candidate envelope/payload, so the guard deliberately keeps arrays.
- */
+/** Whether a decoded JSON value is an object read field by field. The stock connection grammar treats any non-null object (arrays included) as a candidate envelope/payload, so the guard deliberately keeps arrays. */
 function isEnvelopeObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -42,15 +25,10 @@ export type JjBlocker = 'read-only' | 'outside-writable-root' | 'jj-unavailable'
 
 /** What the browser needs to decide whether to offer the jj option. */
 export interface JjStatus {
-  /** The nearest VCS root: none, a Git checkout, or a jj workspace. */
   kind: 'none' | 'git' | 'jj'
-  /** The nearest VCS root, when one was found. */
   root?: string
-  /** Whether the jj workspace is colocated with a Git checkout. */
   hasGit?: boolean
-  /** Null when a jj workspace can be created, else the blocking reason. */
   blocker?: JjBlocker | null
-  /** Local bookmark names available as an explicit base. */
   bookmarks?: string[]
 }
 
@@ -62,12 +40,7 @@ export interface JjStatusSource {
   taskStates(sessionId: string): Promise<JjTaskState[]>
 }
 
-/**
- * Mount the status route once the connection service and a web server exist.
- * Authentication and framing mirror the connection RPC grammar, so the client
- * cannot read a Session's directory without the same admission the rest of the
- * page uses.
- */
+/** Mount the status route once the connection service and a web server exist. Authentication and framing mirror the connection RPC grammar, so the client cannot read a Session's directory without the same admission the rest of the page uses. */
 export function registerChannel(ctx: Context, source: JjStatusSource): void {
   const serve = async (
     svcCtx: Context,

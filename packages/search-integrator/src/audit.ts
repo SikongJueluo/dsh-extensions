@@ -1,14 +1,5 @@
 /**
- * Audit persistence: the full record of one research run goes to the spill
- * store (session-scoped, owner-only) and the result carries back only the
- * opaque locator plus retrieval guidance.
- *
- * Everything here is best-effort BY DESIGN: a missing spill backend, a
- * headless call without a session, or a storage failure degrades to "no audit
- * ref" with a warning log — the research result itself must not fail because
- * its audit could not be written. No in-process sourceId maps, no custom
- * session events.
- *
+ * Audit persistence: the full record of one research run goes to the spill store (session-scoped, owner-only) and the result carries back only the opaque locator plus retrieval guidance.
  * @module dsh-search-integrator/audit
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -20,7 +11,6 @@ import { isRecord } from './types.js'
 export interface AuditOwner {
   readonly toolName: string
   readonly callId: ToolCallId
-  /** Session-scoped spill ownership; the raw id as the tool context reports it. */
   readonly sessionId?: string
 }
 
@@ -45,7 +35,6 @@ function isSpillStore(value: unknown): value is SpillStorePort {
 
 /**
  * The real port over the optional `ctx.spillStore` service.
- *
  * @param ctx - plugin context (`spillStore` resolved opportunistically).
  * @param owner - tool-call identity for the artifact.
  */

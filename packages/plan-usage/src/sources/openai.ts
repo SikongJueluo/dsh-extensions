@@ -1,29 +1,14 @@
 /**
  * OpenAI Codex quota source: the ChatGPT subscription's usage endpoint.
- *
- * `GET https://chatgpt.com/backend-api/wham/usage` with the Codex OAuth
- * bearer token and account id (the dedicated endpoint current Codex uses;
- * the older `x-codex-*` response headers are gone). The payload carries
- * `rate_limit.primary_window` (the rolling short window — 5h on Plus/Pro)
- * and an optional `secondary_window` (the weekly cap), each with consumed
- * `used_percent` (0-100), `limit_window_seconds`, and `reset_at` in **unix
- * seconds** (normalized to ms here). Verified against headroom's live
- * capture of the endpoint (MIT).
- *
- * The token comes from the `oauthProviders` service (dsh-more-providers),
- * so it is always the fresh, refresh-rotated one; without that plugin (or
- * without a sign-in) this source resolves `undefined`.
- *
  * @module dsh-plan-usage/sources/openai
  */
 import type { QuotaSnapshot } from '../types.js'
 import { isRecord } from './contracts.js'
 import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
-/** The ChatGPT backend usage endpoint Codex clients poll. */
 const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage'
 
-/** Token provider — typically `() => ctx.get('oauthProviders')?.token('chatgpt')`. */
+/** Token provider - typically `() => ctx.get('oauthProviders')?.token('chatgpt')`. */
 export type TokenProvider = () => Promise<{ access: string; accountId?: string } | undefined>
 
 export interface OpenAiUsageSourceOptions {
@@ -42,7 +27,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return isRecord(value) ? value : null
 }
 
-/** One `rate_limit.{primary,secondary}_window` object → window facts. */
+/** One `rate_limit.{primary,secondary}_window` object -> window facts. */
 function windowOf(
   raw: unknown,
 ): { percent: number; resetAt?: number; windowMinutes?: number } | undefined {
@@ -54,7 +39,6 @@ function windowOf(
     percent: Math.min(100, Math.max(0, Math.round(percent * 10) / 10)),
   }
   const seconds = finiteNumber(row.reset_at)
-  // The payload reports unix SECONDS; the harness vocabulary is epoch ms.
   if (seconds !== undefined && seconds > 1_577_836_800 && seconds < 4_102_444_800)
     window.resetAt = Math.round(seconds * 1000)
   const span = finiteNumber(row.limit_window_seconds)
@@ -62,10 +46,7 @@ function windowOf(
   return window
 }
 
-/**
- * Parse a `GET /wham/usage` JSON body into window facts. Pure; returns
- * `undefined` when the body carries no usable rate-limit data.
- */
+/** Parse a `GET /wham/usage` JSON body into window facts. Pure; returns `undefined` when the body carries no usable rate-limit data. */
 export function parseCodexUsage(
   body: unknown,
 ): Pick<QuotaSnapshot, 'fiveHour' | 'weekly' | 'level'> | undefined {
@@ -84,10 +65,7 @@ export function parseCodexUsage(
   return parsed
 }
 
-/**
- * The OpenAI usage source for the `chatgpt` route: one authenticated GET per
- * fetch, `undefined` on any failure (never throws).
- */
+/** The OpenAI usage source for the `chatgpt` route: one authenticated GET per fetch, `undefined` on any failure (never throws). */
 export class OpenAiUsageSource implements QuotaSource {
   readonly id = 'openai-codex'
   readonly routes = ['chatgpt'] as const
@@ -108,7 +86,7 @@ export class OpenAiUsageSource implements QuotaSource {
 
   /** Whether the token provider can be reached at all (service mounted). */
   ready(_route: string): boolean {
-    return true // availability is discovered at fetch time; absence yields undefined
+    return true
   }
 
   async get(route: string): Promise<QuotaSnapshot | undefined> {

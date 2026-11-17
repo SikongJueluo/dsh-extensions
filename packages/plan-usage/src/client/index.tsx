@@ -1,9 +1,3 @@
-// Client half of dsh-plan-usage: a Settings section showing every monitored
-// coding plan's quota windows — the rolling five-hour bar, the weekly bar,
-// the monthly bar, and (when the plan reports it) the monthly MCP budget —
-// each with its consumed percentage and reset countdown. Reads through this
-// package's own channel (`/dsh-plan-usage/quota`), refreshes on demand and
-// once a minute while visible.
 import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
@@ -44,8 +38,6 @@ const en = {
   fetchFailed: 'Quota unavailable (see host logs).',
   level: 'plan: {level}',
 
-  // "just now / n s ago / …" — the shared locale keys oauth-providers
-  // also uses locally; defined here so the section is self-contained.
   checkedJustNow: 'just now',
   secondsAgo: '{n}s ago',
   minutesAgo: '{n}m ago',
@@ -143,8 +135,6 @@ interface ProviderView {
   error?: string
 }
 
-// Discriminated so `value` is present exactly when `ok` is — the channel's
-// server half answers `{ ok: true, value } | { ok: false, error }`.
 type QuotaResult =
   | { ok: true; value: { providers?: ProviderView[] } }
   | { ok: false; error?: { message?: string } }
@@ -177,7 +167,6 @@ interface QuotaEnvelope {
   result?: QuotaResult
 }
 
-// "5h" / "2.5h" / "45m" from API-reported window minutes, when present.
 function fmtWindowSize(minutes: number | undefined) {
   if (!minutes || minutes <= 0) return null
   if (minutes < 60) return `${minutes}m`
@@ -218,8 +207,6 @@ function WindowBar({
 
   let meta: string
   if (percent !== null) {
-    // A reported percentage is the primary display; amounts are a fallback for
-    // sources that report used/total without a percentage.
     const bits = [t('consumed', { percent })]
     if (w.unit === 'usd' && typeof w.remaining === 'number') {
       bits.push(t('remainingUsd', { amount: fmtUsd(w.remaining) }))
@@ -318,8 +305,6 @@ function Section({ operations, t }: { operations: Operations; t: Translate }) {
     return operations
       .quota(refresh)
       .then((result) => {
-        // Same throw-on-missing-envelope semantics as the old code: a missing
-        // `value` rejects into the catch below and keeps the previous views.
         if (result.ok && aliveRef.current) setViews(result.value.providers ?? [])
         return result
       })
@@ -344,7 +329,6 @@ function Section({ operations, t }: { operations: Operations; t: Translate }) {
       clearInterval(poll)
       clearInterval(tick)
     }
-    // Mount/unmount only, like the old code.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

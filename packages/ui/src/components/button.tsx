@@ -34,11 +34,6 @@ export interface ButtonProps
     Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'type'>,
     VariantProps<typeof buttonVariants> {}
 
-/**
- * Always renders `type="button"`: a slot button must never submit an
- * enclosing host form, and no caller in this repo asks for submit/reset.
- * The spread comes first so even a JS caller cannot override the literal.
- */
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, ...props }, ref) => (
     <button

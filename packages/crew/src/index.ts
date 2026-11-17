@@ -1,35 +1,3 @@
-/**
- * dsh-crew — user-configured delegation routes plus a persistent role agent.
- *
- * The routing policy lives in one external YAML file (`$DSH_HOME/crew.yaml` by
- * default, or the plugin row's `configFile`). Every route is a user-named
- * choice with a short description and an ordered list of explicitly approved
- * model candidates. The model sees the route table in its system prompt and
- * passes a route name; it can neither name a provider/model nor invent a
- * fallback. Before each child starts, candidates are tried in order: routes the
- * LLM registry cannot resolve and coding-plan windows that are known to be
- * spent are skipped, and the first usable candidate wins. All candidates being
- * unusable fails the delegation; there is no unapproved escape hatch.
- *
- * The tools keep one stable name/schema per process (`subagent`,
- * `create_agent`); only the route table changes between steps. A configuration
- * change therefore never re-registers a tool in the middle of a step. The
- * policy is read once per delegation and a revision check before the child is
- * created rejects the call when the file changed during preparation.
- *
- * Invalid configuration is fail-closed: the tools stay visible but every new
- * delegation is refused until the file validates again. With `watch` enabled
- * the plugin reloads on save (including atomic replacement and symlink swaps)
- * and recovers without a restart.
- *
- * The profile mounting this plugin should disable the stock delegation rows
- * (`tool-subagent`, `tool-subagent-fork`, `tool-workflow`, `workflow-ptc`):
- * they would collide with `subagent` or open an unapproved model-selection
- * bypass. The stock control plane (`send_message` / `list_agents` /
- * `interrupt_agent`) stays.
- *
- * @module dsh-crew
- */
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
@@ -58,11 +26,9 @@ const PACKAGE_NAME = 'dsh-crew'
 const CONFIG_FILE_NAME = 'crew.yaml'
 const STATUS_PREFIX = '/dsh-crew'
 
-/** Plugin-row configuration: the subagent backend plus an optional policy path. */
 export interface Config {
-  /** The `ctx.subagents` provider name to start runs on (e.g. `spawn`). */
   provider: string
-  /** Policy path; empty uses `$DSH_HOME/crew.yaml`. */
+
   configFile?: string
 }
 
@@ -73,25 +39,20 @@ export const Config = Schema.object({
   ),
 })
 
-/** One explicitly approved model route for a delegation. */
 export interface RouteTarget {
-  /** Registered LLM provider route. */
   provider: string
-  /** Provider-owned exact model id. */
+
   model: string
-  /** Adapter-owned reasoning effort; omit for the model's default. */
+
   reasoningEffort?: string
 }
 
-/** One user-named delegation route: what it is for, and what may serve it. */
 export interface DelegationRoute {
-  /** Short guidance the model uses to pick this route. */
   desc: string
-  /** Approved candidates in preference order; the first usable one wins. */
+
   candidates: readonly RouteTarget[]
 }
 
-/** The whole `crew.yaml` document. */
 export interface CrewPolicy {
   routes: Record<string, DelegationRoute>
 }
@@ -143,7 +104,6 @@ function optionalString(
   return value.trim()
 }
 
-/** Validate one YAML document into a delegation policy. Throws {@link ConfigError}. */
 export function parseCrewPolicy(document: unknown): CrewPolicy {
   const root = asRecord(document, 'config')
   rejectUnknown(root, ROOT_KEYS, 'config')
@@ -183,19 +143,16 @@ export function parseCrewPolicy(document: unknown): CrewPolicy {
   return { routes }
 }
 
-/** A short, single-line rendering of a preflight failure. */
 function failureDetail(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   const single = message.replaceAll(/\s+/gu, ' ').trim()
   return single.length > 200 ? `${single.slice(0, 197)}…` : single
 }
 
-/** `<provider>/<model>`, for messages. */
 export function routeName(target: RouteTarget): string {
   return `${target.provider}/${target.model}`
 }
 
-/** One target as an LLM call config. */
 export function callConfigOf(target: RouteTarget): LlmCallConfig {
   return {
     provider: target.provider,
@@ -206,13 +163,11 @@ export function callConfigOf(target: RouteTarget): LlmCallConfig {
   }
 }
 
-/** Quota window facts as dsh-plan-usage reports them. */
 interface PlanUsageWindowShim {
   percent?: number
   resetAt?: number
 }
 
-/** One provider's quota snapshot as dsh-plan-usage reports it. */
 interface PlanUsageSnapshotShim {
   fiveHour?: PlanUsageWindowShim
   weekly?: PlanUsageWindowShim
@@ -220,7 +175,6 @@ interface PlanUsageSnapshotShim {
   monthlyMcp?: PlanUsageWindowShim
 }
 
-/** Minimal `planUsage` surface consumed by route selection; absent plugin reads as `undefined`. */
 interface PlanUsageServiceShim {
   get(
     provider: string,
@@ -228,14 +182,12 @@ interface PlanUsageServiceShim {
   ): Promise<PlanUsageSnapshotShim | undefined>
 }
 
-/** The context surface route selection reads — structurally satisfied by Context, narrowed so tests can stub it. */
 export interface RouteSelectionContext {
   llm: { resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig> }
   logger: { warn(message: string, ...args: unknown[]): void }
   get(name: string): unknown
 }
 
-/** Whether any reported window sits at its limit with the reset still ahead. */
 export function anyWindowExhausted(
   snapshot: PlanUsageSnapshotShim | undefined,
   now: number,
@@ -250,19 +202,16 @@ export function anyWindowExhausted(
   )
 }
 
-/** A quota read may serve from cache; older than this it refetches upstream. */
 const PLAN_SNAPSHOT_MAX_AGE_MS = 60_000
-/** A routing hint must never delay the delegation it routes: all quota reads share this budget. */
+
 const PLAN_READ_BUDGET_MS = 2_000
 
-/** Narrow the optional `planUsage` service without an assertion. */
 function isPlanUsageService(value: unknown): value is PlanUsageServiceShim {
   return (
     typeof value === 'object' && value !== null && 'get' in value && typeof value.get === 'function'
   )
 }
 
-/** A provider is exhausted only on a known full window; absence, failure, and timeout are unknown. */
 async function providerExhausted(
   ctx: RouteSelectionContext,
   provider: string,
@@ -289,34 +238,18 @@ async function providerExhausted(
   }
 }
 
-/** One candidate that could not serve this delegation, and why. */
 export interface SkippedCandidate {
   target: RouteTarget
   reason: string
 }
 
-/** The candidate one delegation runs on, plus the candidates skipped before it. */
 export interface RouteSelection {
-  /** The approved candidate that served the delegation. */
   target: RouteTarget
-  /**
-   * The LLM service's resolved call config for that candidate. When it names
-   * no effort (the model declares no default), `startChild` clears any effort
-   * inherited from a parent on the same route through the child's own model
-   * selection, before its first step runs.
-   */
+
   config: LlmCallConfig
   skipped: readonly SkippedCandidate[]
 }
 
-/**
- * Pick the candidate one delegation runs on.
- *
- * Candidates are preflighted in their configured order; a route the LLM
- * registry cannot resolve or a provider whose coding-plan window is known to
- * be spent is skipped. Exhausting every candidate throws — the caller never
- * falls back to an unapproved model, and an aborted call never degrades.
- */
 export async function selectRoute(
   ctx: RouteSelectionContext,
   policy: CrewPolicy,
@@ -345,7 +278,6 @@ export async function selectRoute(
     try {
       config = await ctx.llm.resolveCallConfig(callConfigOf(target), signal)
     } catch (error) {
-      // Cancellation is the caller's own decision, never a routing signal.
       if (signal.aborted) throw error
       skipped.push({ target, reason: `route unavailable (${failureDetail(error)})` })
       continue
@@ -362,7 +294,6 @@ export async function selectRoute(
   )
 }
 
-/** One route's fallback reason as the tool result's notice. */
 function selectionNotice(routeId: string, selection: RouteSelection): string | undefined {
   if (selection.skipped.length === 0) return undefined
   const skipped = selection.skipped
@@ -371,7 +302,6 @@ function selectionNotice(routeId: string, selection: RouteSelection): string | u
   return `route "${routeId}" ran on ${routeName(selection.target)} after skipping ${skipped}`
 }
 
-/** Render text blocks from the canonical JSON block array without trusting arbitrary values. */
 function outputValueText(values: readonly unknown[]): string {
   return values
     .filter(
@@ -386,7 +316,6 @@ function outputValueText(values: readonly unknown[]): string {
     .join('')
 }
 
-/** A non-`completed` stop reason means the child did not finish cleanly. */
 function stopReasonError(result: SubagentResult): string | undefined {
   switch (result.stopReason) {
     case 'completed':
@@ -404,7 +333,6 @@ function stopReasonError(result: SubagentResult): string | undefined {
   }
 }
 
-/** Append provider-authored failure detail and the child's preserved partial answer to a stop-reason error. */
 function withDiagnosticAndPartialText(error: string, result: SubagentResult): string {
   const diagnostic = result.diagnostic === undefined ? '' : `\nDiagnostic: ${result.diagnostic}`
   const text = result.output
@@ -414,31 +342,20 @@ function withDiagnosticAndPartialText(error: string, result: SubagentResult): st
   return `${error}${diagnostic}${text.length === 0 ? '' : `\nPartial output before the run ended:\n${text}`}`
 }
 
-/** The foreground branch of every delegation tool's output value. */
 interface ForegroundResult {
   kind: 'foreground'
   runId: string
   output: JsonValue[]
 }
 
-/** Outcome of releasing one activation, captured instead of thrown so a result failure survives. */
 type DisposalOutcome = { ok: true } | { ok: false; error: unknown }
 
-/**
- * Collect and release one foreground activation.
- *
- * The activation's start signal owns publication only: once the child is
- * accepted, the caller owns cancellation, so an abort must `dispose()` the
- * activation — that is what stops the running child and lets its result settle.
- * Both teardown and the result are awaited before this returns, so the tool
- * call never reports an outcome the child is still running against.
- */
 async function settleForegroundRun(
   activation: SubagentActivation,
   signal: AbortSignal,
 ): Promise<ForegroundResult> {
   let release: Promise<DisposalOutcome> | undefined
-  /** Start (or reuse) the one release this activation ever needs; dispose is idempotent. */
+
   const dispose = (): Promise<DisposalOutcome> =>
     (release ??= Promise.resolve()
       .then(() => activation.dispose())
@@ -449,7 +366,7 @@ async function settleForegroundRun(
   const cancel = (): void => {
     void dispose()
   }
-  // Covers an abort that landed while `startActivation` was still publishing.
+
   if (signal.aborted) cancel()
   else signal.addEventListener('abort', cancel, { once: true })
   try {
@@ -465,8 +382,7 @@ async function settleForegroundRun(
         }
       }),
     ])
-    // A normal completion releases here; an aborted activation already released
-    // in the listener, and the result settled because of it.
+
     const disposal = await dispose()
     if (execution.status === 'rejected') {
       if (!disposal.ok)
@@ -483,12 +399,10 @@ async function settleForegroundRun(
   }
 }
 
-/** What one delegation start produced: a background child id, or the settled foreground result. */
 type ChildOutcome =
   | { background: true; childId: string; selection: RouteSelection }
   | { background: false; value: ForegroundResult; selection: RouteSelection }
 
-/** The error a delegation reports while the policy file is not usable. */
 function unusablePolicyError(state: ConfigState<CrewPolicy>): Error {
   const reason = state.error ?? 'it has not been read yet'
   return new Error(
@@ -496,14 +410,6 @@ function unusablePolicyError(state: ConfigState<CrewPolicy>): Error {
   )
 }
 
-/**
- * Start one child on the requested route.
- *
- * The policy revision is captured before route selection and re-checked before
- * the child exists: if the file changed while this call was preparing, the
- * call fails and the caller retries against the new policy instead of running
- * a stale one. A change after the child exists does not touch it.
- */
 async function startChild(
   ctx: Context,
   config: Config,
@@ -519,9 +425,7 @@ async function startChild(
   if (before.value === undefined) throw unusablePolicyError(before)
   exec.signal.throwIfAborted()
   const selection = await selectRoute(ctx, before.value, spec.route, exec.signal)
-  // Use the resolved config, not the candidate as written: the resolver
-  // materializes the model's default effort, which is what keeps a
-  // same-provider/same-model child from inheriting the parent's effort.
+
   const agentOptions = selection.config
   if (ctx.subagents.getProvider(config.provider) !== subagentProvider)
     throw new Error(
@@ -540,12 +444,7 @@ async function startChild(
   }
   const notice = selectionNotice(spec.route, selection)
   if (notice !== undefined) log.warn('crew: %s', notice)
-  // When the resolver has no default effort to materialize, the SDK's child
-  // merge would inherit the parent's effort on an identical provider/model
-  // route. The supported way to express "adapter default, not the previous
-  // effort" is the child's own model selection: omit the effort there. The
-  // creation listener runs before the queued prompt's first step, so this is
-  // the selection the child actually uses.
+
   const clearInheritedEffort = selection.config.reasoningEffort === undefined
   const childId = clearInheritedEffort ? SessionId(randomUUID()) : undefined
   const stopCreated = clearInheritedEffort
@@ -559,11 +458,6 @@ async function startChild(
     : undefined
   let activation: SubagentActivation
   try {
-    // One activation API for both modes: only the result recipient (and
-    // therefore whether the model is notified) differs. Background children
-    // stay resident and are released through the host's control plane — this
-    // tool call's end, including a later abort of its signal, never touches
-    // them. A foreground child is settled and disposed by this call itself.
     activation = await ctx.subagents.startActivation({
       provider: config.provider,
       ...(childId === undefined ? {} : { childId }),
@@ -585,7 +479,6 @@ async function startChild(
   }
 }
 
-/** Verify one provider supports everything the crew tools mount against. */
 function assertProviderConfiguration(subagentProvider: SubagentProvider) {
   if (!subagentProvider.capabilities.agentOptions)
     throw new Error(`crew: provider "${subagentProvider.name}" does not support child agentOptions`)
@@ -595,7 +488,6 @@ function assertProviderConfiguration(subagentProvider: SubagentProvider) {
     )
 }
 
-/** Verified route metadata echoed by every delegation result. */
 const routeResultFields = {
   route: { type: 'string', required: true, description: 'The route the caller asked for.' },
   provider: { type: 'string', required: true, description: 'LLM provider that serves the child.' },
@@ -607,7 +499,6 @@ const routeResultFields = {
   },
 } as const
 
-/** Shared output contract of the delegation tools: a continuable child id, or the collected foreground output. */
 const delegationOutputSchema = {
   oneOf: [
     {
@@ -632,7 +523,6 @@ const delegationOutputSchema = {
   ],
 } as const
 
-/** Output contract of `create_agent`: the created agent's id and the serving route. */
 const createAgentOutputSchema = {
   type: 'object',
   additionalProperties: false,
@@ -655,12 +545,10 @@ const ROUTE_PARAMETER_DESCRIPTION =
 const PROMPT_PARAMETER_DESCRIPTION =
   "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
 
-/** One route table entry: a name plus one line of user-authored guidance. */
 function routeLine(id: string, desc: string): string {
   return `- ${id}: ${desc.replaceAll(/\s+/gu, ' ').trim()}`
 }
 
-/** The per-step system-prompt section: the current route table, or why delegation is disabled. */
 export function renderRouteTable(state: ConfigState<CrewPolicy>): string {
   if (!state.loaded) return ''
   if (state.value === undefined) {
@@ -673,7 +561,6 @@ export function renderRouteTable(state: ConfigState<CrewPolicy>): string {
   ].join('\n')
 }
 
-/** Install the crew delegation composition. */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const log = ctx.logger(PACKAGE_NAME)
   const store = registerConfig(ctx, {
@@ -877,8 +764,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.systemPrompt.section({
     name: 'tool:crew',
     order: ctx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
-    // Route descriptions are literal user text; `{{...}}` in them is not a
-    // prompt variable.
+
     interpolate: false,
     text: () => (mounted === undefined ? '' : renderRouteTable(store.state())),
   })

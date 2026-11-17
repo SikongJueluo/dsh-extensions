@@ -1,8 +1,3 @@
-/* Runtime smoke test for dsh-plan-usage: parser vectors for all four
- * sources (captured live payloads from OpenTokenUsage / opencodex / headroom
- * / ai-usagebar, all MIT, plus OpenCode's own endpoint live-verified
- * 2026-10-13), the GLM monitor dedupe, service registration on a
- * real Cordis context, and live-route filtering via a stub llm service. */
 import { Context, Service } from '@deepseek-ai/cordis'
 import {
   CommandCodeSource,
@@ -35,14 +30,12 @@ function check(label, condition) {
   }
 }
 
-// ── defaults ─────────────────────────────────────────────────────────────────
 const config = Config({})
 console.log('plugin:', name, '| inject:', inject)
 check('quotaCacheMs default 60s', config.quotaCacheMs === 60_000)
 check('providers default empty', Object.keys(config.providers).length === 0)
 check('command-code monitor defaults empty', Object.keys(config.commandCode).length === 0)
 
-// ── GLM monitor resolution ───────────────────────────────────────────────────
 check(
   'zai-coding-cn builtin monitor',
   resolveMonitor('zai-coding-cn')?.monitorBaseUrl === 'https://open.bigmodel.cn',
@@ -59,7 +52,6 @@ check(
   monitoredProviders({ extra: { monitorBaseUrl: 'https://x' } }).includes('extra'),
 )
 
-// ── GLM payload parsing (live-response vectors) ──────────────────────────────
 const v2Limits = parseQuotaBody({
   success: true,
   data: {
@@ -131,7 +123,6 @@ check(
   parseQuotaBody({ success: false, data: { limits: [] } }) === null,
 )
 
-// ── OpenAI Codex usage parsing (headroom's live capture) ─────────────────────
 const codexBody = {
   plan_type: 'plus',
   rate_limit: {
@@ -163,7 +154,6 @@ check(
 )
 check('codex: no rate_limit rejected', parseCodexUsage({ plan_type: 'plus' }) === undefined)
 
-// OpenAI source: token missing → undefined; token present → fetched snapshot.
 const openaiFetches = []
 const openai = new OpenAiUsageSource({
   getToken: async () => undefined,
@@ -203,7 +193,6 @@ check(
     String(openaiFetches[0]?.url).endsWith('/backend-api/wham/usage'),
 )
 
-// ── MiniMax token_plan parsing (ai-usagebar's live capture) ──────────────────
 const minimaxLive = {
   model_remains: [
     {
@@ -317,7 +306,6 @@ check(
   (await minimaxSource.get('minimax-cn')) === undefined && minimaxCalls.length === 1,
 )
 
-// Region fallback: a CN key behind the global route flips hosts and remembers.
 const regionCalls = []
 const regionSource = new MiniMaxSource({
   env: { MINIMAX_API_KEY: 'cn-key' },
@@ -350,7 +338,6 @@ check(
   flippedAgain !== undefined && regionCalls.length === 3 && regionCalls[2].includes('minimaxi.com'),
 )
 
-// ── OpenCode Go usage parsing (live capture of 2026-10-13) ───────────────────
 const opencodeLive = {
   usage: {
     rolling: { status: 'ok', percent: 0, resetsAt: '2026-10-13T11:32:35.000Z' },
@@ -414,7 +401,6 @@ check(
   }).fiveHour?.resetAt === undefined,
 )
 
-// OpenCode source: no env key → not ready; keyed → fetches and maps; failures → undefined.
 const opencodeCalls = []
 const opencodeFetch = async (url, init) => {
   opencodeCalls.push({ url: String(url), auth: init?.headers?.authorization })
@@ -476,7 +462,6 @@ check(
   (await opencodeBadJson.get('opencode-go')) === undefined,
 )
 
-// The optional providerKeys service wins over env; absent service keeps env behavior.
 const keyedCalls = []
 const keyedSource = new OpenCodeGoSource({
   env: {},
@@ -497,7 +482,6 @@ check(
   keyedSnapshot !== undefined && keyedCalls[0]?.auth === 'Bearer service-key',
 )
 
-// ── Command Code credits parsing (alpha billing routes, 2026-11) ────────────
 const commandCodeCredits = {
   credits: { monthlyCredits: 57.6, monthlyCreditsGranted: 70 },
   windowLimits: {
@@ -611,7 +595,6 @@ check(
   'error' in parseCommandCodeCredits('nope'),
 )
 
-// Command Code source: no env key → not ready; keyed → whoami + credits + subscriptions; failures → undefined.
 const commandCodeCalls = []
 const commandCodeFetch = async (url, init) => {
   const target = String(url)
@@ -712,7 +695,6 @@ check(
   (await commandCodeCreditsDown.get('command-code')) === undefined,
 )
 
-// ── GLM QuotaMonitor providerKeys resolver ─────────────────────────────────
 const serviceKeyCalls = []
 const serviceMonitor = new QuotaMonitor({
   resolveKey: (provider) => (provider === 'zai-coding-cn' ? 'service-glm-key' : undefined),
@@ -748,7 +730,6 @@ check(
   serviceGlm?.fiveHour?.percent === 9 && serviceKeyCalls[0] === 'Bearer service-glm-key',
 )
 
-// ── GLM QuotaMonitor with a stub fetch (shared-monitor dedupe) ───────────────
 let fetchCalls = 0
 const stubFetch = async (url, init) => {
   fetchCalls += 1
@@ -780,13 +761,11 @@ check(
   alias?.provider === 'glm' && fetchCalls === 1,
 )
 
-// ── service on a real Cordis context: registration + live-route filter ──────
 const root = new Context()
 apply(root, config)
 const service = root.get('planUsage')
 check('apply registers the planUsage service', service instanceof PlanUsageService)
 
-// Without an llm service every known source route is listed.
 const unfiltered = service.providers()
 check(
   'no llm service → all source routes listed',
@@ -797,7 +776,6 @@ check(
     unfiltered.includes('command-code'),
 )
 
-// A stub llm service narrows the list to routes actually registered.
 class StubLlm extends Service {
   constructor(ctx) {
     super(ctx, 'llm')

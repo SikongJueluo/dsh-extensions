@@ -1,85 +1,60 @@
-/**
- * Bounded, read-only project evidence for the approval judge.
- *
- * The judge is a model with three tools — read a file, list a directory,
- * search literal text — and nothing else. Capabilities are enforced here, not
- * by prompt wording: every path is resolved to its real location and rejected
- * unless it stays inside the session workspace; secret-looking files and VCS
- * internals are never returned; every call draws from one byte/call budget.
- * There is no write, execute, network, or delegation path in this module.
- *
- * Budgets, truncation, and evidence failures are recorded as a blocking
- * problem: the judge may continue the conversation, but its final ALLOW is
- * refused once any evidence request was cut short, failed, or changed under
- * the investigation. That gate lives in the judge; this module supplies the
- * deterministic facts it needs.
- *
- * @module dsh-auto-permit/inspect
- */
 import { createHash } from 'node:crypto'
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
+import type { Logger } from '@deepseek-ai/cordis'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import { debugQuietly, errorTag } from './diagnostics.js'
 import { isRecord } from './record.js'
 
-/** Bounds for one judge investigation. */
 export const INSPECT_LIMITS = {
-  /** Tool invocations across the whole judge turn. */
   maxToolCalls: 12,
-  /** Total evidence bytes returned to the model across all tools. */
+
   maxOutputBytes: 32 * 1024,
-  /** Bytes in one `read_file` result. */
+
   maxReadBytes: 12 * 1024,
-  /** Files larger than this are not read as a whole. */
+
   maxFileBytes: 256 * 1024,
-  /** Bytes scanned by one `search_files` call. */
+
   maxScanBytes: 4 * 1024 * 1024,
-  /** Files visited by one recursive search. */
+
   maxVisitedFiles: 400,
-  /** Matches returned by one search. */
+
   maxMatches: 60,
-  /** Entries returned by one `list_dir`. */
+
   maxListEntries: 200,
-  /** Characters in one path argument. */
+
   maxPathChars: 4096,
-  /** Characters kept from one matched line. */
+
   maxMatchLineChars: 300,
 } as const
 
-/** One tool result handed back to the judge model. */
 export interface InspectResult {
-  /** Model-facing result text (already bounded). */
   text: string
-  /** True when the request failed or named something the judge may not read. */
+
   isError: boolean
-  /** True when this result was cut short and cannot prove completeness. */
+
   incomplete?: boolean
 }
 
-/** The first blocking evidence fact of one investigation. */
 export interface InspectProblem {
-  /** `budget` for caps/truncation, `evidence-unavailable` for failures. */
   readonly category: 'budget' | 'evidence-unavailable' | 'evidence-changed'
   readonly message: string
 }
 
-/** The read-only world one judge turn may inspect. */
 export interface Inspector {
-  /** Tool declarations for the model request. */
   readonly tools: readonly ToolSchema[]
-  /** Execute one tool call by name with its raw JSON arguments. */
+
   execute(name: string, argumentsJson: string): Promise<InspectResult>
-  /** Evidence references accumulated so far, e.g. `scripts/build.sh:1-40`. */
+
   references(): readonly string[]
-  /** Re-resolve and re-read every inspected file, returning changed paths. */
+
   changedFiles(): Promise<readonly string[]>
-  /** The first failed, truncated, or capped evidence request, if any. */
+
   problem(): InspectProblem | undefined
-  /** True when a path was read again after its target or content changed. */
+
   invalidated(): boolean
 }
 
-/** The declared tool surface; no other capability is reachable from a judge. */
 const INSPECT_TOOLS: readonly ToolSchema[] = [
   {
     name: 'read_file',
@@ -143,7 +118,6 @@ const INSPECT_TOOLS: readonly ToolSchema[] = [
   },
 ]
 
-/** Directories never listed, read, or searched, even inside the workspace. */
 const DENIED_DIRS = new Set([
   '.git',
   '.jj',
@@ -163,10 +137,8 @@ const DENIED_DIRS = new Set([
   '.tox',
 ])
 
-/** Heavy output directories skipped only by recursive search. */
 const SEARCH_SKIP_DIRS = new Set(['dist', 'build', 'target', 'coverage'])
 
-/** Files that may carry credentials or private keys. */
 const DENIED_FILE =
   /^(?:\.env(?:\.(?!example$|sample$|template$)[^/]*)?$|\.netrc|\.git-credentials|id_(?:rsa|dsa|ecdsa|ed25519)|[^/]*\.(?:pem|key|p12|pfx))$/iu
 
@@ -213,13 +185,12 @@ function integerArgument(args: Record<string, unknown>, name: string): number | 
 }
 
 interface Resolved {
-  /** The path the caller named, made absolute before symlink resolution. */
   logical: string
-  /** Canonical target used for reading. */
+
   real: string
-  /** Canonical path relative to the workspace root, slash-separated. */
+
   rel: string
-  /** The named path relative to the workspace root, slash-separated. */
+
   logicalRel: string
 }
 
@@ -261,19 +232,11 @@ function denyReason(rel: string): string | undefined {
   return undefined
 }
 
-/**
- * Build the read-only inspector for one approval.
- *
- * @param workspace - the session's immutable project root.
- * @param cwd - the directory the pending command runs in; used to resolve
- *   relative tool paths and ignored when it is outside the workspace.
- * @param signal - the request's cancellation/deadline signal.
- * @returns an inspector, or undefined when the workspace cannot be resolved.
- */
 export async function createInspector(
   workspace: string | undefined,
   cwd: string | undefined,
   signal?: AbortSignal,
+  logger?: Pick<Logger, 'debug'>,
 ): Promise<Inspector | undefined> {
   if (workspace === undefined) return undefined
   signal?.throwIfAborted()
@@ -290,8 +253,13 @@ export async function createInspector(
     try {
       const resolved = await realpath(cwd)
       if (contains(root, resolved)) base = resolved
-    } catch {
-      // A missing working directory keeps the workspace root as the base.
+    } catch (error) {
+      debugQuietly(
+        logger,
+        'auto-permit: cwd %s is unresolved inside the workspace; evidence resolves against the root (%s)',
+        cwd,
+        errorTag(error),
+      )
     }
   }
 
@@ -339,11 +307,6 @@ export async function createInspector(
     if (!state.refs.includes(ref)) state.refs.push(ref)
   }
 
-  /**
-   * Record one read. A second read of the same logical path must see the same
-   * target and bytes; otherwise the turn is invalidated and the old evidence
-   * is never silently replaced by the new version.
-   */
   const recordRead = (
     resolved: Resolved,
     raw: Buffer,
@@ -450,8 +413,7 @@ export async function createInspector(
     if (!info.isDirectory()) return fail(`not a directory: ${resolved.rel}`)
     const entries = await readdir(resolved.real, { withFileTypes: true })
     signal?.throwIfAborted()
-    // Policy exclusions (.git, .env, node_modules, …) are not truncation;
-    // only entries the tool would have listed but for the count cap are.
+
     const eligible = entries
       .filter((entry) => !isDeniedComponent(entry.name))
       .toSorted(

@@ -1,20 +1,3 @@
-/**
- * Restart-resume: keep harness restarts non-destructive for running turns.
- *
- * The plugin mirrors the set of RUNNING sessions into a small durable file on
- * every status transition (not just at shutdown — teardown ordering then
- * cannot lose it, and even a hard kill leaves the last known state behind).
- * On the next boot every fresh entry inside the max-age window is resumed:
- * the session is cold-opened and sent a continuation message, unless its log
- * shows the interrupted turn actually completed (the status write raced the
- * kill) — a session the user stopped manually is never in the set, because
- * stopping flips it to idle and the mirror drops it.
- *
- * A resumed turn that immediately hits a quota failure re-enters the normal
- * quota-wait path, so restart-resume and reset-aligned waiting compose.
- *
- * @module dsh-auto-continue/restart
- */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentRegistry } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -25,11 +8,9 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import type { SessionControllerShim } from './shims.js'
 import { isRecord } from './guards.js'
 
-/** The continuation message sent into a restarted-mid-flight session. */
 export const RESTART_RESUME_MESSAGE =
   '[auto-continue] The harness restarted while this session was working and the running turn was interrupted. Continue that work from exactly where it stopped.'
 
-/** One mirrored entry: a session that was RUNNING as of `at`. */
 interface RunningEntry {
   sessionId: string
   at: number
@@ -40,17 +21,15 @@ interface MirrorFile {
   entries: RunningEntry[]
 }
 
-/** Where the mirror lives: `$DSH_HOME` (matching dsh-home-paths) over `~/.dsh`. */
 export function defaultMirrorPath(): string {
   const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
   return join(home, 'storages', 'dsh-auto-continue', 'running.json')
 }
 
-/** Stagger between consecutive cold-open resumes at boot. */
 const RESUME_STAGGER_MS = 2_000
-/** Grace period after boot before the first resume fires. */
+
 const BOOT_SETTLE_MS = 5_000
-/** How long the boot pass keeps retrying while the sessionController is absent. */
+
 const CONTROLLER_WAIT_MS = 30_000
 const CONTROLLER_POLL_MS = 1_000
 
@@ -65,7 +44,6 @@ function isEntry(value: unknown): value is RunningEntry {
   )
 }
 
-/** Whether the session's last completed turn actually finished (race guard). */
 function lastTurnCompleted(agent: Agent): boolean {
   // oxlint-disable-next-line typescript/no-deprecated -- A25: the deprecated synchronous session-log readers have no sync replacement; the sanctioned ones are async and optional, so migrating changes exported contracts and control flow.
   const events = agent.session.ownEvents()
@@ -78,10 +56,6 @@ function lastTurnCompleted(agent: Agent): boolean {
   return false
 }
 
-/**
- * Register the running-sessions mirror and the boot-time resumption pass.
- * Both unwind on plugin disposal.
- */
 export function registerRestartResume(
   ctx: Context,
   config: { resumeOnRestart: boolean; resumeMaxAgeMs: number },
@@ -110,13 +84,9 @@ export function registerRestartResume(
         await rename(tmp, path)
         return undefined
       })
-      .catch(() => {
-        // A failed mirror write only narrows restart coverage; waiting goes on.
-      })
+      .catch(() => {})
   }
 
-  // Mirror every transition: running → record, idle → drop. Immediate write,
-  // so the file always reflects the last state death could have interrupted.
   ctx.on('agent/status', (payload) => {
     if (lifetime.signal.aborted) return
     const sessionId = String(payload.agent.id)
@@ -130,7 +100,6 @@ export function registerRestartResume(
     source: { kind: 'user' },
   })
 
-  /** Wait for the sessionController (the composition may still be mounting). */
   const awaitController = async (): Promise<SessionControllerShim | undefined> => {
     const deadline = Date.now() + (options.controllerWaitMs ?? CONTROLLER_WAIT_MS)
     for (;;) {
@@ -144,8 +113,6 @@ export function registerRestartResume(
     }
   }
 
-  /** One resume attempt; resolves false when the composition could not serve
-   *  it (controller absent) and the whole pass should leave the mirror alone. */
   const resumeOne = async (entry: RunningEntry): Promise<boolean> => {
     const registry: AgentRegistry | undefined = ctx.get('agents')
     let agent: Agent | undefined = registry?.get(SessionId(entry.sessionId))
@@ -193,8 +160,7 @@ export function registerRestartResume(
     const record = isRecord(parsed) ? parsed : undefined
     const rawEntries = record?.entries
     const entries = Array.isArray(rawEntries) ? rawEntries.filter((entry) => isEntry(entry)) : []
-    // Consume only after the pass finishes, so a not-yet-ready composition
-    // (or a mid-pass crash) leaves the mirror for the next boot to retry.
+
     const now = Date.now()
     const fresh = entries.filter((entry) => now - entry.at < config.resumeMaxAgeMs)
     const stale = entries.length - fresh.length
@@ -205,14 +171,14 @@ export function registerRestartResume(
         stale === 1 ? 'y is' : 'ies are',
       )
     if (fresh.length === 0) return
-    // Let the composition settle, then resume one session at a time.
+
     await new Promise((resolve) => {
       setTimeout(resolve, settleMs)
     })
     for (const entry of fresh) {
       if (lifetime.signal.aborted) return
       try {
-        if (!(await resumeOne(entry))) return // composition not ready: keep the mirror
+        if (!(await resumeOne(entry))) return
       } catch (error) {
         ctx.logger.warn('auto-continue: restart-resume of "%s" failed: %o', entry.sessionId, error)
       }
@@ -220,13 +186,10 @@ export function registerRestartResume(
         setTimeout(resolve, staggerMs)
       })
     }
-    // One-shot: consume once the pass has finished, so a not-yet-ready
-    // composition (or a mid-pass crash) leaves the mirror for the next boot.
+
     persist([])
   }
 
-  // The boot pass waits for the plugin tree (and sessionController) to exist;
-  // a plain delay is enough because apply runs during composition.
   void adoptAtBoot()
 
   ctx.effect(

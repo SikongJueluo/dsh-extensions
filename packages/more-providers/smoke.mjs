@@ -1,8 +1,3 @@
-/* Runtime smoke test for dsh-more-providers: YAML validation/inheritance, key
- * sources, builtin + custom provider construction, the providerKeys service,
- * Command Code's three-protocol mapping, and the plugin apply path. It never
- * touches the network: custom catalogs are either static or served by a stub
- * fetch. */
 import { mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -78,7 +73,6 @@ const baseConfig = {
 const configPath = join(root, 'more-providers.yaml')
 writeFileSync(configPath, JSON.stringify(baseConfig))
 
-// ── defaults / paths ────────────────────────────────────────────────────────
 const previousHome = process.env.DSH_HOME
 process.env.DSH_HOME = root
 check(
@@ -94,7 +88,6 @@ check('default secret dir is XDG_RUNTIME_DIR/agenix', defaultSecretDir() === joi
 if (previousRuntime === undefined) delete process.env.XDG_RUNTIME_DIR
 else process.env.XDG_RUNTIME_DIR = previousRuntime
 
-// ── config resolution / inheritance ─────────────────────────────────────────
 const { providers: resolved } = await loadConfig(configPath)
 check(
   'account routes are provider-account',
@@ -114,7 +107,6 @@ check(
   resolved[2]?.route === 'zai-coding-cn' && resolved[2]?.catalog === 'zai-coding-cn',
 )
 
-// apiKeyFile wins over secretName at the same level.
 const precedencePath = join(root, 'precedence.yaml')
 writeFileSync(
   precedencePath,
@@ -136,7 +128,6 @@ check(
   precedence[0]?.keySource.kind === 'file' && precedence[0]?.keySource.path === keyFile,
 )
 
-// ── strict config errors ────────────────────────────────────────────────────
 throwsConfig(() => resolveConfig({ providers: {}, extra: true }), 'unknown top-level key rejected')
 throwsConfig(() => resolveConfig({ providers: { p: { kind: 'nope' } } }), 'unknown kind rejected')
 throwsConfig(
@@ -179,7 +170,6 @@ throwsConfig(
   'duplicate route rejected',
 )
 
-// ── missing key is dormant, not config-invalid ──────────────────────────────
 const dormantPath = join(root, 'dormant.yaml')
 writeFileSync(
   dormantPath,
@@ -197,7 +187,6 @@ const dormant = await buildProviders((await loadConfig(dormantPath)).providers, 
 })
 check('missing key file skips only that route', dormant.profiles.size === 0)
 
-// ── builtin + custom provider construction ─────────────────────────────────
 const built = await buildProviders(resolved, { info() {}, warn() {}, error() {} })
 check('build registers all keyed routes', built.profiles.size === 3)
 check('build keeps key sources', built.keys.get('mdkj-stable')?.kind === 'file')
@@ -222,7 +211,6 @@ check(
     '["text","image"]',
 )
 
-// reasoning: false removes the thinking map.
 const noThinkingPath = join(root, 'no-thinking.yaml')
 writeFileSync(
   noThinkingPath,
@@ -250,7 +238,6 @@ check(
   plain?.reasoning === false && plain?.thinkingLevelMap === undefined,
 )
 
-// ── model discovery + static fallback (stubbed fetch) ─────────────────────
 const originalFetch = globalThis.fetch
 let discoveryCalls = 0
 globalThis.fetch = async (_url) => {
@@ -321,7 +308,6 @@ check(
 )
 globalThis.fetch = originalFetch
 
-// ── providerKeys service ───────────────────────────────────────────────────
 const serviceContext = new Context()
 const keyService = new ProviderKeys(serviceContext, built.keys)
 check('providerKeys service resolves a file key', keyService.key('mdkj-stable') === 'file-key')
@@ -332,7 +318,6 @@ utimesSync(keyFile, future, future)
 check('providerKeys service reloads by mtime', keyService.key('mdkj-stable') === 'rotated-key')
 writeFileSync(keyFile, 'file-key\n')
 
-// ── Command Code three-protocol mapping ────────────────────────────────────
 const commandCodeItems = parseCatalog({
   data: [
     { id: 'claude-sonnet-5', context_length: 1_000_000, supported_endpoints: ['/messages'] },
@@ -364,7 +349,6 @@ const commandCodeProvider = buildCommandCodeProvider(commandCodeItems, {
 })
 check('command-code provider builds', commandCodeProvider.provider.getModels().length === 3)
 
-// ── plugin apply path ──────────────────────────────────────────────────────
 class StubLlm extends Service {
   constructor(ctx) {
     super(ctx, 'llm')
@@ -396,7 +380,6 @@ const missingLlm = new StubLlm(missingContext)
 await apply(missingContext, Config({ configFile: join(root, 'missing.yaml') }))
 check('missing config does not throw or register', missingLlm.registrations.length === 0)
 
-// ── config status route ────────────────────────────────────────────────────
 class StubWebServer extends Service {
   constructor(ctx) {
     super(ctx, 'webServer')
@@ -428,9 +411,6 @@ check(
 check('no provider was registered from the broken config', statusLlm.registrations.length === 0)
 await statusContext.fiber.dispose()
 
-// A document can validate yet still fail provider construction (an unknown
-// builtin catalog). That failure must reach the status route too, not leave it
-// lying "valid" while no adapter was registered.
 process.env.REVIEW_FAKE_KEY = 'review-value'
 const badCatalogPath = join(root, 'bad-catalog.yaml')
 writeFileSync(

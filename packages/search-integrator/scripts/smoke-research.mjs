@@ -1,18 +1,3 @@
-/**
- * Real-endpoint smoke test for dsh-search-integrator (NOT part of vitest).
- *
- * Usage:
- *   node scripts/smoke-research.mjs --providers   # one query per enabled source
- *   node scripts/smoke-research.mjs --full        # whole pipeline incl. deepseek-flash integration
- *
- * Credentials come from the environment (ZHIPU_API_KEY / EXA_API_KEY /
- * TAVILY_API_KEY / BRAVE_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY); values
- * are never printed. The ChatGPT subscription source is enabled with
- * CHATGPT_OAUTH=1: the smoke reads the live oauth-providers grant record
- * directly (access token only, never printed, never refreshed — refresh stays
- * with the host). The deepseek leg talks to the public API directly; the
- * llm-service wrapper is covered by unit tests.
- */
 import { readFileSync } from 'node:fs'
 import { load } from 'js-yaml'
 import {

@@ -1,46 +1,28 @@
 /**
  * OpenAI ChatGPT OAuth protocol (PKCE + loopback callback).
- *
- * Implements the same authorization flow the Codex CLI and pi-ai use against
- * `auth.openai.com`: a PKCE S256 authorization URL the human opens in a
- * browser, a loopback HTTP server on 127.0.0.1:1455 that catches the
- * redirect, and a manual paste fallback that accepts the whole redirect URL,
- * a `code#state` pair, or a bare authorization code when the loopback server
- * cannot be reached (remote host, occupied port).
- *
- * Adapted from pi-ai's `openai-codex` flow (MIT) and werifu/dsh-oai-oauth
- * (MIT) — see THIRD-PARTY-NOTICE.md.
- *
  * @module dsh-more-providers/providers/chatgpt/oauth
  */
 import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
+import type { Logger } from '@deepseek-ai/cordis'
+import { debugQuietly } from '../../diagnostics.js'
 import { PACKAGE_NAME } from '../../identity.js'
 import { isRecord } from '../../record.js'
 import type { FetchLike } from '../../oauth/transport.js'
 
-/** The public OAuth client id the Codex CLI uses for the ChatGPT login. */
 const OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
-/** OpenAI authorization endpoint. */
 const OAUTH_AUTHORIZE_URL = 'https://auth.openai.com/oauth/authorize'
-/** OpenAI token endpoint (code exchange and refresh). */
 const OAUTH_TOKEN_URL = 'https://auth.openai.com/oauth/token'
-/** Loopback redirect URI registered for the client id (fixed port). */
 export const OAUTH_REDIRECT_URI = 'http://localhost:1455/auth/callback'
-/** Loopback port the callback server listens on. */
 const OAUTH_CALLBACK_PORT = 1455
-/** Loopback host the callback server binds. */
 const OAUTH_CALLBACK_HOST = '127.0.0.1'
-/** OAuth scopes for the ChatGPT login. */
 const OAUTH_SCOPE = 'openid profile email offline_access'
-/** JWT claim path carrying the ChatGPT account id. */
 const JWT_CLAIM_PATH = 'https://api.openai.com/auth'
 
 /** The stored OAuth grant: everything later requests and refreshes need. */
 export interface OAuthGrant {
   access: string
   refresh: string
-  /** Expiry in epoch milliseconds. */
   expires: number
   accountId: string
 }
@@ -83,21 +65,16 @@ export async function createAuthorizationRequest(originator: string = PACKAGE_NA
   return { verifier, state, url: url.toString() }
 }
 
-/**
- * Parse a pasted authorization answer: the whole redirect URL, a
- * `code#state` pair, `code=…` parameters, or a bare code.
- */
+/** Parse a pasted authorization answer: the whole redirect URL, a `code#state` pair, `code=...` parameters, or a bare code. */
 export function parseAuthorizationInput(input: string): { code?: string; state?: string } {
   const value = input.trim()
   if (!value) return {}
-  try {
+  if (URL.canParse(value)) {
     const url = new URL(value)
     return {
       code: url.searchParams.get('code') ?? undefined,
       state: url.searchParams.get('state') ?? undefined,
     }
-  } catch {
-    // not a URL
   }
   if (value.includes('#')) {
     const [code, state] = value.split('#', 2)
@@ -232,13 +209,8 @@ function errorPage(message: string): string {
   return `<!doctype html><meta charset="utf-8"><title>Sign-in failed</title><p>${message}</p>`
 }
 
-/**
- * Listen on the loopback redirect port for the OAuth callback. Resolves with
- * a {@link CallbackServer} whose `waitForCode` fulfills on a state-matching
- * code; resolves with a no-op server when the port cannot be bound (remote
- * host or another login holding it) so the paste fallback takes over.
- */
-export function startCallbackServer(state: string): Promise<CallbackServer> {
+/** Listen on the loopback redirect port for the OAuth callback. Resolves with a {@link CallbackServer} whose `waitForCode` fulfills on a state-matching code; resolves with a no-op server when the port cannot be bound (remote host or another login holding it) so the paste fallback takes over. */
+export function startCallbackServer(state: string, logger?: Logger): Promise<CallbackServer> {
   let settleWait: ((value: { code: string } | null) => void) | undefined
   const waitForCode = new Promise<{ code: string } | null>((resolve) => {
     settleWait = (value) => resolve(value)
@@ -294,21 +266,19 @@ export function startCallbackServer(state: string): Promise<CallbackServer> {
           close: settleAndClose,
         })
       })
-      .once('error', () => {
-        // Port unavailable (another login holds it, or a headless remote
-        // host): hand back a no-op server so the manual paste path serves
-        // the login instead.
+      .once('error', (error) => {
+        debugQuietly(
+          logger,
+          'chatgpt oauth: loopback callback listener unavailable (%s); using the paste fallback',
+          error,
+        )
         settleWait?.(null)
         settleWait = undefined
         resolve({
           waitForCode: async () => null,
           cancelWait: () => undefined,
           close: () => {
-            try {
-              server.close()
-            } catch {
-              // never listened; nothing to close
-            }
+            if (server.listening) server.close()
           },
         })
       })

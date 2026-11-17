@@ -1,22 +1,3 @@
-/**
- * Recovery owner for quota/rate-limited model requests.
- *
- * Listens on the `agent/request-error` waterfall downstream of the built-in
- * `llm-retry` executor: `QUOTA` failures are never in its default retryable
- * set and reach us immediately; `RATE_LIMIT` reaches us once its bounded
- * budget is exhausted (or an `always` policy defers downstream first).
- *
- * For each owned failure we plan one wait — until the quota API's reported
- * window reset when the `planUsage` service (dsh-plan-usage) is mounted and
- * answers, or a staged probe otherwise — record it durably as an `llm/retry`
- * event (the stock Web conversation view renders the countdown for free),
- * sleep cancellably, then return `{ kind: 'retry' }` so the loop re-runs the
- * failed step inside the same open turn over the same durable history: no
- * "continue" message, no extra prompt tokens, and the rebuilt request can
- * still hit the provider's prompt cache.
- *
- * @module dsh-auto-continue/recovery
- */
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
@@ -25,50 +6,34 @@ import type { ScheduleOptions, WaitPlan } from './schedule.js'
 import { planProbeWait, planResetWait } from './schedule.js'
 import type { PendingWait, WaitSpool } from './spool.js'
 
-/** Failure codes this plugin owns. */
 const OWNED_CODES = new Set(['QUOTA', 'RATE_LIMIT'])
 
-/** One `llm/retry` policy chain's event identity. */
 interface RetryChain {
-  /** One retryId per chain: the persistence format requires every attempt of
-   * a (turn, step, provider, policyKey) chain to share the scheduled id. */
   retryId: string
-  /** Attempts recorded so far in this chain; the next event must be +1. */
+
   attempts: number
 }
 
-/** Wait bookkeeping for one open turn of one session. */
 interface WaitState {
   firstFailureAt: number
   attempts: number
   probes: number
-  /**
-   * Event chains by (turn, step, provider). The session format numbers
-   * `llm/retry` per chain — NOT per turn — so a turn that retries at step 79,
-   * advances, and hits the limit again at step 122 must restart at 1 for the
-   * new chain; a turn-scoped counter corrupts the stored log (it then refuses
-   * to load: "llm/retry skips its policy attempt sequence").
-   */
+
   chains: Map<string, RetryChain>
 }
 
 export interface RecoveryConfig extends ScheduleOptions {
-  /** Durable wait records; `undefined` disables persistence entirely. */
   spool?: WaitSpool
-  /** Called when a wait is kept after its turn aborted (user stop, relay
-   *  teardown, shutdown ordering) so the in-process adopter re-arms it. */
+
   onWaitKept?: (entry: PendingWait) => void
-  /** Session ids whose wait the user cancelled via /ac-cancel; the sleeping
-   *  recovery checks it at wake and stands down without retrying. */
+
   cancelled?: Set<string>
 }
 
-/** Hard cap on tracked turn states; the map is pruned to its first entries. */
 const MAX_TRACKED_STATES = 64
-/** Single sleep chunks below ~12 days so setTimeout never overflows. */
+
 const SLEEP_CHUNK_MS = 2 ** 30
 
-/** Sleep `delayMs` unless `signal` aborts; resolves false when aborted. */
 export function cancellableSleep(delayMs: number, signal: AbortSignal): Promise<boolean> {
   if (delayMs <= 0) return Promise.resolve(!signal.aborted)
   if (signal.aborted) return Promise.resolve(false)
@@ -101,11 +66,6 @@ export function cancellableSleep(delayMs: number, signal: AbortSignal): Promise<
   })
 }
 
-/**
- * Register the recovery owner on `agent/request-error`. Every side effect —
- * the listener, the lifetime controller, in-flight waits — unwinds on plugin
- * disposal.
- */
 export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
   const spool = config.spool
   const lifetime = new AbortController()
@@ -116,7 +76,6 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
     const key = `${sessionId}#${turn}`
     let state = states.get(key)
     if (state === undefined) {
-      // Prune older turns of the same session, then enforce the size cap.
       for (const other of states.keys()) {
         if (other.startsWith(`${sessionId}#`) && other !== key) states.delete(other)
       }
@@ -135,7 +94,6 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
     states.delete(`${sessionId}#${turn}`)
   }
 
-  /** Choose the next wait for one owned failure. */
   const plan = async (provider: string, state: WaitState): Promise<WaitPlan> => {
     const now = Date.now()
     const elapsed = now - state.firstFailureAt
@@ -167,8 +125,7 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
       }
 
       state.attempts += 1
-      // Chain-scoped event identity: reuse the chain's retryId and number the
-      // attempt within the chain, per the persistence format's invariants.
+
       const chainKey = `${turn}#${step}#${provider}`
       let chain = state.chains.get(chainKey)
       if (chain === undefined) {
@@ -198,8 +155,6 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
           : ` (until ${new Date(wait.retryAt).toISOString()})`,
       )
 
-      // Persist before sleeping: a process restart (or plugin update) during
-      // the wait leaves this record for the resumption adopter to pick up.
       const entry: PendingWait = {
         sessionId: agent.session.id,
         provider,
@@ -216,7 +171,6 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
 
       const slept = await cancellableSleep(wait.delayMs, fused)
       if (slept && config.cancelled?.has(agent.session.id)) {
-        // The user cancelled while we slept: stand down without retrying.
         config.cancelled.delete(agent.session.id)
         dropState(agent.session.id, turn)
         await spool?.delete(agent.session.id)
@@ -224,12 +178,7 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
       }
       if (!slept) {
         dropState(agent.session.id, turn)
-        // A turn abort is NOT an instruction to abandon the wait: it can be a
-        // user stop, a relay peer tearing the turn down, or graceful-shutdown
-        // ordering — so the record is always kept, and when the plugin itself
-        // is not being disposed the in-process adopter re-arms it. (A session
-        // the user has since driven is stood down at resume time by the
-        // newer-user-message guard; the budget deadline bounds everything.)
+
         if (!lifetime.signal.aborted) config.onWaitKept?.(entry)
         return undefined
       }

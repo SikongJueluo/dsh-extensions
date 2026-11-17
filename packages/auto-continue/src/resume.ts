@@ -1,22 +1,3 @@
-/**
- * Post-restart resumption: the adopter half of auto-continue persistence.
- *
- * On plugin start every spool record is scheduled — a timer until its
- * `retryAt`, then the session is woken with a visible continuation message
- * ("the quota window reset; resume the interrupted turn"). Sessions already
- * live again (restored or opened by the user) are adopted through
- * `agent/created`; sessions that are not are cold-opened through the
- * sessionController's resolve path — the same one the browser uses, so the
- * agent gets its full preset composition back.
- *
- * Guard rails: records past the total wait budget are pruned; a session the
- * user has interacted with since the wait (a user/message event newer than
- * the recorded seq) is left alone; a busy agent is retried later; every
- * fired resumption removes its record, and a quota failure inside the
- * resumed turn re-enters the normal in-memory recovery (which re-persists).
- *
- * @module dsh-auto-continue/resume
- */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentRegistry } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -26,23 +7,18 @@ import type { PendingWait, WaitSpool } from './spool.js'
 import { cancellableSleep } from './recovery.js'
 import { buildWaitNotice } from './notice.js'
 
-/** How long to wait before re-checking a busy or unresolvable session. */
 export const RETRY_LATER_MS = 60_000
 
-/** Internal control-flow signal: try this record again in a minute. */
 class RetryLater extends Error {}
 
 export interface ResumeConfig {
-  /** Total wait budget from the first owned failure (ms). */
   maxWaitMs: number
 }
 
-/** The visible continuation message sent as the resumed turn's input. */
 export function resumeMessage(entry: PendingWait): string {
   return `[auto-continue] The ${entry.provider} ${entry.code} limit that interrupted turn ${entry.turn} has reset. Continue that turn's work from exactly where it stopped.`
 }
 
-/** Latest user-authored message seq in the session, or 0 (the "user moved on" probe). */
 function lastUserSeq(agent: Agent): number {
   let last = 0
   // oxlint-disable-next-line typescript/no-deprecated -- A25: the deprecated synchronous session-log readers have no sync replacement; the sanctioned ones are async and optional, so migrating changes exported contracts and control flow.
@@ -54,32 +30,18 @@ function lastUserSeq(agent: Agent): number {
   return last
 }
 
-/** Handle for arming resumptions from outside (the recovery owner / commands). */
 export interface ResumeHandle {
-  /** Arm (or re-arm) one record's resumption timer in this process. */
   schedule(entry: PendingWait): void
-  /** Cancel one session's pending resumption; true when a record was dropped. */
+
   cancel(sessionId: string): Promise<boolean>
 }
 
-/**
- * Register the resumption adopter: boot scan + agent/created adoption, both
- * unwound on plugin disposal. Records armed later in this process (a wait
- * whose turn aborted while the plugin kept running) reach the same scheduler
- * through the returned handle.
- */
 export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSpool): ResumeHandle {
   const lifetime = new AbortController()
   const pending = new Map<string, Promise<void>>()
-  /** Sessions whose adoption notice was already appended to the log. */
+
   const noticed = new Set<string>()
 
-  /**
-   * Surface one armed record in its session as a collapsed notice row (the
-   * auto-permit verdict-notice pattern): appending `user/message` is legal at
-   * any time, unlike `llm/retry` events which the persistence reader
-   * validates against the open step.
-   */
   const notice = (entry: PendingWait, agent: Agent): void => {
     if (noticed.has(entry.sessionId) || entry.retryAt <= Date.now() + 1_000) return
     noticed.add(entry.sessionId)
@@ -108,9 +70,6 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
       return
     }
 
-    // Prefer an agent that is already live (restored at boot, or opened by
-    // the user); otherwise cold-open the session the same way the browser
-    // does, so the preset composition is rebuilt.
     const registry: AgentRegistry | undefined = ctx.get('agents')
     let agent: Agent | undefined = registry?.get(SessionId(entry.sessionId))
     if (agent === undefined) {
@@ -143,7 +102,7 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
       )
       throw new RetryLater()
     }
-    // The user has driven this session since our wait began: stand down.
+
     if (lastUserSeq(agent) > entry.lastSeq) {
       await spool.delete(entry.sessionId)
       ctx.logger.info(
@@ -177,7 +136,7 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
         if (!slept) return undefined
         const fresh = spool.get(entry.sessionId)
         if (fresh === undefined) return undefined
-        // A newer cycle replaced this wait: follow it instead.
+
         if (fresh.retryAt !== entry.retryAt) {
           schedule(fresh)
           return undefined
@@ -205,7 +164,6 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
     pending.set(entry.sessionId, task)
   }
 
-  // Boot scan: adopt every persisted wait once the spool is loaded.
   void spool.load().then(async () => {
     await spool.pruneExpired(config.maxWaitMs)
     const registry: AgentRegistry | undefined = ctx.get('agents')
@@ -217,7 +175,6 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
     return undefined
   })
 
-  // Sessions the user (or boot restore) opened after our start: adopt them.
   ctx.on('agent/created', (payload) => {
     const entry = spool.get(payload.agent.session.id)
     if (entry !== undefined) {
@@ -238,7 +195,7 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
     schedule,
     async cancel(sessionId) {
       noticed.delete(sessionId)
-      // The armed timer no-ops at wake when its record is gone.
+
       if (spool.get(sessionId) === undefined) return false
       await spool.delete(sessionId)
       ctx.logger.info('auto-continue: pending wait for "%s" cancelled', sessionId)

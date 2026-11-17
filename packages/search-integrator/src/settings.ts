@@ -1,30 +1,16 @@
 /**
- * Row configuration (dsh 0.2 settings model), resolved into a plain snapshot
- * the pipeline reads once per call.
- *
- * Registration-time facts (`enabled`, `toolName`, `timeoutMs`) are NOT
- * volatile: editing them remounts the row, which is the desired effect — the
- * master switch should actually remove the tool, and the timeout is declared
- * as `ToolDefinition.timeoutMs` at registration. Everything the pipeline can
- * honor mid-flight (provider toggles, credential references, integrator
- * route, budgets) is volatile and read live at each execution.
- *
- * Secrets never appear here: each provider has only the *reference* — an
- * environment-variable name resolved through `ctx.credentials` per call.
- *
+ * Row configuration (dsh 0.2 settings model), resolved into a plain snapshot the pipeline reads once per call.
  * @module dsh-search-integrator/settings
  */
 import type { Volatile } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 
-/** Maximum seed queries the tool accepts / the planner may emit. */
 export const MAX_QUERIES = 4
 
 /** Snapshot of the live settings the pipeline consumes. */
 export interface SearchIntegratorSettings {
   readonly zhipuEnabled: boolean
   readonly zhipuApiKeyRef: string
-  /** `mcp` = Coding-Plan MCP broker (per-plan quota); `rest` = open-platform per-call API. */
   readonly zhipuTransport: 'mcp' | 'rest'
   readonly zhipuMcpUrl: string
   readonly zhipuMcpTool: string
@@ -44,7 +30,6 @@ export interface SearchIntegratorSettings {
   readonly openaiModel: string
   readonly openaiSearchContextSize: string
   readonly openaiReasoningEffort: string
-  /** ChatGPT subscription source: Codex backend over the oauth-providers service. */
   readonly chatgptEnabled: boolean
   readonly chatgptModel: string
   readonly chatgptApiBase: string
@@ -56,7 +41,6 @@ export interface SearchIntegratorSettings {
   readonly integratorMaxTokens: number
   readonly followupRounds: number
   readonly maxEvidence: number
-  /** Top ranked sources whose thin provider content gets a page-body fetch. */
   readonly fetchTopN: number
   readonly perSourceResults: number
   readonly excerptChars: number
@@ -112,9 +96,6 @@ export interface Config {
   readonly auditEnabled: Volatile<boolean>
 }
 
-// No `Schema<Config>` annotation: schemastery ≥ 3.18.4 types volatile modes
-// into the schema generics, and an annotation would fight the inference the
-// loader validates `Config` against (same discipline as auto-permit).
 export const Config = Schema.object({
   enabled: Schema.boolean()
     .default(true)
@@ -315,7 +296,6 @@ export const Config = Schema.object({
 
 /**
  * Read the live settings snapshot.
- *
  * @param config - composition row config (volatile live references).
  * @returns the plain snapshot for one execution.
  */

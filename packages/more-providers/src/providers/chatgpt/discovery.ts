@@ -1,14 +1,5 @@
 /**
  * Model discovery for the web Models page.
- *
- * Registered through `ctx.llm.registerModelDiscovery()` so the settings
- * surface gets a "fetch/discover models" action. The handler is a manual
- * refresh (it always re-hits the backend, bypassing the catalog cache) and an
- * implicit sign-in probe: a missing sign-in surfaces the AuthError that tells
- * the user to open Settings → OpenAI.
- *
- * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
- *
  * @module dsh-more-providers/providers/chatgpt/discovery
  */
 import { oauthHeaders } from './auth.js'
@@ -31,8 +22,6 @@ export interface DiscoveryDeps {
 /** Build the `registerModelDiscovery` handler for the `openai` namespace. */
 export function createDiscovery({ refreshMarginMs, tokenStore, catalog }: DiscoveryDeps) {
   return async function discover(): Promise<DiscoveredModelView[]> {
-    // Probe the stored sign-in first (refreshing when near expiry) so a
-    // missing or expired login surfaces as the provider's failure reason.
     const token = await tokenStore.resolve(refreshMarginMs)
     const models = await catalog.forceRefresh(oauthHeaders(token.access, token.accountId))
     return models.map((model) => {

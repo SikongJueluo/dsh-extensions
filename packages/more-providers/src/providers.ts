@@ -1,11 +1,4 @@
-/**
- * Materialize the resolved YAML providers into pi-ai providers and
- * `PiAiAdapter` profiles. Catalog (`builtin`) routes inherit pi-ai's models;
- * `custom` routes discover `/models` or use the configured fallback;
- * `command-code` keeps its mixed-protocol catalog.
- *
- * @module dsh-more-providers/providers
- */
+/** @module dsh-more-providers/providers */
 import type { Api, Model, Provider } from '@earendil-works/pi-ai'
 import { createProvider, envApiKeyAuth } from '@earendil-works/pi-ai'
 import {
@@ -36,7 +29,6 @@ const MODELS_TIMEOUT_MS = 10_000
 const ALL_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 const DEFAULT_THINKING_LEVELS = ['low', 'medium', 'high']
 
-/** dsh-llm's default normal-mode retry policy for one provider route. */
 const DEFAULT_RETRY_POLICY = {
   mode: 'normal' as const,
   maxRetries: 5,
@@ -46,7 +38,6 @@ const DEFAULT_RETRY_POLICY = {
   jitterRatio: 0.1,
 }
 
-/** Credential plumbing PiAiAdapter requires even when every request carries an apiKey. */
 const AUTH: PiAiAdapterOptions['auth'] = {
   credentials: {
     read: async () => undefined,
@@ -132,7 +123,6 @@ function apiStreams(api: Api) {
       return openAIResponsesApi()
     case 'openai-completions':
       return openAICompletionsApi()
-    // The remaining pi-ai catalogs are not supported on custom endpoints.
     case 'azure-openai-responses':
     case 'bedrock-converse-stream':
     case 'google-generative-ai':
@@ -349,11 +339,7 @@ async function buildOne(
   }
 }
 
-/**
- * Build every configured route that has a readable key. A config error throws
- * (the caller registers no providers); a runtime catalog failure logs and
- * skips only that route.
- */
+/** Build every configured route that has a readable key. A config error throws (the caller registers no providers); a runtime catalog failure logs and skips only that route. */
 export async function buildProviders(
   resolved: readonly ResolvedProvider[],
   log: ProviderLogger,
@@ -402,5 +388,3 @@ export function buildAdapter(
     auth: AUTH,
   })
 }
-
-/** Exported for the smoke test. */

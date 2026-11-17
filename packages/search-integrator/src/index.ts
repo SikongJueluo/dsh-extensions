@@ -1,18 +1,5 @@
 /**
- * dsh-search-integrator — a multi-source web research tool.
- *
- * The plugin registers ONE host-side tool (`web_research` by default). It
- * takes a whole question, fans it out to the configured search providers
- * (Zhipu / Tavily / Exa, keys via `ctx.credentials` references), merges and
- * ranks the evidence deterministically, and has a configured integrator model
- * return a citation-checked synthesis with explicit unknowns and coverage
- * notes. The main model never filters raw hit lists; the full audit trail
- * lives in a spill artifact pointed to by the result.
- *
- * Consumed host services (injected): `tools`, `llm`, `credentials`,
- * `systemPrompt`. `spillStore` is used opportunistically when a backend is
- * mounted.
- *
+ * dsh-search-integrator - a multi-source web research tool.
  * @module dsh-search-integrator
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -48,7 +35,6 @@ export type { ResearchResult, EvidenceSource, RawHit } from './types.js'
 
 export const inject = ['tools', 'llm', 'credentials', 'systemPrompt']
 
-/** Prompt-section guidance, blanked when the tool is not visible in scope. */
 const SECTION_TEXT = [
   'web_research runs a bounded multi-source research pipeline and returns one integrated,',
   'citation-checked answer with explicit unknowns and coverage notes; raw hits stay in an audit artifact.',
@@ -59,21 +45,16 @@ const SECTION_TEXT = [
 
 /**
  * Plugin entry.
- *
  * @param ctx - plugin context.
  * @param config - composition row config (volatile live references).
  */
 export function apply(ctx: Context, config: RowConfig): void {
-  // `enabled` is registration-time (non-volatile): turning it off in Settings
-  // remounts the row and this early return unregisters the tool entirely.
   if (!config.enabled) return
   const host = createToolHost(ctx, config)
   const toolName = config.toolName
 
   ctx.systemPrompt.section({
     name: `tool:${toolName}`,
-    // Placed right after the stock web tools block (TOOL_WEB_SEARCH 2000 /
-    // TOOL_WEB_FETCH 2100); a raw number is fine for a plugin-owned position.
     order: 2150,
     text: ({ scope }) => (ctx.tools.get(toolName, scope) === undefined ? '' : SECTION_TEXT),
   })

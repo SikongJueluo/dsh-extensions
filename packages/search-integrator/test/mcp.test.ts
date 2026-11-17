@@ -80,7 +80,6 @@ describe('mcpCallTool', () => {
     expect(result.text).toContain('search_result')
     const methods = requests.map((request) => (request.body as { method?: string }).method)
     expect(methods).toEqual(['initialize', 'notifications/initialized', 'tools/call'])
-    // Bearer auth + session id ride the tool call.
     expect(requests[0]?.headers.authorization).toBe('Bearer key-1')
     expect(requests[2]?.headers['mcp-session-id']).toBe('sess-1')
     const params = (requests[2]?.body as { params?: { name?: string } } | undefined)?.params
@@ -297,5 +296,74 @@ describe('zhipu adapter over MCP', () => {
       },
     )
     await expect(adapters[0]?.search('q', new AbortController().signal)).rejects.toThrow(/401/u)
+  })
+
+  it('reports non-JSON tool text without echoing the payload', async () => {
+    const { post } = fakePost([
+      { body: '{"jsonrpc":"2.0","id":1,"result":{}}', responseHeaders: { 'mcp-session-id': 's' } },
+      { status: 202, body: '' },
+      {
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 3,
+          result: { content: [{ type: 'text', text: 'secret provider body' }] },
+        }),
+      },
+    ])
+    const { adapters } = buildAdapters(
+      settings,
+      { zhipu: 'k' },
+      {
+        postJson: async () => {
+          throw new Error('postJson not expected')
+        },
+        getJson: async () => {
+          throw new Error('getJson not expected')
+        },
+        rawPost: post,
+      },
+    )
+    const adapter = adapters[0]
+    if (adapter === undefined) throw new Error('zhipu adapter missing')
+    const error = await adapter
+      .search('q', new AbortController().signal)
+      .catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('was not valid JSON')
+    expect((error as Error).message).not.toContain('secret provider body')
+  })
+
+  it('surfaces a hit normalization failure instead of hiding it', async () => {
+    const { post } = fakePost([
+      { body: '{"jsonrpc":"2.0","id":1,"result":{}}', responseHeaders: { 'mcp-session-id': 's' } },
+      { status: 202, body: '' },
+      {
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 3,
+          result: { content: [{ type: 'text', text: JSON.stringify({ search_result: [{}] }) }] },
+        }),
+      },
+    ])
+    const { adapters } = buildAdapters(
+      settings,
+      { zhipu: 'k' },
+      {
+        postJson: async () => {
+          throw new Error('postJson not expected')
+        },
+        getJson: async () => {
+          throw new Error('getJson not expected')
+        },
+        rawPost: post,
+      },
+    )
+    const adapter = adapters[0]
+    if (adapter === undefined) throw new Error('zhipu adapter missing')
+
+    await expect(adapter.search('q', new AbortController().signal)).rejects.toThrow(
+      /search_result\[0\]\.link/u,
+    )
   })
 })

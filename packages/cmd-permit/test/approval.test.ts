@@ -1,13 +1,4 @@
-/**
- * Answerer integration tests over the real `CmdPermit` service: the
- * `approval/request` listener it registers must decide a bash sub-call
- * dispatched through PTC (`tool/ptc-dispatch-start` as its only audit trail)
- * exactly like a directly dispatched one — allowlisted → allowed-once with a
- * notice; everything else (no mode, high-risk shape, wider mode, missing
- * evidence, uncovered sibling) → untouched `next()`.
- *
- * @module dsh-cmd-permit/approval.test
- */
+/** @module dsh-cmd-permit/approval.test */
 import { describe, expect, it } from 'vitest'
 import type { Volatile, VolatileSnapshot } from '@deepseek-ai/cordis'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
@@ -181,7 +172,7 @@ describe('cmd-permit answerer over PTC evidence', () => {
     )
     const { outcome, fellThrough } = await fixture.answer('root:ptc:1')
     expect(fellThrough).toBe(true)
-    expect(outcome).toBe('rejected') // the next() sentinel
+    expect(outcome).toBe('rejected')
     expect(fixture.injected).toEqual([])
   })
 

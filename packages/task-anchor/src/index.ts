@@ -1,24 +1,5 @@
 /**
- * dsh-task-anchor — a persistent recovery anchor for long tasks.
- *
- * One seam plus one tool, both report-only toward the host:
- *
- * - `checkpoint_task`: persists where the task believes it is — the jj
- *   WORKSPACE root (realpath-resolved, so a session cwd in a repo
- *   subdirectory still compares correctly; git fallback intentionally absent
- *   and a non-jj root fails loudly), the jj working change id and its parents
- *   through fixed-argv read-only invocations, goal identity (DURABLE
- *   `goal/change` events only — a request proves nothing, and an assertion
- *   without evidence is recorded as unverified and never claimed as CAS),
- *   phase, owned files, and a verification summary.
- * - `agent/created`: on startup/resume the anchor is compared against the
- *   live repository and goal, and a notice reports agreement or drift.
- *
- * This is a RECOVERY ANCHOR, not a repository write lock: it never rebases,
- * checks out, resumes a goal (`goals.resume`), or forks a session, and a
- * session-name match is not treated as a lock. Goal re-arm/activation is
- * deliberately NOT equated with recovery.
- *
+ * dsh-task-anchor - a persistent recovery anchor for long tasks.
  * @module dsh-task-anchor
  */
 import Schema from '@deepseek-ai/schemastery'
@@ -60,26 +41,17 @@ export {
 } from './jj.js'
 export { buildResumeNotice, type ResumeReport } from './notice.js'
 
-/** The tool the model calls to persist an anchor. */
 export const CHECKPOINT_TOOL = 'checkpoint_task'
 
-/** The source kind and log prefix the anchor has always used. */
 const GUARD_NAME = 'execution-guard'
 
-/**
- * Plugin-row configuration. `storagePath` defaults to
- * `$DSH_HOME/storages/execution-guard` when left empty — the pre-split
- * location, deliberately kept so anchors written before the split stay
- * readable.
- */
+/** Plugin-row configuration. `storagePath` defaults to `$DSH_HOME/storages/execution-guard` when left empty - the pre-split location, deliberately kept so anchors written before the split stay readable. */
 export interface Config {
   readonly storagePath: string
   readonly jjTimeoutMs: number
   readonly resumeNotice: boolean
 }
 
-// No `Schema<Config>` annotation: schemastery ≥ 3.18.4 bakes volatile modes
-// into the schema generics and the loader checks the inferred shape.
 export const Config = Schema.object({
   storagePath: Schema.string()
     .default('')
@@ -100,11 +72,7 @@ export interface ApplyDeps {
   readonly jjPath?: string
 }
 
-/**
- * The session surface the anchor reads and appends to — the same shape the
- * host's `Session` exposes (declared locally so this module never has to
- * call the SDK's deprecated synchronous event reads by name).
- */
+/** The session surface the anchor reads and appends to - the same shape the host's `Session` exposes (declared locally so this module never has to call the SDK's deprecated synchronous event reads by name). */
 interface SessionLike {
   readonly id: string
   readonly header: { readonly cwd?: string }
@@ -135,7 +103,6 @@ function sessionOf(ctx: Context, agent: AgentLike | undefined): SessionLike | un
 
 /**
  * Plugin entry.
- *
  * @param ctx - plugin context.
  * @param config - composition row config (validated by {@link Config}).
  * @param deps - injectable process seams for tests.
@@ -322,11 +289,6 @@ export function apply(ctx: Context, config: Config, deps: ApplyDeps = {}): void 
           goalRevision: fold.kind === 'snapshot' ? fold.snapshot.revision : undefined,
           goalPhase: fold.kind === 'snapshot' ? fold.snapshot.phase : undefined,
         })
-        // Safe as a plain surface append: `agent/created` fires while the agent
-        // is still idle (the driver has not opened a turn), so there is no
-        // tool-call/result batch to split. Contrast the repeat hint in
-        // dsh-execution-guard, which fires mid-batch and must go through
-        // `agent.inject()`.
         session.append(
           'user/message',
           buildResumeNotice({

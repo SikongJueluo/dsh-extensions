@@ -1,17 +1,4 @@
 /* oxlint-disable react/set-state-in-effect -- the effect mirrors external data into local UI state; deriving it would change render timing */
-// Client half of dsh-triggers: the current Session's trigger view.
-//
-// One Conversation tab (order 30) shows the execute/review loops THIS session
-// takes part in — as executor or as reviewer — with the real run state, the
-// reason it stopped, the controls the host accepts, and a read-only view of the
-// binding. The host owns every transition; this half only reads
-// `/dsh-triggers/state?sessionId=…` and posts run controls. There is no global
-// template editor, no binding creation form, and no session-header control.
-//
-// TypeScript + JSX on the shared `@dsh-extensions/ui` components; styles come
-// from the bundled `./styles.css` Tailwind entry (`dshx:`-prefixed utilities
-// only). Touch-first: actions are click targets ≥ 44px on coarse pointers,
-// widths shrink with the viewport, and hover is only an enhancement.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Alert, Badge, Button, Input, Root, cn, type DshClientContext } from '@dsh-extensions/ui'
@@ -383,10 +370,6 @@ function fmtTime(ms: number): string {
   )}`
 }
 
-// Host session ids share long common prefixes (`session-<uuid>` or plain
-// `session-<n>`); a fixed head slice collapses them. Strip the prefix and
-// abbreviate the tail instead. Titles are the primary label and this is
-// the fallback for a session missing from the client catalog.
 function shortId(id: string): string {
   const raw = id.replace(/^session-/u, '')
   if (raw.length <= 10) return raw
@@ -406,8 +389,6 @@ function sessionLabel(t: Translate, sessionsById: SessionsById, id: string | und
     if (typeof title === 'string' && title.length > 0) return title
     return shortId(id)
   }
-  // Before the Session catalog arrives, absence is not evidence of a lost
-  // session; show the distinguishable short id without the warning.
   const catalogKnown =
     sessionsById !== undefined && sessionsById !== null && Object.keys(sessionsById).length > 0
   return shortId(id) + (catalogKnown ? ` · ${t('unknownSession')}` : '')
@@ -521,7 +502,6 @@ const RUN_RANK: Record<string, number> = {
 }
 
 function pickCurrentRun(runs: TriggerRun[]): TriggerRun | undefined {
-  // First run in `runSnapshotRank` order (stable: ties keep input order).
   let current: TriggerRun | undefined
   for (const run of runs) {
     if (current === undefined) {
@@ -557,8 +537,7 @@ function groupActivity(group: RunGroup): number {
   return latest
 }
 
-/** Defensive client-side scope: the host already filters before limiting,
- * but a stale/replayed response must never leak another session's rows. */
+/** Defensive client-side scope: the host already filters before limiting, but a stale/replayed response must never leak another session's rows. */
 function scopeSnapshot(data: StatePayload, sessionId: string): ScopedSnapshot {
   const bindings = (data.bindings ?? []).filter(
     (binding) => binding.executor === sessionId || binding.parent === sessionId,
@@ -652,11 +631,6 @@ function lastStopDetail(run: TriggerRun): string | undefined {
   return undefined
 }
 
-/** Redelivery is offered only when the server would accept it: the run is
- * active (retry the send) or parked by that delivery's failure (resume and
- * resend), AND the delivery belongs to the round and side the run is
- * currently waiting on. Terminal runs, user/budget pauses, and stale
- * rounds are all refused server-side. */
 function canRedeliver(run: TriggerRun, delivery: Delivery): boolean {
   if (!delivery || delivery.state !== 'failed') return false
   if (run.status !== 'active' && run.status !== 'paused-error') return false
@@ -948,9 +922,6 @@ function RunActions(props: { t: Translate; run: TriggerRun; onAction: ActionFn }
     )
   }
 
-  // Resume keeps one primary action: an optional note rides along when the
-  // input has text, so paused runs do not grow a second, near-duplicate
-  // button beside the plain one.
   const needsNote = run.status === 'paused-user' || run.status === 'paused-error'
   if (!needsNote && buttons.length === 0) return null
   return (
@@ -982,9 +953,7 @@ function RunActions(props: { t: Translate; run: TriggerRun; onAction: ActionFn }
   )
 }
 
-/** One low-frequency drawer. Its contents answer "what happened" or "how
- * is it configured", never "why is it stopped" or "what can I do", so it
- * starts closed while keeping a 44px tap target. */
+/** One low-frequency drawer. Its contents answer "what happened" or "how is it configured", never "why is it stopped" or "what can I do", so it starts closed while keeping a 44px tap target. */
 function Disclosure({ label, children }: { label: string; children: ReactNode }) {
   const [open, setOpen] = useState(false)
   return (
@@ -1043,9 +1012,7 @@ function RunDetails(props: {
   )
 }
 
-/** Body of one run, without a second title/status/round header. The row
- * summary already carries those for the current run; other runs supply
- * their own compact header. */
+/** Body of one run, without a second title/status/round header. The row summary already carries those for the current run; other runs supply their own compact header. */
 function RunBody(props: {
   t: Translate
   run: TriggerRun
@@ -1312,7 +1279,6 @@ function TriggerListView(props: {
   const sessionsById = props.sessionsById || {}
   const scoped = data === null ? null : scopeSnapshot(data, sessionId)
   const groups = scoped === null ? [] : buildGroups(scoped, sessionId)
-  // Captured before the JSX branches: TS narrowing does not survive them.
   const scopedTemplates = scoped === null ? [] : scoped.templates
   const scopedDeliveries = scoped === null ? [] : scoped.deliveries
   const activeCount =
@@ -1403,10 +1369,6 @@ function TriggerListView(props: {
     )
   }
 
-  // The host's [data-conversation-scroll] is the resident scrollport;
-  // this view contributes normal-flow content and must not create a second
-  // fixed-height scroll container (that nested overflow is what swallowed
-  // wheel input). Chat uses the same ownership model.
   return (
     <div className="dshx:w-full dshx:min-w-0 dshx:bg-bg dshx:text-fg">
       <div className="dshx:mx-auto dshx:w-full dshx:max-w-[820px] dshx:px-6 dshx:pt-10 dshx:pb-[72px] dshx:max-[600px]:px-4 dshx:max-[600px]:pt-7 dshx:max-[600px]:pb-14">
@@ -1445,7 +1407,6 @@ interface TriggersViewProps {
   useSessions: (selector: (state: { byId: SessionsById }) => SessionsById) => SessionsById
 }
 
-// --- the fetch/poll wrapper; TriggerListView stays pure for tests ---------
 function TriggersView(props: TriggersViewProps) {
   const { t, useSessions } = props
   const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
@@ -1561,7 +1522,6 @@ function apply(ctx: DshClientContext) {
 export { apply }
 export const inject = ['slots', 'locale']
 
-/** Component/logic handles for the browser-half test harness. */
 export const testHandles = {
   shortId,
   TriggerListView,

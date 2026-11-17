@@ -33,8 +33,6 @@ describe('argv discipline', () => {
     const argv = workingLayerArgv()
     expect(argv).toContain('--ignore-working-copy')
     expect(argv).toContain('--no-pager')
-    // Shell-metacharacter scan over every arg EXCEPT the -T template (jj's
-    // own language uses `|` and quotes; execFile passes argv verbatim).
     const templateIndex = argv.indexOf('-T')
     const nonTemplate = argv.filter((_, i) => i !== templateIndex && i !== templateIndex + 1)
     expect(nonTemplate.join(' ')).not.toMatch(/[;&|`$><]/u)

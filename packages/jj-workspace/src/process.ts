@@ -1,11 +1,5 @@
 /**
  * Sandboxed process plumbing for the jj workspace service.
- *
- * jj commands and the directory allocator run under the calling Session's
- * existing sandbox policy, exactly as the stock worktree runtime runs Git:
- * no approval, no extra writable roots, and no full-access escalation. A
- * timeout aborts the whole process range; captured output stays bounded.
- *
  * @module dsh-jj-workspace/process
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -23,7 +17,6 @@ export interface ProcessConfig {
   maxOutputBytes: number
 }
 
-/** Clear inherited repository selectors; jj must read its own workspace metadata. */
 const CLEAN_ENV: Record<string, string | undefined> = {
   ...Object.fromEntries(
     [
@@ -49,11 +42,6 @@ const CLEAN_ENV: Record<string, string | undefined> = {
   CLICOLOR: '0',
 }
 
-/**
- * The directory allocator: create the pool (with its self-ignoring
- * `.gitignore` only when this process creates the pool) and the destination
- * exclusively. An existing destination fails instead of being reused.
- */
 const PREPARE_DIRECTORY = `
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -157,7 +145,6 @@ export async function runJj(
   )
 }
 
-/** Append one JSON line without a read-modify-write round trip. */
 const APPEND_RECORD = `
 import fs from 'node:fs/promises';
 import path from 'node:path';

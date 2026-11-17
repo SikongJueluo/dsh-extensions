@@ -1,62 +1,5 @@
 /**
- * dsh-toolchain-access — narrow writable-directory grants for toolchain
- * caches inside the DSH file sandbox.
- *
- * The stock `workspace-write` sandbox mounts the host read-only and the
- * workspace (plus any `additionalWritableRoots` the policy carries) writable,
- * so every tool with a shared HOME cache (uv, Cargo, pnpm) dies on EROFS and
- * the old workaround was a full-access escalation per command. This plugin
- * replaces the sandbox row with a
- * `LocalSandboxProvider` subclass that, for `workspace-write` policies,
- * appends exact `--bind <granted path> <itself>` mounts after the stock
- * bwrap profile (one exception: the semgrep private-state shadow mounts a
- * writable cache directory at the sandbox path of semgrep's data folder —
- * same `--bind` shape, different destination):
- *
- * ```text
- * trusted row config + built-in presets
- *            ↓  (grants.ts: derive, realpath, validate, dedupe — fail closed)
- * precise writable-bind list
- *            ↓  (bwrap.ts: pinned layout verify, splice before "--")
- * sandbox adapter  →  official runner selection / probing / metadata intact
- *            ↓
- * the command still runs confined — one more exact subtree is writable
- * ```
- *
- * Trust semantics, stated exactly once because they are the whole design:
- *
- * - Enabling a preset makes that directory writable for EVERY process in
- *   the confined sandbox, not just the tool it is named after.
- * - Grants come from the plugin row (including its schema defaults) and
- *   ambient host anchors (HOME/XDG/CARGO_HOME/PNPM_HOME/UV_CACHE_DIR as
- *   exported by the operator's session). Agent claims, repository files and
- *   session env overlays are never grant sources: a project that points
- *   `UV_CACHE_DIR` elsewhere does not widen anything — it just keeps
- *   failing until the operator configures that path explicitly.
- * - The added mounts are exact-path only. Neighbors and parent directories
- *   stay read-only (verified on-host), no parent is ever widened to cover a
- *   missing directory, and any configured-but-unhonorable grant fails the
- *   confined call with a precise reason instead of silently degrading to
- *   the old EROFS loop.
- * - One preset mounts at a DIFFERENT path: `semgrep-state` binds a private
- *   writable state directory over semgrep's data folder. The host folder
- *   (whose settings.yml may carry an API token) is never granted and is not
- *   even visible inside the sandbox; the destination is a mount point, not
- *   a write grant.
- * - `read-only` policies are returned untouched — this layer adds write
- *   capability and therefore adds nothing there.
- * - Only the pinned stock Linux bwrap layout is edited. The expected profile
- *   is derived through the SDK's own `workspaceWritableRoots`, so a policy
- *   carrying extra writable roots is still the stock layout; a configured
- *   `runnerCommand` wrapper, the Landlock/Seatbelt/ACL rungs, or any other
- *   profile change in a future dsh release fails closed with `GrantArgvError`
- *   rather than guessing where binds belong in an unfamiliar argv.
- *
- * Like every sandbox-provider service, methods here avoid `#private`
- * fields: cordis rebinds service-method receivers to a shadow proxy and
- * V8 private-brand checks reject proxy receivers (see dsh-auto-env, which
- * documents the same constraint).
- *
+ * dsh-toolchain-access - narrow writable-directory grants for toolchain caches inside the DSH file sandbox.
  * @module dsh-toolchain-access
  */
 import { chmodSync, closeSync, mkdirSync, openSync, realpathSync, statSync } from 'node:fs'
@@ -95,7 +38,6 @@ export type {
   PresetId,
 } from './grants.js'
 
-/** Error code carried through the structured channel when grants cannot be honored. */
 export const TOOLCHAIN_GRANT_UNAVAILABLE = 'TOOLCHAIN_GRANT_UNAVAILABLE'
 
 /** Fail-closed refusal: an enabled preset cannot be honored; the command never runs. */
@@ -125,13 +67,10 @@ export interface PathsConfig {
 
 /** Row configuration: the stock sandbox-local knobs plus the grant fields. */
 export interface Config extends LocalSandboxConfig {
-  /** Enabled presets; omitted resolves to DEFAULT_PRESETS, an explicit list (including []) replaces it exactly. */
   presets: readonly PresetId[]
-  /** Explicit path overrides; unset anchors fall back to ambient host env then defaults. */
   paths: Readonly<PathsConfig>
 }
 
-/** Presets enabled when a row omits `presets`: the ordinary cache/state presets — the whole-toolchain-install presets (pnpm-engine, gradle-jdks) stay opt-in. */
 export const DEFAULT_PRESETS = [
   'uv-cache',
   'cargo-cache',
@@ -142,15 +81,6 @@ export const DEFAULT_PRESETS = [
   'semgrep-state',
 ] as const satisfies readonly PresetId[]
 
-/**
- * The schema mirrors `LocalSandboxProvider.Config` verbatim (this row
- * replaces the stock `sandbox` row, whose config it must be able to
- * restate) and adds the grant fields. No `Schema<Config>` annotation:
- * schemastery ≥ 3.18.4 types volatile modes into the schema generics and an
- * annotation would fight the loader's `static Config` inference. The grant
- * fields are deliberately NOT volatile — editing them remounts the
- * provider, which revalidates every grant from scratch.
- */
 export const configFields = {
   runnerCommand: Schema.array(Schema.string())
     .default([])
@@ -207,8 +137,6 @@ export const configFields = {
     ),
 }
 
-// No `Schema<Config>` annotation on this object (see Config's doc comment);
-// the spread keeps every sibling bundle's schema-extension pattern intact.
 export const Config = Schema.object({ ...configFields })
 
 /** Keep an absolute directory value; drop empty or relative ones. */
@@ -216,12 +144,7 @@ function absolute(value: string | undefined): string | undefined {
   return value !== undefined && value !== '' && value.startsWith('/') ? value : undefined
 }
 
-/**
- * Collect the ambient host facts grants derive from. The dsh host process
- * inherits the operator's session environment — this is deliberately NOT
- * the per-session direnv overlay (auto-env's), which is agent-workspace
- * state and must never widen grants.
- */
+/** Collect the ambient host facts grants derive from. The dsh host process inherits the operator's session environment - this is deliberately NOT the per-session direnv overlay (auto-env's), which is agent-workspace state and must never widen grants. */
 export function grantEnvFrom(
   home: string,
   uid: number,
@@ -256,9 +179,6 @@ export function nodeGrantFs(): GrantFs {
         mode: stats.mode,
       }
     },
-    // Controlled preparation for missing implicit defaults: create exactly
-    // what the owning tool would have created (uv/cargo/pnpm create these
-    // on first run — impossible to do from inside the sandbox).
     ensure: (path, kind) => {
       if (kind === 'lock-file') {
         const fd = openSync(path, 'wx', 0o644)
@@ -266,9 +186,6 @@ export function nodeGrantFs(): GrantFs {
         return
       }
       if (kind === 'state-file') {
-        // The owning tool creates its parent folder on a host-side first run;
-        // an empty file is exactly what its first write leaves behind (and
-        // semgrep's version-cache reader treats an empty file as "no cache").
         mkdirSync(dirname(path), { recursive: true, mode: 0o755 })
         const fd = openSync(path, 'wx', 0o644)
         closeSync(fd)
@@ -276,52 +193,31 @@ export function nodeGrantFs(): GrantFs {
       }
       mkdirSync(path, { recursive: true, mode: kind === 'lock-dir' ? 0o700 : 0o755 })
       if (kind === 'lock-dir') {
-        // mkdir's mode is masked by umask and ignored for recursive
-        // intermediates; pnpm requires 0700 and chmods unconditionally,
-        // so create it exactly right up front.
         chmodSync(path, 0o700)
       }
     },
   }
 }
 
-/**
- * The sandbox provider: `LocalSandboxProvider` with exact directory grants
- * spliced into its stock bwrap wraps. Mount this row in place of the base
- * composition's `sandbox` row (the bundle patch disables that row and
- * appends this one — patch layers cannot rename a row).
- */
+/** The sandbox provider: `LocalSandboxProvider` with exact directory grants spliced into its stock bwrap wraps. Mount this row in place of the base composition's `sandbox` row (the bundle patch disables that row and appends this one - patch layers cannot rename a row). */
 export class ToolchainAccessSandboxProvider extends LocalSandboxProvider {
   static Config = Config
 
-  /** Enabled presets; public because the proxied confine reads it. */
   grantPresets: readonly PresetId[]
-  /** Explicit path overrides; public likewise. */
   grantPaths: Readonly<GrantOverrides>
-  /** Ambient host facts; captured once, public for tests to pin. */
   grantEnv: GrantEnv
-  /** Filesystem slice; public for tests that swap it after construction. */
   grantFs: GrantFs
 
   constructor(ctx: Context, config: Config) {
     super(ctx, config)
     this.grantPresets = config.presets
     this.grantPaths = config.paths
-    // getuid() is typed `number | undefined` (platforms without uids); an
-    // undefined uid can never match an owner, so every grant fails closed.
     this.grantEnv = grantEnvFrom(homedir(), process.getuid?.() ?? -1, process.env)
     this.grantFs = nodeGrantFs()
-    // Early visibility only: a grant that cannot be honored right now is
-    // logged at load, but the fail point is confine() — directories may
-    // appear later, and the provider never refuses to START over one.
     this.logPlan(ctx, this.plan([], false))
   }
 
-  /**
-   * Resolve the current plan for `workspaceRoots`. `prepare` allows the
-   * controlled creation of missing implicit-default paths (confine time
-   * only — plugin load passes false so mounting stays side-effect-free).
-   */
+  /** Resolve the current plan for `workspaceRoots`. `prepare` allows the controlled creation of missing implicit-default paths (confine time only - plugin load passes false so mounting stays side-effect-free). */
   private plan(workspaceRoots: readonly string[], prepare: boolean): GrantPlan {
     return resolveGrants({
       presets: this.grantPresets,
@@ -351,16 +247,6 @@ export class ToolchainAccessSandboxProvider extends LocalSandboxProvider {
     }
   }
 
-  /**
-   * Wrap, then splice. Everything official — runner selection and probing,
-   * enforcement reporting, denial signatures, runner-failure rules, the
-   * fail-closed `SANDBOX_UNAVAILABLE` path — is `super.confine()`'s and is
-   * returned verbatim; the only edit is extra `--bind` arguments inside an
-   * argv whose entire layout has been verified against the pinned stock
-   * shape. Any deviation from that shape, or any enabled grant that cannot
-   * be honored, throws: the command does not run under a silently weaker
-   * contract than the row promised.
-   */
   override async confine(
     argv: readonly string[],
     policy: SandboxPolicy,
@@ -371,9 +257,6 @@ export class ToolchainAccessSandboxProvider extends LocalSandboxProvider {
       policy.mode === 'workspace-write' &&
       process.platform !== 'linux'
     ) {
-      // Refuse BEFORE super.confine(): another platform's rung (windows-acl)
-      // materializes its own side effects (ACEs, temp dirs) inside confine,
-      // and this package only ever edits the pinned Linux bwrap layout.
       throw new GrantArgvError(
         `directory grants are only implemented for the stock Linux bwrap backend, not ${process.platform}`,
       )
@@ -381,12 +264,6 @@ export class ToolchainAccessSandboxProvider extends LocalSandboxProvider {
     const base = await super.confine(argv, policy, signal)
     if (this.grantPresets.length === 0) return base
     if (policy.mode !== 'workspace-write') return base
-    // Canonicalize exactly the roots super.confine() just bound (the stock
-    // `workspaceWritableRoots`: workspace plus any policy extra roots), so
-    // the subtraction below compares like-for-like paths and a grant already
-    // covered by a policy root becomes a note instead of a duplicate bind.
-    // prepare=true: a missing implicit default (e.g. pnpm's lock dir after
-    // a reboot wiped /run/user) is created now, exactly once per confine.
     const plan = this.plan(workspaceWritableRoots(policy), true)
     if (plan.issues.length > 0) throw new ToolchainGrantError(plan.issues)
     if (plan.binds.length === 0) return base

@@ -1,28 +1,16 @@
 #!/usr/bin/env node
-/**
- * The single quality entry point: local development and CI both run this.
- *
- * Order matters. The cheap, build-free gates come first so a formatting or lint
- * break is reported in seconds; `build` then produces the `lib/` output every
- * later step consumes (the smoke scripts and the client check import it).
- *
- * A step that fails does not stop the run by default: the summary shows the
- * whole gap in one pass. `--fail-fast` stops at the first failure instead.
- *
- *   node scripts/check-quality.mjs              # run every step, then summarise
- *   node scripts/check-quality.mjs --fail-fast  # stop at the first failure
- *   node scripts/check-quality.mjs --list       # print the step list
- *   node scripts/check-quality.mjs --only=lint  # one step (repeatable)
- */
+/** @module scripts/check-quality */
+
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 
 const ROOT = join(import.meta.dirname, '..')
 const STEP_TIMEOUT_MS = 15 * 60_000
 
-/** Every gate, in the order they must run. */
 const STEPS = [
   { name: 'format', script: 'format:check', why: 'layout drift, no build needed' },
+  { name: 'comments', script: 'check:comments', why: 'source comment placement and budgets' },
+  { name: 'comment-tests', script: 'test:comments', why: 'comment parser and policy regressions' },
   { name: 'lint', script: 'lint', why: 'single-file rules + typed rules' },
   {
     name: 'suppressions',

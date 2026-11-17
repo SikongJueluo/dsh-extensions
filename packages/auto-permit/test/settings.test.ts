@@ -1,9 +1,3 @@
-/**
- * Judge output-budget schema: a bounded, configurable per-request cap that
- * defaults above the old fixed 1024 tokens.
- *
- * @module dsh-auto-permit/settings.test
- */
 import { describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { Config, JUDGE_OUTPUT_TOKENS, registerSettings } from '../src/settings.js'

@@ -1,12 +1,5 @@
 /**
  * Best-effort page-body extraction for the top evidence sources.
- *
- * A plain SERP snippet caps how deeply the integrator can read a page. For a
- * handful of high-ranked sources whose provider content is thin, this module
- * fetches the page itself and distills an HTML→text excerpt. Everything here
- * is opportunistic: wrong content type, oversized body, encoding surprises,
- * or a fetch failure all degrade silently to the snippet the provider gave.
- *
  * @module dsh-search-integrator/fetch-page
  */
 
@@ -16,7 +9,6 @@ export type PageFetcher = (
   signal: AbortSignal,
 ) => Promise<{ readonly contentType: string; readonly body: string } | undefined>
 
-/** Read at most this many bytes of any page before parsing. */
 const MAX_BYTES = 512 * 1024
 
 const BLOCK_TAGS = /<(script|style|noscript|svg|head|nav|footer|form)\b[^>]*>[\s\S]*?<\/\1>/giu
@@ -56,11 +48,7 @@ function decodeEntities(text: string): string {
     )
 }
 
-/**
- * Distill an HTML document to a compact text excerpt: block-level markup is
- * dropped, tags stripped, entities decoded, whitespace collapsed. Not a
- * markdown converter — good enough for an evidence digest.
- */
+/** Distill an HTML document to a compact text excerpt: block-level markup is dropped, tags stripped, entities decoded, whitespace collapsed. Not a markdown converter - good enough for an evidence digest. */
 export function htmlToExcerpt(html: string, cap: number): string {
   const text = decodeEntities(
     html
@@ -76,10 +64,7 @@ export function htmlToExcerpt(html: string, cap: number): string {
   return text.length > cap ? `${text.slice(0, cap)}…` : text
 }
 
-/**
- * The production page fetcher over global fetch: HTML pages only, size- and
- * signal-bounded, undefined on anything that is not plainly an HTML page.
- */
+/** The production page fetcher over global fetch: HTML pages only, size- and signal-bounded, undefined on anything that is not plainly an HTML page. */
 export function fetchPage(): PageFetcher {
   return async (url, signal) => {
     const response = await fetch(url, {

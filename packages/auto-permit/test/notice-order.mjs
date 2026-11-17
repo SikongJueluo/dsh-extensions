@@ -1,16 +1,3 @@
-/**
- * Reproduction harness: where does an auto-permit notice land relative to the
- * in-flight tool call?
- *
- * Runs the REAL plugin entry (`apply`) against a REAL `Session`, replaying the
- * exact event order the agent loop produced in the failing session
- * (session-5528dac7: seq 121 assistant(tool-call) -> 123 approval/asked ->
- * 125 user/message notice -> 129 tool/result).
- *
- * No network, no API calls, no writes.
- *
- *   node packages/auto-permit/test/notice-order.mjs
- */
 import { createAssistantMessage, createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import { Session } from '@deepseek-ai/dsh-session'
 import { apply } from '../lib/index.js'
@@ -21,8 +8,6 @@ const COMMAND = 'bash /tmp/diag.sh devenv 2>&1 | tail -60'
 const TURN = 1
 const STEP = 16
 
-/** Walk the surface in model order and report every tool-call that is not
- * immediately followed by the tool result correlating with it. */
 function pairingViolations(session) {
   const messages = session.deriveMessages()
   const out = []
@@ -84,7 +69,6 @@ function seedToolCall(session) {
   })
 }
 
-/** Minimal host surface the plugin touches: logger, ctx.get, ctx.on. */
 function makeContext(sessions) {
   const listeners = new Map()
   const ctx = {
@@ -98,10 +82,8 @@ function makeContext(sessions) {
   return { ctx, listeners }
 }
 
-/** One volatile config cell: the plugin only calls `.get()`. */
 const cell = (v) => ({ get: () => v })
 
-/** Volatile row config: the plugin only calls `.get()`. */
 function makeConfig() {
   return {
     enabled: cell(true),
@@ -132,8 +114,6 @@ async function roundTrip({ deliver }) {
   const sessions = { get: (id) => (id === SESSION_ID ? session : undefined) }
   const { ctx, listeners } = makeContext(sessions)
 
-  // Deterministic, judge-free outcome: a cmd-permit allowlist hit settles the
-  // request without any model call, so no `llm` service is needed.
   const delivered = []
   const agent = {
     id: SESSION_ID,
@@ -148,7 +128,6 @@ async function roundTrip({ deliver }) {
     },
   }
   if (deliver === 'append') {
-    // Current plugin behaviour: write the notice onto the surface immediately.
     agent.inject = undefined
   }
 
@@ -160,7 +139,6 @@ async function roundTrip({ deliver }) {
   const outcome = await fireApproval(listeners, session, agent)
   if (outcome !== 'allowed-once') throw new Error(`unexpected outcome: ${String(outcome)}`)
 
-  // ...and only NOW does the tool result land, exactly as runGroup does it.
   session.append(
     'tool/result',
     {
@@ -176,9 +154,6 @@ async function roundTrip({ deliver }) {
   )
 
   if (deliver === 'inject') {
-    // The next step boundary claims the inbox batch and only then writes each
-    // message onto the surface — ReactLoopAgent.preStep + step()'s
-    // `for (const message of decision.messages) this.session.append(...)`.
     session.append('agent/inbox/spliced', {
       target: 'next-step',
       start: 0,
@@ -231,8 +206,6 @@ console.log('auto-permit notice placement — tool-call/result pairing check')
 console.log('(event order replaying session-5528dac7 seq 121..129; no API calls)')
 console.log()
 
-// `deliver: 'append'` also strips `Agent.inject`, which is exactly the state a
-// host without the deferred channel is in — that is the pre-fix write path.
 const okCurrent = await run('PRE-FIX PATH — surface append (no Agent.inject)', 'append')
 const okFixed = await run('FIXED PATH — agent.inject()', 'inject')
 

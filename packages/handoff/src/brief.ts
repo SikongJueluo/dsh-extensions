@@ -1,11 +1,10 @@
 /**
- * The brief lifecycle: the instruction prompt, completion watching, and the
- * failure report for the origin session.
- *
+ * The brief lifecycle: the instruction prompt, completion watching, and the failure report for the origin session.
  * @module dsh-handoff/brief
  */
 import { readFile } from 'node:fs/promises'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { debugQuietly, errorTag, warnQuietly } from './diagnostics.js'
 import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
 import type { HandoffRuntime, PendingHandoff } from './pending.js'
 import { spawnHandoff } from './spawn.js'
@@ -23,7 +22,6 @@ export function timestampSlug(date: Date): string {
   )
 }
 
-/** The six-section skeleton every brief follows. */
 const BRIEF_SECTIONS = [
   'Markdown 六节：',
   '- Goal：本会话总目标',
@@ -73,11 +71,7 @@ export function briefInstruction(
   ].join('\n')
 }
 
-/**
- * The instruction handed to the CURRENT agent on a retry whose brief file
- * already exists but never reached the completion marker: keep what is
- * written, complete the rest, same file.
- */
+/** The instruction handed to the CURRENT agent on a retry whose brief file already exists but never reached the completion marker: keep what is written, complete the rest, same file. */
 export function continueInstruction(
   briefPath: string,
   task: string,
@@ -108,16 +102,18 @@ function reportFailure(rt: HandoffRuntime, pending: PendingHandoff, reason: stri
           source: { kind: 'user' },
         }),
       )
-    } catch {
-      // The origin agent may already be disposed; the log entry above still stands.
+    } catch (error) {
+      warnQuietly(
+        rt.ctx.logger(PACKAGE_NAME),
+        'handoff failure notice not delivered for %s (%s)',
+        pending.briefPath,
+        errorTag(error),
+      )
     }
   }
 }
 
-/**
- * Watch the brief file until the completion marker appears (or the deadline
- * passes), then spawn the fresh session with the brief as its first prompt.
- */
+/** Watch the brief file until the completion marker appears (or the deadline passes), then spawn the fresh session with the brief as its first prompt. */
 export function startHandoffWatch(rt: HandoffRuntime, pending: PendingHandoff): void {
   const { ctx } = rt
   const key = String(pending.agent.id)
@@ -143,8 +139,13 @@ export function startHandoffWatch(rt: HandoffRuntime, pending: PendingHandoff): 
         } catch (error) {
           reportFailure(rt, pending, `new session failed: ${String(error)}`)
         }
-      } catch {
-        // ENOENT / partial write / transient EBUSY — keep polling.
+      } catch (error) {
+        debugQuietly(
+          ctx.logger(PACKAGE_NAME),
+          'handoff brief poll read failed for %s (%s)',
+          pending.briefPath,
+          errorTag(error),
+        )
       }
     })()
   }, rt.pollMs)
@@ -155,8 +156,6 @@ export function startHandoffWatch(rt: HandoffRuntime, pending: PendingHandoff): 
     reportFailure(rt, pending, `brief not completed within ${Math.round(rt.timeoutMs / 1000)}s`)
   }, rt.timeoutMs)
 
-  // Plugin unload cleans any still-running watch; the marker/timeout paths
-  // clear the timers themselves via finish().
   ctx.effect(() => () => {
     finish()
   })

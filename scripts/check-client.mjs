@@ -1,12 +1,6 @@
 #!/usr/bin/env node
-// Client-bundle guard for the browser half plugins.
-//
-// Every package with a `dsh.client` declaration must ship a built
-// `lib/client.js` whose factory registers one module. This script checks the
-// artifact (not the source): the loader wrapper, the registered id, external
-// requests against the frozen platform table, the inlined stylesheet, and that
-// the factory materializes, exposes apply/inject, and can render every slot
-// component it registers.
+/** @module scripts/check-client */
+
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join, relative } from 'node:path'
@@ -17,14 +11,8 @@ const nodeRequire = createRequire(import.meta.url)
 const React = nodeRequire('react')
 const { renderToStaticMarkup } = nodeRequire('react-dom/server')
 
-// Host primitives ship as browser ESM with CSS Module imports. The artifact
-// check materializes the real pinned module (identity, exports, SSR markup) and
-// stubs only the CSS modules: class names drive the browser's stylesheet and
-// have no meaning in this Node process. Storybook/Vitest load the same files
-// through Vite with real CSS.
 const { registerHooks } = nodeRequire('node:module')
-// Node 20 cannot require the ESM package at all; it falls back to a shape stub
-// below, while the Vitest/Storybook runs still exercise the real module.
+
 const canMaterializeHostEsm = typeof registerHooks === 'function'
 if (canMaterializeHostEsm) {
   registerHooks({
@@ -41,8 +29,6 @@ if (canMaterializeHostEsm) {
   })
 }
 
-// Base UI's floating primitives use useLayoutEffect; server rendering (used
-// only to prove a component mounts) logs a harmless warning for each one.
 const consoleError = console.error
 console.error = (...args) => {
   if (typeof args[0] === 'string' && args[0].includes('useLayoutEffect does nothing on the server'))
@@ -59,14 +45,11 @@ const PLATFORM_REQUESTS = new Set([
   'react-dom/client',
 ])
 
-// Exact host rows a client half may request from the shell's frozen table. A
-// package must also declare the same name in `dsh.client.external`.
 const HOST_REQUESTS = new Set(['@deepseek-ai/dsh-client-ui-primitives'])
 const PRIMITIVES = '@deepseek-ai/dsh-client-ui-primitives'
 
 const stubComponent = () => null
 
-/** Module-shape stand-in for runtimes that cannot require the host ESM package. */
 function stubHostPrimitives() {
   return new Proxy({}, { get: () => stubComponent })
 }
@@ -78,9 +61,6 @@ function checkRequire(request) {
 
 const failures = []
 
-// The primitives coupling is only sound when the installed package is the exact
-// version pinned for this host release; a stale or floating install would
-// typecheck against a different module than the shell serves.
 const catalog = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8')
 const pinnedPrimitives = catalog.match(
   /^\s+'@deepseek-ai\/dsh-client-ui-primitives':\s*(\S+)\s*$/mu,
@@ -128,7 +108,6 @@ function createDocument() {
   }
 }
 
-/** A permissive remote stand-in: any call resolves to an unsuccessful envelope. */
 const call = () => Promise.resolve({ ok: false })
 
 function createRemote() {
@@ -148,6 +127,12 @@ function createContext(registrations, cleanups) {
     get() {
       return undefined
     },
+    logger: () => ({
+      debug() {},
+      info() {},
+      warn() {},
+      error() {},
+    }),
     locale: {
       register: () => () => {},
       bind: () => (key) => key,
@@ -162,8 +147,7 @@ function createContext(registrations, cleanups) {
     },
     remote: createRemote(),
   }
-  // Cordis runtime injection (services that appear after apply): call the
-  // callback immediately with the same context, as the host does once ready.
+
   context.inject = (_deps, callback) => callback(context)
   return context
 }
@@ -267,8 +251,7 @@ for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })
       for (const { options, component } of registrations) {
         try {
           const injected = options.inject ? options.inject() : {}
-          // Standard slot-kit hooks the host always injects. A bare render
-          // must not crash just because no page store is mounted.
+
           renderToStaticMarkup(
             React.createElement(component, {
               t: (key) => key,

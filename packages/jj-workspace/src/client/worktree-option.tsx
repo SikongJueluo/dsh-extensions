@@ -9,26 +9,19 @@ import {
   type MenuEntry,
 } from '@dsh-extensions/ui/host'
 
-/**
- * One selectable base in the worktree menu. `value` is what the Forge Remote
- * accepts (`''` for a detached Git HEAD); `label` is the visible name.
- */
+/** One selectable base in the worktree menu. `value` is what the Forge Remote accepts (`''` for a detached Git HEAD); `label` is the visible name. */
 export interface WorktreeChoice {
   value: string
   label: string
-  /** Trailing qualifier such as the Git checkout's current branch. */
   note?: string
 }
 
 export interface WorktreeOptionProps {
   kind: 'jj' | 'git'
-  /** Localized label for the checkbox, `t('jj')` or `t('git')`. */
   label: string
   menuLabel: string
   requested: boolean
-  /** The stock request can be created from here (no VCS/permission blocker). */
   usable: boolean
-  /** Creation is running or the request itself is in flight. */
   disabled: boolean
   baseText: string
   hint: string
@@ -39,7 +32,6 @@ export interface WorktreeOptionProps {
   onPick: (value: string) => void
 }
 
-/** Geometry of the stock Forge worktree option, on DSH theme tokens. */
 const controlClass = cn(
   'dshx:inline-flex dshx:h-7 dshx:min-w-0 dshx:items-center dshx:gap-1.5 dshx:whitespace-nowrap',
   'dshx:rounded-[var(--dsw-radius-sm)] dshx:border-0 dshx:bg-transparent dshx:px-2',
@@ -63,17 +55,7 @@ function optionLabel(choice: WorktreeChoice): ReactNode {
   )
 }
 
-/**
- * The new-session worktree option, following the stock Forge control: the
- * current base (or the base menu once requested), then the checkbox that
- * requests or withdraws it. The menu and the tooltips are host primitives, so
- * their card, rows, and keyboard behavior are the ones the stock UI uses.
- *
- * The menu stays in the slot subtree instead of portaling to the body. It opens
- * on the side with room and caps its height, because the hero row sits inside
- * the conversation scroll container: an in-place card that runs past the
- * scrollport would be clipped. The long list scrolls inside the stock viewport.
- */
+/** The new-session worktree option, following the stock Forge control: the current base (or the base menu once requested), then the checkbox that requests or withdraws it. The menu and the tooltips are host primitives, so their card, rows, and keyboard behavior are the ones the stock UI uses. */
 export function WorktreeOption({
   kind,
   label,
@@ -93,15 +75,10 @@ export function WorktreeOption({
   const [side, setSide] = useState<'top' | 'bottom'>('top')
   const menu = requested && usable
 
-  // Withdrawing (or the stock stream clearing the request) unmounts the list;
-  // a later request must start closed rather than reuse stale open state.
   useEffect(() => {
     if (!menu) setOpen(false)
   }, [menu])
 
-  // The stock menu portals and flips to fit the viewport. This one stays in the
-  // slot subtree, so choose the side with room instead of clipping the card
-  // above or below the conversation scroll container.
   const toggle = (event: MouseEvent<HTMLButtonElement>) => {
     if (open) {
       setOpen(false)
@@ -127,8 +104,6 @@ export function WorktreeOption({
             selectedId={selected}
             onSelect={(id) => {
               setOpen(false)
-              // Re-submitting the same base is meaningful: the stock Remote
-              // forgets a failed attempt, records the request, and rechecks it.
               onPick(id)
             }}
             onClose={() => setOpen(false)}
@@ -136,7 +111,6 @@ export function WorktreeOption({
             align="end"
             listClassName={cn(
               'dshx:max-h-[min(320px,40vh)]!',
-              // Host rows are 34px; a coarse pointer needs a 44px target.
               'dshx:[&_button]:pointer-coarse:min-h-11!',
             )}
             anchor={

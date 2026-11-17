@@ -1,20 +1,4 @@
 /* oxlint-disable react/set-state-in-effect -- the effect mirrors external data into local UI state; deriving it would change render timing */
-// Client half of dsh-session-write-access.
-//
-// Two additive slots:
-//   - `conversation.input.left`: a compact write-scope button beside the stock
-//     composer controls (never replacing the permission control);
-//   - `shell.overlay`: the panel itself, in the frame-wide floating layer, so
-//     it is not clipped by the docked composer.
-//
-// The panel is the user-only management surface: add a directory, allow/deny
-// a persistent Agent request, revoke a grant, or fork this session with its
-// current grants. All decisions are posted to this package's same-origin
-// route; the host re-validates every path and never accepts a browser-supplied
-// actor.
-//
-// TypeScript TSX on the shared @dsh-extensions/ui components; the panel is the
-// shared `Dialog` controlled by the module-level state below.
 import { useEffect, useState } from 'react'
 import {
   Alert,
@@ -177,7 +161,6 @@ interface SharedState {
   listeners: (() => void)[]
 }
 
-// --- module-level panel state (two slots share it) ---
 const S: SharedState = {
   open: false,
   sessionId: null,
@@ -308,16 +291,13 @@ function apply(ctx: DshClientContext) {
         setState({ sessionId, view: null })
         void refresh()
       } else if (!shared.open) {
-        // Keep the compact count current without opening the panel.
         setState({ sessionId })
         rpc('state', { sessionId })
           .then((view) => {
             if (!S.open && S.sessionId === sessionId) setState({ view })
             return undefined
           })
-          .catch(() => {
-            /* unattributed sessions simply show no counts */
-          })
+          .catch(() => {})
       }
       return undefined
     }, [sessionId, shared.open])

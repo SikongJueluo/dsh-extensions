@@ -1,11 +1,4 @@
-/**
- * Path rules shared by the persistent store, the policy service, and the
- * browser channel. The enforcing host still validates every grant on every
- * call; these checks are the earlier, clearer refusal at the moment a user
- * adds a directory or a session workspace is first recorded.
- *
- * @module dsh-session-write-access/paths
- */
+/** @module dsh-session-write-access/paths */
 import { realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, parse, resolve, sep } from 'node:path'
@@ -30,17 +23,12 @@ export class ProtectedWriteRootError extends Error {
 }
 
 /**
- * Expand the two spellings a deployment config can reasonably use without a
- * shell: a leading `~`, `$DSH_HOME`, and `$HOME`. Anything else is kept as-is
- * so an unknown variable fails the absolute-path check instead of silently
- * naming another directory.
+ * Expand the two spellings a deployment config can reasonably use without a shell: a leading `~`, `$DSH_HOME`, and `$HOME`. Anything else is kept as-is so an unknown variable fails the absolute-path check instead of silently naming another directory.
  * @param path - configured or submitted path.
  * @param environment - process environment, injectable for tests.
  * @returns the expanded path (still possibly relative).
  */
 export function expandPath(path: string, environment: NodeJS.ProcessEnv = process.env): string {
-  // An empty trimmed value means "unset" — the same fall-through `||` had,
-  // written out because `??` alone would keep the empty string.
   const homeValue = environment.HOME?.trim()
   const home = homeValue === undefined || homeValue === '' ? homedir() : homeValue
   const dshHomeValue = environment.DSH_HOME?.trim()
@@ -54,10 +42,7 @@ export function expandPath(path: string, environment: NodeJS.ProcessEnv = proces
 }
 
 /**
- * Canonicalize an existing directory without requiring the caller's spelling
- * to be physical. Session workspaces may legitimately be reached through a
- * symlink; the enforcing host canonicalizes them itself, so the recorded root
- * is the real directory.
+ * Canonicalize an existing directory without requiring the caller's spelling to be physical. Session workspaces may legitimately be reached through a symlink; the enforcing host canonicalizes them itself, so the recorded root is the real directory.
  * @param path - absolute directory path.
  * @returns the physical directory.
  * @throws {InvalidWriteRootError} when the path is not an existing directory.
@@ -78,9 +63,7 @@ export function canonicalDirectory(path: string): string {
 }
 
 /**
- * Resolve a directory grant the way the enforcing host does: an existing
- * physical directory, spelled as its real path. A symlinked grant is refused
- * rather than canonicalized, matching the stock root validation.
+ * Resolve a directory grant the way the enforcing host does: an existing physical directory, spelled as its real path. A symlinked grant is refused rather than canonicalized, matching the stock root validation.
  * @param path - untrusted absolute directory path.
  * @returns the physical absolute directory.
  * @throws {InvalidWriteRootError} when the path is unusable.
@@ -111,9 +94,7 @@ export function physicalDirectory(path: string): string {
 }
 
 /**
- * Whether `parent` is the same directory as `child` or contains it. The
- * filesystem root is special: joining it with a separator yields `//`, which
- * no absolute path starts with, so it must be recognized before prefixing.
+ * Whether `parent` is the same directory as `child` or contains it. The filesystem root is special: joining it with a separator yields `//`, which no absolute path starts with, so it must be recognized before prefixing.
  * @param parent - a physical absolute directory.
  * @param child - another physical absolute directory.
  * @returns true when `child` is `parent` or sits under it.
@@ -127,10 +108,7 @@ export function pathContains(parent: string, child: string): boolean {
 }
 
 /**
- * Whether two physical paths name the same directory or one contains the
- * other. Used to refuse a grant that could rewrite the authorization store
- * and to explain that a revoked child directory is still covered by a parent
- * grant.
+ * Whether two physical paths name the same directory or one contains the other. Used to refuse a grant that could rewrite the authorization store and to explain that a revoked child directory is still covered by a parent grant.
  * @param root - a physical absolute directory.
  * @param other - another physical absolute directory.
  * @returns true when either path contains the other.
@@ -153,8 +131,7 @@ export function findProtectedOverlap(
 }
 
 /**
- * Validate one candidate directory and refuse it when it overlaps protected
- * data.
+ * Validate one candidate directory and refuse it when it overlaps protected data.
  * @param path - submitted path.
  * @param protectedRoots - physical absolute protected paths.
  * @returns the physical directory.
@@ -168,9 +145,7 @@ export function admitWriteRoot(path: string, protectedRoots: readonly string[]):
 }
 
 /**
- * Merge the deployment's extra roots with one group's grants, preserving
- * order and dropping duplicates. The deployment list keeps its own order so
- * stock policy text stays recognizable.
+ * Merge the deployment's extra roots with one group's grants, preserving order and dropping duplicates. The deployment list keeps its own order so stock policy text stays recognizable.
  * @param deploymentRoots - configured `additionalWritableRoots`.
  * @param grantedRoots - the group's currently effective grant paths.
  * @returns a frozen, de-duplicated list, or undefined when empty.

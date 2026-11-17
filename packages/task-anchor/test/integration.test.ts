@@ -300,8 +300,6 @@ describe('adapter: checkpoint_task through the real defineTool', () => {
     const created = fixture.listeners.get('agent/created')?.[0]
     if (created === undefined) throw new Error('no agent/created listener')
     await created.fn({ agent: fixture.agent, source: 'resume' })
-    // `agent/created` fires while the agent is idle, so there is no tool-call
-    // batch to split and the append is safe (contrast the guard's hint).
     const notice = fixture.appended.find((entry) => entry.type === 'user/message')
     expect(notice?.opts).toMatchObject({ surfaceOp: 'append' })
   })

@@ -1,6 +1,4 @@
 @theme inline {
-  /* Public DSH alias tokens only. Everything here resolves to the host's
-     light/dark variables at use time, so no color is hard-coded here. */
   --color-bg: var(--dsw-alias-bg-base);
   --color-surface: var(--dsw-alias-bg-layer-1);
   --color-surface-2: var(--dsw-alias-bg-layer-2);
@@ -33,8 +31,6 @@
   --text-base--line-height: 22px;
 }
 
-/* Scoped reset: the host owns global CSS, so we replace only Preflight's
-   effects inside our own roots instead of importing it. */
 @layer base {
   .dshx-root,
   .dshx-root *,

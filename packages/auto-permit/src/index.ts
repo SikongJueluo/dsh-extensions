@@ -1,50 +1,11 @@
-/**
- * dsh-auto-permit — an AI answerer on the approval waterfall.
- *
- * When a bash sandbox escalation (or any bash approval) reaches the
- * `approval/request` waterfall, this plugin runs BEFORE the Web GUI answerer
- * (registered with `prepend`) and decides whether the request matches what
- * the user already asked for — or already approved — in this session:
- *
- * 1. high-risk irreversibility shapes (rm -rf ~, git clean -xfd, reset
- *    --hard, push --force, sudo, curl|sh…) and container boundaries
- *    (compose, remote targets, privilege, host namespaces, engine sockets,
- *    sensitive mounts, lifecycle of existing resources, prune, push, host
- *    configuration) → straight to the human dialog;
- * 2. cmd-permit's explicit allowlist, when that plugin is mounted → its
- *    claim wins over both memory and the judge;
- * 3. exact-repeat memory: the same command escalated to the same mode was
- *    already allowed in this session → allowed at once, no model call; never
- *    for container-engine or script commands, whose effects come from mutable
- *    files (those are judged again every time);
- * 4. otherwise a bounded read-only judge agent (a small model configured in
- *    the plugin row config) over the session's user prompts, the pending
- *    call's full arguments, the call/session working directories, the
- *    already-approved commands, and — when needed — project files it reads
- *    through its three read-only tools: ALLOW claims the request, everything
- *    else (ambiguity, a weak or changed evidence trail, timeout, budget,
- *    provider failure) falls through to the human answerer.
- *
- * Every decision is appended to the session's log as a `form: 'notice'`
- * message, so the stock Web chat shows it as a collapsed context row
- * (persistent, replayable; the one-line account also enters the model
- * transcript). The plugin never returns `rejected`: an AI denial must not
- * masquerade as the user's explicit "no". Fail-open direction is toward the
- * human dialog, so a broken judge degrades to the stock behavior, never
- * worse.
- *
- * Consumed host services: `llm` (injected); `sessions` opportunistically
- * via `ctx.get()`.
- *
- * @module dsh-auto-permit
- */
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Logger } from '@deepseek-ai/cordis'
 import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 import { SessionStore } from '@deepseek-ai/dsh-session'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { collectEvidence } from './evidence.js'
 import { containerRisk, isMutableFileDependent } from './container.js'
+import { errorTag, warnQuietly } from './diagnostics.js'
 import { isHighRisk } from './rules.js'
 import { judge } from './judge.js'
 import { buildNoticeMessage } from './notice.js'
@@ -63,10 +24,8 @@ export { buildNoticeMessage } from './notice.js'
 
 export const inject = ['llm']
 
-/** Key of the per-session approval-source memory sets. */
 const keyOf = (sessionId: string, callId: string): string => `${sessionId}:${callId}`
 
-/** Live session lookup: `agent.session` when materialized, else the store. */
 function sessionOf(ctx: Context, agent: { id: SessionId; session?: Session }): Session | undefined {
   const direct = agent.session
   if (direct !== undefined && direct !== null) return direct
@@ -75,70 +34,39 @@ function sessionOf(ctx: Context, agent: { id: SessionId; session?: Session }): S
   return undefined
 }
 
-/**
- * The approval request's agent, narrowed to what the notice path needs: the
- * durable session (audit + fallback) and the host's deferred inbox channel.
- * The members stay optional and the host's `Agent` stays assignable without an
- * assertion: `inject` is duck-typed because it reached `Agent` after the
- * oldest hosts this plugin still loads on, and older hosts may not expose a
- * materialized `session` either.
- */
 export interface NoticeAgent {
   id: string
   session?: Session | undefined
   inject?(message: UserMessage): void
 }
 
-/**
- * Deliver a notice without ever breaking the tool-call/result pairing.
- *
- * An approval is raised from inside the agent loop's `runGroup`, i.e. between
- * the assistant's `tool_calls` (committed as `tool/call` before dispatch) and
- * the `tool/result` batch `commitReady` writes afterwards. A `user/message`
- * appended to the surface at that point lands *between* them, and
- * `deriveMessages()` then projects `assistant(tool_calls) -> user -> tool`,
- * which OpenAI-compatible endpoints reject with HTTP 400 — permanently,
- * because the bad order is durable history. Observed in DSH session
- * 5528dac7 seq 121..129: the auto-permit notice at seq 125 wedged every later
- * request in that session, `/compact` included.
- *
- * `agent.inject()` is the host's own answer for exactly this situation —
- * `ApprovalService.setPolicy()` delivers its mid-turn notices the same way. It
- * queues the message at the `next-step` boundary without waking the driver, so
- * the notice is logged after the tool results and claimed at the start of the
- * next step: same transcript row, correct order.
- *
- * @param agent - the agent whose approval produced the notice.
- * @param message - the built notice message.
- */
-export function deliverNotice(agent: NoticeAgent, message: UserMessage): void {
+export function deliverNotice(
+  agent: NoticeAgent,
+  message: UserMessage,
+  logger?: Pick<Logger, 'warn'>,
+): void {
   try {
     if (typeof agent.inject === 'function') {
       agent.inject(message)
       return
     }
-    // Hosts without the deferred channel: keep the notice, accept the
-    // ordering hazard rather than dropping the audit row. An agent without a
-    // materialized session has no surface to append to; skipping is the same
-    // visible outcome the previous duck call's catch produced.
+
     agent.session?.append('user/message', message, { surfaceOp: 'append' })
-  } catch {
-    // A notice is best-effort observability; the approval outcome itself must
-    // not fail because the log rejected the row.
+  } catch (error) {
+    warnQuietly(
+      logger,
+      'auto-permit: notice delivery failed for %s (%s)',
+      agent.id,
+      errorTag(error),
+    )
   }
 }
 
-/**
- * The optional dsh-cmd-permit service (the shared high-risk oracle), when
- * that plugin is mounted. Duck-typed on purpose: no packaging dependency in
- * this direction, so auto-permit stays independently installable.
- */
 interface CmdPermitLike {
   isHighRisk(command: string): boolean
   claim(command: string, mode: string): { via: string } | undefined
 }
 
-/** Structural guard for the duck-typed service lookup (no assertion). */
 function isCmdPermitLike(value: unknown): value is CmdPermitLike {
   if (typeof value !== 'object' || value === null) return false
   return (
@@ -147,11 +75,6 @@ function isCmdPermitLike(value: unknown): value is CmdPermitLike {
   )
 }
 
-/**
- * The mounted cmd-permit service, or undefined when absent. A mounted-but-
- * malformed service still throws, so the answerer's catch keeps the old
- * fail-closed defer path instead of silently skipping the oracle.
- */
 function cmdPermitOf(value: unknown): CmdPermitLike | undefined {
   if (value === undefined || value === null) return undefined
   if (!isCmdPermitLike(value)) {
@@ -160,26 +83,15 @@ function cmdPermitOf(value: unknown): CmdPermitLike | undefined {
   return value
 }
 
-/**
- * The optional dsh-working-directory service: the host's committed current
- * directory for a session (updated by `working-directory/change`, and the
- * directory a relative or omitted bash `workdir` resolves against).
- */
 interface WorkingDirectoryLike {
   get(session: Session): string
 }
 
-/** Structural guard for the duck-typed service lookup (no assertion). */
 function isWorkingDirectoryLike(value: unknown): value is WorkingDirectoryLike {
   if (typeof value !== 'object' || value === null) return false
   return typeof (value as { get?: unknown }).get === 'function'
 }
 
-/**
- * The effective cwd through the optional service. A missing service yields
- * undefined (the fallback chain takes over); a mounted-but-malformed service
- * still throws, so the answerer's catch keeps the old fail-closed defer path.
- */
 function workingDirectoryOf(value: unknown, session: Session): string | undefined {
   if (value === undefined || value === null) return undefined
   if (!isWorkingDirectoryLike(value)) {
@@ -188,45 +100,20 @@ function workingDirectoryOf(value: unknown, session: Session): string | undefine
   return value.get(session)
 }
 
-/**
- * Record the decision's notice through the order-safe channel.
- *
- * @param agent - the agent the approval was raised for.
- * @param outcome - how the request settled.
- * @param command - the command being escalated (already excerpted).
- * @param reason - the judge's reason line, when the model call produced one.
- * @param detail - judge category and evidence references, when available.
- */
 function notify(
+  logger: Pick<Logger, 'warn'>,
   agent: NoticeAgent,
   outcome: NoticeOutcome,
   command: string,
   reason?: string,
   detail?: NoticeDetail,
 ): void {
-  deliverNotice(agent, buildNoticeMessage(outcome, command, reason, detail))
+  deliverNotice(agent, buildNoticeMessage(outcome, command, reason, detail), logger)
 }
 
-/**
- * Plugin entry.
- *
- * @param ctx - plugin context.
- * @param config - composition row config (volatile live references).
- */
 export function apply(ctx: Context, config: RowConfig): void {
   const readSettings = registerSettings(ctx, config)
 
-  // Per-process, per-session source memory for exact-repeat replay. The
-  // audit trail (`approval/decided`) records only the outcome — never WHO
-  // decided — so a log-derived "approved before" cannot prove the approval
-  // came from the user rather than a plugin auto-answer (e.g. a pre-v3
-  // cache-rule allowance). Replay is therefore gated on what this process
-  // observed: approvals this plugin ITSELF granted are never replayed
-  // (they must stand on their own each time under the current rules);
-  // approvals that arrived through `next()` — the human dialog, or another
-  // answerer that reconsidered the repeat — may be replayed. A restart
-  // empties both sets, so historical approvals fall to the judge/human,
-  // never to silent replay.
   const selfAllowed = new Set<string>()
   const chainApproved = new Set<string>()
 
@@ -261,11 +148,6 @@ export function apply(ctx: Context, config: RowConfig): void {
 
         const command = evidence.call.command.slice(0, 160)
 
-        // Shared high-risk oracle: when dsh-cmd-permit is mounted, its table
-        // (these built-ins plus its row's denyShape regexes) is authoritative,
-        // so the judge and the allowlist defer on exactly the same shapes.
-        // The union is deliberate: this plugin's own boundary must hold even
-        // when the peer's table is older than this build.
         const cmdPermit = cmdPermitOf(ctx.get('cmdPermit'))
         const container = containerRisk(evidence.call.command)
         const highRisk =
@@ -278,6 +160,7 @@ export function apply(ctx: Context, config: RowConfig): void {
             command,
           )
           notify(
+            ctx.logger,
             agent,
             container === undefined ? 'high-risk' : 'container-guard',
             command,
@@ -286,32 +169,17 @@ export function apply(ctx: Context, config: RowConfig): void {
           return await rest()
         }
 
-        // Shared allowlist decision, BEFORE memory and judge: the allowlist
-        // is the user's explicit statement of trust, cheaper and stronger
-        // than either. Fronting it here (instead of racing a second answerer
-        // for chain order) is deliberate — dsh-cmd-permit's own answerer
-        // still exists for compositions without this plugin, but with it
-        // mounted the order [high-risk → allowlist → memory → judge] holds
-        // regardless of listener registration order.
         const claim = cmdPermit?.claim(
           evidence.call.command,
           evidence.call.sandboxPermissions ?? '',
         )
         if (claim !== undefined) {
           ctx.logger.info('auto-permit: cmd-permit allowlisted (%s): %s', claim.via, command)
-          notify(agent, 'allowed-by-cmd-permit', command, claim.via)
+          notify(ctx.logger, agent, 'allowed-by-cmd-permit', command, claim.via)
           rememberSelf()
           return 'allowed-once'
         }
 
-        // Exact-repeat memory, source-gated: replay only an approval this
-        // process saw arrive through the rest of the chain (the human
-        // dialog). Our own earlier auto-allowances are deliberately NOT
-        // replayable — a pre-v3 cache-rule allowance must not become a
-        // standing grant, and post-v3 allowances stand on their own merits
-        // each time. Container-engine and script commands are excluded even
-        // when the source qualifies: their effect is a mutable file or
-        // engine state, so the identical string must be judged again.
         const replayable = evidence.exactRepeatSources.some(
           (priorCallId) =>
             chainApproved.has(keyOf(session.id, priorCallId)) &&
@@ -326,7 +194,7 @@ export function apply(ctx: Context, config: RowConfig): void {
             'auto-permit: exact repeat of a chain-approved command, allowing: %s',
             command,
           )
-          notify(agent, 'allowed-by-memory', command)
+          notify(ctx.logger, agent, 'allowed-by-memory', command)
           rememberSelf()
           return 'allowed-once'
         }
@@ -339,7 +207,9 @@ export function apply(ctx: Context, config: RowConfig): void {
             (result.evidence ?? []).join(', ') || 'none',
             command,
           )
-          notify(agent, 'allowed', command, result.reason, { evidence: result.evidence })
+          notify(ctx.logger, agent, 'allowed', command, result.reason, {
+            evidence: result.evidence,
+          })
           rememberSelf()
           return 'allowed-once'
         }
@@ -351,20 +221,17 @@ export function apply(ctx: Context, config: RowConfig): void {
           result.reason ?? 'no reason recorded',
           command,
         )
-        notify(agent, 'deferred', command, result.reason, {
+        notify(ctx.logger, agent, 'deferred', command, result.reason, {
           category: result.category,
           evidence: result.evidence,
         })
         return await rest()
       } catch (error) {
-        // Any surprise (log read failure, agent shape drift, …) goes to the
-        // human dialog; never reject on the judge's behalf.
         ctx.logger.warn('auto-permit: answerer failed, deferring: %o', error)
         return next()
       }
     },
-    // Prepend: run before the Web GUI answerer, which otherwise claims the
-    // request first whenever a browser is attached.
+
     true,
   )
 }

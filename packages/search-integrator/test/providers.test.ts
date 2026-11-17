@@ -134,7 +134,7 @@ describe('openai adapter', () => {
             action: {
               sources: [
                 { url: 'https://o.example/1', title: 'One' },
-                { url: 'https://o.example/2' }, // no title
+                { url: 'https://o.example/2' },
               ],
             },
           },
@@ -159,7 +159,7 @@ describe('openai adapter', () => {
       'https://o.example/2',
       'https://o.example/3',
     ])
-    expect(hits?.every((hit) => hit.snippet === '')).toBe(true) // generated text is never evidence
+    expect(hits?.every((hit) => hit.snippet === '')).toBe(true)
     const body = calls[0]?.body as Record<string, unknown>
     expect(body.model).toBe('gpt-5.5')
     expect(body.tool_choice).toBe('required')

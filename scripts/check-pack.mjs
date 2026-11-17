@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Pack guard: the tarball a consumer installs must contain the built host and
-// client halves plus the bundle patch, and must not depend on the source tree.
+/** @module scripts/check-pack */
+
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

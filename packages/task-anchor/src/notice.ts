@@ -1,22 +1,10 @@
 /**
- * The model-visible resume notice: what the anchor recorded, what currently
- * holds, and the evidence to pick the work back up from.
- *
- * It rides the standard user-message surface with a first-class
- * `execution-guard` source (the anchor predates this package's split, and the
- * source kind is what the stock Web chat keys the collapsed row on — renaming
- * it would orphan notices already stored in existing session logs), so the
- * summary renders as a collapsed context row and the transcript stays
- * replayable.
- *
+ * The model-visible resume notice: what the anchor recorded, what currently holds, and the evidence to pick the work back up from.
  * @module dsh-task-anchor/notice
  */
 import { boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 
-// Merge-extensible source registry (runtime consumers read form/summary
-// duck-typed), same pattern as dsh-auto-permit's notices. `hint` belongs to
-// dsh-execution-guard, which shares this source kind.
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     'execution-guard': {
@@ -47,11 +35,7 @@ function mark(matches: boolean | undefined): string {
 }
 
 /**
- * Build the recovery-anchor notice appended on resume/startup: what the
- * anchor recorded, what currently holds, and the owned-files/verification
- * evidence to pick work back up from. Purely informational — it never
- * performs recovery and is not a repository write lock.
- *
+ * Build the recovery-anchor notice appended on resume/startup: what the anchor recorded, what currently holds, and the owned-files/verification evidence to pick work back up from. Purely informational - it never performs recovery and is not a repository write lock.
  * @param report - the anchor-vs-current comparison.
  * @returns the frozen user-role notice message.
  */

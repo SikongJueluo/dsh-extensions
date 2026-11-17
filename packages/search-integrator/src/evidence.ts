@@ -1,23 +1,9 @@
 /**
- * The deterministic evidence layer: URL-keyed dedup, syndication merging,
- * ranking, and the numbered digest the integrator model reads.
- *
- * Dedup discipline (product decision, not tuning): merge ONLY on identity we
- * can defend — the same normalized URL, or a byte-identical title+snippet
- * pair (verbatim syndication). Query strings and fragments are kept except a
- * fixed list of well-known tracking parameters; near-duplicate titles or
- * similar snippets NEVER merge, because version, number, date, and negation
- * differences live exactly there.
- *
+ * The deterministic evidence layer: URL-keyed dedup, syndication merging, ranking, and the numbered digest the integrator model reads.
  * @module dsh-search-integrator/evidence
  */
 import type { EvidenceSource, RawHit } from './types.js'
 
-/**
- * Tracking parameters safe to strip for identity: well-known analytics/share
- * markers that do not select content. Deliberately a short, fixed list —
- * anything not here stays part of the dedup key.
- */
 const TRACKING_PARAMS: ReadonlySet<string> = new Set([
   'utm_source',
   'utm_medium',
@@ -39,13 +25,6 @@ const TRACKING_PARAMS: ReadonlySet<string> = new Set([
   'ref_url',
 ])
 
-/**
- * Canonical dedup key for one URL: lowercase scheme/host, default ports and
- * tracking parameters dropped. The FRAGMENT STAYS — hash-routed SPAs serve
- * different content per fragment, and merging them would silently drop
- * evidence. Query ORDER is preserved — reordering is not identity.
- * Unparseable URLs key on their raw string.
- */
 export function urlDedupKey(url: string): string {
   try {
     const parsed = new URL(url)
@@ -125,8 +104,6 @@ function mergeRawHits(hits: readonly RawHit[]): Working[] {
       absorb(existing, hit)
     }
   }
-  // Second pass: byte-identical title+snippet from different URLs (verbatim
-  // syndication) collapses into the earliest entry. Everything else stays.
   const bySyndication = new Map<string, Working>()
   const merged: Working[] = []
   for (const entry of [...byUrl.values()].toSorted((a, b) => a.order - b.order)) {
@@ -156,11 +133,7 @@ function mergeRawHits(hits: readonly RawHit[]): Working[] {
   return merged
 }
 
-/**
- * Deterministic score: cross-source agreement first, question/query term
- * overlap second. No recency guessing — dates stay visible in the digest for
- * the integrator to reason about.
- */
+/** Deterministic score: cross-source agreement first, question/query term overlap second. No recency guessing - dates stay visible in the digest for the integrator to reason about. */
 function score(entry: Working, terms: ReadonlySet<string>): number {
   const haystack = `${entry.title ?? ''} ${entry.snippet} ${entry.url}`.toLowerCase()
   let overlap = 0
@@ -181,12 +154,6 @@ function domainOf(url: string): string {
 
 /**
  * Deduplicate, rank, cap, and number the evidence pool.
- *
- * After slicing to `cap`, at most one dropped entry whose DOMAIN appears
- * nowhere in the kept set is re-admitted. This is a domain-diversity
- * heuristic, NOT verified counter-evidence detection — it only widens what
- * the integrator can see; it cannot know whether the page dissents.
- *
  * @param hits - every raw hit from all rounds.
  * @param terms - question + query tokens for overlap scoring.
  * @param cap - `maxEvidence`: entries kept after ranking.
@@ -211,9 +178,6 @@ export function buildEvidence(
     .find(({ entry, score: entryScore }) => entryScore > 0 && !keptDomains.has(domainOf(entry.url)))
   if (dissent !== undefined) kept.push(dissent)
   return kept.map(({ entry, score: entryScore }, index) => {
-    // Field-by-field instead of the previous conditional spreads; the optional
-    // title/content/publishedAt keys land after the required ones, which only
-    // reorders keys inside the audit artifact's JSON (values unchanged).
     const value: { -readonly [K in keyof EvidenceSource]: EvidenceSource[K] } = {
       id: index + 1,
       url: entry.url,
@@ -244,11 +208,7 @@ export interface RetrievalContext {
   readonly failed: readonly { source: string; reason: string }[]
 }
 
-/**
- * The retrieval-context header for the integrator digest. Retrieval time and
- * content freshness are deliberately separate facts: the header says when we
- * searched, never that content is current up to that date.
- */
+/** The retrieval-context header for the integrator digest. Retrieval time and content freshness are deliberately separate facts: the header says when we searched, never that content is current up to that date. */
 export function buildRetrievalContext(context: RetrievalContext): string {
   return [
     `Retrieval context:`,
@@ -261,10 +221,7 @@ export function buildRetrievalContext(context: RetrievalContext): string {
 }
 
 /**
- * Render the numbered digest the integrator model reads. Every selected
- * source keeps at least a URL line even when the character budget runs out —
- * citation numbers must stay resolvable — while excerpts shrink first.
- *
+ * Render the numbered digest the integrator model reads. Every selected source keeps at least a URL line even when the character budget runs out - citation numbers must stay resolvable - while excerpts shrink first.
  * @param sources - numbered evidence.
  * @param excerptChars - per-source excerpt cap.
  * @param charBudget - total digest budget.
@@ -277,9 +234,6 @@ export function buildDigest(
   const lines: string[] = []
   let used = 0
   let budgetExhausted = false
-  // Fair-share excerpt budget: every source gets a floor share of the digest
-  // before any long excerpt can claim the rest, so one verbose source cannot
-  // push later sources down to URL-only lines.
   const perSourceCap = Math.max(
     240,
     Math.min(excerptChars, Math.floor((charBudget * 0.8) / Math.max(1, sources.length))),
@@ -301,7 +255,7 @@ export function buildDigest(
       continue
     }
     let excerpt = excerptOf(source, Math.min(excerptChars, perSourceCap))
-    const room = charBudget - used - 40 // leave slack for separators
+    const room = charBudget - used - 40
     if (room <= 0) {
       budgetExhausted = true
       lines.push('    (excerpt omitted: digest budget reached)')

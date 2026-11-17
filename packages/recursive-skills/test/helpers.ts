@@ -1,8 +1,3 @@
-/**
- * Shared fixtures for the recursive-skills tests: a temporary agents home, a
- * real composed filesystem, the real skill registry, and the plugin mounted as
- * the loader would mount it.
- */
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -17,13 +12,10 @@ import {
 } from '@deepseek-ai/dsh-skill-filesystem'
 import { apply, Config, inject, name } from '../src/index.js'
 
-/** Plugin object in the shape Cordis mounts from a package entry. */
 const plugin = { apply, Config, inject, name }
 
 export interface HarnessOptions {
-  /** Mount a LocalFileSystem subclass (failure injection) instead of the stock one. */
   fsPlugin?: typeof LocalFileSystem
-  /** Mount the stock skill-filesystem provider on the same root first. */
   stockProvider?: boolean
   extraRoots?: string[]
   maxDepth?: number

@@ -1,13 +1,5 @@
 /**
  * OpenAI OAuth (ChatGPT subscription) LLM adapter.
- *
- * Speaks the OpenAI Responses API against the ChatGPT backend used by the
- * Codex CLI (`https://chatgpt.com/backend-api/codex`), authenticated with the
- * OAuth access token from the local Codex login. SSE output is translated into
- * the harness `StreamChunk` protocol.
- *
- * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
- *
  * @module dsh-more-providers/providers/chatgpt/adapter
  */
 import { Readable } from 'node:stream'
@@ -37,6 +29,8 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import { longEdgeDimensions } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentRef, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
+import type { Logger } from '@deepseek-ai/cordis'
+import { debugQuietly } from '../../diagnostics.js'
 import type { FetchLike } from '../../oauth/transport.js'
 import { isRecord } from '../../record.js'
 import type { ProviderImageServices } from '../../runtime.js'
@@ -61,16 +55,10 @@ export interface AdapterOptions {
   defaultReasoningEfforts: string[]
   defaultContextWindow: number
   refreshMarginMs: number
-  /** Stamp `prompt_cache_key` + session-affinity headers from the session id. */
   promptCacheKey: boolean
 }
 
-/**
- * Long-edge pixel cap for request images — the resize Codex applies to
- * non-`original` detail images before sending them to the same backend.
- */
 const REQUEST_IMAGE_LONG_EDGE = 2048
-/** Encoded-byte sanity bound per request image, mirroring Codex's 1 GiB guard. */
 const REQUEST_IMAGE_MAX_BYTES = 2 ** 30
 
 /** Map the Responses API SSE byte stream into data payload strings. */
@@ -244,8 +232,6 @@ async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<Strea
       throw new LlmError('malformed SSE payload', 'MALFORMED_RESPONSE')
     }
     const type = ev.type
-    // Index fields are optional on the wire; bucket keys must not read
-    // `undefined`, so narrow once per event.
     const outputIndex = typeof ev.output_index === 'number' ? ev.output_index : -1
     const contentIndex = typeof ev.content_index === 'number' ? ev.content_index : -1
 
@@ -340,8 +326,8 @@ export interface OpenAiOauthAdapterDeps {
   tokenStore: TokenStore
   catalog: ModelCatalog
   getFetch: () => Promise<FetchLike>
-  /** Host image services, shared with the other adapters in this plugin. */
   images: ProviderImageServices
+  logger?: Logger
 }
 
 export class OpenAiOauthAdapter extends LlmAdapter {
@@ -350,14 +336,16 @@ export class OpenAiOauthAdapter extends LlmAdapter {
   private readonly catalog: ModelCatalog
   private readonly getFetch: () => Promise<FetchLike>
   private readonly images: ProviderImageServices
+  private readonly logger: Logger | undefined
 
-  constructor({ options, tokenStore, catalog, getFetch, images }: OpenAiOauthAdapterDeps) {
+  constructor({ options, tokenStore, catalog, getFetch, images, logger }: OpenAiOauthAdapterDeps) {
     super()
     this.options = options
     this.tokenStore = tokenStore
     this.catalog = catalog
     this.getFetch = getFetch
     this.images = images
+    this.logger = logger
   }
 
   override providerInfo(provider: string): LlmProviderInfo {
@@ -365,8 +353,6 @@ export class OpenAiOauthAdapter extends LlmAdapter {
   }
 
   override async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
-    // Probe OAuth first so the model selector can show the provider offline
-    // (red) when the ChatGPT login is missing or no longer refreshable.
     const { access, accountId } = await this.tokenStore.resolve(this.options.refreshMarginMs)
     const models = await this.catalog.refresh(oauthHeaders(access, accountId))
     return models.map((model) => this.modelInfo(provider, model))
@@ -431,20 +417,17 @@ export class OpenAiOauthAdapter extends LlmAdapter {
       if (iterator.return !== undefined) {
         try {
           await iterator.return(undefined)
-        } catch {
-          // teardown after abort is best-effort
+        } catch (error) {
+          debugQuietly(
+            this.logger,
+            'chatgpt stream: upstream iterator cleanup failed (%s); stream already stopping',
+            error,
+          )
         }
       }
     }
   }
 
-  /**
-   * Read encoded request images for every live image occurrence in the
-   * conversation (offloaded occurrences stay text placeholders). Returns
-   * `undefined` for text-only requests, so nothing else changes on the wire.
-   * The access resolver gives the serializer's handle/offload texts the
-   * model-tool-readable path when the host filesystem provider exposes one.
-   */
   private async prepareImages(
     options: GenerateOptions,
     signal: AbortSignal,
@@ -502,9 +485,6 @@ export class OpenAiOauthAdapter extends LlmAdapter {
       { promptCacheKey: cfg.promptCacheKey },
       prepared?.access,
     )
-    // Same affinity pair pi-ai's Codex SSE transport sends (`session-id` +
-    // `x-client-request-id`, both the clamped cache key): it keeps a session's
-    // requests on one backend route so the prompt cache actually hits.
     const affinityKey =
       cfg.promptCacheKey && options.sessionId !== undefined
         ? clampSessionAffinityKey(String(options.sessionId))
@@ -547,8 +527,13 @@ export class OpenAiOauthAdapter extends LlmAdapter {
             typeof providerError.message === 'string'
               ? providerError.message
               : (JSON.stringify(providerError.message) ?? '')
-      } catch {
-        // non-JSON error body: keep the HTTP-level message
+      } catch (error) {
+        debugQuietly(
+          this.logger,
+          'chatgpt response: error body could not be parsed (%s, HTTP %d); keeping the generic message',
+          error,
+          response.status,
+        )
       }
       const rid = requestId(response.headers)
       throw new LlmError(message, httpErrorCode(response.status, providerError), {

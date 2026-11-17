@@ -1,13 +1,5 @@
 /**
- * dsh-session-write-access — persistent, user-approved extra writable
- * directories for one session family.
- *
- * The bundle disables the stock `sandbox-policy` row and mounts
- * {@link SessionWriteAccessPolicy} under the same `sandboxPolicy` service
- * name. That service is the single policy home every filesystem fence and
- * confined shell already reads, so one durable grant reaches both families
- * and a child cannot widen its own scope by changing cwd.
- *
+ * dsh-session-write-access - persistent, user-approved extra writable directories for one session family.
  * @module dsh-session-write-access
  */
 export { default, ForkBusyError, SessionWriteAccessPolicy } from './service.js'

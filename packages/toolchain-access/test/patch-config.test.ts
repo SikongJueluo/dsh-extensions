@@ -1,11 +1,4 @@
-/**
- * The bundle and dev patch layers must not restate the preset list: with
- * `presets` omitted, the row config resolves through the plugin schema and
- * the seven default presets switch on — a hardcoded `presets: []` here would
- * silently disable that default for every deployment.
- *
- * @module dsh-toolchain-access/patch-config.test
- */
+/** @module dsh-toolchain-access/patch-config.test */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'

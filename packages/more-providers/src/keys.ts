@@ -1,11 +1,4 @@
-/**
- * API-key sources for the provider registry: an explicit file, an agenix-style
- * `secretDir/<name>` file, or an environment variable. The synchronous
- * `ProviderKeys` service is the single reader plan-usage can consume, with an
- * mtime cache so a rotated file is picked up without restarting dsh.
- *
- * @module dsh-more-providers/keys
- */
+/** @module dsh-more-providers/keys */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
 import { readFileSync, statSync } from 'node:fs'

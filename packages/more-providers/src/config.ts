@@ -1,11 +1,5 @@
 /**
  * The `more-providers.yaml` loader and validator.
- *
- * Configuration is deliberately strict: one bad provider rejects the whole
- * file so a typo cannot silently leave a half-migrated provider set. A missing
- * key file is not a config error; it keeps that one provider dormant. YAML
- * stays data-only — no code, no env expansion, no secret values.
- *
  * @module dsh-more-providers/config
  */
 import type { Api } from '@earendil-works/pi-ai'

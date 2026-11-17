@@ -1,13 +1,5 @@
 /**
  * The jj domain behind the worktree entry points.
- *
- * This module owns the whole jj creation sequence: find the workspace, pin a
- * base change, allocate the destination exclusively, add the workspace, create
- * the same-name task bookmark, and describe the record the caller persists.
- * Callers supply a command runner, path probe, and directory allocator; the
- * Cordis adapter binds them to the Session's sandbox policy, while tests bind
- * them to a plain temporary repository.
- *
  * @module dsh-jj-workspace/jj
  */
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -20,21 +12,13 @@ export type JjTaskOrigin = 'tool' | 'ui'
 
 /** What one successful jj creation produced. */
 export interface CreatedJjWorkspace {
-  /** Canonical destination after `jj workspace add`. */
   path: string
-  /** Workspace name, identical to the task bookmark and the directory name. */
   workspace: string
-  /** Task bookmark at the new workspace's initial working-copy commit. */
   bookmark: string
-  /** Change id the task bookmark points at. */
   changeId: string
-  /** Change id pinned as the new workspace's parent. */
   baseChange: string
-  /** Commit id of `baseChange`, the value Forge records as `baseCommit`. */
   baseCommit: string
-  /** Default-workspace root of the shared jj repository (the source project). */
   repositoryRoot: string
-  /** Pool directory that holds the workspace. */
   poolPath: string
 }
 
@@ -65,9 +49,7 @@ export type JjTaskStateCode =
 /** A recorded task plus the current state of its workspace and bookmark. */
 export interface JjTaskState extends JjTaskRecord {
   state: JjTaskStateCode
-  /** Bookmark target change id when it still exists and differs from the recorded one. */
   currentChangeId?: string
-  /** Why the observation failed, for `unavailable`. */
   message?: string
 }
 
@@ -78,23 +60,18 @@ export interface BookmarkInfo {
   changeId: string
 }
 
-/** The file the record is appended to, inside the workspace pool. */
 export const TASK_RECORD_FILE = '.dsh-jj-workspace-records.jsonl'
 
 /** Execution seams the domain needs; the adapter decides sandbox, the test decides the process. */
 export interface JjWorkspaceHost {
   /**
-   * Run a jj subcommand in `cwd` and return standard output.
-   * The host supplies global flags and the inherited environment.
+   * Run a jj subcommand in `cwd` and return standard output. The host supplies global flags and the inherited environment.
    * @throws when jj rejects the command or exits non-zero.
    */
   run(cwd: string, args: readonly string[], signal: AbortSignal): Promise<string>
   /** Whether `path` exists (a file, directory, or symlink). */
   exists(path: string, signal: AbortSignal): Promise<boolean>
-  /**
-   * Create `poolPath` (self-ignoring when newly created) and `destination`
-   * exclusively. An existing destination rejects the whole creation.
-   */
+  /** Create `poolPath` (self-ignoring when newly created) and `destination` exclusively. An existing destination rejects the whole creation. */
   prepare(
     projectRoot: string,
     poolPath: string,
@@ -105,13 +82,9 @@ export interface JjWorkspaceHost {
 
 /** Inputs of one jj workspace creation. */
 export interface CreateJjWorkspaceRequest {
-  /** Directory the calling Session currently works in. */
   cwd: string
-  /** Workspace name, task bookmark name, and destination directory name. */
   name: string
-  /** Change id or bookmark to start from; omitted means the current change `@`. */
   from?: string
-  /** Relative pool directory inside the source project. */
   poolDirectory: string
   signal: AbortSignal
   onPhase?: (phase: JjCreatePhase) => void
@@ -133,7 +106,6 @@ export interface VcsRoot {
   jj: boolean
 }
 
-/** The common prefix of every jj command; the adapter prepends the executable and environment. */
 const ROOT_TEMPLATE = 'root ++ "\\n"'
 
 /** Read one template field of one revision. */
@@ -182,12 +154,7 @@ async function resolveFrom(
   return value
 }
 
-/**
- * Find the default workspace root: the shallowest listed root containing the
- * current workspace. The default workspace is the shared project root; when
- * the current workspace lives outside it (or the repository has no default),
- * the current workspace root is the fallback.
- */
+/** Find the default workspace root: the shallowest listed root containing the current workspace. The default workspace is the shared project root; when the current workspace lives outside it (or the repository has no default), the current workspace root is the fallback. */
 export async function projectRootOf(
   host: JjWorkspaceHost,
   workspaceRoot: string,
@@ -246,11 +213,7 @@ export function isWithin(parent: string, child: string): boolean {
   return rest === '' || (rest !== '..' && !rest.startsWith(`..${sep}`) && !isAbsolute(rest))
 }
 
-/**
- * Find the nearest ancestor that is a Git checkout or a jj workspace.
- * A nested Git worktree (a `.git` file at its root) is Git even when an outer
- * directory is a jj workspace; a colocated workspace has both markers and is jj.
- */
+/** Find the nearest ancestor that is a Git checkout or a jj workspace. A nested Git worktree (a `.git` file at its root) is Git even when an outer directory is a jj workspace; a colocated workspace has both markers and is jj. */
 export async function findVcsRoot(
   cwd: string,
   probe: VcsProbe,
@@ -289,11 +252,7 @@ export async function listWorkspaces(
   return workspaces
 }
 
-/**
- * List local present bookmarks by exact name with their conflict flag and
- * normal target. Remote-tracking rows and absent local rows are dropped; a
- * conflicted bookmark never reads its empty normal target.
- */
+/** List local present bookmarks by exact name with their conflict flag and normal target. Remote-tracking rows and absent local rows are dropped; a conflicted bookmark never reads its empty normal target. */
 export async function listBookmarks(
   host: JjWorkspaceHost,
   cwd: string,
@@ -335,8 +294,6 @@ export function parseTaskRecords(text: string): JjTaskRecord[] {
     .filter((line) => line.length > 0)
     .map((line) => {
       const parsed: unknown = JSON.parse(line)
-      // The record file is written only by `serializeTaskRecord`; a line that
-      // is not one of its records means the file was corrupted externally.
       if (!isTaskRecord(parsed)) {
         throw new Error('jj task record line is not a serialized task record')
       }
@@ -388,12 +345,6 @@ async function assertAvailable(
 
 /**
  * Create and describe one jj workspace.
- *
- * The destination is allocated exclusively before `jj workspace add`; an
- * occupied name or path rejects before allocation. A failure after allocation
- * leaves the directory, workspace, or bookmark it created in place and says
- * so; nothing is rolled back.
- *
  * @param host - command, path, and allocation seams.
  * @param request - name, base, pool, Session directory, and cancellation.
  * @returns the created workspace and the values the caller records.

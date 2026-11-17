@@ -1,15 +1,5 @@
 /**
  * Pure argument preflight for one tool call and one native same-step batch.
- *
- * The harness already validates arguments inside `defineTool` execution; this
- * module moves the SAME check in front of approval and side effects by
- * re-using the public registry surface (`ctx.tools.schemas`) and the shared
- * enforced-subset validators (`assertSupportedJsonSchema` /
- * `validateJsonSchemaValue`). It never rewrites arguments, never auto-fills,
- * and never widens a decision: the only extra outcome it can produce is a
- * DENY with per-call violations; everything it cannot decide degrades to the
- * host's own behavior with a diagnostic.
- *
  * @module dsh-execution-guard/preflight
  */
 import {
@@ -18,18 +8,14 @@ import {
   type JsonSchemaNode,
 } from '@deepseek-ai/dsh-tools'
 
-/** Model-facing deny code; also the repeat-hint correlation key. */
 export const INVALID_ARGS_CODE = 'INVALID_ARGS'
-/** Diagnostic-namespace name carried on every denial this module issues. */
 export const GUARD_NAME = 'execution-guard'
 
 /** One candidate call entering preflight; arguments are still raw or parsed. */
 export interface PreflightCall {
   readonly tool: string
   readonly callId: string
-  /** Losslessly parsed arguments when available (the live execution). */
   readonly args?: unknown
-  /** Raw model JSON string when only the durable event is available (siblings). */
   readonly argsRaw?: string
 }
 
@@ -45,9 +31,7 @@ export type PreflightDecision =
   | {
       kind: 'deny'
       reason: string
-      /** Every invalid call with its tool/callId, for the deny report. */
       invalid: readonly { tool: string; callId: string; violations: readonly string[] }[]
-      /** Unchecked calls kept for diagnostics; they never cause a deny. */
       unchecked: readonly {
         tool: string
         callId: string
@@ -55,7 +39,6 @@ export type PreflightDecision =
       }[]
     }
 
-/** Bounded report text so a huge batch cannot balloon the deny reason. */
 const MAX_VIOLATIONS_PER_CALL = 8
 const MAX_INVALID_CALLS_IN_REASON = 8
 const MAX_REASON_CHARS = 2000
@@ -66,12 +49,6 @@ function clip(text: string, max: number): string {
 
 /**
  * Validate one call against one raw parameter schema.
- *
- * `assertSupportedJsonSchema` rejects schemas outside the enforced subset
- * rather than trusting them, so an unsupported schema yields `unchecked` —
- * the host's own definition-time validation stays authoritative there and we
- * do not bypass it with a guess.
- *
  * @param parameters - raw `parameters` of a public tool schema (untrusted).
  * @param call - the candidate call (parsed args preferred, else raw JSON).
  * @returns the per-call verdict.
@@ -89,10 +66,6 @@ export function checkCall(parameters: unknown, call: PreflightCall): CallVerdict
   if (call.args !== undefined) {
     args = call.args
   } else if (typeof call.argsRaw === 'string') {
-    // Mirror the host's raw-argument parse EXACTLY: only the empty string
-    // is the legal "no arguments" form (raw === '' -> {}); a blank
-    // whitespace string is truthy, fails JSON.parse, and reaches the
-    // schema as a parse failure — as it does on the host.
     if (call.argsRaw === '') {
       args = {}
     } else {
@@ -112,14 +85,6 @@ export function checkCall(parameters: unknown, call: PreflightCall): CallVerdict
 
 /**
  * Decide one whole native same-step batch (and the degenerate single call).
- *
- * Any invalid member denies the batch: the current pre-execute returns the
- * deny, and each sibling's own gate independently reaches the same decision,
- * so no child body runs while its batch-mate is invalid. `unchecked` members
- * (unknown tool, unsupported schema) never deny — the host already treats an
- * unknown native tool as UNKNOWN_TOOL and validates unsupported schemas at
- * the definition layer; inventing a verdict there would be a bypass.
- *
  * @param calls - the batch's calls (see {@link checkCall} for arg forms).
  * @param schemaOf - raw public parameters for a tool name, or undefined.
  * @returns the gate decision; `allow` when nothing checkable is invalid.

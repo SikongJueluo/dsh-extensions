@@ -1,15 +1,4 @@
 /* oxlint-disable react/set-state-in-effect -- the effect mirrors external data into local UI state; deriving it would change render timing */
-// Client half of dsh-context-audit: a sidebar panel (like Plugins / Tasks)
-// whose main page reports, over the local session event logs:
-//
-// - per provider/model route: requests, prompt totals, cache-read share and
-//   hit rate, output tokens — the numbers cache-affinity A/B needs;
-// - per tool: call counts, errored results, failure rate, average and max
-//   duration, distinct sessions, and the error-code distribution — the
-//   numbers that show which tools (ours or the harness's) misbehave;
-// - the heaviest sessions by uncached input.
-//
-// Reads through this package's own channel (`/dsh-context-audit/report`).
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
   Badge,
@@ -128,7 +117,7 @@ function fmtDuration(ms: number) {
   return `${Math.round(ms)}ms`
 }
 
-/** Zero-padded two-digit form of a number (5 → "05"). */
+/** Zero-padded two-digit form of a number (5 -> "05"). */
 const p = (n: number) => String(n).padStart(2, '0')
 
 function fmtClock(ms: number) {
@@ -488,8 +477,6 @@ function apply(ctx: DshClientContext) {
   const t = ctx.locale.bind(LOCALE_NS)
   const boundPage = () => <ContextAuditPage t={t} />
   ctx.slots.inject('main', () => {
-    // The layout's `main` slot is keyed: it addresses registrations by `key`
-    // (the matching sidebar.panellist id), not by `id`.
     return ctx.slots.register(
       {
         name: 'main',

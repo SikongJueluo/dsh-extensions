@@ -1,21 +1,5 @@
 /**
- * The durable data model: templates, bindings (rule groups), runs, and
- * deliveries — plus the zod schemas that guard the storage-domain boundary.
- *
- * Three record kinds, three lifetimes:
- *
- * - {@link TemplateRecord} — a reusable prompt body with `{{variable}}` slots.
- * - {@link BindingRecord} — one rule group: which two sessions form the loop,
- *   which templates it references, and the round budget NEW runs start from.
- *   Edits affect future runs only; an in-flight run keeps its own snapshot.
- * - {@link RunRecord} — one started loop. Snapshots everything it needs
- *   (executor, parent, budget, template BODIES) so binding edits can never
- *   swap targets under a live conversation.
- * - {@link DeliveryRecord} — one queued prompt intent. The `requestId` is
- *   minted once, persisted BEFORE the prompt call, and reused on every retry:
- *   the session controller dedupes an already-queued/logged requestId, which
- *   is the delivery idempotency contract this package relies on.
- *
+ * The durable data model: templates, bindings (rule groups), runs, and deliveries - plus the zod schemas that guard the storage-domain boundary.
  * @module dsh-triggers/model
  */
 import { z } from 'zod'
@@ -28,15 +12,11 @@ import {
   DOMAIN_NAME,
 } from './identity.js'
 
-/**
- * One place where the table schemas cross into dsh-storage-domain's
- * `ZodType<V>` parameterisation; validation behavior is untouched.
- */
+/** One place where the table schemas cross into dsh-storage-domain's `ZodType<V>` parameterisation; validation behavior is untouched. */
 function triggerTable<K extends string, V>(schema: z.ZodType<V>): DomainTableSpec<K, V> {
   return domainTable<K, V>(schema)
 }
 
-/** Structured handoff verdicts the model can emit through `trigger_signal`. */
 export const SIGNAL_OUTCOMES = ['deliver', 'rework', 'pass', 'needs_user'] as const
 export type SignalOutcome = (typeof SIGNAL_OUTCOMES)[number]
 
@@ -51,11 +31,8 @@ export type RunPhase = 'awaiting-delivery' | 'awaiting-review'
 /** Lifecycle status of a run; `phase` stays meaningful across the pauses. */
 export type RunStatus =
   | 'active'
-  /** A `needs_user` outcome or a manual pause; the loop waits for the user. */
   | 'paused-user'
-  /** Rework requested but the round budget is spent; waits for more budget. */
   | 'paused-budget'
-  /** Abnormal stop: failed/cancelled signal turn, delivery failure, restart uncertainty. */
   | 'paused-error'
   | 'completed'
   | 'cancelled'
@@ -64,31 +41,21 @@ export type RunStatus =
 export interface PendingSignal {
   readonly outcome: SignalOutcome
   readonly summary: string
-  /** The session that submitted the signal; only ITS turn end commits it. */
   readonly session?: string
-  /**
-   * The session-log turn the signal belongs to; only its matching `turn/end`
-   * commits it. `session` is optional only for records persisted before
-   * session-scoped matching existed (either bound side may commit those).
-   */
   readonly turn: number
   readonly at: number
-  /** Set on the synthetic deliver signal a turn-end auto-delivery mints. */
   readonly auto?: true
 }
 
 /** Which sides have already been nudged in their current round (bounded once per round). */
 export interface NudgeState {
-  /** Last round a deliver-side nudge was sent to the executor. */
   readonly deliver?: number
-  /** Last round a review-side nudge was sent to the reviewer. */
   readonly review?: number
 }
 
 /** The deferred rework a `paused-budget` run holds until the budget grows. */
 export interface PendingRework {
   readonly summary: string
-  /** The round that was reviewed when the budget ran out. */
   readonly round: number
 }
 
@@ -119,42 +86,20 @@ export interface RunTemplateBodies {
 export interface RunRecord {
   readonly id: string
   readonly bindingId: string
-  /** Free-form task label (the handoff task or a UI-entered one). */
   readonly task: string
   readonly status: RunStatus
   readonly phase: RunPhase
-  /** Current round, 1-based. One round = one delivery + its review. */
   readonly round: number
   readonly maxRounds: number
   readonly executor: string
   readonly parent: string
   readonly templates: RunTemplateBodies
-  /**
-   * Snapshot at run start: the executor's turn that ends `completed` (with no
-   * explicit signal and no active goal in its session) is auto-submitted for
-   * review using the turn's final assistant text. Absent = tool-only delivery.
-   */
   readonly autoDeliver?: boolean
   readonly pendingSignal?: PendingSignal
   readonly pendingRework?: PendingRework
-  /** Bounded missing-conclusion reminders already sent in their round. */
   readonly nudgeState?: NudgeState
-  /**
-   * Transactional outbox: queued prompts committed atomically WITH the run
-   * state. Empty/absent once every send has been confirmed. See
-   * {@link OutboxEntry}.
-   */
   readonly outbox?: readonly OutboxEntry[]
-  /**
-   * Turn-end consumption checkpoint per side: the highest turn whose
-   * `turn/end` this run has already consumed (advanced OR evaluated and
-   * skipped — both count). Committed atomically WITH the transition it
-   * belongs to, so a restart replay can never re-consume an old turn as a
-   * new round's delivery. Absent on records written before the checkpoint
-   * existed; recovery initializes it from the log tail on first sight.
-   */
   readonly consumedTurns?: { readonly executor?: number; readonly parent?: number }
-  /** Which side a `needs_user` pause came from (resume notes go there). */
   readonly pausedBy?: 'executor' | 'parent'
   readonly startedAt: number
   readonly endedAt?: number
@@ -177,7 +122,6 @@ export interface BindingRecord {
   readonly parent: string
   readonly maxRounds: number
   readonly enabled: boolean
-  /** Whether runs of this group auto-submit the executor's completed turns (handoff binds default on, UI binds default off). */
   readonly autoDeliver?: boolean
   readonly templates: BindingTemplateRefs
   readonly createdAt: number
@@ -203,7 +147,6 @@ export interface DeliveryRecord {
   readonly round: number
   readonly to: string
   readonly kind: DeliveryKind
-  /** Session-controller prompt requestId; minted once, reused on every retry. */
   readonly requestId: string
   readonly state: 'pending' | 'sent' | 'failed'
   readonly content: string
@@ -212,36 +155,18 @@ export interface DeliveryRecord {
   readonly error?: string
 }
 
-/**
- * One not-yet-confirmed queued prompt carried INSIDE its run record — the
- * transactional-outbox half of an atomic commit. A transition and the prompts
- * it owes are persisted by a single `runs.put`: before that write neither
- * exists, after it both do, so a crash can never leave a run advanced with no
- * delivery owed (or vice versa). The entry keeps the FULL composed content
- * (retry never re-renders) and the once-minted `requestId` (the host queue
- * dedupes replays). `sent` entries leave the outbox; `failed` entries stay for
- * the manual redeliver path. The `deliveries` table is a rebuildable
- * projection of these entries kept for UI history and redeliver lookup.
- */
 export interface OutboxEntry {
-  /** Same id the deliveries projection row carries. */
   readonly id: string
   readonly runId: string
   readonly round: number
   readonly to: string
   readonly kind: DeliveryKind
-  /** Session-controller prompt requestId; minted once, reused on every retry. */
   readonly requestId: string
-  /** The complete composed prompt; redelivery re-sends this verbatim. */
   readonly content: string
-  /** `pending` until the send is confirmed; `failed` stays for manual retry. */
   readonly state: 'pending' | 'failed'
-  /** Nudge semantics: a failed send must not park the run. */
   readonly bestEffort?: true
   readonly createdAt: number
 }
-
-// ── zod boundary schemas ─────────────────────────────────────────────────────
 
 const schemaSignalOutcome = z.enum(SIGNAL_OUTCOMES)
 const schemaRunStatus = z.enum([
@@ -257,7 +182,6 @@ const schemaRunPhase = z.enum(['awaiting-delivery', 'awaiting-review'])
 const schemaPendingSignal = z.object({
   outcome: schemaSignalOutcome,
   summary: z.string(),
-  // Optional: legacy rows predate session-scoped signal matching.
   session: z.string().optional(),
   turn: z.number().int(),
   at: z.number(),
@@ -394,7 +318,6 @@ const schemaDelivery = z.object({
   error: z.string().optional(),
 })
 
-/** The storage domain: one small `single`-layout unit (records are few and tiny). */
 export const TRIGGER_DOMAIN = defineDomain({
   name: DOMAIN_NAME,
   version: 1,
@@ -415,5 +338,4 @@ export function defaultTemplateRefs(): BindingTemplateRefs {
   }
 }
 
-/** Default round budget for new bindings and runs. */
 export const DEFAULT_MAX_ROUNDS = 5

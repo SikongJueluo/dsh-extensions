@@ -87,8 +87,6 @@ describe('evidence dissent protection', () => {
         title: 'Lone',
       },
     ]
-    // All a.example entries agree (multi-query provenance scores higher); the
-    // lone dissenting domain would be sliced off by cap=3 but is re-admitted.
     const evidence = buildEvidence(hits, ['alpha'], 3)
     expect(evidence).toHaveLength(4)
     expect(evidence.at(-1)?.url).toBe('https://lone.example/counter')
@@ -163,6 +161,7 @@ describe('pipeline page enrichment', () => {
       {
         adapters,
         configFailures: [],
+        warn: () => undefined,
         llm: {
           async call(req) {
             llmCalls.push(req.user)
@@ -183,7 +182,7 @@ describe('pipeline page enrichment', () => {
               body: `<html><body><p>${'body '.repeat(200)}</p></body></html>`,
             }
           }
-          return undefined // rich source fetch fails silently
+          return undefined
         },
       },
       { question: 'q', queries: ['q'] },
@@ -191,7 +190,6 @@ describe('pipeline page enrichment', () => {
     )
     expect(result.status).toBe('ok')
     expect(fetched).toEqual(['https://thin.example/1'])
-    // The digest the integrator saw carries the fetched body, not the snippet.
     expect(llmCalls[0]).toContain('body body body')
   })
 
@@ -205,6 +203,7 @@ describe('pipeline page enrichment', () => {
           ]),
         ],
         configFailures: [],
+        warn: () => undefined,
         llm: {
           async call() {
             return { ok: true, text: integration, finishKind: 'stop' }

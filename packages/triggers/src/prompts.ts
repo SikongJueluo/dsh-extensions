@@ -1,12 +1,5 @@
 /**
- * Prompt composition: the seeded built-in templates, the signal-instruction
- * block appended to every delivered prompt, and the mapping from a delivery
- * intent to the final prompt text.
- *
- * Everything the model needs to participate in the loop (runId, its role,
- * which outcomes it may submit) rides the delivered prompt itself — the
- * session logs stay the single source of truth for what each side was told.
- *
+ * Prompt composition: the seeded built-in templates, the signal-instruction block appended to every delivered prompt, and the mapping from a delivery intent to the final prompt text.
  * @module dsh-triggers/prompts
  */
 import type { DeliveryKind, RunRecord } from './model.js'
@@ -17,7 +10,6 @@ import {
   BUILTIN_START_TEMPLATE,
 } from './identity.js'
 
-/** The seeded template bodies (zh; edits affect future runs only). */
 export const BUILTIN_TEMPLATE_BODIES: Readonly<Record<string, { name: string; body: string }>> = {
   [BUILTIN_START_TEMPLATE]: {
     name: '内置 · 循环开工',
@@ -51,7 +43,6 @@ export const BUILTIN_TEMPLATE_BODIES: Readonly<Record<string, { name: string; bo
   },
 }
 
-/** Template variables every body may use; the UI offers them as insertable tags. */
 export const TEMPLATE_VARIABLES: readonly { readonly key: string; readonly label: string }[] = [
   { key: 'summary', label: '对方提交的 summary' },
   { key: 'task', label: '任务描述' },
@@ -81,14 +72,6 @@ function signalInstructions(run: RunRecord, role: 'executor' | 'parent'): string
   ].join('\n')
 }
 
-/**
- * The one-line body of a bounded missing-conclusion nudge. `composeDeliveryPrompt`
- * wraps this with the standing instructions block for the side being reminded —
- * except `deliver-ambiguous`, which is `standalone`: the standing block of an
- * autoDeliver run promises "a normal turn end delivers itself", the exact
- * opposite of what an attribution-ambiguous turn needs, so that flavor carries
- * its own complete instructions instead.
- */
 export function nudgeLine(
   run: RunRecord,
   kind: 'deliver-missing-signal' | 'deliver-empty' | 'deliver-ambiguous' | 'review',
@@ -129,12 +112,7 @@ function noticeText(run: RunRecord, summary: string): string {
   }
 }
 
-/**
- * Compose the final prompt text of one delivery intent.
- * `summary` is the counterpart's signal summary (absent for start/resume);
- * `standalone` keeps a nudge prompt free of the standing instructions block,
- * for nudge flavors whose own instructions must not be contradicted by it.
- */
+/** Compose the final prompt text of one delivery intent. `summary` is the counterpart's signal summary (absent for start/resume); `standalone` keeps a nudge prompt free of the standing instructions block, for nudge flavors whose own instructions must not be contradicted by it. */
 export function composeDeliveryPrompt(
   intent: { readonly kind: DeliveryKind; readonly round: number },
   run: RunRecord,
@@ -158,11 +136,6 @@ export function composeDeliveryPrompt(
   if (intent.kind === 'resume') {
     return `[triggers] runId=${run.id} 已恢复（第 ${round}/${maxRounds} 轮）。用户的答复：${summary ?? '（无附加说明）'}\n\n${signalInstructions(run, run.phase === 'awaiting-delivery' ? 'executor' : 'parent')}`
   }
-  // The summary IS the nudge line (see nudgeLine); re-wrap it with the
-  // standing block so the reminded side still sees runId and its role —
-  // unless the flavor carries standalone instructions that the standing
-  // block (an autoDeliver run promises normal-end delivery) would
-  // directly contradict.
   if (standalone) return summary ?? ''
   return `${summary ?? ''}\n\n${signalInstructions(run, run.phase === 'awaiting-delivery' ? 'executor' : 'parent')}`
 }

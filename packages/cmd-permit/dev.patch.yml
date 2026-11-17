@@ -1,18 +1,3 @@
-# Development overlay: the locally built plugin entry, by absolute path.
-# Rebuild first (`pnpm build`) so lib/ is current, then restart dsh. Use with
-# the global flag, e.g.
-#   dsh --profile web --patch ./packages/cmd-permit/dev.patch.yml --no-open --port <port>
-# The runtime imports `dsh-auto-permit` (collectEvidence / isHighRisk), so
-# that package must be resolvable from the profile's node_modules — i.e. the
-# profile needs dsh-auto-permit installed (its own dev.patch.yml or a
-# `dsh plugin add`), even when only this overlay is being tested.
-#
-# The escalation defaults (allow/maxMode) intentionally MIRROR the bundle
-# seed in cordis.patch.yml — the dev overlay is an executable entry point,
-# not a scratchpad, and diverging defaults would re-open the coarse
-# full-access exits the seed closed (test/seed-parity.test.ts enforces
-# this). Widen trust explicitly, for the entry point you are actually
-# using, when you mean it.
 - insert:
     - id: cmd-permit
       name: '/home/sikongjueluo/Projects/dsh-extensions/packages/cmd-permit/lib/index.js'

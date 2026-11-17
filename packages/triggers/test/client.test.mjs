@@ -1,12 +1,3 @@
-/**
- * Client-half tests for the migrated TSX view.
- *
- * The old suite instrumented the hand-written JS factory in a VM with a
- * minimal React. The migration runs on real React and shared components, so
- * this suite mounts the registered component with react-test-renderer and
- * asserts the same contract: slot registration, session scoping/grouping,
- * the empty state, run controls, and redelivery gating.
- */
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,7 +5,6 @@ import { apply, inject, testHandles as T } from '../src/client/index.tsx'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
-// The view registers a visibility listener but never touches layout.
 globalThis.document = {
   hidden: false,
   addEventListener() {},

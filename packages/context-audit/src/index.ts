@@ -1,13 +1,5 @@
 /**
- * dsh-context-audit — `/context-audit` + sidebar panel: measure what the
- * models and tools actually cost.
- *
- * Scans the local session event logs (nothing leaves the machine) and
- * reports per-route and per-session cache-hit rates, token usage, and
- * per-tool call/failure statistics, so routing choices, cache-affinity
- * changes (e.g. the chatgpt `promptCacheKey` toggle in dsh-more-providers),
- * and tool design can be judged with data instead of anecdotes.
- *
+ * dsh-context-audit - `/context-audit` + sidebar panel: measure what the models and tools actually cost.
  * @module dsh-context-audit
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -25,14 +17,10 @@ export { RPC_CHANNEL } from './channel.js'
 export const CONTEXT_AUDIT_COMMAND = 'context-audit'
 
 interface Config {
-  /** Default scan window for `/context-audit` without arguments (days). */
   days?: number
-  /** How many sessions the per-session table lists. */
   sessionLimit?: number
 }
 
-// No `Schema<Config>` annotation: see AGENTS.md — the loader validates the
-// inferred shape, and an annotation would fight schemastery's generics.
 export const Config = Schema.object({
   days: Schema.number()
     .step(1)

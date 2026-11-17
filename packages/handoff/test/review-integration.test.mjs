@@ -1,15 +1,8 @@
-/* Cross-plugin integration test: the real Cordis runtime with BOTH real
- * built plugins (dsh-triggers + dsh-handoff from lib/), stub host services
- * whose shapes come from the host type declarations. This is the seam that
- * proved the auto-review binding broken: handoff resolves the triggers
- * service through ctx.get() — the Cordis trace proxy — at spawn time.
- *
- * Requires `pnpm build` in both packages first (lib/ is the runtime under
- * test). Run: node --test
- */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import * as handoffPlugin from '../lib/index.js'
 import * as triggersPlugin from '../../triggers/lib/index.js'
@@ -26,6 +19,16 @@ async function until(fn, ms, what) {
     await sleep(10)
   }
   throw new Error(`timeout waiting for ${what}`)
+}
+
+/** Read a JSON record, treating only a torn (mid-write) parse as not-ready. */
+async function readJsonIfComplete(path) {
+  try {
+    return JSON.parse(await readFile(path, 'utf8'))
+  } catch (error) {
+    if (error instanceof SyntaxError) return undefined
+    throw error
+  }
 }
 
 /** Stub host surface (shapes verified against host .d.ts files). */
@@ -119,8 +122,6 @@ function makeHost({ queueFails = false } = {}) {
       return () => {}
     },
   }
-  // The host's session-log reader (dsh-triggers injects it). This fake keeps
-  // no durable history, so every session reads as a genuinely empty log.
   const sessionQuery = {
     async readSession(sessionId) {
       return { session: { id: sessionId }, inheritedEventCount: 0, events: [] }
@@ -242,8 +243,6 @@ async function originFixture(host, label) {
     agent: {
       id,
       options: { provider: 'origin-provider', model: 'origin-model' },
-      // The host Agent folds the durable /model selection over its creation
-      // options; this fixture has no recorded selection.
       model: {
         current: () => ({ provider: 'origin-provider', model: 'origin-model' }),
         select() {},
@@ -283,8 +282,6 @@ test('flag path: --review binds the loop before the first prompt and the loop cl
     )
 
     const { agent } = await originFixture(host, 'flag')
-    // --review fixes the verdict and --model fixes the route, so nothing is
-    // left to ask: the scripted invocation must not open (or wait for) a card.
     await channel(host, 'pending', {})
     const handled = command.handler({
       rawInput: '--review --model prov/model fix the flaky tests',
@@ -298,7 +295,6 @@ test('flag path: --review binds the loop before the first prompt and the loop cl
 
     const { briefPath, created } = await completeBrief(host, 'origin-flag')
 
-    // bindReview runs after agents.create resolves; wait for it to land.
     const bindings = await until(
       () => {
         const rows = triggerRows(host, 'bindings').filter((b) => b.parent === 'origin-flag')
@@ -324,15 +320,14 @@ test('flag path: --review binds the loop before the first prompt and the loop cl
     assert.equal(run.autoDeliver, true, 'handoff binds auto-deliver runs')
 
     const metaPath = briefPath.replace(/\.md$/u, '.meta.json')
-    await until(
+    const meta = await until(
       async () => {
-        const metaNow = JSON.parse(await readFile(metaPath, 'utf8'))
-        return metaNow.review?.runId
+        const now = await readJsonIfComplete(metaPath)
+        return now?.review?.runId ? now : undefined
       },
       3000,
       'meta bound runId',
     )
-    const meta = JSON.parse(await readFile(metaPath, 'utf8'))
     assert.equal(meta.review?.runId, run.id, 'meta records the bound runId')
     assert.equal(meta.review?.bindingId, bindings[0].id)
 
@@ -351,7 +346,6 @@ test('flag path: --review binds the loop before the first prompt and the loop cl
       'handoff-style bind delivers no start prompt of its own',
     )
 
-    // Executor round: deliver signal, turn end → review queued to the origin.
     const exec = String(created.sessionId)
     emit(root, exec, { type: 'turn/start', data: { turn: 1 } })
     const sig = await callSignalTool(host, exec, {
@@ -371,7 +365,6 @@ test('flag path: --review binds the loop before the first prompt and the loop cl
     assert.ok(review.text.includes('你是审核者'))
     assert.ok(review.text.includes('31/31'))
 
-    // Reviewer round: pass → notice → completed.
     emit(root, 'origin-flag', { type: 'turn/start', data: { turn: 7 } })
     const verdict = await callSignalTool(host, 'origin-flag', {
       runId: run.id,
@@ -488,7 +481,6 @@ test('no triggers mounted: --review degrades to a plain handoff with a visible n
 
 test('flag-fixed summary: --workspace + --review reaches the card with the real target and verdict', async () => {
   const config = handoffPlugin.Config ? handoffPlugin.Config({}) : {}
-  // A two-workspace registry so --workspace resolves a non-origin target.
   const registry = {
     list: () => [
       { id: 'ws-origin', title: 'Origin Space', path: '/int/origin', status: async () => 'ok' },
@@ -522,8 +514,6 @@ test('flag-fixed summary: --workspace + --review reaches the card with the real 
       3000,
       'pending pick',
     )
-    // The card's summary must state what will actually run: the flag target
-    // and the flag-decided review verdict, not the defaults.
     assert.equal(
       pick.fixedWorkspace?.id,
       'ws-other',
@@ -542,10 +532,40 @@ test('flag-fixed summary: --workspace + --review reaches the card with the real 
     assert.equal(answer.kind, 'success', JSON.stringify(answer))
     assert.ok(answer.text.includes('已请求'), answer.text)
     const { briefPath } = await completeBrief(host2, 'origin-flags')
-    const meta = JSON.parse(await readFile(briefPath.replace(/\.md$/u, '.meta.json'), 'utf8'))
+    const metaPath = briefPath.replace(/\.md$/u, '.meta.json')
+    const meta = await until(
+      async () => {
+        const now = await readJsonIfComplete(metaPath)
+        return now?.review?.maxRounds === 5 ? now : undefined
+      },
+      3000,
+      'review binding in meta',
+    )
     assert.equal(meta.target?.path, '/int/other', 'the flag target actually runs')
-    assert.equal(meta.review?.maxRounds, 5)
   } finally {
     await rm(new URL('./.smoke-review-ws/flags', import.meta.url), { recursive: true, force: true })
+  }
+})
+
+test('meta polling reads a torn non-atomic write as not-ready, not as a failure', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-handoff-torn-meta-'))
+  const metaPath = join(dir, 'torn.meta.json')
+  try {
+    const record = JSON.stringify({ review: { runId: 'run-1' } }, null, 2)
+    await writeFile(metaPath, record.slice(0, 12), 'utf8')
+    assert.equal(await readJsonIfComplete(metaPath), undefined, 'torn write is not ready')
+    const completed = sleep(40).then(() => writeFile(metaPath, record, 'utf8'))
+    const review = await until(
+      async () => (await readJsonIfComplete(metaPath))?.review,
+      3000,
+      'review after torn write',
+    )
+    assert.equal(review.runId, 'run-1')
+    await completed
+    await assert.rejects(readJsonIfComplete(join(dir, 'missing.meta.json')), {
+      code: 'ENOENT',
+    })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
   }
 })

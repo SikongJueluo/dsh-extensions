@@ -1,15 +1,4 @@
 {
-  // Oxlint is the correctness/type-quality gate. Layout belongs to Oxfmt
-  // (.oxfmtrc.json), and codebase-level graph questions (unused exports,
-  // dependency hygiene, duplication, complexity budgets) belong to Fallow.
-  //
-  // Policy: everything that can be judged mechanically is ON at "error" —
-  // correctness, suspicious, pedantic and perf categories run in full and are
-  // narrowed only by the explicit `rules` entries below, each of which carries
-  // its reason in docs/quality-gates.md. `style` and `restriction` are OFF as
-  // categories because most of their rules restate formatting (Oxfmt) or ban
-  // language features this codebase uses deliberately; the rules worth keeping
-  // are adopted one by one further down.
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "node"],
   "env": {
@@ -28,24 +17,16 @@
     "typeAware": true,
     "reportUnusedDisableDirectives": "error"
   },
-  "ignorePatterns": [
-    // Untracked nested repository of unknown origin; never part of this project.
-    "repo/**"
-  ],
+  "ignorePatterns": ["repo/**"],
   "rules": {
-    // --- adopted from `style`: rules that constrain structure, not layout ---
     "prefer-const": "error",
     "object-shorthand": "error",
     "prefer-template": "error",
-    // A18 (approved): type-only imports stay separate from value imports;
-    // consistent-type-imports requires that shape.
+
     "no-duplicate-imports": ["error", { "allowSeparateTypeImports": true }],
     "typescript/consistent-type-imports": "error",
     "typescript/array-type": "error",
 
-    // --- adopted from `restriction`: project invariants, not taste ---
-    // Type escape hatches are banned by policy; existing occurrences are debt
-    // to be reviewed one by one, never silently suppressed.
     "typescript/no-explicit-any": "error",
     "typescript/no-non-null-assertion": "error",
     "typescript/no-invalid-void-type": "error",
@@ -58,32 +39,24 @@
     "no-sequences": "error",
     "promise/catch-or-return": "error",
     "unicorn/prefer-number-properties": "error",
-    // B20 (approved): explicit `undefined` in stubs documents intent; its autofix
-    // breaks typed Promise signatures.
+
     "unicorn/no-useless-undefined": "off",
-    // B19 (approved): a per-file dependency count is a numeric budget, not a
-    // defect; cross-file dependency hygiene is Fallow's job.
+
     "import/max-dependencies": "off",
 
-    // --- exclusions from `pedantic` (the list awaiting approval in
-    // docs/quality-gates.md §6) ---
-    // Immutability annotation style: flags every parameter whose type is not
-    // `readonly`, which is not a defect and is not required by the compiler.
     "typescript/prefer-readonly-parameter-types": "off",
-    // Truthiness checks: tsc already rejects ambiguous operand types; this
-    // rule additionally bans `if (value)` on legitimately boolean-ish values.
+
     "typescript/strict-boolean-expressions": "off",
-    // `async` without `await` is how the plugin contracts return promises;
-    // rewriting it changes function identity and therefore dispatch.
+
     "require-await": "off",
     "typescript/require-await": "off",
-    // Returning a void expression from an arrow (React handlers) is idiomatic.
+
     "typescript/no-confusing-void-expression": "off",
     "no-negated-condition": "off",
     "unicorn/no-negated-condition": "off",
-    // Trailing `// ...` comments are used to justify adjacent constants.
+
     "no-inline-comments": "off",
-    // Numeric size budgets: reported by `fallow health`, not gated per line.
+
     "max-lines": "off",
     "max-lines-per-function": "off",
     "max-statements": "off",
@@ -93,46 +66,18 @@
     "max-expects": "off",
     "vitest/max-expects": "off",
     "unicorn/max-nested-calls": "off",
-    // Sequential awaits are deliberate (ordered FS/JJ mutations, backpressure);
-    // parallelising them would change observable ordering.
+
     "no-await-in-loop": "off",
 
-    // --- rule options, not relaxations ---
-    // Stylesheet imports exist only for their side effect on the bundle.
     "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }],
 
-    // B21: `import type {} from 'x'` is TypeScript's way to pull a module's
-    // declaration merges (Context.settings, Context.attachments, SlotMap, …)
-    // into the program with no runtime import and no name to bind. Both rules
-    // below test only `specifiers.length === 0` and never look at
-    // `importKind`, so they flag that idiom as leftover empty braces — the one
-    // construct they were written to catch. Verified that the empty braces are
-    // load-bearing (`ctx.settings` stops type-checking without the line), that
-    // a `.d.ts` rewrite is flagged identically, and that a bare `import 'x'`
-    // would become a runtime import. The host SDK itself
-    // (deepseek-ai/deepseek-harness) writes the same lines with the same
-    // comments, so these rules fire only on a shape this project cannot drop.
-    // Cost of excluding: `import {} from` leftovers and `export {}` module
-    // markers go unchecked; this tree has none of the former and no `export {}`
-    // outside the ones these rules already misread.
     "import/no-empty-named-blocks": "off",
     "unicorn/require-module-specifiers": "off",
 
-    // B22: TypeScript already rejects duplicate block-scoped declarations
-    // ("Cannot redeclare block-scoped variable"), so this rule adds nothing for
-    // the TS half; for JS a duplicate `const` is a parse error and this tree
-    // uses no `var`. Its only hits here (21) are the `interface Config` +
-    // `const Config = Schema.object(...)` declaration merge that AGENTS.md
-    // mandates (the loader matches the inferred schema against the interface,
-    // and the rule cannot see a type/value merge), so every hit is a false
-    // positive on the host contract.
     "no-redeclare": "off"
   },
   "overrides": [
     {
-      // Browser halves and the shared UI package: React + accessibility rules,
-      // DOM globals, and no Node globals (importing `node:fs` here would only
-      // fail at runtime in the browser).
       "files": ["packages/*/src/client/**", "packages/ui/src/**", ".storybook/**"],
       "env": { "browser": true, "node": false },
       "plugins": [
@@ -146,18 +91,12 @@
         "jsx-a11y"
       ],
       "rules": {
-        // React 18 automatic JSX runtime: components never need `React` in
-        // scope, so the classic-runtime rule reports the bundler's job.
         "react/react-in-jsx-scope": "off",
-        // Every <button> must carry an explicit type; the default is "submit".
+
         "react/button-has-type": "error"
       }
     },
     {
-      // Test runners. `vitest` covers packages that run Vitest; `node:test`
-      // files share the glob and are unaffected because the rules key off
-      // Vitest's own globals. Console output is the interface of smoke
-      // scripts, so the console ban is lifted here and only here.
       "files": ["**/test/**", "**/*.test.*", "**/smoke.mjs", "packages/*/scripts/**", "scripts/**"],
       "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "node", "vitest"],
       "env": { "vitest": true },
@@ -166,10 +105,6 @@
       }
     },
     {
-      // JavaScript has no annotations: type-aware rules there report what
-      // TypeScript inferred for untyped code (`null`-initialised variables
-      // become `any`), not what the code does. Every `*.{js,mjs,cjs}` file
-      // still gets the full syntax-level rule set above.
       "files": ["**/*.{js,mjs,cjs}"],
       "rules": {
         "typescript/await-thenable": "off",
@@ -208,15 +143,6 @@
       }
     },
     {
-      // B23 (approved): a test double for a class-based host interface cannot
-      // be made structurally complete — cordis `Context` carries a dozen
-      // services, `SessionEvent` is a branded discriminated union — so
-      // "this object stands in for the host" is the one assertion a fixture
-      // cannot avoid. The hatch stays confined to fixtures: `no-non-null-
-      // assertion` still runs here (a missing element must be proven, not
-      // asserted), every other unsafe-* rule still runs, and
-      // `scripts/check-suppressions.mjs` fails the gate on any inline
-      // suppression that is not on the approved list in docs/quality-gates.md.
       "files": [
         "**/test/**",
         "**/*.test.*",

@@ -1,16 +1,5 @@
 /**
- * dsh-handoff — one-command session handoff.
- *
- * `/handoff <task>` asks the CURRENT session to write a self-contained brief
- * to `<cwd>/.dsh/handoff/<timestamp>-handoff.md` (completion-marked), then
- * spawns a FRESH session in the same workspace via `ctx.agents.create` —
- * the same factory chain the Web "New Session" button uses — with the brief
- * as its first prompt. No skill, no manual context hauling.
- *
- * Consumed host services: `commands` + `agents` (hard inject), and optionally
- * `userQuestions` (confirmation card), `agentPresets`, `agentDefaultModel`,
- * and `sessionTitle` via `ctx.get()`.
- *
+ * dsh-handoff - one-command session handoff.
  * @module dsh-handoff
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -25,27 +14,17 @@ import type { HandoffRuntime } from './pending.js'
 export { PACKAGE_NAME, PLUGIN_NAME, COMMAND_NAME } from './identity.js'
 
 export const name = PLUGIN_NAME
-// The command registry and the agent factory are both host-core; the plugin
-// is useless without either, so it waits for them.
 export const inject = ['commands', 'agents']
 
 /** Plugin-row configuration. */
 export interface Config {
-  /** Brief directory; relative paths resolve against the session's workspace cwd. */
   dir?: string
-  /** How long to wait for the completion marker before failing the handoff. */
   timeoutMs?: number
-  /** Brief file poll interval. */
   pollMs?: number
-  /** Ask the preset/model question before starting the handoff. */
   confirm?: boolean
-  /** Enumerate every provider/model route in the dialog (slow providers degrade to base options + custom input). */
   modelMenu?: boolean
-  /** How long the browser model picker may stay open before the command gives up. */
   pickTimeoutMs?: number
-  /** On failure, queue a visible notice turn on the origin session. */
   notifyFailure?: boolean
-  /** Brief truncation guard for the first prompt (chars). */
   maxBriefChars?: number
 }
 
@@ -90,8 +69,6 @@ export const Config: Schema<Config> = Schema.object({
 
 export function apply(ctx: Context, config: Config): void {
   const preferences = createPreferenceStore(ctx)
-  // The store is opened lazily on first use; release a handle this plugin
-  // owns when the row unmounts.
   ctx.effect(() => () => {
     void preferences.close().catch(() => {})
   })

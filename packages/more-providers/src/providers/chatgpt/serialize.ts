@@ -1,23 +1,5 @@
 /**
- * Harness message → OpenAI Responses API `input` serialization.
- *
- * The ChatGPT subscription backend only accepts the Responses wire shape:
- * user/assistant messages plus top-level `function_call` / `function_call_output`
- * items. Assistant reasoning is dropped (the backend does not surface raw
- * reasoning without an opt-in summary). User-role image blocks map to
- * `input_image` parts with inline base64 data URLs — the exact shape Codex
- * sends to the same endpoint — and tool results carrying images switch
- * `function_call_output.output` to the content-item array Codex uses for MCP
- * image results. Images in assistant messages are rejected because the wire
- * path cannot represent them.
- *
- * Tool results are first-class `role: 'tool'` messages in the 0.2 message
- * model; developer-role tool addition/removal notices are skipped — the
- * harness projects active declarations through `GenerateOptions.tools` /
- * `toolHistory` instead.
- *
- * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
- *
+ * Harness message -> OpenAI Responses API `input` serialization.
  * @module dsh-more-providers/providers/chatgpt/serialize
  */
 import {
@@ -80,13 +62,6 @@ function imagePart(version: RequestImageAttachment): InputItem {
   }
 }
 
-/**
- * Serialize one user message's blocks into Responses content parts. Text-only
- * messages keep the historical single joined `input_text` part; messages with
- * live image blocks map block-by-block (`input_text` / `input_image`), while
- * offloaded image occurrences degrade to their placeholder text — enriched
- * with the model-tool-readable path when `access` resolves one.
- */
 function userContent(
   blocks: readonly ContentBlock[],
   images: RequestImages | undefined,
@@ -108,7 +83,6 @@ function userContent(
         continue
       }
       const version = requestVersion(block, images)
-      // Label the occurrence the way Codex does, so the model can name it.
       content.push(
         {
           type: 'input_text',
@@ -121,12 +95,7 @@ function userContent(
   return content.length > 0 ? content : [{ type: 'input_text', text: '' }]
 }
 
-/**
- * Serialize one tool result's `function_call_output.output` value. Text-only
- * results keep the historical plain-string output; results carrying image
- * blocks switch to the content-item array Codex sends for MCP image results,
- * with offloaded occurrences degrading to placeholder text.
- */
+/** Serialize one tool result's `function_call_output.output` value. Text-only results keep the historical plain-string output; results carrying image blocks switch to the content-item array Codex sends for MCP image results, with offloaded occurrences degrading to placeholder text. */
 function toolOutput(
   blocks: readonly ContentBlock[],
   images: RequestImages | undefined,
@@ -156,11 +125,7 @@ function toolOutput(
 /** A Responses API input item (loose structural type). */
 type InputItem = Record<string, unknown>
 
-/**
- * Serialize the conversation into Responses API input items.
- * System messages are skipped — the harness delivers the system prompt
- * separately as `GenerateOptions.system` → `instructions`.
- */
+/** Serialize the conversation into Responses API input items. System messages are skipped - the harness delivers the system prompt separately as `GenerateOptions.system` -> `instructions`. */
 function serializeInput(
   messages: readonly RequestMessage[],
   images?: RequestImages,
@@ -191,7 +156,6 @@ function serializeInput(
     }
 
     if (message.role === 'tool') {
-      // 0.2 message model: one first-class tool-role message per result.
       input.push({
         type: 'function_call_output',
         call_id: message.toolCallId,
@@ -200,29 +164,20 @@ function serializeInput(
       continue
     }
 
-    // User-role messages (persisted or one-shot identity-free inputs).
     input.push({ role: 'user', content: userContent(message.content, images, access) })
   }
   return input
 }
 
-/**
- * Resolve the wire `reasoning` field from the harness reasoning effort.
- * Returns `undefined` (omitted) for the "off" / unset case so the backend
- * applies its own default.
- */
+/** Resolve the wire `reasoning` field from the harness reasoning effort. Returns `undefined` (omitted) for the "off" / unset case so the backend applies its own default. */
 function resolveReasoning(effort: string | undefined): { effort: string } | undefined {
   if (effort === undefined || effort === 'off') return undefined
   return { effort }
 }
 
-/** OpenAI caps `prompt_cache_key` / affinity header values at 64 characters. */
 const AFFINITY_KEY_MAX_LENGTH = 64
 
-/**
- * Clamp a session id into an OpenAI cache-affinity key (≤ 64 chars, by code
- * points). `session-<uuid>` fits as-is; the clamp only guards exotic ids.
- */
+/** Clamp a session id into an OpenAI cache-affinity key (<= 64 chars, by code points). `session-<uuid>` fits as-is; the clamp only guards exotic ids. */
 export function clampSessionAffinityKey(sessionId: string): string {
   const chars = Array.from(sessionId)
   return chars.length <= AFFINITY_KEY_MAX_LENGTH
@@ -232,21 +187,10 @@ export function clampSessionAffinityKey(sessionId: string): string {
 
 /** Cache-affinity knobs the serializer honors per request. */
 export interface SerializeAffinity {
-  /** Attach `prompt_cache_key` derived from the request's session id. */
   promptCacheKey: boolean
 }
 
-/**
- * Build the full Responses API request body. The backend rejects the standard
- * `max_output_tokens` / `temperature` / `stop` scalars, so they are
- * deliberately omitted.
- *
- * With `affinity.promptCacheKey` (the default), the loop-stamped session id
- * becomes `prompt_cache_key`, matching what Codex CLI / pi-ai send to the
- * same backend: without it every request routes randomly and the backend's
- * prompt cache all but never hits (measured 16–21% over 30+ sessions, vs
- * 97%+ on providers that stamp the key).
- */
+/** Build the full Responses API request body. The backend rejects the standard `max_output_tokens` / `temperature` / `stop` scalars, so they are deliberately omitted. */
 export function serializeRequest(
   options: GenerateOptions,
   images?: RequestImages,

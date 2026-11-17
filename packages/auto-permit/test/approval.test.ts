@@ -1,12 +1,3 @@
-/**
- * Approval-listener integration tests: drive the REAL `approval/request`
- * listener `apply()` registers (fake host surface, fake judge route) and
- * assert the full decision order — high-risk → allowlist → memory → judge —
- * works for a bash sub-call dispatched through PTC, whose only audit trail
- * at approval time is `tool/ptc-dispatch-start`.
- *
- * @module dsh-auto-permit/approval.test
- */
 import { afterAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -19,7 +10,6 @@ import { JUDGE_OUTPUT_TOKENS } from '../src/settings.js'
 
 const vol = <T>(value: T): Volatile<T> => ({ get: () => value as VolatileSnapshot<T> })
 
-/** A real directory: mutable-file commands need a readable inspector. */
 const WORKSPACE = mkdtempSync(join(tmpdir(), 'dsh-auto-permit-approval-'))
 
 afterAll(() => {
@@ -39,7 +29,7 @@ interface Fixture {
     toolName?: string,
     chainOutcome?: ApprovalOutcome,
   ): Promise<{ outcome: ApprovalOutcome; fellThrough: boolean }>
-  /** Queue the fake judge's next verdict texts (consumed one per call). */
+
   judgeVerdicts(verdicts: string[]): void
 }
 
@@ -121,7 +111,6 @@ function makeFixture(
   }
 }
 
-/** A PTC sub bash call exactly as the host logs it before scheduling. */
 function ptcBash(fixture: Fixture, subCallId: string, args: Record<string, unknown>): void {
   fixture.events.push({
     type: 'tool/ptc-dispatch-start',
@@ -129,7 +118,6 @@ function ptcBash(fixture: Fixture, subCallId: string, args: Record<string, unkno
   })
 }
 
-/** A direct top-level bash call, arguments as the JSON string the host logs. */
 function directBash(fixture: Fixture, callId: string, args: Record<string, unknown>): void {
   fixture.events.push({
     type: 'tool/call',
@@ -137,7 +125,6 @@ function directBash(fixture: Fixture, callId: string, args: Record<string, unkno
   })
 }
 
-/** A prior settled direct approval (asked + allowed-once pair). */
 function priorDirectAllowed(
   fixture: Fixture,
   callId: string,
@@ -151,7 +138,6 @@ function priorDirectAllowed(
   )
 }
 
-/** First ask: judge defers (no queued verdict), the chain allows once. */
 async function chainApprove(fixture: Fixture, callId: string, command: string): Promise<void> {
   ptcBash(fixture, callId, { command, sandbox_permissions: 'danger-full-access' })
   const first = await fixture.answer(callId, 'bash', 'allowed-once')
@@ -172,7 +158,7 @@ describe('auto-permit answerer over PTC evidence', () => {
     expect(fixture.llmCalls).toHaveLength(0)
     expect(fixture.injected).toHaveLength(1)
     expect(fixture.injected[0]?.source?.summary).toContain('cmd-permit')
-    // The order-safe channel: never a bare surface append mid-batch.
+
     expect(fixture.appended).toEqual([])
   })
 
@@ -221,7 +207,7 @@ describe('auto-permit answerer over PTC evidence', () => {
     })
     const { outcome, fellThrough } = await fixture.answer('root:ptc:1')
     expect(fellThrough).toBe(true)
-    expect(outcome).toBe('rejected') // the next() sentinel, i.e. the human dialog
+    expect(outcome).toBe('rejected')
     expect(fixture.llmCalls).toHaveLength(0)
     expect(
       fixture.injected.some((message) => message.source?.summary?.includes('irreversible')),
@@ -229,10 +215,6 @@ describe('auto-permit answerer over PTC evidence', () => {
   })
 
   it('does NOT replay a log-only prior approval: the judge must see it (v3 migration)', async () => {
-    // The audit trail cannot prove WHO allowed the prior call. A pre-v3
-    // cache-rule allowance looks identical to a human approval in the log,
-    // so a log-derived exact repeat is no longer auto-allowed — the judge
-    // (under the current rules) or the human decides again.
     const fixture = makeFixture()
     priorDirectAllowed(
       fixture,
@@ -244,21 +226,19 @@ describe('auto-permit answerer over PTC evidence', () => {
     const { outcome, fellThrough } = await fixture.answer('root:ptc:1')
     expect(fixture.llmCalls).toHaveLength(1)
     expect(fellThrough).toBe(true)
-    expect(outcome).toBe('rejected') // the next() sentinel, i.e. the human dialog
+    expect(outcome).toBe('rejected')
     expect(
       fixture.injected.some((message) => message.source?.summary?.includes('seen this session')),
     ).toBe(false)
   })
 
   it('replays an exact repeat that this process saw the CHAIN approve', async () => {
-    // First ask: the judge defers and the human (next()) allows. The repeat
-    // of a human-approved command is a genuine standing authorization.
     const fixture = makeFixture()
     ptcBash(fixture, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' })
     const first = await fixture.answer('root:ptc:1', 'bash', 'allowed-once')
     expect(first.outcome).toBe('allowed-once')
     expect(first.fellThrough).toBe(true)
-    // The approved pair is now in the log (as the host would write it).
+
     fixture.events.push(
       { type: 'approval/asked', data: { id: 'a1', toolName: 'bash', callId: 'root:ptc:1' } },
       { type: 'approval/decided', data: { id: 'a1', outcome: 'allowed-once' } },
@@ -267,16 +247,13 @@ describe('auto-permit answerer over PTC evidence', () => {
     const second = await fixture.answer('root:ptc:2')
     expect(second.outcome).toBe('allowed-once')
     expect(second.fellThrough).toBe(false)
-    expect(fixture.llmCalls).toHaveLength(1) // only the first ask reached the judge
+    expect(fixture.llmCalls).toHaveLength(1)
     expect(
       fixture.injected.some((message) => message.source?.summary?.includes('seen this session')),
     ).toBe(true)
   })
 
   it('does NOT replay its own judge allowance: each ask stands on its own', async () => {
-    // First ask: the judge allows. The identical repeat must go back to the
-    // judge (which may now defer) instead of the old allowance compounding
-    // into a standing grant.
     const fixture = makeFixture(undefined, { verdicts: ['VERDICT: allow', 'VERDICT: defer'] })
     ptcBash(fixture, 'root:ptc:1', { command: 'uv sync', sandbox_permissions: 'workspace-write' })
     const first = await fixture.answer('root:ptc:1')
@@ -309,7 +286,7 @@ describe('auto-permit answerer over PTC evidence', () => {
       justification: 'uv needs its cache outside the workspace',
     })
     const { outcome, fellThrough } = await fixture.answer('root:ptc:1')
-    // The fake judge model yields nothing → defer → next().
+
     expect(fellThrough).toBe(true)
     expect(outcome).toBe('rejected')
     expect(fixture.llmCalls).toHaveLength(1)
@@ -413,7 +390,7 @@ describe('container boundary', () => {
     })
     const { outcome, fellThrough } = await fixture.answer('root:ptc:1')
     expect(fellThrough).toBe(true)
-    expect(outcome).toBe('rejected') // the next() sentinel, i.e. the human dialog
+    expect(outcome).toBe('rejected')
     expect(fixture.llmCalls).toHaveLength(0)
     expect(fixture.injected).toHaveLength(1)
     expect(fixture.injected[0]?.source?.summary).toContain('container boundary')
@@ -421,8 +398,6 @@ describe('container boundary', () => {
   })
 
   it('keeps the local boundary when a mounted cmd-permit oracle would claim the shape', async () => {
-    // A stale/looser peer allowlist must not override this plugin's own
-    // container boundary; the union is deliberate.
     const fixture = makeFixture({ isHighRisk: () => false, claim: () => ({ via: 'podman' }) })
     ptcBash(fixture, 'root:ptc:1', {
       command: 'podman run --privileged alpine',
@@ -443,7 +418,7 @@ describe('container boundary', () => {
     for (const [index, command] of commands.entries()) {
       let claims = 0
       const fixture = makeFixture({
-        isHighRisk: () => false, // simulate a peer table older than this build
+        isHighRisk: () => false,
         claim: () => {
           claims += 1
           return { via: 'podman' }
@@ -453,7 +428,7 @@ describe('container boundary', () => {
       directBash(fixture, callId, { command, sandbox_permissions: 'danger-full-access' })
       const { outcome, fellThrough } = await fixture.answer(callId)
       expect(fellThrough, command).toBe(true)
-      expect(outcome, command).toBe('rejected') // the next() sentinel, i.e. the human
+      expect(outcome, command).toBe('rejected')
       expect(fixture.llmCalls, command).toHaveLength(0)
       expect(claims, command).toBe(0)
       expect(fixture.injected[0]?.source?.summary, command).toContain('container boundary')
@@ -461,7 +436,6 @@ describe('container boundary', () => {
   })
 
   it('routes attached short-option mount forms to the human before a claiming allowlist', async () => {
-    // pflag accepts `-vSOURCE:DEST`; it names the same mount as `-v SOURCE:DEST`.
     const commands = [
       'podman run --rm -v/:/host alpine true',
       'podman run --rm -v/home/u/.ssh:/keys alpine true',

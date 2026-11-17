@@ -1,13 +1,5 @@
 /**
  * Frontmatter parsing for the recursive skills provider.
- *
- * The shipped filesystem provider parses `<root>/<skill>/SKILL.md` with a
- * deliberately small grammar: YAML frontmatter delimited by `---` lines,
- * required non-empty `name` (kebab-case) and `description`, optional
- * `whenToUse`, optional `metadata` object, and two invocation booleans.
- * `parseFrontmatter` / `parseSkillFile` are not exported from that package, so
- * this module reproduces the same observable contract for nested bundles.
- *
  * @module dsh-recursive-skills/frontmatter
  */
 import { isSkillName, type SkillInvocationPolicy } from '@deepseek-ai/dsh-skill'
@@ -34,8 +26,7 @@ interface Frontmatter {
 }
 
 /**
- * Parse one `SKILL.md` text. Invalid input is reported, never thrown: a broken
- * bundle must not fail discovery for every other skill.
+ * Parse one `SKILL.md` text. Invalid input is reported, never thrown: a broken bundle must not fail discovery for every other skill.
  * @param raw - complete file text.
  * @returns the parsed skill, or a human-readable reason it was ignored.
  */

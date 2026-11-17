@@ -17,7 +17,9 @@ pnpm format:check   # 只检查
 pnpm fallow         # fallow dead-code：死代码、依赖卫生、循环依赖（阻塞）
 pnpm fallow:health  # 复杂度报告（不阻塞）
 pnpm fallow:dupes   # 重复度报告（不阻塞）
-pnpm check:quality  # 全部门禁：format → lint → suppressions → fallow → typecheck → build → test → smoke → client → pack → storybook
+pnpm check:comments # 源码注释的解析式静态检查
+pnpm test:comments  # 注释检查器回归测试
+pnpm check:quality  # 全部门禁：format → comments → comment-tests → lint → suppressions → fallow → typecheck → build → test → smoke → client → pack → storybook
 pnpm check          # 旧聚合：typecheck + build + client 产物检查（保留但不含新门禁）
 pnpm check:smoke    # 跑 11 个可无人值守的 smoke；1 个需真实凭据的显式排除并打印理由
 pnpm check:client   # 校验 packages/*/lib/client.js：DSH factory 包装、注册 id、外部请求、内联样式、apply/render
@@ -28,6 +30,8 @@ pnpm clean
 [docs/quality-gates.md](docs/quality-gates.md) 为准；**降级任何规则、扩大 ignore、加内联豁免
 都要先改那份文档并获用户批准**，不要直接改配置。扫描数据见
 [docs/quality-scan-baseline.md](docs/quality-scan-baseline.md)。
+
+修改源码、测试、脚本或配置中的注释前，先读 [源码注释规则](docs/comment-policy.md)；完成后运行 `pnpm check:comments`。规则只适用于本仓库，存量注释同样受约束。
 
 `pnpm-workspace.yaml` 的 `nodeLinker: hoisted` 是刻意的：本机 pnpm 12 的 isolated store 曾对带 peer 的 `@deepseek-ai/*` 生成悬空链接。勿改回。
 

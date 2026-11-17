@@ -1,13 +1,4 @@
 // @vitest-environment jsdom
-/**
- * Client-half tests for the handoff picker.
- *
- * The old suite rendered the hand-written JS card through a minimal React in
- * a VM. The migrated card is real TSX on shared components, so this suite
- * mounts the exported Picker with react-test-renderer and checks the contract
- * the research established: one confirmation card, the host-resolved default,
- * a stale default that blocks submission, and the exact choose/cancel payload.
- */
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 

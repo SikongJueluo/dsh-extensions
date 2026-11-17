@@ -1,16 +1,5 @@
 name: quality
 
-# One entry point for local development and CI: `pnpm check:quality`.
-# This workflow only provisions the environment and calls it.
-#
-# First real runs (2026-11-16, commits leading to `main` at rozzpxpt) exposed
-# three things this file now carries: the smoke runner needs `jj`, the
-# remote-exec smoke drives a real `fish`, and the only substantive failure was
-# the lint backlog the local gate also reported. The environment steps below are
-# the fix for the first two; the lint clearance happened in the tree, not here.
-# Branch protection / required checks are a repository setting the maintainer
-# must enable separately.
-
 on:
   push:
     branches: [main]
@@ -40,9 +29,6 @@ jobs:
           node-version: '24'
           cache: pnpm
 
-      # The smoke runner shells out to `jj`, and the jj-workspace suites create
-      # real repositories, so the binary and an identity must exist before the
-      # checks run. Pinned to the version used locally.
       - name: Install jj
         run: |
           curl -fsSL "https://github.com/jj-vcs/jj/releases/download/v0.46.0/jj-v0.46.0-x86_64-unknown-linux-musl.tar.gz" \
@@ -59,13 +45,12 @@ jobs:
           user.email = "ci@dsh-extensions.invalid"
           EOF
 
-      # Part 8 of `packages/remote-exec/smoke.mjs` drives the real `fish`
-      # binary as a container shell and asserts that login-shell noise is
-      # diverted into the env log. The runner image does not ship fish; the
-      # smoke skips that part with a printed reason when it is absent, and
-      # runs it here so CI keeps the coverage.
       - name: Install fish
         run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends fish
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - run: pnpm install --frozen-lockfile
 

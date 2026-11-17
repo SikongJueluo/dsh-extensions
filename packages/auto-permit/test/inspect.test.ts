@@ -1,10 +1,3 @@
-/**
- * Read-only evidence boundary tests: the judge may read the project and
- * nothing else, and every capability is enforced by the module rather than by
- * prompt wording.
- *
- * @module dsh-auto-permit/inspect.test
- */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp, mkdir, symlink, writeFile, rm } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'

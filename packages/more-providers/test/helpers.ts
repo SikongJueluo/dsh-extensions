@@ -1,11 +1,5 @@
 /**
  * Shared fixtures for the more-providers contract tests.
- *
- * Every test drives the real plugin seam — `apply(ctx, config)` on a real
- * Cordis context with fixture host services — and observes behavior through
- * what the plugin registers and what the adapters put on the wire. Third-party
- * transports are stubbed; the plugin's own code is never mocked here.
- *
  * @module dsh-more-providers/test/helpers
  */
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -23,21 +17,15 @@ import type { CredentialKey, CredentialRecord } from '@deepseek-ai/dsh-credentia
 import type { GenerateOptions, RequestMessage, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { apply } from '../src/index.js'
 
-/** YAML `apiKeyEnv` name the fixtures resolve; tests stub it. */
 export const TEST_ENV_KEY = 'MORE_PROVIDERS_TEST_KEY'
-/** Static fake API key handed to the gateway route. */
 export const TEST_API_KEY = 'sk-static-test-key'
 
-/** Fixed valid 1×1 PNG used by both adapters. */
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
 const PNG_BYTES = Buffer.from(PNG_BASE64, 'base64')
-/** `data:image/png;base64,…` of {@link PNG_BYTES}, computed from the literal. */
 export const PNG_DATA_URL = `data:image/png;base64,${PNG_BASE64}`
 
-/** ChatGPT backend the OAuth fixtures point at; the mocked transport answers. */
 export const CHATGPT_BASE_URL = 'https://chatgpt.invalid/backend-api/codex'
-/** Gateway endpoint the API-key fixtures point at; the stubbed fetch answers. */
 const GATEWAY_BASE_URL = 'https://gateway.invalid/v1'
 
 /** One stored OAuth grant for the ChatGPT record (valid, no refresh needed). */
@@ -119,10 +107,7 @@ interface ImageRead {
   signal: AbortSignal | undefined
 }
 
-/**
- * The attachment-service members the request pipeline actually calls:
- * `readImageRequest` (with a read log) and `imageHostPath` (absent mapping).
- */
+/** The attachment-service members the request pipeline actually calls: `readImageRequest` (with a read log) and `imageHostPath` (absent mapping). */
 export function fixtureAttachmentStore() {
   const reads: ImageRead[] = []
   const store = {
@@ -197,7 +182,6 @@ export function capturingFetch() {
   const calls: CapturedRequest[] = []
   const fetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
     const signal = init?.signal
-    // Abort test double: fail immediately when the caller already aborted.
     if (signal?.aborted) throw new Error('aborted before request')
     calls.push({ url: String(url), init: init ?? {} })
     return new Response(JSON.stringify({ error: { message: 'static test 400' } }), {
@@ -266,7 +250,6 @@ export function toolResultMsg(callId: string, content: RequestMessage['content']
   }
 }
 
-/** Live harnesses from this test file, disposed together in afterEach. */
 const liveHarnesses: Harness[] = []
 
 export async function disposeTracked(): Promise<void> {
@@ -325,18 +308,13 @@ export interface Harness {
   web: ReturnType<typeof fakeWebServerService>
   credentials: ReturnType<typeof fakeCredentialsService>
   attachments: ReturnType<typeof fixtureAttachmentStore> | undefined
-  /** The file the plugin row points at. */
   file: string
 }
 
 export interface HarnessOptions {
-  /** The full YAML document. */
   yaml: string
-  /** Provide the attachment service. @default true */
   attachments?: boolean
-  /** Seed the `oauth-providers/chatgpt` grant record. @default true */
   chatgptGrant?: boolean
-  /** Value for the test env key; empty string leaves it unreadable. */
   envKey?: string
 }
 

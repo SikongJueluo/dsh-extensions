@@ -14,14 +14,12 @@ import {
 } from './helpers.js'
 
 async function seed(root: string): Promise<void> {
-  // Direct skills: the stock provider owns these; this provider must skip them.
   await writeSkill(join(root, 'direct'), ['name: direct', 'description: Direct bundle'])
   await writeFileAt(
     join(root, 'flat.md'),
     skillDocument(['name: flat', 'description: Flat markdown skill']),
   )
 
-  // Nested bundles at depth 2 and 3.
   await writeSkill(
     join(root, 'anthropic', 'pdf'),
     ['name: pdf', 'description: PDF skill'],
@@ -30,16 +28,13 @@ async function seed(root: string): Promise<void> {
   await writeSkill(join(root, 'anthropic', 'docx'), ['name: docx', 'description: DOCX skill'])
   await writeSkill(join(root, 'deep', 'one', 'two'), ['name: deep-two', 'description: Deep skill'])
 
-  // A bundle boundary: resources under a skill directory are not skills.
   await writeSkill(join(root, 'anthropic', 'pdf', 'references', 'nested'), [
     'name: hidden-ref',
     'description: Must never surface',
   ])
 
-  // Arbitrary markdown is not a skill.
   await writeFileAt(join(root, 'anthropic', 'notes.md'), '# Notes\n')
 
-  // Invalid documents are ignored without hiding valid siblings.
   await writeSkill(join(root, 'broken', 'yaml'), ['name: [unclosed'])
   await writeSkill(join(root, 'broken', 'missing'), ['name: no-description'])
   await writeSkill(join(root, 'broken', 'name'), ['name: Bad_Name', 'description: Bad name'])
@@ -50,11 +45,9 @@ async function seed(root: string): Promise<void> {
   ])
   await writeSkill(join(root, 'broken', 'ok'), ['name: sibling', 'description: Sibling survives'])
 
-  // Duplicate names resolve in deterministic scan order.
   await writeSkill(join(root, 'duplicate', 'a'), ['name: dup', 'description: First wins'])
   await writeSkill(join(root, 'duplicate', 'b'), ['name: dup', 'description: Second loses'])
 
-  // Invocation policy is preserved, not re-exposed by the recursive path.
   await writeSkill(join(root, 'policy', 'disabled'), [
     'name: disabled-skill',
     'description: Model-hidden but user-visible',

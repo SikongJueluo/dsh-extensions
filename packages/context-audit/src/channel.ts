@@ -1,16 +1,4 @@
-/**
- * Browser ↔ host channel: one web-server prefix route (the connection RPC
- * envelope grammar, same as dsh-plan-usage) serving the sidebar panel's
- * report reads.
- *
- * Endpoints:
- * - `report` — the full audit report for a window; `days` is a positive
- *   number or absent for all history. The scan is synchronous-over-local
- *   files (a few seconds over a typical store) and serialized behind the
- *   previous one so double-clicks cannot stampede.
- *
- * @module dsh-context-audit/channel
- */
+/** @module dsh-context-audit/channel */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -19,12 +7,9 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { collectAudit, isRecord } from './audit.js'
 
-/** Route prefix this channel serves on the host web server. */
 export const RPC_CHANNEL = '/dsh-context-audit'
 
-/** One endpoint segment of the channel (same grammar as connection RPC). */
 const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
-/** Report requests are tiny; anything bigger is a misbehaving client. */
 const MAX_CHANNEL_BODY_BYTES = 16 * 1024
 
 /** `$DSH_HOME` (matching dsh-home-paths) over `~/.dsh`. */
@@ -33,15 +18,11 @@ function dshHome(): string {
 }
 
 export interface ChannelDeps {
-  /** Config defaults shared with the command (window / table sizes). */
   defaultDays: number
   sessionLimit: number
 }
 
-/**
- * Mount the channel route; appears once the connection service and a web
- * server are both present (soft-injected), mirroring dsh-plan-usage.
- */
+/** Mount the channel route; appears once the connection service and a web server are both present (soft-injected), mirroring dsh-plan-usage. */
 export function registerChannel(ctx: Context, deps: ChannelDeps): void {
   let inFlight: Promise<unknown> = Promise.resolve()
 
@@ -81,7 +62,6 @@ export function registerChannel(ctx: Context, deps: ChannelDeps): void {
         join(home, 'storages', 'session_projcache', 'sessions'),
         { days, sessionLimit: deps.sessionLimit, now: Date.now() },
       )
-    // Serialize scans: overlapping requests reuse the queued run's result.
     const queued = inFlight.then(run, run)
     inFlight = queued.catch(() => undefined)
     return { ok: true, value: await queued }
@@ -117,9 +97,6 @@ export function registerChannel(ctx: Context, deps: ChannelDeps): void {
     }
     const chunks: Buffer[] = []
     let received = 0
-    // IncomingMessage is `AsyncIterable<any>` in the node typings; the request
-    // stream yields Buffers unless an encoding was set (never here), so the
-    // annotation records that fact instead of casting every chunk.
     const body: AsyncIterable<Buffer> = req
     for await (const chunk of body) {
       received += chunk.byteLength

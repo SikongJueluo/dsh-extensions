@@ -1,10 +1,5 @@
 /**
- * Local type shims for host services this plugin consumes optionally through
- * `ctx.get()` but whose packages are not published to npm as standalone type
- * entry points (or whose augmentation we do not want to hard-depend on).
- *
- * Everything here is type-only and erased at build time.
- *
+ * Local type shims for host services this plugin consumes optionally through `ctx.get()` but whose packages are not published to npm as standalone type entry points (or whose augmentation we do not want to hard-depend on).
  * @module dsh-handoff/shims
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -15,7 +10,6 @@ export interface AgentPresetSummary {
   readonly name?: string
   readonly description?: string
   readonly order?: number
-  /** Why the preset cannot compose a session; absent when it can. */
   readonly broken?: string
 }
 
@@ -37,11 +31,7 @@ export interface AgentDefaultModelShim {
   currentSelection(): { provider: string; model: string; reasoningEffort?: string }
 }
 
-/**
- * Minimal `ctx.triggerBindings` surface (dsh-triggers). Present when that
- * plugin is mounted; without it the auto-review option degrades to a plain
- * handoff with a visible notice.
- */
+/** Minimal `ctx.triggerBindings` surface (dsh-triggers). Present when that plugin is mounted; without it the auto-review option degrades to a plain handoff with a visible notice. */
 export interface TriggerBindingsShim {
   bindReviewLoop(request: {
     task: string
@@ -49,18 +39,14 @@ export interface TriggerBindingsShim {
     parentSession: string
     maxRounds?: number
     deliverStart?: boolean
-    /** Auto-submit the executor's completed turns (handoff passes true). */
     autoDeliver?: boolean
   }): Promise<{ bindingId: string; runId: string }>
 }
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    /** Present in compositions that mount the preset registry (the stock web profile does). */
     agentPresets?: AgentPresetsShim
-    /** Present in compositions that mount the default-model selection service. */
     agentDefaultModel?: AgentDefaultModelShim
-    /** Present when the dsh-triggers plugin is mounted. */
     triggerBindings?: TriggerBindingsShim
   }
 }

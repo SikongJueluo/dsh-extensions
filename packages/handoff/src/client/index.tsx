@@ -1,15 +1,5 @@
 /* oxlint-disable jsx-a11y/no-autofocus, react/set-state-in-effect -- autoFocus is a desktop-only enhancement (off under pointer: coarse);
    the effect mirrors external data into local UI state and deriving it would change render timing */
-// Client half of dsh-handoff: the configuration card shown when /handoff asks
-// which model, preset, and workspace the fresh session should use. TypeScript
-// TSX on the shared @dsh-extensions/ui components, built by Vite into the DSH
-// client factory.
-//
-// Registers one `shell.overlay` entry — the frame-wide floating layer, so the
-// card is a real modal — and talks to the host half over this package's
-// channel (`/dsh-handoff`): poll for a pending pick, submit the verdict or
-// cancel. The catalog comes from the same Client Remote the /model popup
-// reads, so provider groups, model display names, and efforts match.
 import { useEffect, useState } from 'react'
 import { isRecord } from '../choice.js'
 import {
@@ -31,20 +21,12 @@ const POLL_MS = 1500
 const INHERIT_LABEL = '继承当前会话'
 const DEFAULT_LABEL = '全局默认'
 const ORIGIN_LABEL = '原工作区'
-// A selector row that already is the card's effective value.
 const CURRENT_BADGE = '当前'
-// Flag-decided fields display with this badge and no 更改 button, so the
-// summary can never contradict what will actually run.
 const FLAG_BADGE = '命令指定'
 const REVIEW_LABEL = '自动审核'
 
-// Touch-primary devices (phones): hover feedback and autofocus are
-// desktop enhancements; on them a tap-fired mouseenter sticks and the
-// autofocus keyboard covers the list, so both stay off.
 const COARSE =
   typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches
-
-// --- wire shapes (the host publishes no browser-half types; narrowed here) ---
 
 interface EffortEntry {
   id: string
@@ -93,19 +75,15 @@ interface PresetWire {
   id: string
   name?: string
   description?: string
-  /** Non-empty when the preset cannot compose a session right now. */
   broken?: string
 }
 
 type PresetChoice = { kind: 'inherit' } | { kind: 'preset'; id: string }
 
 interface PresetRequestWire {
-  /** The origin session's live preset; absent when it runs none. */
   inherited?: string
   options: PresetWire[]
-  /** The preset the card preselects (a retry's pick, else inherit). */
   default: PresetChoice
-  /** Why that default cannot mount as-is; the card must ask for a reselect. */
   defaultIssue?: string
 }
 
@@ -119,26 +97,16 @@ interface ChoiceRequestWire {
   task: string
   inherited?: RouteWire
   fallback?: RouteWire
-  /** The model the card preselects; `defaultChoiceIssue` marks it unrunnable. */
   defaultChoice?: ModelChoice
   defaultChoiceIssue?: string
-  /** Preset selection block (present = the composition registers presets). */
   preset?: PresetRequestWire
-  /** The origin session's workspace (or bare cwd when ungrouped). */
   origin?: WorkspaceWire
-  /** Registered workspaces other than the origin's; absent/empty = no step. */
   workspaces?: WorkspaceWire[]
-  /** Whether the browser must run the workspace step before answering. */
   pickWorkspace?: boolean
-  /** The model came from `--model`; the picker starts at the workspace step. */
   modelFixed?: boolean
-  /** The flag-fixed route, shown in the confirmation summary (`modelFixed` only). */
   fixedModel?: RouteWire
-  /** The `--workspace` flag's resolved target, shown as fixed in the summary. */
   fixedWorkspace?: WorkspaceWire
-  /** Retry default: the previous attempt's workspace pick. */
   previous?: { workspaceId?: string }
-  /** Auto-review block: toggle defaults, or a flag-decided read-only verdict. */
   review?: { defaultRounds: number; enabled?: boolean; fixed?: boolean }
 }
 
@@ -206,8 +174,6 @@ function isCatalogEnvelope(value: unknown): value is CatalogEnvelope {
   return isRecord(value) && typeof value.ok === 'boolean'
 }
 
-// --- shared row classes (theme tokens only; no style tables) ---
-
 const GROUP_TITLE_CLASS =
   'dshx:px-2 dshx:pb-1 dshx:pt-2.5 dshx:text-[11px] dshx:leading-4 dshx:tracking-[0.04em] dshx:text-fg-muted dshx:uppercase'
 const EMPTY_CLASS = 'dshx:px-2.5 dshx:py-3 dshx:text-[13px] dshx:text-fg-muted'
@@ -217,10 +183,7 @@ const FIELD_LABEL_CLASS =
 const FIELD_VALUE_CLASS =
   'dshx:flex dshx:min-w-0 dshx:flex-1 dshx:items-center dshx:gap-1.5 dshx:text-[13px] dshx:text-fg'
 
-/** One clickable entry, optionally carrying a small badge beside its label.
- * `muted` renders an unselectable row (a broken preset, a workspace whose
- * directory is gone) without hiding the reason from the operator. Hover
- * feedback stays a desktop enhancement (pointer: coarse retreat). */
+/** One clickable entry, optionally carrying a small badge beside its label. `muted` renders an unselectable row (a broken preset, a workspace whose directory is gone) without hiding the reason from the operator. Hover feedback stays a desktop enhancement (pointer: coarse retreat). */
 interface EntryProps {
   label: string
   description?: string
@@ -272,7 +235,6 @@ function Entry({ label, description, badge, busy, muted, onPick }: EntryProps) {
   )
 }
 
-/** One summary row: label, value (may carry a badge), optional 更改. */
 interface FieldRowProps {
   label: string
   value: string
@@ -305,7 +267,6 @@ function FieldRow({ label, value, badge, changeable, busy, onOpen }: FieldRowPro
 
 type Section = 'model' | 'effort' | 'preset' | 'workspace'
 
-/** Whether the effective choice already IS the described route (the "当前" badge). */
 function isCurrentModel(
   effectiveChoice: ModelChoice,
   kind: 'inherit' | 'default' | 'model',
@@ -327,25 +288,15 @@ interface PickerProps {
   onSettled: () => void
 }
 
-/** The configuration card, rendered only while a pick is pending.
- * ONE card, not a wizard: every field shows its effective value (the retry
- * pick, else the remembered handoff default, else inherit), 更改 expands
- * that one field's selector in place, and only the fixed 开始交接 button
- * submits. Model and preset are independent fields. */
 function Picker({ request, operations, onSettled }: PickerProps) {
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // The field whose selector is expanded: null = the summary card.
   const [section, setSection] = useState<Section | null>(null)
-  // The model the operator picked in this card (null = the host default).
   const [choice, setChoice] = useState<ModelChoice | null>(null)
-  // The preset the operator picked in this card (null = the host default).
   const [presetPick, setPresetPick] = useState<PresetChoice | null>(null)
-  // The selected workspace id (null = the retry pick, else origin).
   const [wsPick, setWsPick] = useState<string | null>(null)
-  // Auto-review verdict: offered toggle or flag-fixed display.
   const reviewOffer = request.review ?? null
   const reviewFixed = reviewOffer?.fixed === true
   const [review, setReview] = useState({
@@ -363,10 +314,6 @@ function Picker({ request, operations, onSettled }: PickerProps) {
   const effectivePreset = presetPick ??
     (presetBlock ? presetBlock.default : null) ?? { kind: 'inherit' }
 
-  // Escape collapses an expanded selector first and only cancels at the
-  // summary card; a backdrop press or the close button cancels from any view.
-  // Intercepting Escape here (capture phase) keeps Base UI from closing the
-  // dialog while a selector is open.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key !== 'Escape' || section === null) return
@@ -384,8 +331,6 @@ function Picker({ request, operations, onSettled }: PickerProps) {
     setQuery('')
     setError(null)
     let alive = true
-    // `ctx.remote.*` answers with the connection result envelope
-    // ({ok:true, value} | {ok:false, error}); the catalog is inside `value`.
     operations
       .modelCatalog()
       .then((result: unknown) => {
@@ -408,25 +353,19 @@ function Picker({ request, operations, onSettled }: PickerProps) {
     return () => {
       alive = false
     }
-    // The Picker remounts per request (`key={request.id}`), so the catalog is
-    // fetched once per mount; `operations` is the only value read here.
   }, [operations])
 
   function needsWorkspace(): boolean {
     return request.pickWorkspace === true && (request.workspaces?.length ?? 0) > 0
   }
 
-  /** Expand one field's selector with a fresh search, so a query typed
-   * for another field never filters the next one. */
+  /** Expand one field's selector with a fresh search, so a query typed for another field never filters the next one. */
   function openSection(name: Section) {
     setQuery('')
     setSection(name)
   }
 
-  /** The ONE effective workspace verdict, shared by the summary row AND
-   * the submit payload: this pick → the retry's previous pick (when it is
-   * still in the roster) → origin. Display and payload must never
-   * disagree — a card that shows "Other" must not submit "origin". */
+  /** The ONE effective workspace verdict, shared by the summary row AND the submit payload: this pick -> the retry's previous pick (when it is still in the roster) -> origin. Display and payload must never disagree - a card that shows "Other" must not submit "origin". */
   function effectiveWorkspace(): string {
     if (wsPick !== null) return wsPick
     if (
@@ -494,9 +433,7 @@ function Picker({ request, operations, onSettled }: PickerProps) {
     return request.fallback ?? null
   }
 
-  /** Adopt an effort for the current model choice. Inherit/default picks
-   * become explicit model choices: an inherited route with a changed
-   * effort is exactly that route with the effort spelled out. */
+  /** Adopt an effort for the current model choice. Inherit/default picks become explicit model choices: an inherited route with a changed effort is exactly that route with the effort spelled out. */
   function pickEffort(effortId: string) {
     const route = effortRoute()
     if (!route) {
@@ -512,8 +449,6 @@ function Picker({ request, operations, onSettled }: PickerProps) {
     setSection(null)
   }
 
-  // A host-resolved default that cannot run as-is demands a reselect; once
-  // the operator picks a replacement the issue clears.
   const modelIssue =
     !modelFixed && choice === null && request.defaultChoiceIssue ? request.defaultChoiceIssue : null
   const selectedPresetRow =
@@ -572,11 +507,9 @@ function Picker({ request, operations, onSettled }: PickerProps) {
   }
 
   function handleDialogClose(): void {
-    // Cancellation is best effort; the overlay stays whatever the channel answered.
     void cancel()
   }
 
-  // ── summary card values ─────────────────────────────────────────────────
   const modelValue = modelFixed
     ? routeText(fixedModel, '由 --model 指定')
     : effectiveChoice.kind === 'model'
@@ -635,9 +568,6 @@ function Picker({ request, operations, onSettled }: PickerProps) {
   }
   const showWorkspace = fixedWorkspace !== null || needsWorkspace()
 
-  /** The auto-review row: a toggle when offered, a read-only verdict when
-   * a flag decided it. The round budget is fixed at 5 unless a flag or a
-   * retry recorded another one, and is always shown as the actual number. */
   const reviewRow =
     reviewOffer === null ? null : (
       <label
@@ -712,7 +642,6 @@ function Picker({ request, operations, onSettled }: PickerProps) {
     )
   }
 
-  // ── expanded selectors (one field at a time, inside the same card) ──────
   function searchBox(placeholder: string) {
     return (
       <div className="dshx:px-2.5 dshx:pb-2 dshx:pt-1">
@@ -738,7 +667,6 @@ function Picker({ request, operations, onSettled }: PickerProps) {
       })
       if (kept.length > 0) groups.push({ id: group.id, name: group.name, models: kept })
     }
-    // Providers whose catalog lookup failed are reported, never silently absent.
     const failures = (catalog?.failures ?? []).filter((failure) => {
       if (needle.length === 0) return true
       return `${failure.name} ${failure.id} ${failure.message}`.toLowerCase().includes(needle)
@@ -805,8 +733,6 @@ function Picker({ request, operations, onSettled }: PickerProps) {
                       }
                       busy={busy}
                       onPick={() => {
-                        // A model without efforts commits directly; one with
-                        // efforts keeps its default until 更改 强度.
                         setChoice({ kind: 'model', provider: group.id, model: model.id })
                         setSection(null)
                       }}
@@ -1070,9 +996,7 @@ function Overlay({ operations }: { operations: Operations }) {
           setRequest(list.length > 0 ? (list[0] ?? null) : null)
           return undefined
         })
-        .catch(() => {
-          /* offline or channel absent: keep the previous state */
-        })
+        .catch(() => {})
     }
     tick()
     const timer = window.setInterval(tick, POLL_MS)
@@ -1085,8 +1009,6 @@ function Overlay({ operations }: { operations: Operations }) {
   return (
     <Root>
       {request === null ? null : (
-        // One card instance per pending request: the key remounts the Picker
-        // when a new pick arrives, so picker state never leaks across requests.
         <Picker
           key={request.id}
           request={request}
@@ -1132,5 +1054,4 @@ function apply(ctx: DshClientContext) {
 export { apply }
 export const inject = ['slots', 'remote', 'remote.session']
 
-/** Component handle for the browser-half test harness. */
 export const testHandles = { Picker }

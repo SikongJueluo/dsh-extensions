@@ -1,11 +1,3 @@
-/* Host-half tests for remembered model defaults and independent preset
- * selection: the real built plugin (lib/) with stub host services whose shapes
- * come from the host type declarations. The storage stub keeps its domain
- * tables in a caller-owned map, so a second boot reuses the same "disk".
- *
- * Requires `pnpm build` first (lib/ is the runtime under test).
- * Run: node --test
- */
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -126,7 +118,6 @@ function makeHost({ domains, presets, catalog = CATALOG, putFails = false } = {}
       state.createdAgents.push(options)
       const sid = String(options.sessionId)
       state.followups.set(sid, state.followups.get(sid) ?? [])
-      // The real factory runs setup before publishing; preset mounts ride it.
       if (typeof options.setup === 'function') await options.setup({ fake: sid }, { id: sid })
       return {
         agent: {
@@ -296,11 +287,7 @@ async function answerPick(host, choice) {
   return pick
 }
 
-/**
- * An origin agent whose `model` accessor folds like the host's: the durable
- * selection when one exists, otherwise the creation options. `selection` stands
- * in for a recorded `/model` choice.
- */
+/** An origin agent whose `model` accessor folds like the host's: the durable selection when one exists, otherwise the creation options. `selection` stands in for a recorded `/model` choice. */
 function originModel(selection) {
   return {
     current: () => selection ?? { provider: 'origin-provider', model: 'origin-model' },
@@ -404,8 +391,6 @@ async function handoff(host, agent, rawInput) {
   return command.handler({ rawInput, agent, signal: null })
 }
 
-// ══ tests ══════════════════════════════════════════════════════════════════
-
 test('a successful handoff remembers its model and the next card starts there', async () => {
   const domains = new Map()
   const presets = makePresets()
@@ -437,7 +422,6 @@ test('a successful handoff remembers its model and the next card starts there', 
     assert.equal(remembered.choice.reasoningEffort, 'low')
     assert.equal((await metaFor(briefPath)).preset.kind, 'inherit')
 
-    // A later handoff in another session starts from that remembered route.
     const second = await originFixture(host, 'second')
     await channel(host, 'pending', {})
     const pendingSecond = handoff(host, second.agent, 'second task')
@@ -463,7 +447,6 @@ test('--model never overwrites the remembered default; a restart keeps it', asyn
   const presets = makePresets()
   {
     const { host } = await boot({ domains, presets })
-    // First remember reasoner/low through the normal card.
     const first = await originFixture(host, 'remember')
     await channel(host, 'pending', {})
     const pendingFirst = handoff(host, first.agent, 'remember task')
@@ -478,7 +461,6 @@ test('--model never overwrites the remembered default; a restart keeps it', asyn
     await completeBrief(host, 'origin-remember')
     await waitPref(host, (row) => row.choice.model === 'reasoner', 'remembered model')
 
-    // A flag override is one-off: the stored route must not change.
     const flagged = await originFixture(host, 'flag-model')
     const pendingFlag = handoff(host, flagged.agent, '--model prov/simple flag task')
     const answer = await pendingFlag
@@ -488,8 +470,6 @@ test('--model never overwrites the remembered default; a restart keeps it', asyn
     assert.equal(pref(host).choice.model, 'reasoner', 'a --model override writes no preference')
   }
   {
-    // A fresh process (new root) reopens the same domain: the preference from
-    // the first boot is still the default, with no browser pick needed.
     const { host } = await boot({ confirm: false, domains, presets })
     const origin = await originFixture(host, 'restart')
     const answer = await handoff(host, origin.agent, 'restart task')
@@ -519,7 +499,6 @@ test('a stale remembered route is reported and cannot be spawned silently', asyn
     ],
   }
   {
-    // Remember a route that the next deployment no longer advertises.
     const { host } = await boot({ domains, presets, catalog: withRetired })
     const origin = await originFixture(host, 'remember-stale')
     await channel(host, 'pending', {})
@@ -546,7 +525,6 @@ test('a stale remembered route is reported and cannot be spawned silently', asyn
       'pending pick',
     )
     assert.match(pick.defaultChoiceIssue ?? '', /retired/u)
-    // The picker offers a reselect; answering the stale route anyway must not spawn.
     const chosen = await channel(host, 'choose', {
       requestId: pick.id,
       choice: {
@@ -605,7 +583,6 @@ test('a stale remembered route is reported and cannot be spawned silently', asyn
     await waitPref(host, (row) => row.choice.reasoningEffort === 'ultra', 'remembered ultra effort')
   }
   {
-    // The effort is no longer supported: a valid reselect still proceeds.
     const { host } = await boot({ domains, presets })
     const origin = await originFixture(host, 'stale-effort')
     await channel(host, 'pending', {})
@@ -704,8 +681,6 @@ test('a broken preset fails visibly instead of composing a preset-less session',
     assert.equal(host.state.followups.get('origin-broken-explicit').length, 0)
   }
   {
-    // The origin itself runs a now-broken preset: the card must report it and
-    // accept a valid replacement.
     const { host } = await boot({ domains, presets })
     const origin = await originFixture(host, 'broken-inherited', 'preset-broken')
     await channel(host, 'pending', {})
@@ -724,7 +699,6 @@ test('a broken preset fails visibly instead of composing a preset-less session',
     assert.equal(created.meta.agentPreset, 'preset-b')
   }
   {
-    // No card in a confirm:false composition: fail before writing a brief.
     const { host } = await boot({ confirm: false, domains, presets })
     const origin = await originFixture(host, 'broken-confirm-false', 'preset-broken')
     const answer = await handoff(host, origin.agent, 'no dialog task')
@@ -827,15 +801,12 @@ test('the question-card fallback starts from the remembered model and asks for a
     const questions = makeQuestions()
     const { host } = await boot({ domains, presets, withChannel: false, userQuestions: questions })
     const first = await originFixture(host, 'card-first')
-    // The model card from a first handoff: pick the displayed model name.
     questions.answers.push({ answers: [{ id: 'model', selected: ['Reasoner'] }] })
     const pending = handoff(host, first.agent, 'card task')
     assert.equal((await pending).kind, 'success')
     await completeBrief(host, 'origin-card-first')
     await waitPref(host, (row) => row.choice.model === 'reasoner', 'remembered card model')
 
-    // The next handoff offers the remembered route first; accepting it works
-    // without any browser and without guessing the inherited (expensive) one.
     const second = await originFixture(host, 'card-second')
     questions.answers.push({ answers: [{ id: 'model', selected: ['上次使用的模型'] }] })
     const pendingSecond = handoff(host, second.agent, 'card second task')
@@ -847,7 +818,6 @@ test('the question-card fallback starts from the remembered model and asks for a
     assert.equal(lastCard.questions[0].options[0].label, '上次使用的模型')
   }
   {
-    // The remembered model is gone: the card states why and does not offer it.
     const questions = makeQuestions()
     const { host } = await boot({
       domains,
@@ -869,8 +839,6 @@ test('the question-card fallback starts from the remembered model and asks for a
     await completeBrief(host, 'origin-card-stale')
   }
   {
-    // A broken inherited preset asks a dedicated card after the model card;
-    // a valid replacement is mounted.
     const questions = makeQuestions()
     const { host } = await boot({ domains, presets, withChannel: false, userQuestions: questions })
     const origin = await originFixture(host, 'card-preset', 'preset-broken')
@@ -908,12 +876,7 @@ test('a browser card timeout uses the retry default but never remembers it', asy
     await waitPref(host, (row) => row.choice.model === 'reasoner', 'seeded preference')
   }
   {
-    // The browser is attached (so a real picker is requested) but never
-    // answers. The retry sidecar's choice must still run and must NOT replace
-    // the remembered reasoner/low.
     const realSetTimeout = globalThis.setTimeout
-    // pickTimeoutMs is schema-bounded at 5s; clamp that timer so the test can
-    // exercise the real timeout branch quickly.
     globalThis.setTimeout = (fn, ms, ...args) => realSetTimeout(fn, ms >= 5000 ? 100 : ms, ...args)
     try {
       const { host } = await boot({ domains, presets, pickTimeoutMs: 5000 })
@@ -971,8 +934,6 @@ test('an unanswered question card uses its default but never remembers it', asyn
   }
   {
     const realSetTimeout = globalThis.setTimeout
-    // The card timeout is a fixed 60s; clamp it so the test can exercise the
-    // actual timeout branch instead of the separate no-answerer branch.
     globalThis.setTimeout = (fn, ms, ...args) =>
       realSetTimeout(fn, ms >= 60_000 ? 100 : ms, ...args)
     try {
@@ -1063,8 +1024,6 @@ test('an omitted preset field keeps the retry sidecar intent', async () => {
       'pending pick',
     )
     assert.deepEqual(pick.preset?.default, { kind: 'preset', id: 'preset-b' })
-    // An older client sends no preset field: the host must keep the sidecar
-    // intent instead of substituting inherit.
     const chosen = await channel(host, 'choose', {
       requestId: pick.id,
       choice: { kind: 'inherit' },

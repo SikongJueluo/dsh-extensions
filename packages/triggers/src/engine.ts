@@ -1,24 +1,4 @@
-/**
- * The pure loop state machine — every rule about rounds, roles, phases, and
- * stops lives here, expressed as total functions over plain records. No I/O,
- * no clocks, no Cordis: the runtime layer persists what these return and turns
- * the returned intents into queued prompts. Tests exercise the whole loop
- * through this seam.
- *
- * Core invariants:
- *
- * - A signal only advances the loop after the turn it belongs to ends
- *   `completed`. Any other end reason parks the run in `paused-error`; a
- *   missing signal never advances anything.
- * - Terminal and paused runs reject every signal ("late result" protection);
- *   a stale run id cannot revive anything.
- * - One delivery + its review is one round. The budget blocks the NEXT
- *   execution round, never the review of the last allowed delivery: a rework
- *   verdict at the budget edge becomes `paused-budget` holding the deferred
- *   rework, resumable by raising the budget.
- *
- * @module dsh-triggers/engine
- */
+/** @module dsh-triggers/engine */
 import type {
   BindingRecord,
   DeliveryKind,
@@ -32,7 +12,6 @@ import type {
   SignalOutcome,
 } from './model.js'
 
-/** How many history lines a run keeps (oldest fall off; session logs stay full). */
 const HISTORY_LIMIT = 60
 
 /** One queued prompt the runtime should deliver (content composed outside). */
@@ -77,7 +56,6 @@ function withHistory(run: RunRecord, entry: RunHistoryEntry): RunRecord {
   }
 }
 
-/** Outcomes each role may signal, by the phase the run must be in. */
 const ALLOWED: Record<'executor' | 'parent', Partial<Record<SignalOutcome, RunPhase>>> = {
   executor: { deliver: 'awaiting-delivery', needs_user: 'awaiting-delivery' },
   parent: { rework: 'awaiting-review', pass: 'awaiting-review', needs_user: 'awaiting-review' },
@@ -90,12 +68,7 @@ export function roleOf(run: RunRecord, callerSession: string): 'executor' | 'par
   return undefined
 }
 
-/**
- * Whether a pending signal was submitted by this session. The two sides
- * number their turns independently, so turn equality across sessions means
- * nothing: only the submitting session's own `turn/end` may commit (or abort)
- * its signal. Legacy records without `session` accept either bound side.
- */
+/** Whether a pending signal was submitted by this session. The two sides number their turns independently, so turn equality across sessions means nothing: only the submitting session's own `turn/end` may commit (or abort) its signal. Legacy records without `session` accept either bound side. */
 export function signalBelongsTo(
   pending: PendingSignal,
   run: RunRecord,
@@ -130,11 +103,7 @@ export function startRun(
   }
 }
 
-/**
- * Accept (or refuse) one `trigger_signal` call. On success the run holds the
- * signal as pending — nothing advances until `commitTurnEnd` sees the turn's
- * `completed` end, so a still-running session is never pre-empted.
- */
+/** Accept (or refuse) one `trigger_signal` call. On success the run holds the signal as pending - nothing advances until `commitTurnEnd` sees the turn's `completed` end, so a still-running session is never pre-empted. */
 export function submitSignal(
   run: RunRecord,
   callerSession: string,
@@ -196,12 +165,7 @@ export function submitSignal(
   }
 }
 
-/**
- * Fold one session-log `turn/end` into a run. Only the session that submitted
- * the pending signal, on the exact turn it belongs to, ending `completed`,
- * commits; anything else with a pending signal parks the run in `paused-error`
- * instead of guessing.
- */
+/** Fold one session-log `turn/end` into a run. Only the session that submitted the pending signal, on the exact turn it belongs to, ending `completed`, commits; anything else with a pending signal parks the run in `paused-error` instead of guessing. */
 export function commitTurnEnd(
   run: RunRecord,
   sessionId: string,
@@ -291,17 +255,7 @@ export function commitTurnEnd(
   }
 }
 
-/**
- * Fold one executor turn that ended `completed` with NO explicit signal into
- * an auto-delivery: mint the synthetic pending signal (the runtime supplies
- * the turn's final assistant text as the summary) and commit it in the same
- * step — the turn is already over, so there is nothing left to wait for.
- *
- * Refuses (returns `ignored`) unless the run is active, the caller is the
- * executor, the phase expects a delivery, no explicit signal is pending, and
- * the summary is non-empty — an empty final reply has nothing to review, so
- * the runtime nudges instead of delivering noise.
- */
+/** Fold one executor turn that ended `completed` with NO explicit signal into an auto-delivery: mint the synthetic pending signal (the runtime supplies the turn's final assistant text as the summary) and commit it in the same step - the turn is already over, so there is nothing left to wait for. */
 export function autoDeliver(
   run: RunRecord,
   sessionId: string,
@@ -332,13 +286,6 @@ export function autoDeliver(
 /** Which side a missing-conclusion nudge targets and which nudgeState slot bounds it. */
 export type NudgeKind = 'deliver' | 'review'
 
-/**
- * Mint the ONE bounded missing-conclusion reminder a round may carry per side:
- * `deliver` reminds an executor whose completed turn carried no delivery,
- * `review` reminds a reviewer whose turn ended without a verdict. The nudge
- * records its round in `nudgeState`, so a second eligible turn-end in the same
- * round is silently ignored — reminders never loop.
- */
 export function dueNudge(
   run: RunRecord,
   kind: NudgeKind,
@@ -414,18 +361,11 @@ export function cancelRun(
 }
 
 export interface ResumeOptions {
-  /** A user note delivered to the side that asked (or that acts next). */
   readonly message?: string
-  /** New budget for `paused-budget`; defaults to exactly one more round. */
   readonly newMaxRounds?: number
 }
 
-/**
- * Resume a paused run. `paused-user` re-activates in place (an optional note
- * goes to the pause's signaler); `paused-budget` raises the budget (default:
- * the one round the deferred rework needs) and releases the deferred rework;
- * `paused-error` re-activates in the phase it parked in.
- */
+/** Resume a paused run. `paused-user` re-activates in place (an optional note goes to the pause's signaler); `paused-budget` raises the budget (default: the one round the deferred rework needs) and releases the deferred rework; `paused-error` re-activates in the phase it parked in. */
 export function resumeRun(
   run: RunRecord,
   options: ResumeOptions,
@@ -439,8 +379,6 @@ export function resumeRun(
     return { ok: false, code: 'run-not-resumable', message: '运行已结束，不能恢复。' }
   }
   if (run.status === 'paused-budget') {
-    // Never shrink: an explicit number wins only above both the deferred
-    // round and the budget already on record.
     const target = Math.max(options.newMaxRounds ?? 0, run.round + 1, run.maxRounds)
     const pending = run.pendingRework
     const resumed: RunRecord = withHistory(
@@ -460,16 +398,12 @@ export function resumeRun(
         detail: `budget ${run.maxRounds} → ${target}, round ${run.round + 1}`,
       },
     )
-    // With a deferred rework held, resuming releases it; otherwise the user
-    // paused mid-budget without a verdict and the executor just continues.
     const intents: DeliveryIntent[] =
       pending !== undefined
         ? [{ runId: run.id, round: run.round + 1, to: run.executor, kind: 'rework' }]
         : []
     return { ok: true, run: resumed, intents }
   }
-  // `pausedBy` records the ROLE that asked; map it back to its session id
-  // before the resume clears the pause provenance.
   const pausedByRole = run.pausedBy ?? (run.phase === 'awaiting-delivery' ? 'executor' : 'parent')
   const resumed: RunRecord = withHistory(
     { ...run, status: 'active', endNote: undefined, pausedBy: undefined },
@@ -501,7 +435,6 @@ export function renderTemplate(body: string, vars: Readonly<Record<string, strin
   )
 }
 
-/** Human labels (UI copy shares them). */
 const STATUS_LABELS: Record<RunStatus, string> = {
   active: '进行中',
   'paused-user': '等待用户',

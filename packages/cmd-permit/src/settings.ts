@@ -1,14 +1,3 @@
-/**
- * The allowlist configuration (dsh 0.2 settings model).
- *
- * The row's `Config` schema IS the Settings form: `@deepseek-ai/dsh-settings`
- * projects every live plugin entry's schema automatically, so the allowlist is
- * editable from the Web Settings page by editing this plugin's own row —
- * namespace `cmd-permit`, the bundle patch's entry id. Every field is
- * `volatile()`, so a Settings edit commits into the running fiber without a
- * remount; the answerer reads the live values through the `Volatile`
- * references on every approval.
- */
 import type { Context, Volatile } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 
@@ -17,15 +6,10 @@ export type MaxMode = 'workspace-write' | 'danger-full-access'
 
 /** Resolved allowlist configuration (live row config). */
 export interface CmdPermitSettings {
-  /** Master switch; false defers everything to the rest of the chain. */
   enabled: boolean
-  /** Command names whose escalations may be auto-allowed. */
   allow: readonly string[]
-  /** Extra regex sources; one matching EVERY segment also allows. */
   allowPattern: readonly string[]
-  /** User additions to the high-risk shapes (always deferred to the human). */
   denyShape: readonly string[]
-  /** Highest escalation mode an allowlisted command may receive. */
   maxMode: MaxMode
 }
 
@@ -38,9 +22,6 @@ export interface Config {
   maxMode: Volatile<MaxMode>
 }
 
-// No `Schema<Config>` annotation: schemastery ≥ 3.18.4 types volatile modes
-// into the schema generics, and an annotation would fight the inference the
-// loader validates `Config` against.
 export const Config = Schema.object({
   enabled: Schema.boolean()
     .default(true)
@@ -76,7 +57,6 @@ export const Config = Schema.object({
 
 /**
  * Return the live settings reader.
- *
  * @param _ctx - plugin context.
  * @param config - composition row config (volatile live references).
  * @returns a thunk reading the currently authoritative settings value.

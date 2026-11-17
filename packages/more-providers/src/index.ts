@@ -1,7 +1,5 @@
 /**
- * YAML-configured API-key routes and default-on OAuth providers.
- * Both adapter families receive the same request-time host image services.
- * Invalid startup configuration registers no provider routes.
+ * YAML-configured API-key routes and default-on OAuth providers. Both adapter families receive the same request-time host image services. Invalid startup configuration registers no provider routes.
  * @module dsh-more-providers
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -41,7 +39,6 @@ export {
 
 /** Plugin-row configuration: only the YAML path is configured here. */
 export interface Config {
-  /** YAML path; empty uses `$DSH_HOME/more-providers.yaml`. */
   configFile?: string
 }
 
@@ -62,8 +59,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     validate: resolveConfig,
     logger: log,
   })
-  // Provider rows are registered once at startup, so a fixed file still needs
-  // a restart; the status route says so and keeps the error visible to the UI.
   registerConfigStatusRoute(ctx, {
     prefix: '/dsh-more-providers',
     title: 'more-providers',
@@ -85,9 +80,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     built = await buildProviders(state.value.providers, log)
   } catch (error) {
     const reason = error instanceof ConfigError ? error.message : String(error)
-    // The document validated, but provider construction rejected it (an
-    // unknown builtin catalog, for example). Surface that failure through the
-    // same status the browser half reads instead of leaving it "valid".
     store.reportFailure(reason)
     log.error(
       'more-providers: config %s is unusable: %s — fix it and restart dsh',

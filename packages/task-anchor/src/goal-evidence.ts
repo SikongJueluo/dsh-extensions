@@ -1,22 +1,5 @@
 /**
- * Goal evidence folded from DURABLE `goal/change` events — never requests.
- *
- * The payloads are decoded against the `dsh-goal` domain's version-1 shapes
- * EXACTLY (`GoalSnapshotChangeMeta` / `GoalClearChangeMeta` in
- * `@deepseek-ai/dsh-goal/lib/types/domain.d.ts`): `{kind:'goal/change',
- * version:1, operation, goal:{id, revision, phase, …}}` or the
- * `{operation:'clear', cleared:{id, revision}}` tombstone. Anything else —
- * unknown `version`, missing `goal.id`/`goal.revision`, an unrecognized
- * `phase` — folds to `unreadable`, never a compatibility guess. `phase` is
- * the durable lifecycle (`active` | `paused` | `blocked` | `complete`);
- * nothing defaults to active. Tool `tool/call` requests prove nothing about
- * outcomes (`update_goal.revision` is the PRE-update CAS value, requests
- * can fail, get/create carry no id) and are ignored entirely.
- *
- * `@deepseek-ai/dsh-goal` also exports a public strict `foldGoal`; once it
- * is installed as a dev dependency this decoder can delegate to it
- * one-for-one. Until then the shapes below are the same contract.
- *
+ * Goal evidence folded from DURABLE `goal/change` events - never requests.
  * @module dsh-execution-guard/goal-evidence
  */
 
@@ -30,11 +13,7 @@ export interface GoalSnapshot {
   readonly phase: GoalPhase
 }
 
-/**
- * Authoritative goal fold. `none` = no goal events; `cleared` = the last
- * event was the clear tombstone; `unreadable` = goal events exist but do
- * not match the known version-1 shapes — explicitly NOT a guess.
- */
+/** Authoritative goal fold. `none` = no goal events; `cleared` = the last event was the clear tombstone; `unreadable` = goal events exist but do not match the known version-1 shapes - explicitly NOT a guess. */
 export type GoalFold =
   | { kind: 'none' }
   | { kind: 'cleared' }
@@ -51,11 +30,7 @@ function isGoalPhase(value: string): value is GoalPhase {
   return PHASES.has(value)
 }
 
-/**
- * Decode one value as a version-1 goal change. `undefined` = not a goal
- * change at all; `'unreadable'` = claims to be one but deviates from the
- * known shape (unknown version, malformed snapshot, unknown phase).
- */
+/** Decode one value as a version-1 goal change. `undefined` = not a goal change at all; `'unreadable'` = claims to be one but deviates from the known shape (unknown version, malformed snapshot, unknown phase). */
 export function decodeGoalChangeV1(
   value: unknown,
 ): { op: 'snapshot'; snapshot: GoalSnapshot } | { op: 'clear' } | undefined | 'unreadable' {
@@ -81,16 +56,7 @@ export function decodeGoalChangeV1(
 }
 
 /**
- * Fold every durable goal event forward; the last decodable one wins and a
- * clear resets to no goal. An unreadable goal event poisons the fold to
- * `unreadable` (later valid events may recover it — the fold keeps going,
- * matching how a strict decoder replays the newest state).
- *
- * The parameter is the structural minimum the fold reads (`type` / `data`),
- * so any durable event stream — including the host's typed `SessionEvent`
- * snapshot and the duck-typed `goal/change` records that are not part of
- * `SessionEventMap` — folds without a cast.
- *
+ * Fold every durable goal event forward; the last decodable one wins and a clear resets to no goal. An unreadable goal event poisons the fold to `unreadable` (later valid events may recover it - the fold keeps going, matching how a strict decoder replays the newest state).
  * @param events - full session snapshot.
  */
 export function foldGoalEvents(
@@ -126,13 +92,6 @@ export type GoalClaim =
 
 /**
  * Merge the model's asserted goal identity with the durable fold.
- *
- * CAS semantics: when the fold carries a snapshot, both id AND revision must
- * agree (a new goal at the same revision is still a mismatch); the result is
- * then `fold-agrees` — proven, and carries the durable phase. Without a
- * readable snapshot the assertion is recorded `args-only-unverified` —
- * explicitly NOT CAS proof, never a silent pick.
- *
  * @param args - goalId/goalRevision asserted by `checkpoint_task` arguments.
  * @param fold - the durable goal fold from {@link foldGoalEvents}.
  */
@@ -158,14 +117,10 @@ export function mergeGoal(
     return { goal: { goalId: id, revision: rev, phase: fold.snapshot.phase }, proof: 'fold-agrees' }
   }
   if (fold.kind === 'cleared') {
-    // A clear tombstone is counter-evidence: the session HAD a goal and it
-    // is gone. Asserting one now is a stale claim, not an unknown.
     return {
       conflict:
         'the session goal was cleared (durable tombstone); no active goal to checkpoint — re-read the goal state',
     }
   }
-  // 'none' (no goal events ever) or 'unreadable': no durable proof either
-  // way — record the assertion, clearly unverified.
   return { goal: { goalId: id, revision: rev }, proof: 'args-only-unverified' }
 }

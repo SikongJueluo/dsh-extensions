@@ -1,18 +1,4 @@
-/**
- * The persistent authorization store. Every permission fact is a record in
- * the plugin's storage domain; this class owns the ordering rules that the
- * domain itself does not provide (one write chain across tables), the path
- * admission checks, and the read model the policy service and browser panel
- * consume.
- *
- * Reads are synchronous from the domain's committed in-memory state. A
- * mutation resolves only after its records are durable; the group record is
- * the commit point for a permission change, and a request's status is
- * interaction state that can be reconciled from the group after a partial
- * failure.
- *
- * @module dsh-session-write-access/access
- */
+/** @module dsh-session-write-access/access */
 import { randomUUID } from 'node:crypto'
 import type { GroupRecord, GrantRecord, MemberRecord, RequestRecord, ForkRecord } from './domain.js'
 import { admitWriteRoot, canonicalDirectory, findProtectedOverlap, pathContains } from './paths.js'
@@ -69,7 +55,6 @@ export class AccessError extends Error {
 
 /** One grant with its effective-coverage explanation. */
 export interface GrantView extends GrantRecord {
-  /** A broader grant in the same group that already covers this one. */
   coveredBy?: string
 }
 
@@ -87,7 +72,6 @@ export interface AccessStatus {
 /** Result of a user add: the new group plus an existing broader grant, if any. */
 export interface AddResult {
   group: GroupRecord
-  /** Set when the directory was already writable, so no revision changed. */
   coveredBy?: string
 }
 
@@ -95,7 +79,6 @@ export interface AddResult {
 export interface RemoveResult {
   group: GroupRecord
   removed: boolean
-  /** A remaining broader grant that still makes the directory writable. */
   stillCoveredBy?: string
 }
 
@@ -108,7 +91,6 @@ export type RequestResult =
 export interface DecisionResult {
   request: RequestRecord
   group: GroupRecord
-  /** False for a repeated click on an already-decided request. */
   changed: boolean
 }
 
@@ -123,9 +105,7 @@ export function covers(parent: string, child: string): boolean {
   return pathContains(parent, child)
 }
 
-/**
- * The persistent authorization store.
- */
+/** The persistent authorization store. */
 export class AccessStore {
   private readonly tables: AccessTables
   private readonly protectedRoots: readonly string[]
@@ -137,9 +117,7 @@ export class AccessStore {
 
   /**
    * @param tables - the opened domain tables.
-   * @param options - protected paths, the deployment's stated workspace
-   *   fallback (absent when it stated none), cold-session lookup, and
-   *   injectable id/clock sources.
+   * @param options - protected paths, the deployment's stated workspace fallback (absent when it stated none), cold-session lookup, and injectable id/clock sources.
    */
   constructor(
     tables: AccessTables,
@@ -162,8 +140,6 @@ export class AccessStore {
   /** Serialize one mutation behind every earlier mutation. */
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.chain.then(operation, operation)
-    // Keep the chain alive for later callers; their own rejection is observed
-    // by the caller's slice, not by this bookkeeping promise.
     this.chain = next.then(
       () => undefined,
       () => undefined,
@@ -273,8 +249,7 @@ export class AccessStore {
   }
 
   /**
-   * Attribute one root session (a fresh session, a resume, or a plugin Fork).
-   * The workspace is recorded once and never widened by a later cwd.
+   * Attribute one root session (a fresh session, a resume, or a plugin Fork). The workspace is recorded once and never widened by a later cwd.
    * @param facts - durable session identities.
    * @param inherited - Fork workspace and click-time grants.
    */
@@ -315,9 +290,6 @@ export class AccessStore {
         }
         await this.tables.groups.put(group.groupId, group)
       } else if (inheritedGrants.length > 0 && existingGroup.grants.length === 0) {
-        // A partial Fork wrote an empty group before it failed. The target is a
-        // freshly created session that has not run a step, so completing its
-        // inherited group is recovery, not widening a used session.
         group = {
           ...existingGroup,
           workspaceRoot,
@@ -347,10 +319,7 @@ export class AccessStore {
     })
   }
 
-  /**
-   * Walk parent links to the root session that owns a family's group. A cold
-   * child is attributed from persisted headers, never from its own cwd.
-   */
+  /** Walk parent links to the root session that owns a family's group. A cold child is attributed from persisted headers, never from its own cwd. */
   private async collectRootFacts(sessionId: string): Promise<RootFacts> {
     let current = sessionId
     for (let depth = 0; depth < 64; depth += 1) {
@@ -385,9 +354,7 @@ export class AccessStore {
   }
 
   /**
-   * Attribute a local subagent to its family's group. The child's own cwd is
-   * deliberately ignored: changing directory or creating a child must not
-   * create a new writable root.
+   * Attribute a local subagent to its family's group. The child's own cwd is deliberately ignored: changing directory or creating a child must not create a new writable root.
    * @param facts - durable child identities, including `parentSession`.
    */
   async ensureChildSession(facts: SessionFacts): Promise<MemberRecord> {
@@ -449,9 +416,6 @@ export class AccessStore {
       workspaceRoot: group.workspaceRoot,
       revision: group.revision,
       grants,
-      // A manual add can make a pending request's directory writable before
-      // anyone clicks Allow; it is no longer pending, and the grant (not the
-      // request row) is the permission fact.
       pending: requests.filter(
         (request) =>
           request.status === 'pending' &&
@@ -462,8 +426,7 @@ export class AccessStore {
   }
 
   /**
-   * Add a directory as a user decision. The group record is the commit point;
-   * nothing is published before the durable write resolves.
+   * Add a directory as a user decision. The group record is the commit point; nothing is published before the durable write resolves.
    * @param sessionId - any session in the target group.
    * @param path - submitted absolute directory.
    */
@@ -516,9 +479,7 @@ export class AccessStore {
   }
 
   /**
-   * Submit one Agent request. The directory must already exist and must not
-   * overlap protected data; an already-granted or already-pending directory
-   * returns the existing fact instead of creating a duplicate.
+   * Submit one Agent request. The directory must already exist and must not overlap protected data; an already-granted or already-pending directory returns the existing fact instead of creating a duplicate.
    * @param sessionId - root or local child session.
    * @param path - requested absolute directory.
    * @param reason - why the Agent needs it (displayed to the user).
@@ -558,9 +519,7 @@ export class AccessStore {
   }
 
   /**
-   * Apply a user decision. A repeated click on an already-decided request is
-   * idempotent; a stale page's expected revision is refused so an old Allow
-   * cannot re-grant a directory after a newer revoke.
+   * Apply a user decision. A repeated click on an already-decided request is idempotent; a stale page's expected revision is refused so an old Allow cannot re-grant a directory after a newer revoke.
    * @param sessionId - session whose panel submitted the decision.
    * @param requestId - the request being decided.
    * @param decision - allow or deny.
@@ -652,11 +611,7 @@ export class AccessStore {
     })
   }
 
-  /**
-   * Create the target group and membership, or reuse an existing one. Caller
-   * already holds the write chain. The caller wrote a `committing` record
-   * naming the target first, so every record this writes is recoverable.
-   */
+  /** Create the target group and membership, or reuse an existing one. Caller already holds the write chain. The caller wrote a `committing` record naming the target first, so every record this writes is recoverable. */
   private async materializeFork(fork: ForkRecord, targetSessionId: string): Promise<GroupRecord> {
     const existingMember = this.tables.members.get(targetSessionId)
     if (existingMember !== undefined) {
@@ -684,8 +639,6 @@ export class AccessStore {
       }
       await this.tables.groups.put(group.groupId, group)
     } else if (fork.grants.length > 0 && existingGroup.grants.length === 0) {
-      // Completing a group left empty by an interrupted commit. The target is
-      // the freshly forked session, which the pre-step gate kept from running.
       group = {
         ...existingGroup,
         workspaceRoot: fork.workspaceRoot,
@@ -715,10 +668,7 @@ export class AccessStore {
   }
 
   /**
-   * Publish the new group for a Fork after the host returned its session id.
-   * The `committing` record naming the target is the durable commit intent;
-   * group and member follow, then the final `committed` marker. A failure at
-   * any later write leaves records `reconcileForks` can finish.
+   * Publish the new group for a Fork after the host returned its session id. The `committing` record naming the target is the durable commit intent; group and member follow, then the final `committed` marker. A failure at any later write leaves records `reconcileForks` can finish.
    * @param forkId - the Fork record.
    * @param targetSessionId - the newly created session.
    */
@@ -755,9 +705,7 @@ export class AccessStore {
   }
 
   /**
-   * Persist the exact target session id as a `committing` intent. The service
-   * calls this before retrying any permission write in its error path, so a
-   * subsequent success or failure is always tied to a durable record.
+   * Persist the exact target session id as a `committing` intent. The service calls this before retrying any permission write in its error path, so a subsequent success or failure is always tied to a durable record.
    * @param forkId - the Fork record.
    * @param targetSessionId - the session the host created.
    */
@@ -779,8 +727,7 @@ export class AccessStore {
   }
 
   /**
-   * Record a host-side Fork failure that still reveals the created session.
-   * No inherited permission is published; the target is kept for diagnosis.
+   * Record a host-side Fork failure that still reveals the created session. No inherited permission is published; the target is kept for diagnosis.
    * @param forkId - the Fork record.
    * @param targetSessionId - the session the host created before failing.
    */
@@ -798,9 +745,7 @@ export class AccessStore {
   }
 
   /**
-   * Remove every permission record published for a target whose commit could
-   * not be confirmed, then mark the Fork failed. Membership is removed first
-   * so the target cannot keep executing with a partial group.
+   * Remove every permission record published for a target whose commit could not be confirmed, then mark the Fork failed. Membership is removed first so the target cannot keep executing with a partial group.
    * @param forkId - the Fork record.
    * @param targetSessionId - the partially committed session.
    */
@@ -812,8 +757,6 @@ export class AccessStore {
       if (fork.stage === 'committed') {
         throw new AccessError('FORK_MISSING', 'a committed Fork cannot be aborted')
       }
-      // Mark failed first so a crash during cleanup cannot be reconciled back
-      // into a committed, inherited group.
       await this.tables.forks.put(fork.forkId, {
         ...fork,
         targetSessionId,
@@ -834,8 +777,7 @@ export class AccessStore {
   }
 
   /**
-   * Mark a Fork failed when its inherited permissions were NOT applied. A
-   * `committed` record is never demoted.
+   * Mark a Fork failed when its inherited permissions were NOT applied. A `committed` record is never demoted.
    * @param forkId - the Fork record.
    */
   async failFork(forkId: string): Promise<void> {
@@ -846,12 +788,7 @@ export class AccessStore {
     })
   }
 
-  /**
-   * Reconcile Fork records left behind by a crash or a partial write.
-   * A `committing` record (or a legacy pending record with a target) is
-   * completed from its own snapshot and marked committed; a pending record
-   * without a target is marked failed. Never invents a target.
-   */
+  /** Reconcile Fork records left behind by a crash or a partial write. A `committing` record (or a legacy pending record with a target) is completed from its own snapshot and marked committed; a pending record without a target is marked failed. Never invents a target. */
   async reconcileForks(): Promise<void> {
     for (const fork of this.forks()) {
       if (fork.stage !== 'pending' && fork.stage !== 'committing') continue

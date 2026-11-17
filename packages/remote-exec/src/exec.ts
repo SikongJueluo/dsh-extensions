@@ -1,75 +1,32 @@
 /**
- * Pure remote-exec protocol: the fixed remote-host script, the ssh argv, the
- * control-line parser and outcome classification. No DSH imports live here,
- * so every piece stays trivially unit-testable (see smoke.mjs).
- *
- * One call is three phases, separated by file descriptors rather than by
- * grepping log text:
- *
- * 1. Host prep (docker present → container exists → running/started) runs in
- *    the remote bash; failures emit a nonce-framed control line on stderr.
- * 2. Container setup runs in a login fish whose stdout/stderr are redirected
- *    to a container-side env log; `cd <cwd>` and the direnv bootstrap happen
- *    there, so their noise never reaches the command's streams.
- * 3. The command runs in that same fish process with fd 3/4 (the real ssh
- *    stdout/stderr) and writes its exit status to a status file; the host
- *    reads that file after the command and emits one final control line.
- *
- * The nonce is generated per call and frames the host's control line; normal
- * command output does not collide with it, and the host emits the line last so
- * it survives the bounded collected tail. The command still runs as arbitrary
- * container code, so this is a reporting protocol, not a security boundary.
- *
+ * Pure remote-exec protocol: the fixed remote-host script, the ssh argv, the control-line parser and outcome classification. No DSH imports live here, so every piece stays trivially unit-testable (see smoke.mjs).
  * @module dsh-remote-exec/exec
  */
 
 /** A whitelisted target, resolved from the plugin-row config (operator-owned). */
 export interface RemoteTarget {
-  /** `~/.ssh/config` alias (or user@host); never model-controlled. */
   readonly sshHost: string
-  /** Remote ssh port; omitted lets ssh config decide. */
   readonly sshPort?: number
-  /** Operator-trusted extra ssh options, pre-split (`['-o', 'Foo=bar']`). */
   readonly sshOptions?: readonly string[]
-  /** Container name on the remote docker host. */
   readonly container: string
-  /**
-   * `docker exec -u` spec, inserted inside double quotes so command
-   * substitution stays live; the default resolves the remote login user's
-   * uid:gid (`$(id -u):$(id -g)`), exactly like remote.py.
-   */
   readonly containerUser?: string
-  /** Default container directory for calls that omit `cwd` (absolute path). */
   readonly defaultCwd: string
-  /**
-   * Container shell, inserted inside a double-quoted assignment so `$(…)`
-   * stays live; invoked as `<shell> -l -c <wrapper>`.
-   */
   readonly shell: string
-  /** `direnv` mirrors remote.py's env bootstrap; `none` runs the bare command. */
   readonly envInit: 'direnv' | 'none'
-  /** `docker start` a stopped container (never create/rebuild). */
   readonly autoStart: boolean
-  /** Human hint surfaced in approval prompts. */
   readonly description?: string
 }
 
-/** Default container shell: a login fish from the remote user's nix profile. */
 export const DEFAULT_CONTAINER_SHELL = '/home/$(id -un)/.nix-profile/bin/fish'
 
-/** Default `docker exec -u` spec: the remote login user's uid:gid. */
 export const DEFAULT_CONTAINER_USER = '$(id -u):$(id -g)'
 
-/** Distinctive exit code for host prep failures (docker/host side). */
 export const PREP_EXIT_CODE = 86
 
-/** Exit code the container wrapper uses when environment initialization fails. */
 export const ENV_EXIT_CODE = 87
 
-/** Exit code the container wrapper uses when the requested cwd is inaccessible. */
 export const CWD_EXIT_CODE = 88
 
-/** ssh's own failure exit code (openssh uses 255 for connection-level errors). */
 export const SSH_EXIT_CODE = 255
 
 /** How one remote_exec call ended. */
@@ -84,7 +41,6 @@ export type RemoteOutcome =
   | 'timeout-unknown'
   | 'cancelled-unknown'
 
-/** Every outcome, as a readonly tuple for schemas and tests. */
 export const REMOTE_OUTCOMES = [
   'ok',
   'prep-error',
@@ -105,7 +61,6 @@ export type RemoteControlKind =
   | 'status-unknown'
   | 'command-start'
 
-/** Every control kind, as a readonly tuple for parsing and tests. */
 export const REMOTE_CONTROL_KINDS = [
   'prep-error',
   'cwd-error',
@@ -118,7 +73,6 @@ export const REMOTE_CONTROL_KINDS = [
 export interface RemoteControl {
   readonly kind: RemoteControlKind
   readonly detail: string
-  /** stderr before the control line: command stderr, env log, or setup error. */
   readonly before: string
 }
 
@@ -129,21 +83,12 @@ export function shQuote(value: string): string {
 
 /** Inputs to {@link buildRemoteScript} beyond the target itself. */
 export interface RemoteScriptOptions {
-  /** fish-syntax command from the model; evaluated inside the container shell. */
   readonly command: string
-  /** Absolute container directory for this call (already validated). */
   readonly cwd: string
-  /** Per-call token framing the final control line and the temp file names. */
   readonly nonce: string
-  /** autoStart poll budget in 1-second attempts (clamped to at least 1). */
   readonly startAttempts: number
 }
 
-/**
- * Container-side fish wrapper, invoked as `fish -l -c <wrapper> <command>
- * <cwd> <status> <envInit>`. Its stdout/stderr are the env log (set up by the
- * outer sh), while fd 3/4 are the real ssh streams.
- */
 const FISH_WRAPPER = `set -l __re_command $argv[1]
 set -l __re_cwd $argv[2]
 set -l __re_status $argv[3]
@@ -189,12 +134,6 @@ begin
 end >&3 2>&4
 `
 
-/**
- * Outer sh wrapper: save the real ssh streams on fd 3/4, point the login
- * fish's streams at the container-side env log, then exec the fish wrapper.
- * Invoked as `sh -c <outer> remote-exec <envlog> <shell> <wrapper> <command>
- * <cwd> <status> <envInit>`.
- */
 const OUTER_SH = `exec 3>&1 4>&2 1>"$1" 2>&1
 exec "$2" -l -c "$3" "$4" "$5" "$6" "$7"`
 
@@ -302,11 +241,6 @@ exit "$rc"
 export function buildSshArgv(sshPath: string, target: RemoteTarget): string[] {
   const argv: string[] = [sshPath]
   if (target.sshPort !== undefined) argv.push('-p', String(target.sshPort))
-  // BatchMode is an invariant — the tool never answers interactive prompts —
-  // and comes FIRST because ssh keeps the first obtained value per option.
-  // The operator's options follow it, then the TOFU host-key default: an
-  // operator option may tighten ('yes') or widen ('no') it, but a *changed*
-  // host key always fails.
   argv.push(
     '-o',
     'BatchMode=yes',
@@ -321,13 +255,6 @@ export function buildSshArgv(sshPath: string, target: RemoteTarget): string[] {
   return argv
 }
 
-/**
- * Parse the final nonce-framed control line from stderr. The host emits it as
- * the last line, so the parser looks from the end; `before` is the content
- * that preceded it (command stderr, env log, or setup error). Normal command
- * output does not collide with the per-call nonce; a fake earlier line is
- * ignored because the host's line is last.
- */
 export function parseControl(stderr: string, nonce: string): RemoteControl | undefined {
   const marker = `remote-exec:${nonce}:`
   const at = stderr.lastIndexOf(`\n${marker}`)
@@ -348,16 +275,6 @@ function isControlKind(value: string): value is RemoteControlKind {
   return (REMOTE_CONTROL_KINDS as readonly string[]).includes(value)
 }
 
-/**
- * Classify one finished (or aborted) run. Timeout and caller cancellation
- * win over any control line: the local ssh was killed, so the remote
- * command's fate is unknown by construction. A `command-start` line is
- * authoritative for "the command ran" (the host wrote it after reading the
- * container status), including a command that itself exits 255. A
- * `status-unknown` line means the command may have run but the host could not
- * read its completion status; a missing control line is treated the same way
- * rather than claiming the command never started.
- */
 export function classifyOutcome(
   exitCode: number | null,
   control: RemoteControl | undefined,
@@ -368,7 +285,6 @@ export function classifyOutcome(
   if (cancelled) return 'cancelled-unknown'
   switch (control?.kind) {
     case undefined:
-      // No nonce-framed control line arrived: classify by the ssh exit code.
       break
     case 'cwd-error':
       return 'cwd-error'

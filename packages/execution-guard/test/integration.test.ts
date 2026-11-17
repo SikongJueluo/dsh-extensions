@@ -56,7 +56,6 @@ function makeFixture(overrides: Partial<Config> = {}): Fixture {
   const agent = {
     id: 'agent-it',
     session,
-    // The host's deferred next-step channel: what a real ReactLoopAgent exposes.
     inject: (message: unknown) => {
       injected.push(message)
     },
@@ -402,7 +401,6 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
     const pre = wrapPre(fixture, () => {})
     const onResult = resultListener(fixture)
 
-    // First occurrence: deny + final invalid -> count 1, NO hint yet.
     const first = await pre({
       callId: 'c2',
       name: 'write',
@@ -414,8 +412,6 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
     onResult({ callId: 'c2', name: 'write', arguments: {}, agent: fixture.agent }, errorResult)
     expect(hints(fixture)).toEqual([])
 
-    // Second same-shape occurrence in a later step: count 2 -> hint notice
-    // appended to the session with the standard execution-guard source.
     const second = await pre({
       callId: 'c2',
       name: 'write',
@@ -428,13 +424,8 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
     expect(
       hints(fixture).some((source) => source.kind === 'execution-guard' && source.form === 'hint'),
     ).toBe(true)
-    // ...and never as a bare surface append: the observer fires per call
-    // inside the batch, where a surface user/message would split a parallel
-    // batch's tool-call/result pairing (HTTP 400 on OpenAI-compatible endpoints).
     expect(surfaceNotices(fixture)).toEqual([])
 
-    // Valid sibling denied by the batch-mate: final INVALID_ARGS but no
-    // own-argument fault — counted never, hinted never.
     const valid = await pre({
       callId: 'c1',
       name: 'read',
@@ -468,9 +459,7 @@ describe('adapter: repeat hints via the tools/result final-outcome observer', ()
       signal: new AbortController().signal,
     })
     onResult({ callId: 'c2', name: 'write', arguments: {}, agent: fixture.agent }, errorResult)
-    // A successful write settles as ABORTED after cancellation: no reset.
     onResult({ callId: 'ok1', name: 'write', arguments: {}, agent: fixture.agent }, aborted)
-    // Therefore the next same-shape invalid is the SECOND -> hint.
     pushStep(fixture, 'c3', '{"file_path":"q"}', 2, 5)
     await pre({
       callId: 'c3',

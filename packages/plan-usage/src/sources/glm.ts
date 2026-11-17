@@ -1,18 +1,5 @@
 /**
  * GLM coding-plan quota source for z.ai / bigmodel.cn.
- *
- * Data source: the subscription console's own (undocumented but stable)
- * monitor endpoint `GET {host}/api/monitor/usage/quota/limit`, authenticated
- * with the same API key the provider route uses. The response's `limits`
- * array carries one row per window: `TOKENS_LIMIT`/`CREDIT_LIMIT` rows with
- * `unit` 3 / `number` 5 are the rolling five-hour window, `unit` 6 /
- * `number` 1 the weekly window, and `TIME_LIMIT` rows are the monthly MCP
- * tool budget. Every row reports the consumed `percentage` (0-100) and, when
- * relevant, `nextResetTime` (epoch ms).
- *
- * Verified against live responses captured by OpenTokenUsage and opencodex
- * (both MIT); the legacy flat-field payload shape is kept as a fallback.
- *
  * @module dsh-plan-usage/sources/glm
  */
 
@@ -30,13 +17,10 @@ export interface GlmWindows extends Pick<
 
 /** How to reach one provider's quota endpoint. */
 export interface MonitorConfig {
-  /** Monitor origin, e.g. `https://open.bigmodel.cn`. */
   monitorBaseUrl: string
-  /** Env var names to try, in order; the first non-empty value wins. */
   apiKeyEnv: string[]
 }
 
-/** Built-in monitors for the known GLM coding-plan provider routes. */
 const BUILTIN_MONITORS: Record<string, MonitorConfig> = {
   'zai-coding-cn': {
     monitorBaseUrl: 'https://open.bigmodel.cn',
@@ -66,16 +50,11 @@ const BUILTIN_MONITORS: Record<string, MonitorConfig> = {
 
 /** User config for one provider monitor (all fields optional). */
 export interface ProviderMonitorSettings {
-  /** Override the monitor origin (default: the route's built-in). */
   monitorBaseUrl?: string
-  /** Env var name holding the API key (default: the route's built-ins). */
   apiKeyEnv?: string
 }
 
-/**
- * Resolve the monitor config for one provider route: user settings over the
- * built-in table. Unknown providers with no user config have no monitor.
- */
+/** Resolve the monitor config for one provider route: user settings over the built-in table. Unknown providers with no user config have no monitor. */
 export function resolveMonitor(
   provider: string,
   settings: Record<string, ProviderMonitorSettings> = {},
@@ -118,7 +97,6 @@ function normalizePercent(value: unknown): number | undefined {
 /** Normalize an epoch-ms reset timestamp; `undefined` when absent or absurd. */
 function normalizeResetAt(value: unknown): number | undefined {
   const raw = finiteNumber(value)
-  // Accept ms epochs from ~2020 to ~2100; anything else is not a timestamp.
   if (raw === undefined || raw < 1_577_836_800_000 || raw > 4_102_444_800_000) return undefined
   return Math.round(raw)
 }
@@ -150,11 +128,7 @@ function usable(window: QuotaWindow | undefined): boolean {
   return window !== undefined && (window.percent !== undefined || window.resetAt !== undefined)
 }
 
-/**
- * Parse a quota-limit response body (`limits`-array shape preferred, legacy
- * flat fields as fallback). Pure; returns the window facts without provider
- * identity or fetch time.
- */
+/** Parse a quota-limit response body (`limits`-array shape preferred, legacy flat fields as fallback). Pure; returns the window facts without provider identity or fetch time. */
 export function parseQuotaBody(body: unknown): GlmWindows | null {
   const outer = asRecord(body)
   if (outer === null || outer.success === false) return null
@@ -176,8 +150,6 @@ export function parseQuotaBody(body: unknown): GlmWindows | null {
         monthlyMcp = windowOf(row)
       }
     }
-    // Per opencodex: when the `limits` key is present, legacy fields are ignored —
-    // even an empty array means "no windows", not "fall back".
     const parsed: GlmWindows = { source: 'glm:limits' }
     if (usable(fiveHour)) parsed.fiveHour = fiveHour
     if (usable(weekly)) parsed.weekly = weekly
@@ -191,7 +163,6 @@ export function parseQuotaBody(body: unknown): GlmWindows | null {
     if (level !== undefined) parsed.level = level
     return parsed
   }
-  // Legacy flat fields, optionally nested under `quota`.
   const nested = asRecord(data.quota)
   const percentAt = (key: string): number | undefined =>
     normalizePercent(data[key]) ?? (nested === null ? undefined : normalizePercent(nested[key]))
@@ -218,9 +189,7 @@ export interface QuotaMonitorOptions {
   fetchImpl?: FetchLike
   now?: () => number
   logger?: SourceLogger
-  /** Request timeout per quota call. */
   timeoutMs?: number
-  /** Optional external key resolver (dsh-more-providers' `providerKeys`). */
   resolveKey?: (provider: string, monitor: MonitorConfig) => string | undefined
 }
 
@@ -234,12 +203,7 @@ function monitorCacheKey(monitor: MonitorConfig, apiKey: string): string {
   return JSON.stringify([monitor.monitorBaseUrl, apiKey])
 }
 
-/**
- * Shared quota reader with a TTL cache keyed by monitor identity (endpoint +
- * resolved key), not provider route: every waiting agent and the Settings
- * page read through one instance, and provider routes that share a monitor
- * (the GLM coding-plan aliases) produce one upstream request, not N.
- */
+/** Shared quota reader with a TTL cache keyed by monitor identity (endpoint + resolved key), not provider route: every waiting agent and the Settings page read through one instance, and provider routes that share a monitor (the GLM coding-plan aliases) produce one upstream request, not N. */
 export class QuotaMonitor {
   private readonly fetchImpl: FetchLike
   private readonly now: () => number
@@ -272,11 +236,7 @@ export class QuotaMonitor {
     return undefined
   }
 
-  /**
-   * Read one provider's quota. Serves from cache while younger than
-   * `maxAgeMs`; `force` bypasses the cache. Network/parse failures resolve to
-   * `undefined` (never throw) after a warn log.
-   */
+  /** Read one provider's quota. Serves from cache while younger than `maxAgeMs`; `force` bypasses the cache. Network/parse failures resolve to `undefined` (never throw) after a warn log. */
   async get(
     provider: string,
     monitor: MonitorConfig,

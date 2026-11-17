@@ -14,11 +14,7 @@ export interface DialogProps {
   className?: string
 }
 
-/**
- * Modal dialog on Base UI. Focus trapping, Escape, and focus return are Base
- * UI's contract; the portal targets a container inside the slot subtree so the
- * popup keeps the host's theme variables and never becomes a second app root.
- */
+/** Modal dialog on Base UI. Focus trapping, Escape, and focus return are Base UI's contract; the portal targets a container inside the slot subtree so the popup keeps the host's theme variables and never becomes a second app root. */
 export function Dialog({
   open,
   onOpenChange,

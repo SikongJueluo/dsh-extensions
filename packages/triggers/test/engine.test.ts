@@ -1,7 +1,5 @@
 /**
- * Engine tests: the full loop plus every stop/abuse path, all through the
- * pure seam — no Cordis, no storage, no clocks.
- *
+ * Engine tests: the full loop plus every stop/abuse path, all through the pure seam - no Cordis, no storage, no clocks.
  * @module dsh-triggers/engine.test
  */
 import { describe, expect, it } from 'vitest'
@@ -147,12 +145,9 @@ describe('session-scoped signal ownership', () => {
   it('the counterpart ending its own same-numbered turn never commits the signal', () => {
     const accepted = submitSignal(freshRun(), EXECUTOR, 'deliver', 'done', 1, 1100)
     if (!accepted.ok) throw new Error('rejected')
-    // The reviewer's turn numbering is independent: its turn 1 ending first
-    // must not advance — or even abort — the executor's pending signal.
     expect(commitTurnEnd(accepted.run, PARENT, 1, 'completed', 1200)).toEqual({ kind: 'ignored' })
     expect(commitTurnEnd(accepted.run, PARENT, 1, 'aborted', 1200)).toEqual({ kind: 'ignored' })
     expect(accepted.run.pendingSignal).toBeDefined()
-    // The submitting session's turn end commits exactly once.
     const ended = commitTurnEnd(accepted.run, EXECUTOR, 1, 'completed', 1300)
     expect(ended.kind).toBe('advance')
   })
@@ -242,7 +237,6 @@ describe('round budget', () => {
     if (!accepted.ok) throw new Error(`rejected: ${accepted.code}`)
     const ended = commitTurnEnd(accepted.run, PARENT, 5, 'completed', 1400)
     if (ended.kind !== 'advance') throw new Error(ended.kind)
-    // round 1 rework advanced to round 2; now deliver round 2 and rework again
     expect(ended.run.round).toBe(2)
     const second = deliver(ended.run, 8, 1500)
     const verdict = submitSignal(second.run, PARENT, 'rework', 'again', 10, 1600)
@@ -271,7 +265,6 @@ describe('round budget', () => {
     expect(resumed.run.round).toBe(2)
     expect(resumed.run.maxRounds).toBe(2)
     expect(resumed.intents).toEqual([{ runId: 'run-1', round: 2, to: EXECUTOR, kind: 'rework' }])
-    // An explicit larger budget is honored.
     const bigger = resumeRun(ended.run, { newMaxRounds: 9 }, 2000)
     if (!bigger.ok) throw new Error('rejected')
     expect(bigger.run.maxRounds).toBe(9)
@@ -375,7 +368,6 @@ describe('turn-end auto-delivery', () => {
 
   it('refuses anything but a completed executor delivery turn', () => {
     const run = startRun({ ...binding(), autoDeliver: true }, BODIES, '任务', 'run-1', 1000)
-    // empty reply, other session, wrong phase, pending signal, inactive run
     expect(autoDeliver(run, EXECUTOR, 4, '', 1100).kind).toBe('ignored')
     expect(autoDeliver(run, PARENT, 4, 'hi', 1100).kind).toBe('ignored')
     expect(autoDeliver(run, OUTSIDER, 4, 'hi', 1100).kind).toBe('ignored')
@@ -396,9 +388,7 @@ describe('bounded nudges', () => {
     if (!first.ok) return
     expect(first.intent).toEqual({ runId: 'run-1', round: 1, to: EXECUTOR, kind: 'nudge' })
     expect(first.run.nudgeState).toEqual({ deliver: 1 })
-    // second attempt in the same round is bounded away…
     expect(dueNudge(first.run, 'deliver', 1200).ok).toBe(false)
-    // …and a new round earns exactly one more
     const reworked: RunRecord = { ...first.run, phase: 'awaiting-delivery', round: 2 }
     expect(dueNudge(reworked, 'deliver', 1300)).toMatchObject({ ok: true })
   })
@@ -415,7 +405,6 @@ describe('bounded nudges', () => {
     if (!nudged.ok) return
     expect(nudged.intent).toEqual({ runId: 'run-1', round: 1, to: PARENT, kind: 'nudge' })
     expect(dueNudge(nudged.run, 'review', 1300).ok).toBe(false)
-    // sides are bounded independently within one round
     expect(dueNudge(nudged.run, 'deliver', 1300).ok).toBe(false)
   })
 })

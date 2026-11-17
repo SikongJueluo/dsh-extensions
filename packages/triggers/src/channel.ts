@@ -1,12 +1,5 @@
 /**
- * The browser channel: one web-server prefix route (`/dsh-triggers`) speaking
- * the connection RPC envelope (same grammar as dsh-handoff / dsh-context-audit).
- *
- * The browser view is a full-snapshot client: every mutation is a small RPC
- * (`run.control`, …) and `state` re-reads the domain, so the UI and the model
- * tool always drive the SAME host state — there is no second write path in the
- * browser. `state` accepts a `sessionId` so the host filters before its caps.
- *
+ * The browser channel: one web-server prefix route (`/dsh-triggers`) speaking the connection RPC envelope (same grammar as dsh-handoff / dsh-context-audit).
  * @module dsh-triggers/channel
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -17,12 +10,9 @@ import { PACKAGE_NAME, RPC_CHANNEL } from './identity.js'
 import { isRecord } from './record.js'
 import type { TriggerService } from './service.js'
 
-/** One endpoint segment of the channel (same grammar as connection RPC). */
 const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
-/** Template bodies ride the channel; keep a generous but finite ceiling. */
 const MAX_CHANNEL_BODY_BYTES = 256 * 1024
 
-/** Control actions `run.control` accepts (same vocabulary as the service). */
 const RUN_ACTIONS = ['pause', 'resume', 'cancel', 'extend', 'redeliver'] as const
 type RunAction = (typeof RUN_ACTIONS)[number]
 
@@ -52,9 +42,6 @@ async function handle(
       case 'template.save':
         return {
           ok: true,
-          // saveTemplate validates every field at runtime (`unknown`-typed
-          // input), so passing the record through unchanged is the same
-          // contract the cast used to express.
           value: await service.saveTemplate({
             id: payload.id,
             name: payload.name,
@@ -69,9 +56,6 @@ async function handle(
       case 'binding.save':
         return {
           ok: true,
-          // saveBinding validates every field at runtime (`unknown`-typed
-          // input), so passing the record through unchanged is the same
-          // contract the cast used to express.
           value: await service.saveBinding({
             id: payload.id,
             name: payload.name,
@@ -131,10 +115,7 @@ function bad(_endpoint: string, message: string): ChannelResult {
   return { ok: false, error: { code: 'BAD_PAYLOAD', message } }
 }
 
-/**
- * Mount the channel route; appears once the connection service and a web
- * server are both present (soft-injected), mirroring the other packages.
- */
+/** Mount the channel route; appears once the connection service and a web server are both present (soft-injected), mirroring the other packages. */
 export function registerTriggerChannel(ctx: Context, service: TriggerService): void {
   const serve = async (
     svcCtx: Context,
@@ -168,8 +149,6 @@ export function registerTriggerChannel(ctx: Context, service: TriggerService): v
     let received = 0
     for await (const raw of req) {
       const chunk: unknown = raw
-      // The request is read without `setEncoding`, so the iterator yields
-      // Buffers; anything else carries no byte length to meter.
       if (!(chunk instanceof Buffer)) continue
       received += chunk.byteLength
       if (received > MAX_CHANNEL_BODY_BYTES) {

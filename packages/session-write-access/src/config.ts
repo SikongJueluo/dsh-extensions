@@ -1,12 +1,4 @@
-/**
- * Plugin-row configuration for the sandbox-policy replacement. The stock
- * fields (`mode`, `workspaceRoot`, `additionalWritableRoots`) are restated
- * because replacing a row replaces its whole config; the remaining fields
- * declare which physical paths the standing workspace-write policy must never
- * be able to rewrite.
- *
- * @module dsh-session-write-access/config
- */
+/** @module dsh-session-write-access/config */
 import { realpathSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,25 +8,14 @@ import { expandPath, findProtectedOverlap } from './paths.js'
 
 /** Plugin config; `Config` supplies the same defaults as the stock policy row. */
 export interface Config {
-  /** File-sandbox mode a session starts from (default: `read-only`, the fail-safe stock default). */
   mode?: SandboxMode
-  /**
-   * Absolute fallback workspace root for agentless calls or sessions without a
-   * cwd. Absent means no fallback: such a `workspace-write` call is refused
-   * instead of inheriting whatever directory the host process started in.
-   */
   workspaceRoot?: string
-  /** Extra physical absolute directories `workspace-write` may write under for every session. */
   additionalWritableRoots?: string[]
-  /** Extra physical paths that must never be writable by the standing policy. */
   protectedPaths?: string[]
-  /** Protect the DSH home (profile, plugin bundles, authorization storage); default true. */
   protectHomeData?: boolean
-  /** Protect this package's own installed directory; default true. */
   protectPluginCode?: boolean
 }
 
-/** The schema projected into the settings UI; no `Schema<Config>` annotation by repo rule. */
 export const Config = Schema.object({
   mode: Schema.union(['read-only', 'workspace-write', 'danger-full-access'])
     .default('read-only')
@@ -62,7 +43,6 @@ export const Config = Schema.object({
     .description('Refuse any workspace or grant overlapping this plugin package.'),
 })
 
-/** The package root this module is installed in (lib/.. when built). */
 export const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /** Canonicalize an existing path, else keep a resolved absolute spelling. */
@@ -106,10 +86,6 @@ export function resolveProtectedRoots(
 
 /**
  * The fallback workspace root the deployment actually stated.
- *
- * Nothing is derived from `process.cwd()`: the host process directory is a
- * deployment detail (a service manager unit usually starts in `$HOME`), not a
- * stated grant. A missing fallback is refused at the call that would need it.
  * @param config - validated plugin config.
  * @returns the physical absolute fallback root, or undefined for none.
  */
@@ -120,10 +96,7 @@ export function resolveConfiguredWorkspaceRoot(config: Config): string | undefin
 }
 
 /**
- * Verify the deployment-level roots at load. A deployment that makes the
- * authorization store or plugin code writable must fail loudly rather than
- * run with a policy that can rewrite itself. Only roots the deployment states
- * are checked; an absent fallback contributes nothing here.
+ * Verify the deployment-level roots at load. A deployment that makes the authorization store or plugin code writable must fail loudly rather than run with a policy that can rewrite itself. Only roots the deployment states are checked; an absent fallback contributes nothing here.
  * @param config - validated plugin config.
  * @param protectedRoots - resolved protected paths.
  */

@@ -1,10 +1,3 @@
-/**
- * Judge-policy pins for the v5 read-only investigation agent, plus the real
- * multi-step loop against a fake llm: one model turn may request project
- * evidence, the next decides on what it received.
- *
- * @module dsh-auto-permit/judge.test
- */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -28,7 +21,6 @@ import { join } from 'node:path'
 
 const prompt = SYSTEM_PROMPT
 
-/** A route factory for one scripted investigation (`file` is only a param). */
 const make = (file: string) =>
   route([
     () => toolChunks('read_file', { path: file }),
@@ -219,10 +211,6 @@ describe('judge evidence budget', () => {
     expect(streamCalls).toBe(0)
   })
 })
-
-// ---------------------------------------------------------------------------
-// Multi-step loop against a fake llm
-// ---------------------------------------------------------------------------
 
 let root: string
 let otherRoot: string
@@ -467,8 +455,6 @@ describe('judge investigation loop', () => {
   })
 
   it('classifies a model timeout', async () => {
-    // A stream that never yields and never observes the signal would hang the
-    // test; this one rejects when the judge aborts it.
     const hanging = {
       stream: (request: { signal?: AbortSignal }) =>
         ({

@@ -141,7 +141,6 @@ describe('AccessStore attribution', () => {
     await expect(store.ensureRootSession({ sessionId: 'root', cwd: '/' })).rejects.toThrow(
       /overlaps/u,
     )
-    // A group created from a normal workspace still cannot grant '/'.
     const workspace = mkdtempSync(join(tmpdir(), 'dsh-swa-root-'))
     const other = new AccessStore(tables(), {
       protectedRoots: ['/home/example/.dsh'],
@@ -186,7 +185,6 @@ describe('AccessStore attribution', () => {
     if (!(failure instanceof AccessError)) throw new TypeError('expected an AccessError')
     expect(failure.code).toBe('NO_WORKSPACE')
     expect(failure.message).toMatch(/no workspaceRoot/u)
-    // A stated cwd still works: only the derived fallback is gone.
     await expect(
       store.ensureRootSession({ sessionId: 'with-cwd', cwd: join(root, 'workspace') }),
     ).resolves.toBeDefined()
@@ -429,7 +427,6 @@ describe('AccessStore fork commit recovery', () => {
     await expect(store.commitFork(fork.forkId, 'forked')).rejects.toThrow('member write failed')
     expect(store.member('forked')).toBeUndefined()
     tableSet.members.put = put
-    // Simulate a restart: a fresh store over the same durable tables.
     const reopened = new AccessStore(tableSet, {
       protectedRoots: [join(root, 'protected')],
       workspaceFallback: workspace,

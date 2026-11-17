@@ -1,7 +1,5 @@
 /**
- * `/handoff` command registration: model-choice dialog plus the briefing
- * instruction handed to the current agent.
- *
+ * `/handoff` command registration: model-choice dialog plus the briefing instruction handed to the current agent.
  * @module dsh-handoff/command
  */
 import { readFile } from 'node:fs/promises'
@@ -11,6 +9,7 @@ import type { CommandDefinition, CommandInvocation, CommandResult } from '@deeps
 import type {} from '@deepseek-ai/dsh-user-questions'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { spawnHandoff } from './spawn.js'
+import { debugQuietly, errorTag } from './diagnostics.js'
 import { COMMAND_NAME, COMPLETE_MARKER, DEFAULT_BRIEF_DIR, PACKAGE_NAME } from './identity.js'
 import { briefInstruction, continueInstruction, startHandoffWatch, timestampSlug } from './brief.js'
 import type { ModelChoice, PresetChoice } from './choice.js'
@@ -36,32 +35,19 @@ import {
 } from './selection.js'
 import { presetName, presetProblem, snapshotPresets, type PresetRoster } from './presets.js'
 
-/** Label shown for "keep this session's preset and model". */
 const LABEL_INHERIT = '继承当前会话'
-/** Label shown for "same as manually clicking New Session". */
 const LABEL_DEFAULT = '全局默认'
-/** Label shown for the origin workspace entry of the workspace step. */
 const LABEL_ORIGIN = '原工作区'
-/** Label for the remembered/retry route offered first on the fallback card. */
 const LABEL_LAST = '上次使用的模型'
 
-/** How long the confirmation card may sit unanswered before we fall back to the default choice. */
 const CONFIRM_TIMEOUT_MS = 60_000
-/** Keep the dialog list sane; beyond this, custom input is the escape hatch. */
 const MODEL_MENU_LIMIT = 50
-/** Same cap for the workspace question card (the browser list itself is unbounded). */
 const WORKSPACE_MENU_LIMIT = 50
-/** Prefix flag selecting the fresh session's model without a dialog. */
 const MODEL_FLAG = '--model'
-/** Prefix flag selecting the target workspace without a dialog. */
 const WORKSPACE_FLAG = '--workspace'
-/** Bare flag resuming the newest unfinished handoff; same as empty input. */
 const RETRY_FLAG = '--retry'
-/** Bare flag binding an auto-review loop (dsh-triggers) to the handoff. */
 const REVIEW_FLAG = '--review'
-/** Prefix flag setting the auto-review round budget; implies --review. */
 const REVIEW_ROUNDS_FLAG = '--review-rounds'
-/** Round budget offered by default when the user just ticks the toggle. */
 const DEFAULT_REVIEW_ROUNDS = 5
 
 function ok(text: string): CommandResult {
@@ -80,7 +66,6 @@ function keyOf(agent: Agent): string {
 /** One enumerable provider/model route offered by the dialog. */
 interface ModelRoute {
   readonly provider: string
-  /** Provider display name (shown to the operator instead of the route id). */
   readonly providerName: string
   readonly model: string
   readonly name: string
@@ -98,11 +83,7 @@ function menuDescription(route: ModelRoute): string | undefined {
   return parts.join(' · ')
 }
 
-/**
- * Build clickable rows whose labels are the models' display names — the
- * operator should never have to know a `provider/model` spelling. A display
- * name claimed by several providers gets its route id appended.
- */
+/** Build clickable rows whose labels are the models' display names - the operator should never have to know a `provider/model` spelling. A display name claimed by several providers gets its route id appended. */
 function buildMenu(routes: readonly ModelRoute[]): MenuEntry[] {
   const counts = new Map<string, number>()
   for (const route of routes) counts.set(route.name, (counts.get(route.name) ?? 0) + 1)
@@ -119,10 +100,7 @@ function parseModelFlagValue(spec: string): { provider: string; model: string } 
   return { provider: spec.slice(0, slash), model: spec.slice(slash + 1) }
 }
 
-/**
- * Resolve a typed spelling against known routes: `provider/model`, a unique
- * model id, or a unique model display name.
- */
+/** Resolve a typed spelling against known routes: `provider/model`, a unique model id, or a unique model display name. */
 function parseModelSpec(text: string, routes: readonly ModelRoute[]): ModelRoute | undefined {
   const spec = text.trim()
   if (spec.length === 0) return undefined
@@ -138,10 +116,7 @@ function parseModelSpec(text: string, routes: readonly ModelRoute[]): ModelRoute
   return byName.length === 1 ? byName[0] : undefined
 }
 
-/**
- * Menu rows from a bounded catalog snapshot: the same route metadata the Web
- * /model popup shows, so the fallback card and the browser card agree.
- */
+/** Menu rows from a bounded catalog snapshot: the same route metadata the Web /model popup shows, so the fallback card and the browser card agree. */
 function modelRoutes(catalog: CatalogSnapshot | undefined): ModelRoute[] {
   if (catalog === undefined) return []
   return catalog.models.map((model) => ({
@@ -152,12 +127,7 @@ function modelRoutes(catalog: CatalogSnapshot | undefined): ModelRoute[] {
   }))
 }
 
-/**
- * Dialog outcome: a resolved choice plus its workspace/preset verdicts, or a
- * cancellation. `confirmedModel` is true only when a human explicitly answered
- * the model question; a timeout or a missing answerer settles the default but
- * must never be remembered as a preference.
- */
+/** Dialog outcome: a resolved choice plus its workspace/preset verdicts, or a cancellation. `confirmedModel` is true only when a human explicitly answered the model question; a timeout or a missing answerer settles the default but must never be remembered as a preference. */
 type AskOutcome =
   | {
       kind: 'choice'
@@ -174,11 +144,7 @@ interface PreviousDefaults {
   readonly workspaceId?: WorkspacePick
 }
 
-/**
- * Host-resolved defaults for one handoff, independent of how the pick is
- * collected: the retry's record beats the remembered preference, which beats
- * first-time inheritance. Issues mark a default that must not run as-is.
- */
+/** Host-resolved defaults for one handoff, independent of how the pick is collected: the retry's record beats the remembered preference, which beats first-time inheritance. Issues mark a default that must not run as-is. */
 interface ChoiceDefaults {
   readonly choice: ModelChoice
   readonly choiceIssue?: string
@@ -225,11 +191,7 @@ function buildWorkspaceMenu(
   }))
 }
 
-/**
- * The workspace half of the shipped question-card path, asked after the model
- * card whenever a browser picker is unavailable. Falls back to the origin on
- * timeout, exactly like the model card falls back to inheritance.
- */
+/** The workspace half of the shipped question-card path, asked after the model card whenever a browser picker is unavailable. Falls back to the origin on timeout, exactly like the model card falls back to inheritance. */
 async function askWorkspaceCard(
   ctx: Context,
   agent: Agent,
@@ -290,24 +252,11 @@ async function askWorkspaceCard(
     }
     return { kind: 'pick', pick: 'origin' }
   } catch {
-    // Dismissed card, aborted request, or an answerer failure: treat as cancel.
     return { kind: 'cancel' }
   }
 }
 
-/**
- * The shipped question-card path: a flat clickable list of model display names
- * plus two base options, and a typed spelling as the escape hatch. Used by
- * deployments with no browser half (TUI/headless).
- *
- * A usable remembered route (or retry pick) is offered as the first row; an
- * unusable one is named in `detail` and never offered, so the card is the
- * reselection affordance instead of a silent fallback.
- *
- * The ask deliberately does NOT ride `invocation.signal`: the UI request's
- * lifetime must not cancel an unanswered question — our own timeout is the
- * fallback.
- */
+/** The shipped question-card path: a flat clickable list of model display names plus two base options, and a typed spelling as the escape hatch. Used by deployments with no browser half (TUI/headless). */
 async function askChoiceCard(
   ctx: Context,
   agent: Agent,
@@ -317,9 +266,6 @@ async function askChoiceCard(
   defaultChoice: ModelChoice,
   defaultIssue: string | undefined,
 ): Promise<ModelAskOutcome> {
-  // An unusable remembered route must never be replaced by a silent guess:
-  // without an answer the command fails with the reselect reason instead. A
-  // healthy default may proceed, but it is NOT an explicit confirmation.
   const settle = (): ModelAskOutcome =>
     defaultIssue === undefined
       ? { kind: 'choice', choice: defaultChoice, confirmed: false }
@@ -409,17 +355,11 @@ async function askChoiceCard(
       return { kind: 'choice', choice: { kind: 'inherit' }, confirmed: true }
     return settle()
   } catch {
-    // Dismissed card, aborted request, or an answerer failure: treat as cancel.
     return { kind: 'cancel' }
   }
 }
 
-/**
- * Ask for a preset only when the resolved default cannot be mounted (the
- * origin's preset was deleted or is broken). A healthy default never adds a
- * step; without usable rows the handoff fails with the reason instead of
- * composing a preset-less session.
- */
+/** Ask for a preset only when the resolved default cannot be mounted (the origin's preset was deleted or is broken). A healthy default never adds a step; without usable rows the handoff fails with the reason instead of composing a preset-less session. */
 async function askPresetCard(
   ctx: Context,
   agent: Agent,
@@ -433,8 +373,6 @@ async function askPresetCard(
     return { kind: 'cancel', reason: `${issue}；请在配置卡中重新选择预设` }
   try {
     const menu = usable.slice(0, WORKSPACE_MENU_LIMIT)
-    // Names need not be unique; a label shared by several rows gets its id
-    // appended so a click always maps back to exactly one preset.
     const counts = new Map<string, number>()
     for (const option of menu) {
       const label = option.name ?? option.id
@@ -528,37 +466,13 @@ async function askReviewCard(
     const selected = answer.answers[0]?.selected[0]
     return { enabled: selected === '开启自动审核', rounds: defaultRounds }
   } catch {
-    // Dismissed card or answerer failure: plain handoff.
     return { enabled: false, rounds: defaultRounds }
   }
 }
 
-/**
- * The review block on the wire: `fixed` marks a flag-decided verdict shown
- * read-only (the summary must never contradict the flags), otherwise it is
- * the offered toggle the card or a fallback card asks about.
- */
+/** The review block on the wire: `fixed` marks a flag-decided verdict shown read-only (the summary must never contradict the flags), otherwise it is the offered toggle the card or a fallback card asks about. */
 type ReviewWire = { defaultRounds: number; enabled?: boolean; fixed?: boolean }
 
-/**
- * Resolve the fresh session's model and workspace: prefer the browser card
- * (defaults pre-filled, per-field 更改 buttons, one 开始交接 submit) and fall
- * back to the shipped question cards whenever no browser is attached or the
- * card goes unanswered.
- *
- * `modelFixed` means the model came from `--model` (with `fixedRoute` naming
- * that route for the summary) and `fixedWorkspace` names the `--workspace`
- * flag's target; fixed fields render read-only and the returned choice is a
- * placeholder the caller overrides with the flag's route/target.
- *
- * `previous` (retries only) forwards the last attempt's picks so the card can
- * pre-fill them; the card fallback path ignores it.
- *
- * `reviewWire` (present = dsh-triggers mounted, or `--review` already
- * decided) must stay reachable on EVERY path unless fixed: it becomes the
- * card's review block or one extra card — never something a fixed flag
- * silently skips.
- */
 /** Everything one pick needs; the collector differs per path, the defaults do not. */
 interface ResolveChoiceInput {
   readonly rt: HandoffRuntime
@@ -598,10 +512,7 @@ async function resolveChoice(input: ResolveChoiceInput): Promise<AskOutcome> {
   const fallback = defaultRoute(ctx)
   const channel = rt.channel
 
-  /**
-   * Finish a card-path pick: ask for a preset only when the resolved default
-   * cannot mount, then return the one verdict the caller persists.
-   */
+  /** Finish a card-path pick: ask for a preset only when the resolved default cannot mount, then return the one verdict the caller persists. */
   const finish = async (
     choice: ModelChoice,
     workspace: WorkspacePick,
@@ -679,8 +590,6 @@ async function resolveChoice(input: ResolveChoiceInput): Promise<AskOutcome> {
     )
     if (outcome !== undefined) {
       if (outcome.kind === 'cancel') return { kind: 'cancel' }
-      // A submitted card is an explicit human answer, even when it accepts a
-      // preselected default: that is what may become the remembered choice.
       return {
         kind: 'choice',
         choice: outcome.choice,
@@ -690,9 +599,6 @@ async function resolveChoice(input: ResolveChoiceInput): Promise<AskOutcome> {
         confirmedModel: true,
       }
     }
-    // The card never answered. A known-unusable route or preset must not be
-    // replaced silently (least of all by the origin's expensive model): fail
-    // with the reselect reason; a healthy default stands but is not confirmed.
     if (defaults.presetIssue !== undefined) return { kind: 'cancel', reason: defaults.presetIssue }
     if (defaults.choiceIssue !== undefined) return { kind: 'cancel', reason: defaults.choiceIssue }
     ctx.logger(PACKAGE_NAME).warn('model picker unanswered; using the resolved default')
@@ -739,8 +645,6 @@ async function resolveChoice(input: ResolveChoiceInput): Promise<AskOutcome> {
     )
   }
 
-  // --model given: no model card. The review and preset verdicts still must
-  // be asked when they are open.
   const baseChoice: ModelChoice = { kind: 'inherit' }
   if (!needWorkspace) {
     const review = reviewAsk ? await askReviewCard(ctx, agent, reviewWire.defaultRounds) : undefined
@@ -799,13 +703,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       let task = invocation.rawInput.trim()
       const usage = `Usage: /handoff [${MODEL_FLAG} provider/model] [${WORKSPACE_FLAG} <title|path>] [${RETRY_FLAG}] [${REVIEW_FLAG}] [${REVIEW_ROUNDS_FLAG} <n>] <task description>`
 
-      // Leading flags (`--model provider/model`, `--workspace <title|path>`)
-      // skip their dialog step; flags may appear in either order. A workspace
-      // title may contain spaces, so `--workspace` first tries the longest
-      // registered-title prefix before falling back to a single token (path).
-      // `--review` takes no value and binds the auto-review loop;
-      // `--review-rounds <n>` sets its budget and implies `--review`.
-      // `--retry` takes no value and resumes the newest unfinished handoff.
       let flagChoice: ModelChoice | undefined
       let flagWorkspaceSpec: string | undefined
       let retryFlag = false
@@ -836,9 +733,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
           const rest = task.slice(REVIEW_ROUNDS_FLAG.length + 1).trim()
           const space = rest.indexOf(' ')
           const token = space === -1 ? rest : rest.slice(0, space)
-          // `Number` over `Number.parseInt`: the token is the first space-delimited
-          // slice of the flag argument, so it is a plain integer on every reachable
-          // input; a garbage token must fail the usage check, not parse as a prefix.
           const rounds = Number(token)
           if (!Number.isInteger(rounds) || rounds < 1 || rounds > 50) return fail(usage)
           reviewFlag = true
@@ -880,7 +774,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
           `${RETRY_FLAG} 与任务描述互斥：重试上一次交接时不写任务（沿用原任务），发起新交接时才写任务描述。\n${usage}`,
         )
       }
-      // A bare /handoff (empty input) is the retry entry.
       const retry = retryFlag || task.length === 0
 
       const key = keyOf(agent)
@@ -895,8 +788,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         )
       }
 
-      // Resolve the flag's workspace (if any) before opening any dialog, so
-      // the picker knows the target is settled and skips its workspace step.
       let flagTarget: HandoffTarget | undefined
       if (flagWorkspaceSpec !== undefined) {
         const resolved = await resolveFlagTarget(ctx, flagWorkspaceSpec)
@@ -913,13 +804,9 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
           ? config.dir.replace(/\/+$/u, '')
           : `${workspace}/${config.dir ?? DEFAULT_BRIEF_DIR}`
 
-      // --- retry recovery -------------------------------------------------
-      // The sidecar meta is the only state that survives a timeout, a dsh
-      // restart, or a spawn crash: the newest record without `spawnedAt` is
-      // the handoff a bare /handoff resumes.
       let recovered: RecoveredHandoff | undefined
       if (retry) {
-        recovered = await findLatestUnspawned(dir)
+        recovered = await findLatestUnspawned(dir, ctx.logger(PACKAGE_NAME))
         if (recovered === undefined) {
           return fail(
             `没有可重试的交接：${dir} 里没有未完成的记录。发起新交接请写 /handoff <任务描述>。`,
@@ -930,8 +817,13 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       if (recovered !== undefined) {
         try {
           existingBrief = await readFile(recovered.briefPath, 'utf8')
-        } catch {
-          // Never written: the retry re-issues the full briefing instruction.
+        } catch (error) {
+          debugQuietly(
+            ctx.logger(PACKAGE_NAME),
+            'handoff brief %s is not readable on retry; re-issuing the instruction (%s)',
+            recovered.briefPath,
+            errorTag(error),
+          )
         }
       }
 
@@ -944,11 +836,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         recovered === undefined
           ? undefined
           : { workspaceId: recovered.meta.target.workspaceId ?? 'origin' }
-      // Priority for the fresh session's model: an explicit --model flag beats
-      // the UI answer, which beats this retry's recorded pick, which beats the
-      // remembered handoff preference; first-time handoffs inherit. The preset
-      // is a separate intent: it defaults to the origin's live preset and is
-      // never remembered across normal handoffs.
       const remembered = await rt.preferences?.read()
       const defaultChoice: ModelChoice =
         flagChoice !== undefined
@@ -973,10 +860,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       }
       const notOrigin = String(agent.id) !== originSession
 
-      // A sidecar may carry an explicit preset written where a registry was
-      // mounted. Without one this command cannot honor the intent and must not
-      // substitute a preset-less session: fail before writing the sidecar, so
-      // the retry record (and its preset) survives for a repaired composition.
       if (defaultPreset.kind === 'preset' && presets === undefined) {
         return fail(
           `无法挂载预设 ${defaultPreset.id}：当前组合没有可用的预设注册表（agentPresets 缺失或无法读取）。` +
@@ -984,10 +867,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         )
       }
 
-      // The wire review block: `fixed` when the flags already decided it (the
-      // card then shows the verdict read-only, so the summary never
-      // contradicts the flags), otherwise the offered toggle — a retry
-      // pre-checks last time's verdict.
       const triggersMounted = ctx.get('triggerBindings') !== undefined
       const reviewWire: ReviewWire | undefined = reviewFlag
         ? { defaultRounds: reviewRoundsFlag ?? DEFAULT_REVIEW_ROUNDS, enabled: true, fixed: true }
@@ -997,7 +876,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
               ...(recovered?.meta.review !== undefined ? { enabled: true } : {}),
             }
           : undefined
-      // The flags' fixed values, for the card's read-only summary rows.
       const fixedRoute: RouteSummary | undefined =
         flagChoice !== undefined && flagChoice.kind === 'model'
           ? {
@@ -1018,8 +896,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
               missing: false,
             }
 
-      // A dialog-free path cannot reselect a stale remembered route/preset;
-      // refuse with a visible reason instead of spawning something unusable.
       if (config.confirm === false) {
         const stale = flagChoice === undefined ? defaults.choiceIssue : undefined
         if (stale !== undefined) {
@@ -1034,8 +910,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       let preset: PresetChoice
       let target: HandoffTarget
       let dialogReview: ReviewPick | undefined
-      // Only an explicit human answer to the model question may be remembered;
-      // timeouts and the dialog-free paths leave the long-term choice alone.
       let confirmedModel = false
       const taskLabel = retry ? `重试：${taskText}` : taskText
       const reviewOpen = reviewWire !== undefined && reviewWire.fixed !== true
@@ -1045,8 +919,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         !reviewOpen &&
         defaults.presetIssue === undefined
       ) {
-        // Nothing is left to ask: a scripted invocation must not wait for a
-        // card just to confirm fields the flags already decided.
         choice = flagChoice
         target = flagTarget ?? targetForOrigin(roster)
         preset = defaultPreset
@@ -1054,8 +926,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         choice = flagChoice
         target = flagTarget
         preset = defaultPreset
-        // Everything else is flag-decided; the review verdict and a stale
-        // preset still must be reachable through the card when one is open.
         const presetAsk = defaults.presetIssue !== undefined
         if (
           ((reviewWire !== undefined && reviewWire.fixed !== true) || presetAsk) &&
@@ -1109,7 +979,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         if ('error' in resolved) return fail(resolved.error)
         target = resolved
       } else if (previous !== undefined) {
-        // Dialog-free retry: the previous picks stand in for the defaults.
         choice = flagChoice ?? defaults.choice
         preset = defaultPreset
         if (flagTarget !== undefined) {
@@ -1125,9 +994,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         target = flagTarget ?? targetForOrigin(roster)
       }
 
-      // Last line of defense for the paths that could not ask (a timed-out
-      // card, a dialog-free command, a hand-edited sidecar): never spawn on a
-      // route or preset the catalog just proved unusable.
       if (flagChoice === undefined && catalog !== undefined) {
         const stale = modelChoiceIssue(catalog, choice)
         if (stale !== undefined) {
@@ -1145,13 +1011,8 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
       const crossWorkspace = target.path !== roster.origin.path
       const choiceText = describeChoice(choice, sessionRoute(agent), defaultRoute(ctx))
       const presetText = presets === undefined ? undefined : describePreset(presets, preset)
-      // A --model override is a one-off, and a default that no human confirmed
-      // (timeout, missing answerer, confirm:false) must not become the
-      // remembered choice either.
       const rememberModel = flagChoice === undefined && confirmedModel
 
-      // Final review verdict: flags win, the dialog verdict second, and a
-      // dialog-free retry reuses the previous attempt's recorded verdict.
       const previousReview = recovered?.meta.review
       const reviewEnabled =
         reviewFlag ||
@@ -1165,9 +1026,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
           }
         : undefined
 
-      // The sidecar is the retry contract — task, picks, and the spawn
-      // record. A failed write only costs retryability, never the handoff;
-      // on a retry it also keeps the record truthful about re-resolved picks.
       try {
         await writeMeta(metaPath, {
           version: 1,
@@ -1186,9 +1044,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         })
       }
 
-      // A brief that already carries the completion marker means the watch
-      // was lost (timeout race, dsh restart, spawn crash): no briefing turn,
-      // spawn straight from the file.
       if (existingBrief !== undefined && existingBrief.includes(COMPLETE_MARKER)) {
         const pending: PendingHandoff = {
           agent,
@@ -1235,10 +1090,6 @@ export function handoffCommandDefinition(rt: HandoffRuntime): CommandDefinition 
         )
       }
 
-      // Queue the briefing turn on the CURRENT agent. followup parks a normal
-      // next-turn message, so a busy agent writes the brief after its current
-      // turn finishes. The brief always lands origin-side: that is the one
-      // place the origin agent can write under every sandbox mode.
       const instruction =
         existingBrief === undefined
           ? briefInstruction(

@@ -1,23 +1,5 @@
 /**
- * Session-log context audit: scan the local DSH session event logs and
- * aggregate model-request token usage and tool-call outcomes.
- *
- * The session event log (`$DSH_HOME/sessions/<cwd-dir>/<sessionId>/session.v*.jsonl.zstd`)
- * records one `assistant/message` event per completed model request (with
- * the disjoint usage buckets already normalized by the adapter:
- * `inputTokens` excludes cached reads) plus one `tool/call` /
- * `tool/result` pair per tool invocation (with `isError` and the error
- * `code`). Summing them per provider/model, per session, and per tool name
- * yields exactly the numbers quota-drain, cache-affinity, and tool-design
- * investigations need:
- *
- *   cache hit rate = cacheRead / (cacheRead + uncachedInput)
- *   tool failure rate = errored results / paired results
- *
- * Titles come from the session projection cache
- * (`$DSH_HOME/storages/session_projcache/sessions/<sessionId>.json`),
- * read best-effort — a missing projection just leaves the row untitled.
- *
+ * Session-log context audit: scan the local DSH session event logs and aggregate model-request token usage and tool-call outcomes.
  * @module dsh-context-audit/audit
  */
 import { readdir, readFile, stat } from 'node:fs/promises'
@@ -40,7 +22,6 @@ interface UsageSample {
 interface ToolSample {
   name: string
   callTime: number
-  /** Result arrival time; undefined when the call never completed in the log. */
   resultTime: number | undefined
   error: boolean
   errorCode: string | undefined
@@ -65,16 +46,12 @@ export interface ModelAggregate {
 export interface ToolAggregate {
   name: string
   calls: number
-  /** Results marked `isError` (or carrying an error object). */
   errors: number
-  /** Completed results the failure rate is computed over. */
   completed: number
-  /** Calls whose result never landed in the log (interrupted sessions). */
   unfinished: number
   totalDurationMs: number
   maxDurationMs: number
   sessions: number
-  /** Error codes with counts, most frequent first. */
   errorCodes: [string, number][]
 }
 
@@ -89,12 +66,10 @@ export interface SessionAggregate {
   uncachedInput: number
   cacheRead: number
   output: number
-  /** Per-route breakdown as `provider/model ×N` strings, sorted by requests. */
   routes: string[]
 }
 
 export interface AuditReport {
-  /** Window length in days, or `undefined` for the full history. */
   windowDays: number | undefined
   scannedSessionFiles: number
   sessionsWithUsage: number
@@ -104,9 +79,7 @@ export interface AuditReport {
 }
 
 export interface AuditOptions {
-  /** Only count events at or after now - days*24h; undefined = all history. */
   days: number | undefined
-  /** How many sessions to keep in the per-session table (sorted by uncached input). */
   sessionLimit: number
   now: number
 }
@@ -136,7 +109,6 @@ async function readLogText(path: string): Promise<string> {
     const buffer = await readFile(path)
     return new TextDecoder().decode(decompress(new Uint8Array(buffer)))
   } catch {
-    // Unreadable / partially written logs are skipped, not fatal.
     return ''
   }
 }
@@ -304,7 +276,6 @@ export async function collectAudit(
       }
       for (const file of files) {
         const path = join(sessionDir, file)
-        // Cheap mtime prefilter: no event in a file can be newer than its mtime.
         try {
           if ((await stat(path)).mtimeMs < windowStart) continue
         } catch {
@@ -414,14 +385,12 @@ export async function collectAudit(
       .toSorted((a, b) => b[1] - a[1])
       .map(([key, count]) => (count === 1 ? key : `${key}×${count}`))
   }
-  // Distinct-session count per route, derived after the scan.
   for (const perModel of sessionModels.values()) {
     for (const key of perModel.keys()) {
       const model = models.get(key)
       if (model !== undefined) model.sessions++
     }
   }
-  // Titles resolved concurrently after the scan; failures keep `undefined`.
   await Promise.all(
     sessionList.map(async (session) => {
       session.title = await readTitle(projcacheDir, session.id)
@@ -442,14 +411,14 @@ export async function collectAudit(
   }
 }
 
-/** Format a token count compactly (7,801,315 → 7.8M). */
+/** Format a token count compactly (7,801,315 -> 7.8M). */
 function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
   return String(value)
 }
 
-/** Zero-padded two-digit form of a number (5 → "05"). */
+/** Zero-padded two-digit form of a number (5 -> "05"). */
 const pad = (n: number) => String(n).padStart(2, '0')
 
 function formatClock(ms: number): string {

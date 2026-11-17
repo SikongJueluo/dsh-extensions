@@ -8,12 +8,6 @@ import { describe, expect, it } from 'vitest'
 import { RecursiveSkillProvider } from '../src/provider.js'
 import { createHarness, writeSkill } from './helpers.js'
 
-/**
- * Differential check against the installed stock parser: every nested bundle
- * is also a valid direct bundle when its category directory is handed to the
- * stock provider as a custom root. The two providers must agree on the parsed
- * routing fields, body, instruction path, and resource base.
- */
 describe('parser compatibility with the stock provider', () => {
   it('produces the same fields the stock provider parses from the same files', async () => {
     const harness = await createHarness()

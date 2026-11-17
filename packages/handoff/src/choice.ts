@@ -1,8 +1,5 @@
 /**
- * The two choices a handoff carries: which model route and which preset the
- * fresh session inherits. Parsed from untrusted browser payloads and sidecar
- * JSON, so both come with a narrowing helper.
- *
+ * The two choices a handoff carries: which model route and which preset the fresh session inherits. Parsed from untrusted browser payloads and sidecar JSON, so both come with a narrowing helper.
  * @module dsh-handoff/choice
  */
 
@@ -40,13 +37,6 @@ export function coerceModelChoice(value: unknown): ModelChoice | undefined {
   return undefined
 }
 
-/**
- * Which agent preset the fresh session should mount. Separate from the model
- * choice on purpose: the two must combine freely ("inherit preset + a cheaper
- * remembered model" is the common case). `inherit` means the origin session's
- * live preset — or no preset at all when the origin runs none; it never means
- * the deployment default.
- */
 export type PresetChoice = { kind: 'inherit' } | { kind: 'preset'; id: string }
 
 /** Narrow an untrusted value (browser payload, sidecar meta JSON) into a preset choice. */

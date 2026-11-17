@@ -1,12 +1,5 @@
 /**
- * Fresh-session spawn: the same factory chain the Web "New Session" button
- * uses (`ctx.agents.create` with a mounted preset), plus the first prompt.
- *
- * The fresh session spawns on the chosen target workspace (`meta.cwd` is its
- * canonical path, which both the sandbox boundary and `attachSession`'s
- * cwd-equals-path rule key off); for cross-workspace handoffs the full brief
- * is copied into the target so the successor can always reach it.
- *
+ * Fresh-session spawn: the same factory chain the Web "New Session" button uses (`ctx.agents.create` with a mounted preset), plus the first prompt.
  * @module dsh-handoff/spawn
  */
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -17,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-session-title'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { debugQuietly, errorTag, warnQuietly } from './diagnostics.js'
 import { COMPLETE_MARKER, PACKAGE_NAME } from './identity.js'
 import { bootstrapPrompt } from './prompt.js'
 import type { HandoffRuntime, PendingHandoff } from './pending.js'
@@ -25,7 +19,6 @@ import { targetBriefDir } from './workspace.js'
 import { defaultRoute, sessionRoute, toAgentOptions } from './selection.js'
 import { mountedPreset } from './presets.js'
 
-/** Sidebar title prefix; the task tail is trimmed to keep it readable. */
 const TITLE_PREFIX = 'Handoff: '
 const TITLE_TASK_LIMIT = 40
 
@@ -36,14 +29,9 @@ function mintSessionId(): SessionId {
 
 /** Copy the origin agent's model route into creation options (defined fields only). */
 function inheritAgentOptions(ctx: Context, agent: Agent): AgentOptions | undefined {
-  // The session's durable selection — provider, model, and reasoning effort —
-  // is the route it is actually on; `agent.options` is only the creation
-  // fallback for a session that has not recorded a selection yet.
   const route = sessionRoute(agent)
   const options = toAgentOptions(route)
   if (options === undefined) return undefined
-  // The origin's own output cap is a per-agent setting rather than part of a
-  // route, so it carries over only on an inherited route.
   const maxTokens = agent.options.maxTokens
   return maxTokens === undefined ? options : { ...options, maxTokens }
 }
@@ -55,9 +43,6 @@ function resolveAgentOptions(
   choice: PendingHandoff['choice'],
 ): AgentOptions | undefined {
   if (choice.kind === 'model') {
-    // An explicit route switches the brain. The effort is whatever the picker
-    // chose; without one the target model's own default applies, and the
-    // origin's maxTokens never carries over.
     return toAgentOptions({
       provider: choice.provider,
       model: choice.model,
@@ -65,20 +50,11 @@ function resolveAgentOptions(
     })
   }
   if (choice.kind === 'default') {
-    // The deployment default carries its own reasoning effort; dropping it
-    // silently downgraded the fresh session to the model default.
     return toAgentOptions(defaultRoute(ctx))
   }
   return inheritAgentOptions(ctx, agent)
 }
 
-/**
- * Remember the model choice for later handoffs. Only a successful spawn calls
- * this, so browsing a picker, cancelling, or timing out never overwrites the
- * stored preference, and a `--model` override is excluded by `rememberModel`.
- * A failed write is visible on the origin session but never blocks the
- * handoff: the session itself already exists.
- */
 async function rememberModel(rt: HandoffRuntime, pending: PendingHandoff): Promise<void> {
   if (!pending.rememberModel || rt.preferences === undefined) return
   try {
@@ -103,14 +79,6 @@ function titleFor(task: string): string {
   return TITLE_PREFIX + tail
 }
 
-/**
- * Attach the fresh session to its target workspace so it joins that
- * workspace's sidebar group — the same `attachSession` the web "New Session"
- * flow performs. A registered target attaches directly by id; an ungrouped
- * origin keeps today's `resolveByPath` fallback (which then finds nothing, and
- * the session stays ungrouped exactly like its origin). An attach failure only
- * downgrades grouping, never the handoff.
- */
 async function attachToWorkspace(
   rt: HandoffRuntime,
   pending: PendingHandoff,
@@ -134,11 +102,7 @@ async function attachToWorkspace(
   }
 }
 
-/**
- * Guard the spawn against a target that vanished between the pick and the
- * brief's completion: `agents.create` itself accepts any absolute cwd, but a
- * session rooted in a missing directory would be unusable.
- */
+/** Guard the spawn against a target that vanished between the pick and the brief's completion: `agents.create` itself accepts any absolute cwd, but a session rooted in a missing directory would be unusable. */
 async function preflightTarget(rt: HandoffRuntime, pending: PendingHandoff): Promise<void> {
   if (pending.target.workspaceId === undefined) return
   const registry = rt.ctx.get('workspaceRegistry')
@@ -152,12 +116,7 @@ async function preflightTarget(rt: HandoffRuntime, pending: PendingHandoff): Pro
   }
 }
 
-/**
- * Copy the full brief into the target workspace (host-side write, so no
- * sandbox applies) so the successor always has a readable local copy — the
- * origin side may be a per-branch workspace directory that gets cleaned up.
- * Failures degrade to referencing the origin file, which stays readable.
- */
+/** Copy the full brief into the target workspace (host-side write, so no sandbox applies) so the successor always has a readable local copy - the origin side may be a per-branch workspace directory that gets cleaned up. Failures degrade to referencing the origin file, which stays readable. */
 async function copyBriefToTarget(
   rt: HandoffRuntime,
   pending: PendingHandoff,
@@ -181,13 +140,6 @@ async function copyBriefToTarget(
   }
 }
 
-/**
- * Bind the auto-review loop BEFORE the first prompt, so the executor can
- * never finish before its reviewer exists: create session → persist spawn →
- * attach → BIND → first followup. A missing triggers plugin or a failed bind
- * degrades to a plain handoff with a visible notice on the origin session —
- * the executor still runs; nobody is left orphaned.
- */
 async function bindReview(
   rt: HandoffRuntime,
   pending: PendingHandoff,
@@ -213,15 +165,17 @@ async function bindReview(
       executorSession: sessionId,
       parentSession: String(pending.agent.id),
       maxRounds,
-      // A handoff executor is single-purpose: its normally-ended turn IS the
-      // delivery (the reviewer still verdicts through the tool).
       autoDeliver: true,
     })
-    await writeReviewBound(metaPathFor(pending.briefPath), {
-      bindingId: bound.bindingId,
-      runId: bound.runId,
-      maxRounds,
-    })
+    await writeReviewBound(
+      metaPathFor(pending.briefPath),
+      {
+        bindingId: bound.bindingId,
+        runId: bound.runId,
+        maxRounds,
+      },
+      rt.ctx.logger(PACKAGE_NAME),
+    )
     rt.ctx.logger(PACKAGE_NAME).info('auto-review loop bound', {
       bindingId: bound.bindingId,
       runId: bound.runId,
@@ -252,14 +206,18 @@ function notifyOrigin(rt: HandoffRuntime, pending: PendingHandoff, text: string)
         source: { kind: 'user' },
       }),
     )
-  } catch {
-    // The origin agent may already be disposed; the log entry above stands.
+  } catch (error) {
+    warnQuietly(
+      rt.ctx.logger(PACKAGE_NAME),
+      'handoff notice not delivered for %s (%s)',
+      pending.briefPath,
+      errorTag(error),
+    )
   }
 }
 
 /**
  * Create the fresh session and hand it the brief as its first turn.
- *
  * @returns the new session id.
  */
 export async function spawnHandoff(
@@ -272,8 +230,6 @@ export async function spawnHandoff(
   const stripped = rawBrief.split(COMPLETE_MARKER)[0] ?? rawBrief
   const full = stripped.trimEnd()
   const copiedPath = await copyBriefToTarget(rt, pending, full)
-  // The truncation notice must name a path the successor can read: the copied
-  // target-side brief first, the origin file second (reads are never fenced).
   const briefRef = copiedPath ?? pending.briefPath
   const brief =
     full.length <= rt.maxBriefChars
@@ -293,16 +249,9 @@ export async function spawnHandoff(
     },
     ...(preset.setup !== undefined ? { setup: preset.setup } : {}),
   })
-  // The fresh session exists: record it before any cosmetic step (attach,
-  // title, copy) can fail, so a later bare `/handoff` cannot double-spawn
-  // this brief. A missing sidecar (older briefs) is a silent no-op.
   await markSpawned(metaPathFor(pending.briefPath))
-  // Only a spawned session vouches for the choice; a `--model` override never
-  // reaches the preference because pending.rememberModel is false for it.
   await rememberModel(rt, pending)
   await attachToWorkspace(rt, pending, sessionId)
-  // The review binding must exist before the executor's first prompt: a fast
-  // executor could otherwise deliver into a loop that nobody is watching.
   const review = await bindReview(rt, pending, sessionId)
 
   handle.agent.followup(
@@ -314,8 +263,13 @@ export async function spawnHandoff(
 
   try {
     ctx.get('sessionTitle')?.rename(handle.agent.session, titleFor(pending.task))
-  } catch {
-    // Title is cosmetic; the session itself is already running.
+  } catch (error) {
+    debugQuietly(
+      ctx.logger(PACKAGE_NAME),
+      'handoff session title not set for %s (%s)',
+      String(sessionId),
+      errorTag(error),
+    )
   }
 
   ctx.logger(PACKAGE_NAME).info('handoff session spawned', {

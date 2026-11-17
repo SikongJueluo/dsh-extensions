@@ -1,14 +1,3 @@
-# dsh-recursive-skills bundle layer: one supplemental host provider row.
-#
-# The stock skill-filesystem provider deliberately scans only direct children
-# of each skill root, so a bundle at `<root>/<category>/<skill>/SKILL.md` is
-# invisible. This row registers a second provider beside it: direct skills stay
-# owned by the stock provider, while nested bundles are discovered recursively
-# and enter the same catalog, `skill` tool, and `/name` invocation paths.
-#
-# No service is replaced and nothing else is disabled. `config` is optional;
-# the defaults discover `$DSH_AGENTS_HOME/skills` (normally ~/.agents/skills).
-# A later layer may override this row by id; config is replaced wholesale.
 - insert:
     - id: recursive-skills
       name: dsh-recursive-skills

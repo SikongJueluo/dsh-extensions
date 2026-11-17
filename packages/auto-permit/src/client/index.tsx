@@ -56,7 +56,6 @@ interface Operations {
   modelCatalog(): Promise<CatalogResult>
 }
 
-/** The catalog entry of one model, or null when absent/not loaded. */
 function catalogModel(
   catalog: Catalog | null,
   provider: string,
@@ -69,20 +68,12 @@ function catalogModel(
   return null
 }
 
-/** One method of a host remote service: JSON-safe args, an envelope result. */
 type RemoteMethod = (...args: unknown[]) => unknown
 
-/** True when the value is a callable remote method (predicate, no assertion). */
 function isRemoteMethod(value: unknown): value is RemoteMethod {
   return typeof value === 'function'
 }
 
-/**
- * Resolve `ctx.remote[service][name]` when it is a callable method. The
- * generated remote wire is typed `Record<string, any>` on the client half, so
- * the lookup is guarded field by field; an absent or malformed service yields
- * undefined and the caller fails toward its own error row.
- */
 function remoteMethod(source: unknown, service: string, name: string): RemoteMethod | undefined {
   const remote = isRecord(source) ? source : undefined
   const object = remote === undefined ? undefined : remote[service]
@@ -90,7 +81,6 @@ function remoteMethod(source: unknown, service: string, name: string): RemoteMet
   return isRemoteMethod(method) ? method : undefined
 }
 
-/** Project one settings namespace view into the editor's entry shape. */
 function entryOf(view: unknown): Entry {
   const record = isRecord(view) ? view : undefined
   const value = record !== undefined && isRecord(record.value) ? record.value : {}
@@ -202,7 +192,7 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
     const slash = value.indexOf('/')
     const provider = value.slice(0, slash)
     const model = value.slice(slash + 1)
-    // Switching models keeps the effort only when the new model has it.
+
     if (entry?.reasoningEffort) {
       const next = catalogModel(catalog, provider, model)
       const kept = next?.reasoning?.efforts?.some((effort) => effort.id === entry.reasoningEffort)
@@ -250,7 +240,6 @@ function AutoPermitSection({ operations }: { operations: Operations }) {
           <Select
             value={effortValid && entry.reasoningEffort ? entry.reasoningEffort : '__default__'}
             onValueChange={(value) =>
-              // A null clears the field (settings update path-op semantics).
               write(
                 value === '__default__' ? { reasoningEffort: null } : { reasoningEffort: value },
               )
@@ -310,7 +299,6 @@ function apply(ctx: DshClientContext) {
     },
     write(patch, revision) {
       const ops = Object.keys(patch).map((key) => {
-        // A null value means "clear this optional field" → unset path op.
         return patch[key] === null
           ? { op: 'unset' as const, path: [key] }
           : { op: 'set' as const, path: [key], value: patch[key] }

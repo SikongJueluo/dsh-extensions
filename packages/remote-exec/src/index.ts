@@ -1,35 +1,5 @@
 /**
- * dsh-remote-exec — whitelisted remote container execution for DSH.
- *
- * One `remote_exec` tool runs fish commands inside a fixed Docker container
- * on a whitelisted SSH host. Targets are execution environments (host +
- * container + policy); the container directory is a per-call choice, so
- * adding a project no longer requires editing Nix config and restarting DSH.
- *
- * Four DSH seams carry the design (see docs/research-dsh-remote-exec-tool.md
- * for the original source-verified contracts):
- *
- * - `ctx.tools.register` + `defineTool` — the model-facing tool. The model
- *   picks a target key, an optional absolute container cwd, and a command;
- *   hosts, containers, users and ssh options never cross that boundary.
- * - `ctx.subprocess.spawn` — the ssh client runs HOST-side, in the harness
- *   process (argv, never a local shell), so the real `~/.ssh` config, jump
- *   chains, agent forwarding (`SSH_AUTH_SOCK` survives the env scrub) and
- *   known_hosts all apply. The model bash sandbox is never involved.
- * - `ctx.get('approval')` — the first use of a target per session asks
- *   through the same approval waterfall bash escalation uses. A missing
- *   approval service fails closed; `approvalMode: 'never'` is an explicit
- *   operator opt-out for fully trusted targets.
- * - `ctx.get('spillStore')` — when the model-facing excerpt truncates a
- *   stream, the full raw stream is saved as a session-scoped spill artifact
- *   and its locator is returned; the model retrieves it with its normal
- *   read/grep tools.
- *
- * Failure semantics are deliberate: prep failures (no docker / no container /
- * start failed) are terminal — nothing ever falls back to the remote host
- * shell — and a spent budget only kills the LOCAL ssh, so a timeout reports
- * "unknown", never "failed": the remote command may still be running.
- *
+ * dsh-remote-exec - whitelisted remote container execution for DSH.
  * @module dsh-remote-exec
  */
 import { randomBytes } from 'node:crypto'
@@ -40,8 +10,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { SubprocessOutputReader } from '@deepseek-ai/dsh-subprocess'
-// Type-only: pulls the `ctx.spillStore` declaration merge into the program, so
-// `ctx.get('spillStore')` is typed instead of `any`.
 import type {} from '@deepseek-ai/dsh-spill'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import {
@@ -81,7 +49,6 @@ export type {
 export { formatDisplay } from './display.js'
 export type { DisplayView } from './display.js'
 
-/** The one tool this plugin registers. */
 export const TOOL_NAME = 'remote_exec'
 
 /** A target as written in the plugin config; `defaultCwd` is validated at mount. */
@@ -91,7 +58,6 @@ export interface ConfiguredTarget {
   readonly sshOptions?: readonly string[]
   readonly container: string
   readonly containerUser?: string
-  /** Default container directory for calls that omit `cwd` (absolute path). */
   readonly defaultCwd: string
   readonly shell: string
   readonly envInit: 'direnv' | 'none'
@@ -99,34 +65,16 @@ export interface ConfiguredTarget {
   readonly description?: string
 }
 
-/**
- * Plugin-row configuration. Everything here is operator-owned: the target
- * whitelist, the budgets, and the approval mode. Plain (non-volatile) fields
- * on purpose — editing a target remounts the plugin, which re-registers the
- * tool with a fresh target listing. No `Schema<Config>` annotation:
- * schemastery ≥ 3.18.4 bakes volatile modes into the schema generics and the
- * loader checks the inferred shape (same discipline as auto-env).
- */
 export interface Config {
-  /** ssh executable: absolute path or bare PATH name. */
   readonly sshPath: string
-  /** Per-target authorization: ask once per session, every call, or never. */
   readonly approvalMode: 'session' | 'every' | 'never'
-  /** Default per-call budget (ms). */
   readonly defaultTimeoutMs: number
-  /** Upper bound a caller may raise the per-call budget to (ms). */
   readonly maxTimeoutMs: number
-  /** Budget for docker start + running-state poll (ms). */
   readonly startTimeoutMs: number
-  /** TERM→KILL grace for the local ssh when a budget expires (ms). */
   readonly graceMs: number
-  /** stdout raw retention per call (bytes); older bytes spill to disk. */
   readonly stdoutMaxBytes: number
-  /** stderr raw retention per call (bytes); older bytes spill to disk. */
   readonly stderrMaxBytes: number
-  /** Per-stream model-facing display budget (bytes). */
   readonly displayMaxBytes: number
-  /** The whitelist. The model only ever picks a key of this dict. */
   readonly targets: Record<string, ConfiguredTarget>
 }
 
@@ -234,18 +182,11 @@ export const Config = Schema.object({
     ),
 })
 
-/** Per-stream spill cap for collected stdout/stderr (bytes). */
 const SPILL_MAX_BYTES = 64 * 1024 * 1024
 
-/** Sessions remembered by one GrantStore before the oldest is evicted. */
 const MAX_GRANT_SESSIONS = 256
 
-/**
- * In-memory per-session target grants ("asked once, remembered for the
- * session"). Restarting the harness forgets everything — a resumed session
- * simply asks again; fold the session log's approval audit pairs here if
- * that ever needs to change (auto-permit's evidence.ts is the precedent).
- */
+/** In-memory per-session target grants ("asked once, remembered for the session"). Restarting the harness forgets everything - a resumed session simply asks again; fold the session log's approval audit pairs here if that ever needs to change (auto-permit's evidence.ts is the precedent). */
 export class GrantStore {
   readonly #granted = new Map<string, Set<string>>()
 
@@ -276,38 +217,23 @@ export interface RemoteSpill {
   readonly hint: string
 }
 
-/**
- * The subset of the host `spillStore` service this plugin uses. Structural on
- * purpose: the service is host-provided and optional, so the bundle needs no
- * compile-time dependency on the spill package; the shapes mirror its
- * SaveTextSpill/SpillRef contract.
- */
 /** The canonical value every remote_exec call resolves to. */
 export interface RemoteRunResult {
   readonly target: string
-  /** The absolute container directory this call started in. */
   readonly cwd: string
   readonly outcome: RemoteOutcome
-  /** The command's exit code; present only when the command ran and returned one. */
   readonly exitCode?: number
-  /** Bounded model-facing stdout excerpt (cleaned ANSI/CR/repeats). */
   readonly stdout: string
-  /** Bounded model-facing stderr excerpt (command stderr, env log, or setup error). */
   readonly stderr: string
-  /** Total stdout bytes before the display excerpt. */
   readonly stdoutBytes: number
-  /** Total stderr content bytes before the display excerpt (control line excluded). */
   readonly stderrBytes: number
   readonly stdoutTruncated: boolean
   readonly stderrTruncated: boolean
   readonly durationMs: number
-  /** Protocol detail for setup/env/cwd failures; absent when the command ran. */
   readonly detail?: string
-  /** True when a raw stream exceeded retention and only its tail is available. */
   readonly lossy?: boolean
   readonly stdoutSpill?: RemoteSpill
   readonly stderrSpill?: RemoteSpill
-  /** Why a truncated stream could not be saved to the session spill store. */
   readonly spillError?: string
 }
 
@@ -316,13 +242,10 @@ type ToolCallId = ToolRunContext['callId']
 
 /** Per-call options for {@link RemoteRunner.run}. */
 export interface RemoteRunOptions {
-  /** Absolute container directory (validated by the caller). */
   readonly cwd: string
   readonly timeoutMs: number
   readonly signal?: AbortSignal
-  /** Owning session for spill artifacts; omit when unavailable. */
   readonly owner?: { readonly sessionId: AgentSessionId }
-  /** Tool call id for spill artifacts. */
   readonly callId?: ToolCallId
 }
 
@@ -343,15 +266,6 @@ export class RemoteRunner {
     this.#config = config
   }
 
-  /**
-   * Run `command` in `target`'s container at `options.cwd`. Never throws for
-   * remote-side outcomes — every failure mode comes back as a classified
-   * {@link RemoteRunResult}; only local ssh resolution failures produce
-   * `spawn-error` (also as a value). The caller owns neither deadline: the
-   * per-call budget and `options.signal` both abort the local ssh, and an
-   * aborted run is reported as `timeout-unknown` / `cancelled-unknown`
-   * because the remote command's fate is unknowable from here.
-   */
   async run(
     name: string,
     target: RemoteTarget,
@@ -375,9 +289,6 @@ export class RemoteRunner {
     }
     if (options.signal?.aborted === true) onCallerAbort()
     options.signal?.addEventListener('abort', onCallerAbort, { once: true })
-    // Own the deadline with a ref'd timer: AbortSignal.timeout() schedules
-    // unref'd, so a quiet event loop could exit before the budget elapses
-    // (same discipline as auto-env's direnv budget).
     const timer = setTimeout(() => {
       timedOut = true
       controller.abort()
@@ -398,8 +309,13 @@ export class RemoteRunner {
       let exitCode: number | null = null
       try {
         exitCode = (await handle.done).exitCode
-      } catch {
-        // Aborted mid-flight (or the handle rejected): the flags decide.
+      } catch (error) {
+        logQuietly(() => {
+          const logger = this.#ctx.logger('remote-exec')
+          const format = 'remote_exec %s: local ssh ended without an exit code (%s)'
+          if (timedOut || cancelled) logger.debug(format, name, errorClass(error))
+          else logger.warn(format, name, errorClass(error))
+        })
       }
       const stdout = await this.#readCollected(handle.collected.stdout)
       const stderr = await this.#readCollected(handle.collected.stderr)
@@ -440,10 +356,6 @@ export class RemoteRunner {
         }
       }
       const spillErrorText = spillError.length > 0 ? spillError.join('; ').slice(0, 500) : undefined
-      // Canonical tool values must be LOSSLESS JSON: a property explicitly
-      // set to undefined fails dsh-util-values' snapshotJsonValue and the
-      // registry rejects the whole result. Optional fields are therefore
-      // OMITTED, never assigned undefined.
       return {
         target: name,
         cwd: options.cwd,
@@ -463,7 +375,6 @@ export class RemoteRunner {
         durationMs: Date.now() - startedAt,
       }
     } catch (error) {
-      // ssh resolution or the spawn itself failed (implementation-level).
       const message = describeError(error)
       return {
         target: name,
@@ -489,12 +400,7 @@ export class RemoteRunner {
     return this.#sshBin
   }
 
-  /**
-   * Read one collected stream. When the in-memory tail lost its head and the
-   * provider left a spill file, read the complete stream back from it; if
-   * that read fails (or the stream exceeded the spill cap), keep the tail and
-   * mark the stream lossy.
-   */
+  /** Read one collected stream. When the in-memory tail lost its head and the provider left a spill file, read the complete stream back from it; if that read fails (or the stream exceeded the spill cap), keep the tail and mark the stream lossy. */
   async #readCollected(reader: SubprocessOutputReader | undefined): Promise<CollectedStream> {
     if (reader === undefined) return { text: '', totalBytes: 0, lossy: false }
     const read = reader.readFrom(0)
@@ -539,11 +445,7 @@ export class RemoteRunner {
   }
 }
 
-/**
- * Parse the host-recorded command exit code, falling back to the ssh exit code.
- * `detail` is the shell's own `$?` (always a decimal 0-255), so `Number` and
- * `Number.parseInt` agree on every reachable value.
- */
+/** Parse the host-recorded command exit code, falling back to the ssh exit code. `detail` is the shell's own `$?` (always a decimal 0-255), so `Number` and `Number.parseInt` agree on every reachable value. */
 function parseExitCode(detail: string, fallback: number | null): number | undefined {
   const parsed = Number(detail)
   if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 255) return parsed
@@ -626,6 +528,35 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+const CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/u
+const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u
+
+function codeOf(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || !('code' in value)) return undefined
+  return typeof value.code === 'string' && CODE_PATTERN.test(value.code) ? value.code : undefined
+}
+
+/** The error class and an optional stable code; never a message or arbitrary payload value. */
+function errorClass(error: unknown): string {
+  if (!(error instanceof Error)) return typeof error
+  const name = NAME_PATTERN.test(error.name) ? error.name : 'object'
+  const code = codeOf(error)
+  return code === undefined ? name : `${name}/${code}`
+}
+
+/**
+ * Run a diagnostic; returns whether it was emitted. A throwing log exporter yields `false` so it
+ * cannot change the caller's outcome. Callers may ignore the result.
+ */
+function logQuietly(log: () => void): boolean {
+  try {
+    log()
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** Resolve config targets: one required default cwd per target, validated at mount. */
 export function resolveTargets(
   targets: Record<string, ConfiguredTarget>,
@@ -669,11 +600,6 @@ function resolveCallCwd(requested: string | undefined, target: RemoteTarget): st
 }
 
 export const name = 'remote-exec'
-// approval is fetched opportunistically (ctx.get('approval')) so this plugin
-// also loads in compositions without an approval service — such loads then
-// fail closed per call unless approvalMode is explicitly 'never'. The spill
-// store is equally optional; a missing store only degrades full-output
-// retrieval, never the command result.
 export const inject = ['tools', 'subprocess']
 
 export function apply(ctx: Context, config: Config): void {
@@ -847,9 +773,6 @@ export function apply(ctx: Context, config: Config): void {
         },
         render: (_args, value) => [{ type: 'text', text: formatResult(value) }],
       },
-      // Model-invisible framework backstop; per-call budgets are additionally
-      // clamped against maxTimeoutMs inside execute. Declaring it asserts this
-      // tool forwards exec.signal, which run() does.
       timeoutMs: config.maxTimeoutMs,
       async execute(args, exec) {
         const target = resolvedTargets.get(args.target)

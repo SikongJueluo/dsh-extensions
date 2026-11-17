@@ -1,17 +1,10 @@
 /**
- * Sidecar handoff metadata: the durable on-disk record that outlives the
- * in-memory `pending` map (and the whole dsh process).
- *
- * One `<timestamp>-handoff.meta.json` sits next to every brief the command
- * starts. It carries what a retry needs — the task, the origin session, the
- * picks — plus the one fact nothing else can recover: whether the fresh
- * session was ever spawned. A bare `/handoff` scans for the newest record
- * without `spawnedAt` and resumes exactly there.
- *
+ * Sidecar handoff metadata: the durable on-disk record that outlives the in-memory `pending` map (and the whole dsh process).
  * @module dsh-handoff/meta
  */
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import type { Logger } from '@deepseek-ai/cordis'
 import {
   coerceModelChoice,
   coercePresetChoice,
@@ -19,44 +12,27 @@ import {
   type ModelChoice,
   type PresetChoice,
 } from './choice.js'
+import { errorTag, warnQuietly } from './diagnostics.js'
 import type { HandoffTarget } from './workspace.js'
 
 /** The durable record of one handoff attempt. */
 export interface HandoffMeta {
   readonly version: 1
-  /** The verbatim task description the handoff was started with. */
   readonly task: string
-  /** Session id of the agent that was asked to write the brief. */
   readonly originSession: string
-  /** The target picked when the handoff started (a retry's default). */
   readonly target: HandoffTarget
-  /** The model route picked when the handoff started (a retry's default). */
   readonly choice: ModelChoice
-  /**
-   * The preset intent picked when the handoff started (a retry's default).
-   * Older records predate the field and read as "inherit".
-   */
   readonly preset: PresetChoice
-  /** Epoch ms when the command ran. */
   readonly createdAt: number
-  /** Epoch ms when the fresh session was created; absent = never spawned. */
   readonly spawnedAt?: number
-  /**
-   * The auto-review loop bound to this handoff. Present once the user opted
-   * in; `bindingId`/`runId` join at bind time (absent = not yet bound).
-   */
   readonly review?: HandoffReviewMeta
 }
 
 /** Review-loop facts persisted beside the handoff record. */
 export interface HandoffReviewMeta {
-  /** Round budget chosen at command time. */
   readonly maxRounds: number
-  /** The dsh-triggers binding; set once the loop is bound (pre first prompt). */
   readonly bindingId?: string
-  /** The active run id the executor signals against. */
   readonly runId?: string
-  /** Epoch ms when the loop was bound. */
   readonly boundAt?: number
 }
 
@@ -120,8 +96,6 @@ function coerceMeta(value: unknown): HandoffMeta | undefined {
   if (workspaceId !== undefined && typeof workspaceId !== 'string') return undefined
   const choice = coerceModelChoice(record.choice)
   if (choice === undefined) return undefined
-  // Pre-preset records (and records with a corrupt preset field) inherit the
-  // origin's live preset, which is exactly the old behavior.
   const preset =
     record.preset === undefined
       ? { kind: 'inherit' as const }
@@ -149,12 +123,16 @@ function coerceMeta(value: unknown): HandoffMeta | undefined {
 }
 
 /**
- * The newest record that never spawned: the handoff a bare `/handoff`
- * resumes. Timestamp slugs sort lexically, so the file name orders the scan;
- * corrupt records are skipped and an absent directory simply means "nothing
- * to retry".
+ * The newest record that never spawned: the handoff a bare `/handoff` resumes.
+ * Timestamp slugs sort lexically, so the file name orders the scan; corrupt
+ * records are skipped and an absent directory simply means "nothing to retry".
+ * @param dir - the brief directory to scan.
+ * @param logger - optional sink for a skipped record.
  */
-export async function findLatestUnspawned(dir: string): Promise<RecoveredHandoff | undefined> {
+export async function findLatestUnspawned(
+  dir: string,
+  logger?: Pick<Logger, 'warn'>,
+): Promise<RecoveredHandoff | undefined> {
   let names: string[]
   try {
     names = await readdir(dir)
@@ -172,18 +150,19 @@ export async function findLatestUnspawned(dir: string): Promise<RecoveredHandoff
       if (meta !== undefined && meta.spawnedAt === undefined) {
         return { meta, metaPath, briefPath: `${metaPath.slice(0, -'.meta.json'.length)}.md` }
       }
-    } catch {
-      // Unreadable or corrupt: skip; a newer healthy record wins anyway.
+    } catch (error) {
+      warnQuietly(
+        logger,
+        'handoff meta record skipped as unreadable: %s (%s)',
+        metaPath,
+        errorTag(error),
+      )
     }
   }
   return undefined
 }
 
-/**
- * Record that the fresh session exists, so a later bare `/handoff` cannot
- * double-spawn one brief. Never throws: a missing record (pre-feature brief,
- * or a meta write that already failed with its own warning) is a no-op.
- */
+/** Record that the fresh session exists, so a later bare `/handoff` cannot double-spawn one brief. Never throws: a missing record (pre-feature brief, or a meta write that already failed with its own warning) is a no-op. */
 export async function markSpawned(metaPath: string): Promise<boolean> {
   try {
     const meta = coerceMeta(JSON.parse(await readFile(metaPath, 'utf8')))
@@ -200,13 +179,17 @@ export async function markSpawned(metaPath: string): Promise<boolean> {
 }
 
 /**
- * Record that the review loop is bound (runId in hand), so the sidecar tells
- * the truth about an auto-review handoff even if dsh dies right after. Never
- * throws: the loop itself is already live, this only costs inspectability.
+ * Record that the review loop is bound (runId in hand), so the sidecar tells the
+ * truth about an auto-review handoff even if dsh dies right after. Never throws:
+ * the loop itself is already live, this only costs inspectability.
+ * @param metaPath - the sidecar record to update.
+ * @param review - the binding facts to persist.
+ * @param logger - optional sink for a failed write.
  */
 export async function writeReviewBound(
   metaPath: string,
   review: { bindingId: string; runId: string; maxRounds: number },
+  logger?: Pick<Logger, 'warn'>,
 ): Promise<void> {
   try {
     const meta = coerceMeta(JSON.parse(await readFile(metaPath, 'utf8')))
@@ -216,7 +199,7 @@ export async function writeReviewBound(
       `${JSON.stringify({ ...meta, review: { ...review, boundAt: Date.now() } }, null, 2)}\n`,
       'utf8',
     )
-  } catch {
-    // Cosmetic durability: the binding is live on the triggers side already.
+  } catch (error) {
+    warnQuietly(logger, 'handoff review binding not recorded in %s (%s)', metaPath, errorTag(error))
   }
 }

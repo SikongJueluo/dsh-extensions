@@ -1,14 +1,5 @@
 /**
  * The persistent task-recovery anchor: shape, atomic store, and comparison.
- *
- * This is a RECOVERY ANCHOR, not a repository write lock: reading it never
- * rebases, checks out, resumes a goal, or forks a session — it only reports
- * agreement or drift between "where the task said it was" and "where the
- * repository/goal actually is". Storage uses the host's atomic-write
- * (`writeFileAtomic` + `withFileLock`) so a crashed save leaves the previous
- * anchor intact; tests point `dir` at a temp directory and never touch the
- * real home.
- *
  * @module dsh-execution-guard/checkpoint
  */
 import { mkdir, readFile, realpath } from 'node:fs/promises'
@@ -16,10 +7,9 @@ import { join } from 'node:path'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { isRecord } from './goal-evidence.js'
 
-/** Bump on any incompatible anchor change; readers refuse other versions. */
 export const ANCHOR_SCHEMA_VERSION = 2
 
-/** Pure anchor record — no methods, JSON round-trippable. */
+/** Pure anchor record - no methods, JSON round-trippable. */
 export interface TaskAnchor {
   readonly schemaVersion: typeof ANCHOR_SCHEMA_VERSION
   readonly sessionId: string
@@ -31,15 +21,12 @@ export interface TaskAnchor {
   readonly vcs: {
     readonly tool: 'jj'
     readonly changeId: string
-    /** Full parent change ids in template order; empty for a parentless root. */
     readonly parentChangeIds: readonly string[]
   }
   readonly goal?: {
     readonly goalId: string
     readonly revision: number
-    /** Durable phase at checkpoint time; present only when fold-proven. */
     readonly phase?: 'active' | 'paused' | 'blocked' | 'complete'
-    /** How the identity was established: durable-fold agreement or unverified model assertion. */
     readonly proof: 'fold-agrees' | 'args-only-unverified'
   }
 }
@@ -58,11 +45,9 @@ export interface AnchorCurrent {
 export interface AnchorComparison {
   readonly rootMatches: boolean | undefined
   readonly changeMatches: boolean | undefined
-  /** Both the count and order of parents must agree. */
   readonly parentsMatch: boolean | undefined
   readonly goalIdMatches: boolean | undefined
   readonly goalRevisionMatches: boolean | undefined
-  /** Durable-phase agreement; a completed goal never matches an active anchor. */
   readonly goalPhaseMatches: boolean | undefined
 }
 
@@ -109,13 +94,6 @@ function isAnchorShape(value: unknown): value is TaskAnchor {
   return isJjSection(value.vcs) && isGoalSection(value.goal)
 }
 
-/**
- * Compare an anchor with current facts; absent facts read as `undefined`
- * (unknown), never as a match. Goal identity is id AND revision (a new goal
- * at the same revision is a mismatch) and phase (complete ≠ active);
- * parents compare as an ordered list, so a rebase that rewires them reads
- * as drift even when the working change id survived it.
- */
 export function compareAnchor(anchor: TaskAnchor, current: AnchorCurrent): AnchorComparison {
   const parentsMatch =
     current.parentChangeIds === undefined
@@ -155,10 +133,6 @@ export function parseAnchor(raw: string): TaskAnchor | undefined {
 
 /** Options for {@link AnchorStore}: where corrupt/unsupported loads report. */
 export interface AnchorStoreOptions {
-  /**
-   * Called when an anchor file EXISTS but cannot be used (corrupt JSON,
-   * unsupported schemaVersion, malformed record) — never for plain absence.
-   */
   onProblem?: (message: string) => void
 }
 
@@ -178,12 +152,7 @@ export class AnchorStore {
     return join(this.dir, 'anchors', `${sessionId.replaceAll(/[^A-Za-z0-9._-]/gu, '_')}.json`)
   }
 
-  /**
-   * Atomically replace the session's anchor. The write goes through the
-   * host's `withFileLock` + `writeFileAtomic` pair: concurrent writers
-   * serialize, readers see the old or the new complete file, and a failed
-   * save leaves the previous anchor in place.
-   */
+  /** Atomically replace the session's anchor. The write goes through the host's `withFileLock` + `writeFileAtomic` pair: concurrent writers serialize, readers see the old or the new complete file, and a failed save leaves the previous anchor in place. */
   async save(anchor: TaskAnchor): Promise<void> {
     const target = this.pathFor(anchor.sessionId)
     await mkdir(join(this.dir, 'anchors'), { recursive: true })

@@ -1,8 +1,5 @@
 /**
- * Grant-plan unit tests: pure `resolveGrants` over a fake filesystem, one
- * behavioral fact per case — default derivation, operator-statement trust,
- * every fail-closed floor, and the dedupe/workspace subtraction rules.
- *
+ * Grant-plan unit tests: pure `resolveGrants` over a fake filesystem, one behavioral fact per case - default derivation, operator-statement trust, every fail-closed floor, and the dedupe/workspace subtraction rules.
  * @module dsh-toolchain-access/grants.test
  */
 import { describe, expect, it } from 'vitest'
@@ -17,7 +14,6 @@ import {
 } from '../src/grants.js'
 
 interface Entry {
-  /** Symlink target (resolved by realpath); absent for real paths. */
   target?: string
   dir?: boolean
   file?: boolean
@@ -67,12 +63,16 @@ function plan(
     env?: Partial<GrantEnv>
     workspaceRoots?: readonly string[]
     prepare?: boolean
+    ensureError?: { path: string; code: string }
   } = {},
 ) {
   const table: Record<string, Entry> = { '/': { dir: true }, ...entries }
   const ensured: { path: string; kind: string }[] = []
   const fs: GrantFs = fakeFs(table)
   fs.ensure = (path, kind) => {
+    if (extra.ensureError?.path === path) {
+      throw Object.assign(new Error('sensitive detail'), { code: extra.ensureError.code })
+    }
     ensured.push({ path, kind })
     table[path] =
       kind === 'lock-file' || kind === 'state-file'
@@ -110,9 +110,6 @@ describe('default derivation', () => {
       },
     )
     expect(result.issues).toEqual([])
-    // pnpm-engine's whole-home bind absorbs pnpm-store's <home>/store
-    // (dedupe is order-independent); output keeps derivation order, where
-    // pnpm-runtime-locks precedes pnpm-engine in the presets array.
     expect(result.binds.map((bind) => bind.source)).toEqual([
       '/home/u/.cache/uv',
       '/home/u/.cargo/registry',
@@ -150,11 +147,6 @@ describe('default derivation', () => {
   })
 
   it('real filesystem: symlinked runtime root, first initialization is not misrefused', async () => {
-    // XDG_RUNTIME_DIR is a symlink and pnpm's lock dir does not exist yet:
-    // the first confine must create it and produce the CANONICAL bind
-    // (realpath(runtime root) + lock name), not report lock-dir-mismatch
-    // against the pre-creation spelling. The fixture lives under the
-    // workspace (not os.tmpdir): host /tmp is a floor prefix by design.
     const { mkdtempSync, mkdirSync, symlinkSync, rmSync, statSync } = await import('node:fs')
     const path = await import('node:path')
     const join = path.join.bind(path)
@@ -183,11 +175,9 @@ describe('default derivation', () => {
       })
       expect(first.issues).toEqual([])
       expect(first.binds.map((bind) => bind.source)).toEqual([join(realRuntime, lockName)])
-      // Created inside the REAL runtime root, 0700, on the first call.
       const stats = statSync(join(realRuntime, lockName))
       expect(stats.isDirectory()).toBe(true)
       expect(stats.mode & 0o777).toBe(0o700)
-      // Second call (dir now exists) resolves identically.
       const again = resolve({
         presets: ['pnpm-runtime-locks'],
         overrides: {},
@@ -210,9 +200,6 @@ describe('default derivation', () => {
   })
 
   it('an explicit lock-dir override does NOT skip the runtime-root validation', () => {
-    // pnpm picks its lock dir from $XDG_RUNTIME_DIR regardless of what this
-    // plugin configures: an override cannot rescue an invalid runtime root
-    // (pnpm would still lock a private sandbox /tmp).
     const groupWritable = plan(
       ['pnpm-runtime-locks'],
       {
@@ -238,7 +225,6 @@ describe('default derivation', () => {
       '/run/user/1000': { dir: true, mode: 0o700 },
       '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
     } as const
-    // Re-spelling pnpm's own lock dir: fine.
     const sameDir = plan(
       ['pnpm-runtime-locks'],
       { ...standard },
@@ -251,7 +237,6 @@ describe('default derivation', () => {
       '/run/user/1000/pnpm-store-operation-locks-1000',
     ])
 
-    // Relocating it: pnpm cannot be redirected, so the grant is refused.
     const relocated = plan(
       ['pnpm-runtime-locks'],
       { ...standard, '/data/my-locks': dir() },
@@ -310,9 +295,6 @@ describe('fail-closed validation', () => {
   })
 
   it('refuses the WHOLE home through a symlinked HOME spelling (P1 regression)', () => {
-    // HOME=/home/link -> /data/u; an explicit grant naming the home SPELLING
-    // resolves to the whole /data/u — the canonical-home floor must refuse
-    // it instead of binding every file under HOME (including .ssh/.config).
     const table: Record<string, Entry> = {
       '/': { dir: true },
       '/home/link': { target: '/data/u' },
@@ -415,10 +397,6 @@ describe('fail-closed validation', () => {
   })
 
   it("refuses pnpm-runtime-locks when the runtime dir fails pnpm's own conditions", () => {
-    // pnpm 12.8.2+ falls back to /tmp for locks unless $XDG_RUNTIME_DIR is
-    // a directory of this uid that the owner can write AND search, with
-    // group/other write bits clear — the bind must cover the lock domain
-    // pnpm actually uses, not merely a directory that exists.
     const groupWritable = plan(['pnpm-runtime-locks'], {
       '/run/user/1000': { dir: true, mode: 0o775 },
       '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
@@ -436,7 +414,6 @@ describe('fail-closed validation', () => {
     })
     expect(foreign.issues[0]?.reason).toBe('runtime-dir-unwritable')
 
-    // The standard systemd layout passes.
     const standard = plan(['pnpm-runtime-locks'], {
       '/run/user/1000': { dir: true, mode: 0o700 },
       '/run/user/1000/pnpm-store-operation-locks-1000': { dir: true, mode: 0o700 },
@@ -479,7 +456,6 @@ describe('fail-closed validation', () => {
       '/home/u/.cache/uv': dir(),
       '/home/u/.cargo/registry': dir(),
       '/home/u/.cargo/git': dir(),
-      // .package-cache* files missing entirely and prepare not requested
     })
     expect(result.binds).toEqual([])
     expect(result.issues.length).toBeGreaterThanOrEqual(3)
@@ -498,9 +474,6 @@ describe('fail-closed validation', () => {
   })
 
   it('an explicit ~/.cache override is honored (operator statement, not a default)', () => {
-    // The operator may of course state the broad grant themselves — Pi's
-    // allowWrite did exactly this. Defaults can never derive it; only an
-    // explicit paths override (or exported anchor) can.
     const result = plan(
       ['uv-cache'],
       { '/home/u/.cache': dir() },
@@ -595,8 +568,6 @@ describe('java toolchain presets', () => {
     const result = plan(['gradle-cache'], entries)
     expect(result.issues).toEqual([])
     expect(result.binds.map((bind) => bind.source)).toEqual(GRADLE_DIRS)
-    // gradle.properties (credential-bearing; here a Nix store symlink) is
-    // never in the grant list — the root stays read-only.
     expect(result.binds.some((bind) => bind.source.includes('gradle.properties'))).toBe(false)
   })
 
@@ -623,8 +594,6 @@ describe('java toolchain presets', () => {
     expect(viaEnv.issues).toEqual([])
     expect(viaEnv.binds).toHaveLength(GRADLE_DIRS.length)
 
-    // A missing subdirectory under an explicit anchor fails closed instead
-    // of being created (the operator named this tree; defaults only).
     const missingSub = plan(
       ['gradle-cache'],
       { ...entries, '/data/gradle/caches': undefined as unknown as Entry },
@@ -687,7 +656,6 @@ describe('semgrep state preset', () => {
         preset: 'semgrep-state',
       },
     ])
-    // The host data folder is only ever a mount POINT, never a writable source.
     expect(result.binds.some((bind) => bind.source === '/home/u/.semgrep')).toBe(false)
   })
 
@@ -703,6 +671,35 @@ describe('semgrep state preset', () => {
       '/home/u/.cache/semgrep_version',
       '/home/u/.semgrep',
     ])
+  })
+
+  it('reports the errno when a grant cannot be prepared', () => {
+    const result = plan(
+      ['uv-cache'],
+      {},
+      {
+        prepare: true,
+        ensureError: { path: '/home/u/.cache/uv', code: 'EACCES' },
+      },
+    )
+    expect(result.binds).toEqual([])
+    expect(result.issues[0]?.reason).toBe('missing')
+    expect(result.issues[0]?.message).toContain('EACCES')
+    expect(result.issues[0]?.message).not.toContain('sensitive detail')
+  })
+
+  it('reports the errno when a private-state mount point cannot be prepared', () => {
+    const result = plan(
+      ['semgrep-state'],
+      {},
+      {
+        prepare: true,
+        ensureError: { path: '/home/u/.semgrep', code: 'ENOTDIR' },
+      },
+    )
+    expect(result.binds).toEqual([])
+    expect(result.issues[0]?.reason).toBe('missing')
+    expect(result.issues[0]?.message).toContain('ENOTDIR')
   })
 
   it('a missing mount point without prepare fails closed', () => {
@@ -746,10 +743,8 @@ describe('semgrep state preset', () => {
       { env: { xdgConfigHome: '/home/u/.config' } },
     )
     expect(withXdg.issues).toEqual([])
-    // semgrep joins `.semgrep` directly under XDG_CONFIG_HOME.
     expect(withXdg.binds.at(-1)?.destination).toBe('/home/u/.config/.semgrep')
 
-    // A configured-but-missing XDG_CONFIG_HOME falls back to ~/.semgrep.
     const missingXdg = plan(['semgrep-state'], SEMGREP_ENTRIES, {
       env: { xdgConfigHome: '/home/u/.config' },
     })
@@ -758,8 +753,6 @@ describe('semgrep state preset', () => {
   })
 
   it('the mount point may cross a credential tree, a grant source may not', () => {
-    // `~/.config/.semgrep` is fine as a mount point: the shadow REPLACES it,
-    // so the host's credential-bearing settings.yml stays out of the sandbox.
     const shadow = plan(
       ['semgrep-state'],
       {
@@ -773,7 +766,6 @@ describe('semgrep state preset', () => {
     expect(shadow.issues).toEqual([])
     expect(shadow.binds.at(-1)?.source).toBe('/home/u/.cache/semgrep-state')
 
-    // The writable source itself is still a grant and obeys every rule.
     const source = plan(
       ['semgrep-state'],
       {
@@ -808,9 +800,6 @@ describe('semgrep state preset', () => {
   })
 
   it('keeps the shadow even when another grant already covers its source', () => {
-    // The mount is about the sandbox VIEW: uv-cache may already make the
-    // shadow source writable, yet semgrep still needs the private state dir
-    // mounted at ~/.semgrep.
     const result = plan(
       ['uv-cache', 'semgrep-state'],
       {
@@ -828,7 +817,6 @@ describe('semgrep state preset', () => {
       source: '/data/cache/semgrep-state',
       preset: 'semgrep-state',
     })
-    // The covered state source is not restated as a second plain grant.
     expect(result.binds.filter((bind) => bind.source === '/data/cache/semgrep-state')).toHaveLength(
       1,
     )
@@ -935,14 +923,11 @@ describe('controlled preparation (confine time only)', () => {
   })
 
   it('a concurrent creator racing the ensure still resolves (EEXIST is success)', () => {
-    // The lock file appears between our failed realpath and ensure — the
-    // ensure then throws EEXIST, which must NOT surface as missing.
     const table: Record<string, Entry> = {
       '/': { dir: true },
       '/home/u/.cargo': { dir: true },
       '/home/u/.cargo/registry': { dir: true },
       '/home/u/.cargo/git': { dir: true },
-      // The "other creator" won the race and made all three files:
       '/home/u/.cargo/.package-cache': { file: true, mode: 0o644 },
       '/home/u/.cargo/.package-cache-mutate': { file: true, mode: 0o644 },
       '/home/u/.cargo/.global-cache': { file: true, mode: 0o644 },
@@ -964,9 +949,6 @@ describe('controlled preparation (confine time only)', () => {
   })
 
   it('refuses to create a default under a symlinked base pointing at a system tree', () => {
-    // ~/.cache -> /var/cache: creating ~/.cache/uv would write into /var
-    // BEFORE the floor check could refuse the grant. Pre-flight must reject
-    // without any creation.
     const table: Record<string, Entry> = {
       '/': { dir: true },
       '/home/u': { dir: true },
@@ -995,8 +977,6 @@ describe('controlled preparation (confine time only)', () => {
 
 describe('helpers', () => {
   it('pathCovers matches exact and descendant only (inputs are canonical by contract)', () => {
-    // Non-canonical inputs ('..' segments, unresolved symlinks) are caller
-    // error: every grant path is realpath'd before any comparison.
     expect(pathCovers('/a', '/a')).toBe(true)
     expect(pathCovers('/a', '/a/b')).toBe(true)
     expect(pathCovers('/a', '/ab')).toBe(false)

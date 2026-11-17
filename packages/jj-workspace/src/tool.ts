@@ -1,21 +1,10 @@
-/**
- * The `create_worktree` model tool, adapted to the VCS at the Session's
- * directory: jj workspace + task bookmark in a jj repository, the stock Git
- * branch + worktree elsewhere. The tool keeps its name, arguments, and result
- * fields so existing callers and skills keep working.
- *
- * @module dsh-jj-workspace/tool
- */
+/** @module dsh-jj-workspace/tool */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { CreatedWorktree } from '@deepseek-ai/dsh-experimental-worktree'
 import type { CreateWorkspaceRequest, JjCreatedFields } from './service.js'
 
-/**
- * Whether one creation result carries the jj arm's fields. The worktrees
- * service is declared by the stock Git SDK, so the jj fields are visible only
- * through runtime evidence; the jj fields are always written together.
- */
+/** Whether one creation result carries the jj arm's fields. The worktrees service is declared by the stock Git SDK, so the jj fields are visible only through runtime evidence; the jj fields are always written together. */
 function isJjCreation(
   value: CreatedWorktree & Partial<JjCreatedFields>,
 ): value is CreatedWorktree & JjCreatedFields {
@@ -28,10 +17,8 @@ function isJjCreation(
   )
 }
 
-/** Cordis plugin name. */
 export const name = 'jj-tool-worktree'
 
-/** Services required to register and execute the tool. */
 export const inject = ['tools', 'worktrees']
 
 /**
@@ -78,9 +65,6 @@ export function apply(ctx: Context): void {
         if (exec.agent === undefined) throw new Error('create_worktree requires a calling agent')
         const request: CreateWorkspaceRequest = { ...args, origin: 'tool' }
         const created = await ctx.worktrees.create(exec.agent, request, exec.signal)
-        // The jj arm already reports `vcs: 'jj'`; a plain Git result (only
-        // possible when the stock provider is mounted instead of this bundle's)
-        // gets the Git label the output schema requires.
         const result: CreatedWorktree & { vcs: 'git' | 'jj' } = isJjCreation(created)
           ? created
           : { ...created, vcs: 'git' }

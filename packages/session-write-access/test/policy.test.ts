@@ -19,7 +19,6 @@ function dirs(): { root: string; a: string; b: string; c: string; deployment: st
 describe('group policy combination', () => {
   it('replaces the child workspace with the family root and adds grants', () => {
     const { a, b, c, deployment } = dirs()
-    // The child's cwd is C; the family root is A and B is granted.
     const base: SandboxExecutionPolicy = {
       mode: 'workspace-write',
       workspaceRoot: c,

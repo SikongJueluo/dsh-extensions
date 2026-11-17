@@ -1,14 +1,4 @@
-/**
- * Browser ↔ host channel: one web-server prefix route (the connection RPC
- * envelope grammar) serving the Settings section's quota reads.
- *
- * Endpoints:
- * - `quota` — every monitored provider with its latest snapshot; a truthy
- *   `refresh` bypasses the cache. Never throws: each provider reports its own
- *   fetch outcome.
- *
- * @module dsh-plan-usage/channel
- */
+/** @module dsh-plan-usage/channel */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -18,16 +8,13 @@ import type { PlanUsageService } from './service.js'
 import { isRecord } from './sources/contracts.js'
 import type { QuotaSnapshot } from './types.js'
 
-/** One endpoint segment of the channel (same grammar as connection RPC). */
 const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
-/** Quota requests are tiny; anything bigger is a misbehaving client. */
 const MAX_CHANNEL_BODY_BYTES = 16 * 1024
 
 /** What the browser sees for one monitored provider. */
 interface ProviderQuotaView {
   provider: string
   snapshot?: QuotaSnapshot
-  /** Why the quota is unavailable, when known. */
   error?: string
 }
 
@@ -54,10 +41,7 @@ async function quotaView(
   return { providers: views }
 }
 
-/**
- * Mount the channel route; appears once the connection service and a web
- * server are both present (soft-injected), mirroring dsh-more-providers' OAuth channel.
- */
+/** Mount the channel route; appears once the connection service and a web server are both present (soft-injected), mirroring dsh-more-providers' OAuth channel. */
 export function registerChannel(ctx: Context, service: PlanUsageService): void {
   const handler = async (
     endpoint: string,
@@ -107,9 +91,6 @@ export function registerChannel(ctx: Context, service: PlanUsageService): void {
     const chunks: Buffer[] = []
     let received = 0
     for await (const raw of req) {
-      // The request stream emits Buffers only (`setEncoding` is never called
-      // on it); the guard makes that assumption explicit instead of asserting
-      // it per chunk.
       if (!Buffer.isBuffer(raw)) {
         respond(413, '{}')
         req.destroy()

@@ -1,21 +1,6 @@
 #!/usr/bin/env node
-/**
- * Run every standalone smoke script that can run unattended.
- *
- * Each `packages/<name>/smoke.mjs` is a one-shot verification of a bundle that
- * has no Vitest suite (and a second opinion for the ones that do). None of them
- * was reachable from `package.json` before this runner, so they drifted: three
- * had gone stale without anyone noticing.
- *
- * One script is deliberately not run here and is listed with the reason in
- * EXCLUDED below. A script cannot be skipped silently: every discovered script
- * must either run or carry an explicit exclusion, and a stale exclusion (path
- * gone) fails the run.
- *
- *   node scripts/check-smoke.mjs            # run everything
- *   node scripts/check-smoke.mjs --list     # classification only
- *   node scripts/check-smoke.mjs --verbose  # stream child output
- */
+/** @module scripts/check-smoke */
+
 import { spawn } from 'node:child_process'
 import { readdir, stat } from 'node:fs/promises'
 import { join, relative } from 'node:path'
@@ -23,11 +8,6 @@ import { join, relative } from 'node:path'
 const ROOT = join(import.meta.dirname, '..')
 const TIMEOUT_MS = 180_000
 
-/**
- * Scripts that must not run in the automatic gate, with the contract they need.
- * It is still a real check — it runs by hand, in an environment that has the
- * credentials it exercises.
- */
 const EXCLUDED = new Map([
   [
     'packages/search-integrator/scripts/smoke-research.mjs',
@@ -35,7 +15,6 @@ const EXCLUDED = new Map([
   ],
 ])
 
-/** External programs the smoke scripts shell out to. */
 const REQUIRED_BINARIES = ['git', 'jj']
 
 async function isFile(path) {
@@ -46,7 +25,6 @@ async function isFile(path) {
   }
 }
 
-/** Every standalone script the project ships, relative to the repo root. */
 async function discover() {
   const found = []
   for (const entry of await readdir(join(ROOT, 'packages'), { withFileTypes: true })) {

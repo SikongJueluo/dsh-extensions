@@ -1,17 +1,5 @@
 /**
- * Search provider adapters. Each adapter normalizes one vendor's response
- * into `RawHit`s; cross-source identity is NOT their business (the evidence
- * layer owns dedup).
- *
- * Zhipu defaults to the official MCP broker (`zhipuTransport: 'mcp'`) so a
- * GLM Coding-Plan key's MCP quota covers the calls; the open-platform REST
- * API stays available as `zhipuTransport: 'rest'` for per-call billing.
- *
- * The adapters take injectable IO (`postJson` for REST, `rawPost` for MCP)
- * so tests script them without a network. Response parsing is defensive: a
- * malformed body rejects with a provider-tagged error instead of poisoning
- * the pipeline.
- *
+ * Search provider adapters. Each adapter normalizes one vendor's response into `RawHit`s; cross-source identity is NOT their business (the evidence layer owns dedup).
  * @module dsh-search-integrator/providers
  */
 import { fetchRawPost, mcpCallTool } from './mcp.js'
@@ -35,7 +23,6 @@ export interface AdapterIo {
   readonly postJson: typeof postJson
   readonly getJson: typeof getJson
   readonly rawPost: RawPost
-  /** Fresh ChatGPT-subscription token via ctx.oauthProviders (optional: absent service ⇒ config failure). */
   readonly chatgptToken?: () => Promise<OAuthTokenPair | undefined>
 }
 
@@ -63,8 +50,6 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
-// --- Zhipu (open.bigmodel.cn) ---
-
 function zhipuHitsFrom(entry: readonly unknown[] | undefined, query: string): RawHit[] {
   return (entry ?? []).map((raw, index) => {
     const hit = isRecord(raw) ? raw : {}
@@ -88,25 +73,22 @@ function zhipuHitsFromToolResult(result: McpToolResult, query: string): RawHit[]
       : undefined
   if (structuredHits !== undefined) return zhipuHitsFrom(structuredHits, query)
   if (result.text !== '') {
+    let parsed: unknown
     try {
-      let parsed: unknown = JSON.parse(result.text)
-      // The Coding-Plan webSearchPrime tool double-encodes: content text is
-      // JSON.stringify(hitsArray), which itself parses to a STRING first.
+      parsed = JSON.parse(result.text)
       if (typeof parsed === 'string' && parsed !== '') {
         parsed = JSON.parse(parsed)
       }
-      // Shape 1: REST-like {search_result: [...]} (the open-platform broker).
-      if (isRecord(parsed) && Array.isArray(parsed.search_result)) {
-        const hits: readonly unknown[] = parsed.search_result
-        return zhipuHitsFrom(hits, query)
-      }
-      // Shape 2: a bare hits array (webSearchPrime), single or double encoded.
-      if (Array.isArray(parsed)) {
-        const hits: readonly unknown[] = parsed
-        return zhipuHitsFrom(hits, query)
-      }
-    } catch {
-      // Fall through: the error below names the actual shape we saw.
+    } catch (error) {
+      throw new Error('zhipu mcp: tool result text was not valid JSON', { cause: error })
+    }
+    if (isRecord(parsed) && Array.isArray(parsed.search_result)) {
+      const hits: readonly unknown[] = parsed.search_result
+      return zhipuHitsFrom(hits, query)
+    }
+    if (Array.isArray(parsed)) {
+      const hits: readonly unknown[] = parsed
+      return zhipuHitsFrom(hits, query)
     }
   }
   throw new Error('zhipu mcp: tool result carried no search hits array')
@@ -118,8 +100,6 @@ async function zhipuSearchMcp(
   signal: AbortSignal,
 ): Promise<RawHit[]> {
   const { settings } = config
-  // One retry on a transport-level network failure; auth/quota errors
-  // (McpTransportError with a broker code) fail fast to the source-failure path.
   const attempt = (): Promise<McpToolResult> =>
     mcpCallTool(
       config.io.rawPost,
@@ -157,7 +137,7 @@ function createZhipuAdapter(config: AdapterConfig): SearchAdapter {
           io.postJson(
             `${settings.zhipuApiBase.replace(/\/$/u, '')}/web_search`,
             {
-              search_query: query.slice(0, 70 * 4), // the docs advise short queries; hard cap defensively
+              search_query: query.slice(0, 70 * 4),
               search_engine: settings.zhipuEngine,
               search_intent: false,
               count: settings.perSourceResults,
@@ -175,8 +155,6 @@ function createZhipuAdapter(config: AdapterConfig): SearchAdapter {
     },
   }
 }
-
-// --- Tavily ---
 
 function createTavilyAdapter(config: AdapterConfig): SearchAdapter {
   const { settings, io } = config
@@ -218,8 +196,6 @@ function createTavilyAdapter(config: AdapterConfig): SearchAdapter {
   }
 }
 
-// --- Exa ---
-
 function createExaAdapter(config: AdapterConfig): SearchAdapter {
   const { settings, io } = config
   return {
@@ -256,8 +232,6 @@ function createExaAdapter(config: AdapterConfig): SearchAdapter {
     },
   }
 }
-
-// --- Brave Search API ---
 
 function createBraveAdapter(config: AdapterConfig): SearchAdapter {
   const { settings, io } = config
@@ -304,13 +278,7 @@ function createBraveAdapter(config: AdapterConfig): SearchAdapter {
   }
 }
 
-// --- OpenAI Responses web_search tool ---
-
-/**
- * The OpenAI source is search-grounded generation, not a raw SERP: the
- * integrator consumes ONLY the consulted/cited URLs (titles when present) and
- * discards the generated prose — generated text is never evidence.
- */
+/** The OpenAI source is search-grounded generation, not a raw SERP: the integrator consumes ONLY the consulted/cited URLs (titles when present) and discards the generated prose - generated text is never evidence. */
 function createOpenaiAdapter(config: AdapterConfig): SearchAdapter {
   const { settings, io } = config
   return {
@@ -384,14 +352,7 @@ function createOpenaiAdapter(config: AdapterConfig): SearchAdapter {
   }
 }
 
-// --- ChatGPT subscription (Codex backend over oauth-providers) ---
-
-/**
- * Extract consulted URLs from a Codex-backend SSE transcript: `open_page`
- * search actions (pages the model actually opened) plus `url_citation`
- * annotations (title-bearing). Generated prose is discarded — only the URLs
- * are evidence.
- */
+/** Extract consulted URLs from a Codex-backend SSE transcript: `open_page` search actions (pages the model actually opened) plus `url_citation` annotations (title-bearing). Generated prose is discarded - only the URLs are evidence. */
 function extractCodexSources(sseText: string): { url: string; title?: string }[] {
   const byUrl = new Map<string, { url: string; title?: string }>()
   const put = (url: unknown, title: unknown): void => {
@@ -407,20 +368,17 @@ function extractCodexSources(sseText: string): { url: string; title?: string }[]
       continue
     }
     if (!isRecord(frame)) continue
-    // Streamed frames: a completed web_search_call with an open_page action.
     const item = isRecord(frame.item) ? frame.item : undefined
     if (frame.type === 'response.output_item.done' && item?.type === 'web_search_call') {
       const action = isRecord(item.action) ? item.action : undefined
       if (action?.type === 'open_page') put(action.url, undefined)
     }
-    // Streamed citation annotations.
     if (frame.type === 'response.output_text.annotation.added') {
       const annotation = isRecord(frame.annotation) ? frame.annotation : undefined
       if (annotation?.type === 'url_citation') {
         put(annotation.url, annotation.title)
       }
     }
-    // Terminal frame: re-walk the full output as a safety net.
     if (frame.type === 'response.completed') {
       const response = isRecord(frame.response) ? frame.response : undefined
       const output: readonly unknown[] =
@@ -500,7 +458,6 @@ function createChatgptAdapter(config: AdapterConfig): SearchAdapter {
 
 /**
  * Build the enabled adapters from a settings snapshot and resolved keys.
- *
  * @param settings - live settings snapshot.
  * @param keys - resolved API keys by provider id.
  * @param io - injectable network IO (tests script both halves).
@@ -542,16 +499,9 @@ export function buildAdapters(
     if (id === 'brave') adapters.push(createBraveAdapter(config))
     if (id === 'openai') adapters.push(createOpenaiAdapter(config))
   }
-  // The ChatGPT source authenticates through the oauth-providers service,
-  // not through an API-key credential reference.
   if (settings.chatgptEnabled && liveIo.chatgptToken !== undefined) {
     adapters.push(createChatgptAdapter({ id: 'chatgpt', apiKey: '', settings, io: liveIo }))
   }
-  // One per-request deadline per provider call, independent of the shared
-  // run budget: a hung source must fail into coverage.failed quickly instead
-  // of eating the budget the other sources and the integrator share.
-  // Generation-backed sources (web_search inside a model call) legitimately
-  // take 10-30s+, so they get a multiple of the plain-SERP deadline.
   const generativeMs = settings.perRequestTimeoutMs * 4
   const bounded = adapters.map((adapter): SearchAdapter => {
     const deadlineMs =

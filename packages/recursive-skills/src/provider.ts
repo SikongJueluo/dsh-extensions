@@ -1,26 +1,5 @@
 /**
  * Supplemental skill provider for bundles nested under category directories.
- *
- * The shipped `skill-filesystem` provider walks only the direct children of a
- * skill root: `<root>/<skill>/SKILL.md` and `<root>/<skill>.md`. A bundle one
- * level further down (`<root>/<category>/<skill>/SKILL.md`) is deliberately not
- * discovered. This provider fills that gap without replacing the stock one:
- *
- * - direct skills stay owned by the stock provider (they are skipped here),
- * - every deeper directory containing `SKILL.md` becomes a candidate,
- * - a directory with `SKILL.md` is a bundle boundary, so its `references/`,
- *   `scripts/`, and other assets never become skills,
- * - traversal is breadth-first and deduplicated by the filesystem service's
- *   stable target identity, so a deep symlink alias cannot shadow a shallower
- *   real path and alias/cycle loops terminate,
- * - scanned roots/categories and every discovered bundle directory are watched
- *   through `ctx.fs.watch`; any change invalidates this registration so the
- *   next catalog read rescans. The bundle directory is watched (not only the
- *   instruction target) so re-pointing a symlinked `SKILL.md` is observed.
- *
- * The provider never stores skill bodies: `get()` re-reads the file, so body
- * edits reach the model on the next load without replacing the catalog.
- *
  * @module dsh-recursive-skills/provider
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -38,11 +17,8 @@ import type {
 import { parseSkillDocument, type ParsedSkill } from './frontmatter.js'
 import { SkillWatcher } from './watch.js'
 
-/** Directory name that marks a skill bundle and stops recursive descent. */
 const SKILL_FILE = 'SKILL.md'
-/** Minimum depth of a nested bundle under a scanned root. */
 const NESTED_DEPTH = 2
-/** Maximum scan/watch settle passes before reporting an incomplete observation. */
 const MAX_SETTLE_PASSES = 3
 
 /** One scanned root plus the catalog source its candidates report. */
@@ -115,18 +91,7 @@ export class RecursiveSkillProvider implements SkillProvider {
     control.signal.addEventListener('abort', () => void this.dispose(), { once: true })
   }
 
-  /**
-   * Discover every nested bundle under the configured roots. Discovery is
-   * cancellation-aware and degrades to an incomplete observation when one
-   * directory or file cannot be read, so a single I/O fault never looks like
-   * "all nested skills were deleted".
-   *
-   * Watchers can only be installed after a first scan reveals the tree. That
-   * opens a window in which an external writer can change a directory before
-   * its watcher exists. When `reconcile` reports newly opened watchers, the
-   * scan is repeated under the now-complete watch set, so the returned catalog
-   * never caches away a change that happened in the blind window.
-   */
+  /** Discover every nested bundle under the configured roots. Discovery is cancellation-aware and degrades to an incomplete observation when one directory or file cannot be read, so a single I/O fault never looks like "all nested skills were deleted". */
   async list(options: SkillLookupOptions): Promise<SkillCandidate[] | SkillProviderObservation> {
     let state = await this.scan(options)
     if (this.watcher === undefined) return observation(state)
@@ -136,16 +101,10 @@ export class RecursiveSkillProvider implements SkillProvider {
       if (!opened) return observation(state)
       state = await this.scan(options)
     }
-    // The tree kept gaining unwatched targets while settling. Do not cache a
-    // possibly stale catalog; the consumer keeps its last-good one and retries.
     return { candidates: state.candidates, complete: false }
   }
 
-  /**
-   * Load the current body of the selected candidate. Routing fields come from
-   * the live frontmatter; a name change is detected by the registry, which
-   * invalidates the cached catalog.
-   */
+  /** Load the current body of the selected candidate. Routing fields come from the live frontmatter; a name change is detected by the registry, which invalidates the cached catalog. */
   async get(
     candidate: SkillCandidate,
     options: SkillLookupOptions,
@@ -207,12 +166,7 @@ export class RecursiveSkillProvider implements SkillProvider {
     return this.disposal
   }
 
-  /**
-   * One breadth-first pass over the roots. Breadth-first order is what keeps
-   * duplicate resolution stable: shallower real paths are seen before deeper
-   * symlink aliases, so `visited` cannot let an alias consume the depth budget
-   * of a real directory that the scan would have reached directly.
-   */
+  /** One breadth-first pass over the roots. Breadth-first order is what keeps duplicate resolution stable: shallower real paths are seen before deeper symlink aliases, so `visited` cannot let an alias consume the depth budget of a real directory that the scan would have reached directly. */
   private async scan(options: SkillLookupOptions): Promise<ScanState> {
     const state: ScanState = {
       candidates: [],
@@ -248,8 +202,6 @@ export class RecursiveSkillProvider implements SkillProvider {
 
       const info = await this.stat(target, state, options)
       if (info === undefined) {
-        // Watch an absent root so creating it later starts discovery without a
-        // restart. A missing nested directory is covered by its parent watcher.
         if (depth === 0) state.watchTargets.push(target)
         continue
       }
@@ -260,9 +212,6 @@ export class RecursiveSkillProvider implements SkillProvider {
 
       const skillFile = entries.find((entry) => entry.name === SKILL_FILE && entry.type === 'file')
       if (skillFile !== undefined) {
-        // A SKILL.md directory is a bundle: never descend into its resources.
-        // Watching the directory (not the instruction target) also observes a
-        // symlinked SKILL.md being re-pointed to another file.
         state.watchTargets.push(target)
         if (depth >= NESTED_DEPTH) await this.record(target, skillFile.target, root, state, options)
         continue

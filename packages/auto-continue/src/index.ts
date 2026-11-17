@@ -1,25 +1,3 @@
-/**
- * dsh-auto-continue — automatic continuation for quota-limited coding plans.
- *
- * When a coding-plan model request fails with `QUOTA` (the GLM coding plan's
- * "The usage limit has been reached") — or `RATE_LIMIT` after the built-in
- * `llm-retry` budget is exhausted — this plugin owns recovery on the
- * `agent/request-error` waterfall: it reads the plan's quota windows through
- * the `planUsage` service (provided by the sibling dsh-plan-usage plugin),
- * sleeps until the reported window reset, and returns `{ kind: 'retry' }` so
- * the agent loop re-runs the failed step inside the same open turn. No
- * "continue" message, no extra prompt tokens, prompt-cache friendly. Each
- * scheduled wait is recorded as an `llm/retry` session event, which the
- * stock Web conversation view renders as a countdown.
- *
- * Without dsh-plan-usage mounted (or when it has no monitor for the failed
- * route), recovery degrades to staged probing — the plugin still works, it
- * just cannot align to the reported reset time.
- *
- * Consumed host services: `planUsage` optionally via `ctx.get()`.
- *
- * @module dsh-auto-continue
- */
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { PLUGIN_NAME } from './identity.js'
@@ -46,17 +24,15 @@ export {
 } from './schedule.js'
 export type { ScheduleOptions, WaitPlan } from './schedule.js'
 
-/** Plugin-row configuration. */
 export interface Config {
-  /** Total wait budget from the first owned failure (ms). */
   maxWaitMs: number
-  /** Extra slack after a reported reset before retrying (ms). */
+
   resetMarginMs: number
-  /** Persist in-flight waits so they survive harness restarts (default on). */
+
   persist: boolean
-  /** Resume sessions whose turn was interrupted by a harness restart (default on). */
+
   resumeOnRestart: boolean
-  /** Max age of a restart-mirror entry before it is no longer resumed (ms). */
+
   resumeMaxAgeMs: number
 }
 
@@ -94,7 +70,7 @@ export const name = PLUGIN_NAME
 export const inject: string[] = []
 
 export function apply(ctx: Context, config: Config): void {
-  const spool = config.persist ? new WaitSpool() : undefined
+  const spool = config.persist ? new WaitSpool({ logger: ctx.logger }) : undefined
   const cancelled = new Set<string>()
   const adopter =
     spool === undefined ? undefined : registerResume(ctx, { maxWaitMs: config.maxWaitMs }, spool)

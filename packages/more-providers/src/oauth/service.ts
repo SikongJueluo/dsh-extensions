@@ -1,13 +1,5 @@
 /**
- * The `oauthProviders` host service: a per-provider OAuth token window for
- * host consumers that need to call the vendor's own backend APIs with the
- * signed-in account — quota monitors (dsh-plan-usage's OpenAI usage source)
- * being the first.
- *
- * Each provider module registers a resolver that goes through its own
- * TokenStore, so tokens handed out here are always the fresh, refresh-rotated
- * ones — never a stale copy read straight from the credential record.
- *
+ * The `oauthProviders` host service: a per-provider OAuth token window for host consumers that need to call the vendor's own backend APIs with the signed-in account - quota monitors (dsh-plan-usage's OpenAI usage source) being the first.
  * @module dsh-more-providers/oauth/service
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -40,10 +32,7 @@ export class OAuthProvidersService extends Service {
     return [...this.resolvers.keys()]
   }
 
-  /**
-   * One provider's usable token, or `undefined` when the provider is unknown,
-   * not signed in, or its refresh failed (warn-logged). Never throws.
-   */
+  /** One provider's usable token, or `undefined` when the provider is unknown, not signed in, or its refresh failed (warn-logged). Never throws. */
   async token(provider: string): Promise<OAuthToken | undefined> {
     const resolve = this.resolvers.get(provider)
     if (resolve === undefined) return undefined
@@ -64,7 +53,6 @@ export class OAuthProvidersService extends Service {
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    /** Provided by dsh-more-providers; absent when that plugin is not mounted. */
     oauthProviders: OAuthProvidersService
   }
 }

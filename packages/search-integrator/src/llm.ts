@@ -1,15 +1,5 @@
 /**
  * The auxiliary-model port: one bounded one-shot call at a time.
- *
- * Wrapping `ctx.llm.stream()` here gives the pipeline a seam tests can fake
- * AND a single place that enforces the stream contract: a call succeeded only
- * when a terminal `finish` chunk with `kind === 'stop'` actually arrived. The
- * assembler reports `{kind: 'stop'}` for a stream that ended WITHOUT a finish
- * chunk, so this port tracks finish arrival itself — a terminated-without-
- * finish stream, `error`/`aborted` finish, `max-tokens`, and a thrown adapter
- * are all failures, and partial text is never treated as success (the
- * auto-permit judge's shortcut is deliberately not copied).
- *
  * @module dsh-search-integrator/llm
  */
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -19,7 +9,6 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
-    /** The search-integrator's one-shot auxiliary user messages. */
     'search-integrator': {
       readonly kind: 'search-integrator'
     }
@@ -46,7 +35,6 @@ export interface LlmCallOutcome {
   readonly text: string
   readonly finishKind: string
   readonly usage?: LlmUsage
-  /** Human-readable failure reason when `ok` is false. */
   readonly error?: string
 }
 
@@ -65,10 +53,8 @@ function reasonText(reason: FinishReason): string {
 
 /**
  * The real port over `ctx.llm.stream`.
- *
  * @param ctx - plugin context (for `ctx.llm`).
- * @param route - provider/model/maxTokens from the live settings, plus the
- *   owning session id stamped on every request for routing metadata.
+ * @param route - provider/model/maxTokens from the live settings, plus the owning session id stamped on every request for routing metadata.
  */
 export function createLlmPort(
   ctx: Context,

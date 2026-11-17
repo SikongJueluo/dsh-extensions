@@ -1,34 +1,18 @@
-/**
- * Model-facing rendering of one captured stream: strip ANSI controls,
- * collapse carriage-return progress updates, fold identical consecutive
- * lines, and keep a hard-bounded head/tail excerpt. The raw stream is never
- * modified by this module — callers spill it separately when the view is an
- * excerpt.
- *
- * @module dsh-remote-exec/display
- */
+/** @module dsh-remote-exec/display */
 
 /** One bounded, cleaned stream view. */
 export interface DisplayView {
   readonly text: string
-  /** True when `text` is not the complete stream (raw over budget or cleaned view capped). */
   readonly truncated: boolean
 }
 
-/** CSI, OSC and two-character ANSI escapes; applied only to the bounded excerpt. */
 const ANSI_PATTERN =
   // oxlint-disable-next-line eslint/no-control-regex -- the pattern exists to match ANSI escapes
   /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)|[@-_])/gu
 
-/** Bytes reserved inside the budget for the omission/cap marker. */
 const MARKER_RESERVE = 64
 
-/**
- * Render `raw` for the model under `budgetBytes` (the plugin config minimum is
- * 1024, above the marker reserve). The result fits the budget after the hard
- * cap trims any UTF-8 boundary expansion; a budget below the marker size
- * cannot fit the marker.
- */
+/** Render `raw` for the model under `budgetBytes` (the plugin config minimum is 1024, above the marker reserve). The result fits the budget after the hard cap trims any UTF-8 boundary expansion; a budget below the marker size cannot fit the marker. */
 export function formatDisplay(raw: string, budgetBytes: number): DisplayView {
   const budget = Math.max(1, budgetBytes)
   const bytes = Buffer.from(raw, 'utf8')

@@ -1,14 +1,5 @@
 /**
- * The `worktrees` provider that routes jj workspaces and keeps the stock Git
- * runtime for everything else.
- *
- * The stock Git service is not modified: it is constructed on an isolated
- * `worktrees` realm behind this provider, so Git behavior, configuration, and
- * disposal stay the shipped implementation. The jj arm runs its own pinned
- * sequence under the same Session policy, records the task association in the
- * project pool, and switches the Session directory only after the bookmark
- * exists.
- *
+ * The `worktrees` provider that routes jj workspaces and keeps the stock Git runtime for everything else.
  * @module dsh-jj-workspace/service
  */
 import { Service } from '@deepseek-ai/cordis'
@@ -55,25 +46,15 @@ import { appendTaskRecord, prepareJjDirectory, runJj, validateProcessConfig } fr
 
 /** Worktree row configuration: the stock Git fields plus the jj arm's two choices. */
 export interface Config {
-  /** Relative Git checkout pool inside the source repository. */
   directory: string
-  /** Prefix for automatically generated Git branch and checkout names. */
   namePrefix: string
-  /** Executable name or absolute execution-world path of Git. */
   gitCommand: string
-  /** Node executable used for sandboxed directory allocation. */
   nodeCommand: string
-  /** Deadline in milliseconds for one command. */
   timeoutMs: number
-  /** Subprocess termination grace in milliseconds. */
   graceMs: number
-  /** Maximum captured bytes per subprocess output stream. */
   maxOutputBytes: number
-  /** Relative jj workspace pool inside the source project. */
   workspaceDirectory: string
-  /** Executable name or absolute execution-world path of jj 0.46 or newer. */
   jjCommand: string
-  /** Mount the browser status channel; only the root provider must do this. */
   statusChannel: boolean
 }
 
@@ -119,9 +100,7 @@ export interface JjCreatedFields {
   vcs: 'jj'
   workspace: string
   bookmark: string
-  /** Pinned parent change id. */
   baseChange: string
-  /** Change id the task bookmark points at. */
   changeId: string
 }
 
@@ -147,8 +126,6 @@ export default class JjWorktreeService extends Service {
     super(ctx, 'worktrees')
     validateProcessConfig(config)
     this.config = config
-    // The stock runtime owns Git in a private service realm; the parent scope
-    // sees only this provider, so disabling the shipped row loses no behavior.
     this.git = new WorktreeService(ctx.isolate('worktrees'), config)
     ctx.effect(
       () => async () => {
@@ -160,12 +137,7 @@ export default class JjWorktreeService extends Service {
     if (config.statusChannel) registerChannel(ctx, this)
   }
 
-  /**
-   * Create a workspace and enter it: a jj workspace plus a same-name task
-   * bookmark when the Session is in a jj repository, otherwise the stock Git
-   * worktree. Existing names or paths fail; a failed jj attempt retains what it
-   * already created and reports the paths.
-   */
+  /** Create a workspace and enter it: a jj workspace plus a same-name task bookmark when the Session is in a jj repository, otherwise the stock Git worktree. Existing names or paths fail; a failed jj attempt retains what it already created and reports the paths. */
   async create(
     agent: Agent,
     request: CreateWorkspaceRequest = {},
@@ -190,10 +162,7 @@ export default class JjWorktreeService extends Service {
     }
   }
 
-  /**
-   * Restore a removed worktree through the stock Git runtime. A recorded jj
-   * workspace is reported as unsupported instead of being handed to Git.
-   */
+  /** Restore a removed worktree through the stock Git runtime. A recorded jj workspace is reported as unsupported instead of being handed to Git. */
   async restore(
     agent: Agent,
     request: RestoreWorktreeRequest,
@@ -252,12 +221,7 @@ export default class JjWorktreeService extends Service {
     return this.readRecords(projectRoot)
   }
 
-  /**
-   * Read the Session's jj tasks and observe their workspace and exact bookmark
-   * names without moving or recreating anything. A moved, missing, or
-   * conflicted bookmark is reported as such; a task whose workspace is gone is
-   * reported, never restored.
-   */
+  /** Read the Session's jj tasks and observe their workspace and exact bookmark names without moving or recreating anything. A moved, missing, or conflicted bookmark is reported as such; a task whose workspace is gone is reported, never restored. */
   async taskStates(sessionId: string): Promise<JjTaskState[]> {
     const session = this.ctx.sessions.get(SessionId(sessionId))
     if (session === undefined) return []
@@ -341,8 +305,6 @@ export default class JjWorktreeService extends Service {
       const registered = await this.ctx.fs.resolve(registeredRoot, { signal })
       return recorded.targetKey === registered.targetKey
     } catch {
-      // The registered root moved or vanished; the recorded directory is not
-      // the workspace jj currently knows under that name.
       return false
     }
   }

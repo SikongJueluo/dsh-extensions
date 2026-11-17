@@ -1,72 +1,38 @@
-/**
- * direnv evaluation for dsh-auto-env.
- *
- * The loader answers one question per working directory: "what environment
- * would direnv load here?", as a plain overlay. It runs `direnv export json`
- * host-side (through `ctx.subprocess`, outside the model bash sandbox — the
- * sandbox denies direnv's allow-record and cache writes), converts the JSON
- * diff into `{ name: value | undefined }` (a `null` in the diff becomes an
- * unset tombstone, which the subprocess seam honors), and caches the result
- * per `.envrc` directory with TTL revalidation. direnv's own `.direnv/cache`
- * keeps repeat evaluations at ~20 ms; a cold devenv/nix evaluation can take
- * tens of seconds and is bounded by `timeoutMs`.
- *
- * Trust model: identical to interactive direnv. `direnv export` refuses an
- * `.envrc` whose hash is not in `~/.local/share/direnv/allow` ("is blocked"),
- * and this loader surfaces that as `blocked` instead of loading anything —
- * it never runs `direnv allow` itself. The allow list is shared with the
- * user's interactive direnv.
- *
- * @module dsh-auto-env/direnv
- */
 import { existsSync, watch, type FSWatcher } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-subprocess'
 
-/**
- * One direnv environment diff: string values are set, `undefined` values are
- * unset tombstones (the subprocess seam drops the inherited key), and every
- * `DSH_*` / `DIRENV_*` key is stripped before the overlay is built.
- */
 export type EnvOverlay = Readonly<Record<string, string | undefined>>
 
-/** Terminal state of one `.envrc` evaluation. */
 export type DirenvStatus = 'active' | 'none' | 'blocked' | 'timeout' | 'error' | 'missing'
 
-/** Cached facts for one `.envrc` directory. */
 export interface DirenvFacts {
   status: DirenvStatus
   overlay: EnvOverlay
-  /** Directory containing the `.envrc` backing `overlay`. */
+
   rcDir?: string
-  /** First line of diagnostic context for non-active statuses. */
+
   detail?: string
-  /** When these facts were recorded (epoch ms). */
+
   at: number
-  /**
-   * Invalidation generation these facts were computed under; a watcher event
-   * during evaluation bumps the current generation and discards the result.
-   */
+
   gen: number
 }
 
-/** Loader options; see the plugin `Config` for the user-facing defaults. */
 export interface DirenvOptions {
-  /** Direnv executable: absolute path or bare PATH name. */
   direnvPath: string
-  /** Budget for one `direnv export json` evaluation (ms). */
+
   timeoutMs: number
-  /** Serve a cached overlay until it is this old, then re-evaluate (ms). */
+
   revalidateMs: number
-  /** stdout budget for one evaluation (bytes). */
+
   stdoutMaxBytes: number
-  /** Actively drop cached overlays when direnv inputs change (default on). */
+
   watch?: boolean
 }
 
-/** What `status()` reports for a directory. */
 export interface DirenvStatusInfo {
   status: DirenvStatus | 'pending'
   rcDir?: string
@@ -74,23 +40,13 @@ export interface DirenvStatusInfo {
 }
 
 const EMPTY_OVERLAY: EnvOverlay = Object.freeze({})
-/** Upper bound on cached `.envrc` directories (insertion-order eviction). */
+
 const MAX_CACHED_DIRS = 64
-/** How far up from a working directory to look for an `.envrc`. */
+
 const MAX_UPWARD_HOPS = 64
-/**
- * Basenames inside an `.envrc` directory whose changes drop the cached
- * overlay immediately (the common devenv inputs). direnv itself watches a
- * superset — whatever the `.envrc` `watch_file`s — so anything not listed
- * here still converges through the TTL revalidation.
- */
+
 const WATCHED_BASENAMES = new Set(['.envrc', 'devenv.nix', 'devenv.yaml', 'devenv.lock'])
 
-/**
- * Find the closest ancestor of `start` (inclusive) holding an `.envrc`,
- * mirroring direnv's own upward search. Returns `undefined` when there is
- * none — direnv would load nothing there.
- */
 export function findEnvrcDir(start: string): string | undefined {
   let dir = resolve(start)
   for (let hops = 0; hops < MAX_UPWARD_HOPS; hops++) {
@@ -102,25 +58,17 @@ export function findEnvrcDir(start: string): string | undefined {
   return undefined
 }
 
-/**
- * Per-process direnv overlay cache with TTL revalidation.
- *
- * The cache is keyed by the `.envrc` directory (not the caller's working
- * directory), so every session and subagent rooted under one environment
- * shares a single evaluation. `ensure` never rejects: evaluation failures
- * resolve to the empty overlay and are reported through `status()`.
- */
 export class DirenvLoader {
   readonly #ctx: Context
   readonly #options: DirenvOptions
   readonly #facts = new Map<string, DirenvFacts>()
   readonly #inflight = new Map<string, Promise<EnvOverlay>>()
   readonly #logged = new Map<string, DirenvStatus>()
-  /** Invalidation generation per `.envrc` directory (bumped by watchers). */
+
   readonly #generation = new Map<string, number>()
-  /** One directory watcher per cached `.envrc` directory; `undefined` = failed. */
+
   readonly #watchers = new Map<string, FSWatcher | undefined>()
-  /** Watches direnv's allow list so an interactive `direnv allow` lands at once. */
+
   #allowWatcher: FSWatcher | undefined
   #direnvBin: string | undefined
 
@@ -129,19 +77,13 @@ export class DirenvLoader {
     this.#options = options
   }
 
-  /** Close every watcher; the owning plugin calls this on disposal. */
   dispose(): void {
-    for (const watcher of this.#watchers.values()) this.#closeWatcher(watcher)
+    for (const [rcDir, watcher] of this.#watchers) this.#closeWatcher(watcher, rcDir)
     this.#watchers.clear()
-    this.#closeWatcher(this.#allowWatcher)
+    this.#closeWatcher(this.#allowWatcher, 'the allow list')
     this.#allowWatcher = undefined
   }
 
-  /**
-   * Serve the cached overlay for `dir` without evaluating anything.
-   * `undefined` when nothing has been computed yet — the caller should
-   * treat it as "no overlay available this once" and kick `ensure`.
-   */
   // fallow-ignore-next-line unused-class-member -- only the .mjs smoke calls it; fallow cannot attribute a JS call site
   snapshot(dir: string): EnvOverlay | undefined {
     const rcDir = findEnvrcDir(dir)
@@ -149,10 +91,6 @@ export class DirenvLoader {
     return this.#facts.get(rcDir)?.overlay
   }
 
-  /**
-   * Resolve the overlay for `dir`, evaluating (or re-evaluating) direnv as
-   * needed. Concurrent calls for the same environment share one evaluation.
-   */
   async ensure(dir: string): Promise<EnvOverlay> {
     const rcDir = findEnvrcDir(dir)
     if (rcDir === undefined) return EMPTY_OVERLAY
@@ -162,7 +100,6 @@ export class DirenvLoader {
     return this.#revalidate(rcDir)
   }
 
-  /** Report the current state of `dir`'s environment for `$DSH_DIRENV`. */
   status(dir: string): DirenvStatusInfo {
     const rcDir = findEnvrcDir(dir)
     if (rcDir === undefined) return { status: 'none' }
@@ -181,7 +118,6 @@ export class DirenvLoader {
     if (running !== undefined) return running
     const task = this.#evaluate(rcDir)
       .catch((error: unknown): EnvOverlay => {
-        // #evaluate records its own failure facts; only unexpected throws land here.
         this.#record(rcDir, this.#generation.get(rcDir) ?? 0, {
           status: 'error',
           overlay: EMPTY_OVERLAY,
@@ -196,13 +132,9 @@ export class DirenvLoader {
     return task
   }
 
-  /** Run `direnv export json` in `rcDir` and classify the outcome. */
   async #evaluate(rcDir: string): Promise<EnvOverlay> {
-    // A watcher event during this evaluation bumps the generation; the
-    // then-stale result is discarded instead of cached.
     const gen = this.#generation.get(rcDir) ?? 0
-    // Watch from evaluation start, not completion: a change during the very
-    // first evaluation of a directory must be seen too.
+
     this.#startRcDirWatch(rcDir)
     const bin = await this.#resolveBinary()
     if (bin === undefined) {
@@ -213,8 +145,7 @@ export class DirenvLoader {
       })
       return EMPTY_OVERLAY
     }
-    // Own the deadline with a ref'd timer: AbortSignal.timeout() schedules
-    // unref'd, so a quiet event loop could exit before the budget elapses.
+
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.#options.timeoutMs)
     const settled = (): boolean => controller.signal.aborted
@@ -253,7 +184,7 @@ export class DirenvLoader {
     } finally {
       clearTimeout(timer)
     }
-    // Collect dispositions expose both readers by the seam contract; defensive.
+
     const { stdout, stderr: stderrReader } = handle.collected
     if (stdout === undefined || stderrReader === undefined) {
       this.#record(rcDir, gen, {
@@ -276,7 +207,7 @@ export class DirenvLoader {
     if (outcome.exitCode !== 0) {
       const detail =
         firstLine(stderr) ?? `direnv export exited with code ${outcome.exitCode ?? 'null'}`
-      // direnv refuses an .envrc whose hash is not in its allow list.
+
       const status: DirenvStatus = stderr.includes('is blocked') ? 'blocked' : 'error'
       this.#record(rcDir, gen, { status, overlay: EMPTY_OVERLAY, detail })
       return EMPTY_OVERLAY
@@ -313,7 +244,6 @@ export class DirenvLoader {
     return overlay
   }
 
-  /** Resolve (and cache) the direnv executable; `undefined` when not found. */
   async #resolveBinary(): Promise<string | undefined> {
     if (this.#direnvBin !== undefined) return this.#direnvBin
     try {
@@ -350,10 +280,6 @@ export class DirenvLoader {
     }
   }
 
-  /**
-   * Drop everything cached for `rcDir` (and any in-flight result) so the
-   * next use re-evaluates direnv. Called by the input watchers.
-   */
   #invalidate(rcDir: string, reason: string): void {
     this.#generation.set(rcDir, (this.#generation.get(rcDir) ?? 0) + 1)
     const hadFacts = this.#facts.delete(rcDir)
@@ -363,12 +289,10 @@ export class DirenvLoader {
         .info(`direnv inputs changed (${reason}); re-evaluating ${rcDir} on next use`)
   }
 
-  /** Watch the `.envrc` directory itself (rename-safe, sees new files). */
   #startRcDirWatch(rcDir: string): void {
     if (this.#options.watch === false || this.#watchers.has(rcDir)) return
     try {
       const watcher = watch(rcDir, (_event, filename) => {
-        // `null` filenames cannot be filtered; treat them as a hit.
         if (filename === null || WATCHED_BASENAMES.has(basename(filename)))
           this.#invalidate(rcDir, filename ?? 'unknown change')
       })
@@ -376,8 +300,11 @@ export class DirenvLoader {
         this.#watchers.delete(rcDir)
         try {
           watcher.close()
-        } catch {
-          // The watcher already stopped; nothing left to release.
+        } catch (closeError) {
+          this.#logDiagnostic(
+            'debug',
+            `direnv input watcher close failed for ${rcDir}: ${errorTag(closeError)}`,
+          )
         }
         this.#ctx
           .logger('auto-env')
@@ -386,7 +313,6 @@ export class DirenvLoader {
       this.#watchers.set(rcDir, watcher)
       this.#startAllowWatch()
     } catch (error) {
-      // e.g. the directory vanished; degrade to TTL-only revalidation.
       this.#watchers.set(rcDir, undefined)
       this.#ctx
         .logger('auto-env')
@@ -394,11 +320,6 @@ export class DirenvLoader {
     }
   }
 
-  /**
-   * Watch direnv's allow list so an interactive `direnv allow` unblocks the
-   * session immediately instead of after the TTL. Any event invalidates
-   * every cached environment — allow records are rare and cheap to recheck.
-   */
   #startAllowWatch(): void {
     if (this.#options.watch === false || this.#allowWatcher !== undefined) return
     const allowDir =
@@ -410,51 +331,59 @@ export class DirenvLoader {
       const watcher = watch(allowDir, () => {
         for (const rcDir of this.#watchers.keys()) this.#invalidate(rcDir, 'allow list changed')
       })
-      watcher.on('error', () => {
+      watcher.on('error', (error) => {
         if (this.#allowWatcher === watcher) this.#allowWatcher = undefined
         try {
           watcher.close()
-        } catch {
-          // The watcher already stopped; nothing left to release.
+        } catch (closeError) {
+          this.#logDiagnostic(
+            'debug',
+            `direnv allow-list watcher close failed: ${errorTag(closeError)}`,
+          )
         }
+        this.#logDiagnostic('warn', `direnv allow-list watcher stopped: ${errorTag(error)}`)
       })
       this.#allowWatcher = watcher
-    } catch {
-      // No allow-list watching; blocked environments still recover via TTL.
+    } catch (error) {
+      this.#logDiagnostic(
+        'warn',
+        `direnv allow-list watcher unavailable for ${allowDir}: ${errorTag(error)}`,
+      )
     }
   }
 
-  #closeWatcher(watcher: FSWatcher | undefined): void {
+  #logDiagnostic(level: 'debug' | 'warn', message: string): boolean {
+    try {
+      this.#ctx.logger('auto-env')[level](message)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  #closeWatcher(watcher: FSWatcher | undefined, scope: string): void {
     if (watcher === undefined) return
     try {
       watcher.close()
-    } catch {
-      // The watcher already stopped; nothing left to release.
+    } catch (error) {
+      this.#logDiagnostic('debug', `direnv watcher close failed for ${scope}: ${errorTag(error)}`)
     }
   }
 
-  /** Evict one `.envrc` directory: facts, generation, and watcher. */
   #forget(rcDir: string): void {
     this.#facts.delete(rcDir)
     this.#generation.delete(rcDir)
     this.#logged.delete(rcDir)
     const watcher = this.#watchers.get(rcDir)
     this.#watchers.delete(rcDir)
-    this.#closeWatcher(watcher)
+    this.#closeWatcher(watcher, rcDir)
   }
 }
 
-/** Narrow a parsed JSON document to an indexable record (arrays are rejected). */
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/**
- * Convert one `direnv export json` document into an overlay: `null` becomes
- * an unset tombstone, `DSH_*` (harness-managed namespace) and `DIRENV_*`
- * (direnv-internal bookkeeping the child's hook-less shell must not see)
- * are dropped, and every other value is stringified.
- */
 export function sanitizeDirenvDump(dump: Record<string, unknown>): EnvOverlay {
   const overlay: Record<string, string | undefined> = {}
   for (const [key, value] of Object.entries(dump)) {
@@ -465,12 +394,10 @@ export function sanitizeDirenvDump(dump: Record<string, unknown>): EnvOverlay {
   return Object.freeze(overlay)
 }
 
-/** ANSI escape sequences (direnv colorizes stderr for terminals). */
 // oxlint-disable-next-line eslint/no-control-regex -- the pattern exists to match ANSI escapes
 const ANSI_PATTERN = /\u001B\[[0-9;?]*[A-Za-z]/gu
 
 function firstLine(text: string): string | undefined {
-  // direnv colorizes stderr when it believes a terminal is attached.
   const line = text.replaceAll(ANSI_PATTERN, '').split('\n', 1)[0]?.trim()
   return line === undefined || line.length === 0 ? undefined : line
 }
@@ -479,4 +406,17 @@ function describeError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error)
   const line = firstLine(text)
   return line ?? 'unknown error'
+}
+
+const CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/u
+const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u
+
+/** Stable error identity for logs; only structured names and codes survive. */
+function errorTag(error: unknown): string {
+  if (!(error instanceof Error)) return 'non-error'
+  const name = NAME_PATTERN.test(error.name) ? error.name : 'Error'
+  const code: unknown = 'code' in error ? error.code : undefined
+  if (typeof code === 'string') return CODE_PATTERN.test(code) ? `${name}(${code})` : name
+  if (typeof code === 'number' && Number.isSafeInteger(code)) return `${name}(${code})`
+  return name
 }

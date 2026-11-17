@@ -1,29 +1,13 @@
 /**
  * OpenCode Go quota source: `GET https://opencode.ai/zen/go/v1/usage`.
- *
- * First-party but UNDOCUMENTED, and the shape changed once already — the
- * decoder below treats every field as optional and skips anything it does
- * not recognize. Verified against a live capture of 2026-10-13:
- *
- * 1. One `usage` object with three windows — `rolling` (the ~5h window),
- *    `weekly`, `monthly` — each carrying only `status` ("ok" or
- *    "rate-limited"), `percent` (the CONSUMED share, integer 0-100,
- *    floored upstream — not a fraction), and `resetsAt` (ISO-8601 instant
- *    of the next reset). No amounts are reported.
- * 2. `status: "rate-limited"` means the plan is unusable even if the
- *    number lags — reported as 100.
- * 3. HTTP 403 means the workspace has no Go subscription.
- *
  * @module dsh-plan-usage/sources/opencode
  */
 import type { QuotaSnapshot } from '../types.js'
 import { isRecord } from './contracts.js'
 import type { FetchLike, QuotaSource, SourceLogger } from './contracts.js'
 
-/** The OpenCode Go usage endpoint. */
 const OPENCODE_GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage'
 
-/** Env var holding the API key (matching the pi-ai provider config). */
 const ENV_KEY = 'OPENCODE_API_KEY'
 
 export interface OpenCodeGoSourceOptions {
@@ -31,7 +15,6 @@ export interface OpenCodeGoSourceOptions {
   logger?: SourceLogger
   timeoutMs?: number
   env?: NodeJS.ProcessEnv
-  /** Optional external key resolver (dsh-more-providers' `providerKeys`). */
   getKey?: (provider: string) => string | undefined
 }
 
@@ -51,7 +34,7 @@ function resetAtMs(value: unknown): number | undefined {
   return ms
 }
 
-/** Parsed Go-plan windows (route names mapped: rolling→fiveHour). */
+/** Parsed Go-plan windows (route names mapped: rolling->fiveHour). */
 export interface OpenCodeGoWindows {
   fiveHour?: { percent?: number; resetAt?: number }
   weekly?: { percent?: number; resetAt?: number }
@@ -63,14 +46,13 @@ export interface OpenCodeGoError {
   error: string
 }
 
-/** One `usage.{rolling,weekly,monthly}` row → window facts; malformed rows are skipped. */
+/** One `usage.{rolling,weekly,monthly}` row -> window facts; malformed rows are skipped. */
 function windowOf(raw: unknown): { percent?: number; resetAt?: number } | undefined {
   const row = asRecord(raw)
   if (row === null) return undefined
   const window: { percent?: number; resetAt?: number } = {}
   if (row.status === 'rate-limited') window.percent = 100
   else {
-    // percent is the consumed share, integer 0-100; non-numbers are ignored.
     const percent = finite(row.percent)
     if (percent !== undefined)
       window.percent = Math.min(100, Math.max(0, Math.round(percent * 10) / 10))
@@ -81,12 +63,7 @@ function windowOf(raw: unknown): { percent?: number; resetAt?: number } | undefi
   return window
 }
 
-/**
- * Parse a `GET zen/go/v1/usage` body into window facts. Pure; malformed
- * windows are skipped, and when none is usable an in-band `{ error }` with
- * a stable message comes back (never a throw — the endpoint is
- * undocumented and its shape changed once already).
- */
+/** Parse a `GET zen/go/v1/usage` body into window facts. Pure; malformed windows are skipped, and when none is usable an in-band `{ error }` with a stable message comes back (never a throw - the endpoint is undocumented and its shape changed once already). */
 export function parseOpenCodeGoUsage(body: unknown): OpenCodeGoWindows | OpenCodeGoError {
   const envelope = asRecord(body)
   if (envelope === null) return { error: 'opencode: response was not an object' }
@@ -109,11 +86,7 @@ export function parseOpenCodeGoUsage(body: unknown): OpenCodeGoWindows | OpenCod
   return parsed
 }
 
-/**
- * The OpenCode usage source for the `opencode-go` route, keyed by the
- * `OPENCODE_API_KEY` env var: one authenticated GET per fetch, `undefined`
- * on any failure (never throws).
- */
+/** The OpenCode usage source for the `opencode-go` route, keyed by the `OPENCODE_API_KEY` env var: one authenticated GET per fetch, `undefined` on any failure (never throws). */
 export class OpenCodeGoSource implements QuotaSource {
   readonly id = 'opencode-go'
   readonly routes = ['opencode-go'] as const
@@ -164,7 +137,6 @@ export class OpenCodeGoSource implements QuotaSource {
       return undefined
     }
     if (!response.ok) {
-      // 403 = the workspace has no Go subscription; other codes are upstream trouble.
       this.logger?.warn('plan-usage: opencode usage fetch returned HTTP %s', response.status)
       return undefined
     }

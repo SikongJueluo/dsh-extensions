@@ -199,7 +199,6 @@ describe('createJjWorkspace', () => {
     })
     execFileSync('jj', ['--no-pager', '--color=never', 'new'], { cwd: repo, env: fixture.env })
     await writeFile(join(repo, 'a.txt'), 'one\ncurrent\n')
-    // The reviewer's fixture: Git HEAD names the base branch, not a detached commit.
     execFileSync('git', ['--no-pager', 'symbolic-ref', 'HEAD', 'refs/heads/main'], {
       cwd: repo,
       env: fixture.env,

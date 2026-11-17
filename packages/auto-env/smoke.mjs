@@ -1,18 +1,3 @@
-/* Runtime smoke test for dsh-auto-env.
- *
- * Part 1 — plugin surface: config defaults, class shape, inject list.
- * Part 2 — pure helpers: dump sanitizing (tombstones + DSH_/DIRENV_
- *          stripping) and overlay merge precedence.
- * Part 3 — DirenvLoader against a scripted fake direnv behind a stub
- *          `ctx.subprocess`: none / active / cache / upward walk /
- *          revalidate / in-flight dedup / blocked / timeout / error /
- *          missing-binary classification.
- *
- * The real direnv binary is deliberately not exercised here (the model bash
- * sandbox denies its allow-record writes — the reason the plugin evaluates
- * direnv host-side in the first place); see the package README for the live
- * verification recipe.
- */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -36,7 +21,6 @@ function check(label, condition) {
   }
 }
 
-// ── Part 1: plugin surface ────────────────────────────────────────────────
 const config = Config({})
 console.log('defaults:', JSON.stringify(config))
 check('default timeoutMs', config.timeoutMs.get() === 120000)
@@ -64,7 +48,6 @@ check(
   resolved.timeoutMs.get() === 60000 && resolved.direnvPath === 'direnv',
 )
 
-// ── Part 2: pure helpers ──────────────────────────────────────────────────
 const sanitized = sanitizeDirenvDump({
   FOO: 'bar',
   NIX_PATH: null,
@@ -95,7 +78,6 @@ check('merge layers overlay below it', merged.env.B === 'set')
 check('merge carries unset tombstones', 'C' in merged.env && merged.env.C === undefined)
 check('empty overlay returns the spec untouched', mergeOverlay(spec, {}) === spec)
 
-// ── Part 3: DirenvLoader against a scripted fake direnv ───────────────────
 const spawns = []
 const sleep = (ms) =>
   new Promise((resolve) => {
@@ -120,7 +102,7 @@ function readOptional(path) {
 }
 const stubCtx = {
   logger() {
-    return { info() {}, warn() {} }
+    return { info() {}, warn() {}, debug() {} }
   },
   subprocess: {
     async resolveExecutable(name) {
@@ -171,8 +153,7 @@ const stubCtx = {
 }
 const root = join(tmpdir(), 'dsh-auto-env-smoke')
 rmSync(root, { recursive: true, force: true })
-// DirenvLoader watches XDG_DATA_HOME/direnv/allow when active; point it at a
-// throwaway location so the allow-list test below is hermetic.
+
 process.env.XDG_DATA_HOME = join(root, 'xdg-data')
 function scenario(name, files) {
   const dir = join(root, name)
@@ -193,7 +174,6 @@ const loader = new DirenvLoader(stubCtx, {
   stdoutMaxBytes: 65536,
 })
 
-// none: no .envrc anywhere in the chain
 const plainDir = scenario('plain', {})
 const noneOverlay = await loader.ensure(plainDir)
 check(
@@ -202,7 +182,6 @@ check(
 )
 check('no .envrc → snapshot serves empty, not undefined', loader.snapshot(plainDir) !== undefined)
 
-// active: a full direnv JSON diff
 const activeDir = scenario('active', {
   '.envrc': 'export FOO=bar\n',
   'dump.json': JSON.stringify({
@@ -226,14 +205,12 @@ check(
 )
 check('active: one spawn so far', spawns.length === 1)
 
-// cached: same rc dir served from cache, including from a subdirectory
 const subDir = scenario('active/nested/deeper', {})
 await loader.ensure(activeDir)
 await loader.ensure(subDir)
 check('cache: rc dir + subdir served without a new spawn', spawns.length === 1)
 check('cache: snapshot is warm', loader.snapshot(subDir)?.FOO === 'bar')
 
-// revalidate: a zero-TTL loader re-runs direnv per ensure
 const freshLoader = new DirenvLoader(stubCtx, {
   direnvPath: 'direnv',
   timeoutMs: 50,
@@ -244,7 +221,6 @@ await freshLoader.ensure(activeDir)
 await freshLoader.ensure(activeDir)
 check('revalidate: zero TTL spawns twice', spawns.length === 3)
 
-// in-flight dedup: concurrent ensures share one evaluation
 const slowDir = scenario('slow', { '.envrc': '', 'dump.json': '{"FOO":"bar"}', slow: '' })
 const before = spawns.length
 await Promise.all([
@@ -254,24 +230,20 @@ await Promise.all([
 ])
 check('in-flight: three concurrent ensures → one spawn', spawns.length === before + 1)
 
-// blocked: direnv refuses an unallowed .envrc
 const blockedDir = scenario('blocked', { '.envrc': 'export X=1\n', blocked: '' })
 const blockedOverlay = await loader.ensure(blockedDir)
 check('blocked: empty overlay', Object.keys(blockedOverlay).length === 0)
 check('blocked: status classified from stderr', loader.status(blockedDir).status === 'blocked')
 
-// timeout: a hanging evaluation is cut by the budget
 const hangDir = scenario('hang', { '.envrc': '', hang: '' })
 const hangOverlay = await loader.ensure(hangDir)
 check('timeout: empty overlay', Object.keys(hangOverlay).length === 0)
 check('timeout: status classified', loader.status(hangDir).status === 'timeout')
 
-// error: invalid JSON output
 const errorDir = scenario('badjson', { '.envrc': '', 'dump.json': 'not json{' })
 await loader.ensure(errorDir)
 check('error: invalid dump classified', loader.status(errorDir).status === 'error')
 
-// missing: the direnv binary itself cannot be resolved
 const missingLoader = new DirenvLoader(stubCtx, {
   direnvPath: 'no-such-direnv',
   timeoutMs: 50,
@@ -284,7 +256,6 @@ check(
   missingLoader.status(activeDir).status === 'missing',
 )
 
-// watcher: editing an .envrc input drops the cache despite the 60s TTL
 const beforeWatch = spawns.length
 writeFileSync(join(activeDir, 'dump.json'), JSON.stringify({ FOO: 'baz' }))
 writeFileSync(join(activeDir, '.envrc'), 'export FOO=baz\n')
@@ -295,8 +266,6 @@ check(
   spawns.length === beforeWatch + 1 && refreshed.FOO === 'baz',
 )
 
-// watcher: a change DURING an in-flight evaluation discards the stale result.
-// Long TTL, so only the invalidation (not age) can force the second spawn.
 const raceLoader = new DirenvLoader(stubCtx, {
   direnvPath: 'direnv',
   timeoutMs: 5_000,
@@ -313,7 +282,6 @@ await slowStart
 await raceLoader.ensure(slowDir)
 check('watcher: mid-eval change discards the stale result', spawns.length === beforeRace + 2)
 
-// watcher: disabled → TTL alone governs (no respawn on edit)
 const noWatchLoader = new DirenvLoader(stubCtx, {
   direnvPath: 'direnv',
   timeoutMs: 50,
@@ -328,7 +296,6 @@ await sleepMs(200)
 await noWatchLoader.ensure(activeDir)
 check('watcher: disabled loader keeps serving the cached overlay', spawns.length === beforeNoWatch)
 
-// allow list: an interactive `direnv allow` invalidates every environment
 const beforeAllow = spawns.length
 writeFileSync(join(root, 'xdg-data', 'direnv', 'allow', 'deadbeef'), '')
 await sleepMs(200)
@@ -343,7 +310,6 @@ raceLoader.dispose()
 noWatchLoader.dispose()
 missingLoader.dispose()
 
-// upward walk: findEnvrcDir mirrors direnv's own search
 check(
   'findEnvrcDir walks up to the nearest .envrc',
   findEnvrcDir(subDir) === activeDir && findEnvrcDir(plainDir) === undefined,

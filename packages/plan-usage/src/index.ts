@@ -1,20 +1,5 @@
 /**
- * dsh-plan-usage — coding-plan quota windows as a host service + Settings
- * section.
- *
- * Reads the GLM coding plan's 5h / weekly / monthly-MCP windows from the
- * z.ai / bigmodel subscription monitor API through one shared TTL cache, and
- * publishes them two ways:
- *
- * - the `planUsage` Cordis service (`ctx.get('planUsage')`) for host
- *   consumers — dsh-auto-continue uses it to sleep until a reported reset;
- * - a Settings section (client/client.js) showing the bars with reset
- *   countdowns, reading through this package's own channel
- *   (`/dsh-plan-usage/quota`).
- *
- * Consumed host services: none injected — the channel soft-injects
- * connection + webServer once those exist.
- *
+ * dsh-plan-usage - coding-plan quota windows as a host service + Settings section.
  * @module dsh-plan-usage
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -48,11 +33,8 @@ export type { PlanUsageConfig, PlanUsageGetOptions } from './service.js'
 
 /** Plugin-row configuration. */
 export interface Config {
-  /** Quota fetch cache TTL (ms). */
   quotaCacheMs: number
-  /** Per-provider monitor overrides/additions (monitorBaseUrl / apiKeyEnv). */
   providers: Record<string, ProviderMonitorSettings>
-  /** Command Code monitor overrides (env var / API origin). */
   commandCode?: CommandCodeMonitorSettings
 }
 

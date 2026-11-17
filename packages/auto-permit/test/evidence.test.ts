@@ -1,12 +1,3 @@
-/**
- * Evidence-fold regression tests: one bash call must yield the same approval
- * evidence whether the host dispatched it directly (`tool/call`, JSON-string
- * arguments) or as a PTC sub-call (`tool/ptc-dispatch-start`, object
- * arguments, written BEFORE dispatch — so it is all that exists at approval
- * time).
- *
- * @module dsh-auto-permit/evidence.test
- */
 import { describe, expect, it } from 'vitest'
 import type { Session } from '@deepseek-ai/dsh-session'
 import { collectEvidence, foldPrompt, MAX_COMMAND_CHARS, MAX_PATH_CHARS } from '../src/evidence.js'
@@ -17,7 +8,6 @@ interface Fixture {
   data: unknown
 }
 
-/** Minimal session surface `collectEvidence` reads. */
 function sessionOf(events: Fixture[], header?: { cwd?: string }): Session {
   return {
     snapshotEvents: () => [...events],
@@ -25,12 +15,10 @@ function sessionOf(events: Fixture[], header?: { cwd?: string }): Session {
   } as unknown as Session
 }
 
-/** Top-level `tool/call`: arguments are a JSON string. */
 function directCall(seq: number, callId: string, name: string, args: unknown): Fixture {
   return { type: 'tool/call', seq, data: { callId, name, arguments: JSON.stringify(args) } }
 }
 
-/** PTC sub-dispatch, exactly as dsh-tools appends it before scheduling. */
 function ptcStart(
   seq: number,
   subCallId: string,
@@ -67,7 +55,6 @@ function userPrompt(seq: number, text: string): Fixture {
   }
 }
 
-/** A committed working-directory change, as dsh-working-directory appends it. */
 function changeCwd(seq: number, cwd: string): Fixture {
   return { type: 'working-directory/change', seq, data: { cwd } }
 }
@@ -327,8 +314,7 @@ describe('approval history across both paths', () => {
       ]),
       'root:ptc:2',
     )
-    // The approved list is session-wide memory (the judge may see it), but a
-    // DIFFERENT command must never become an exact repeat of its sibling.
+
     expect(evidence.approved).toEqual(['uv sync'])
     expect(evidence.exactRepeat).toBe(false)
   })
@@ -401,7 +387,7 @@ describe('exact-repeat memory across both paths', () => {
       ]),
       'root:ptc:1',
     )
-    // No decision yet: neither approved history nor exact repeat.
+
     expect(evidence.approved).toEqual([])
     expect(evidence.exactRepeat).toBe(false)
   })

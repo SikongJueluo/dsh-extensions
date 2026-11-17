@@ -1,6 +1,3 @@
-/* Runtime smoke test for dsh-auto-continue: wait planners, cancellable
- * sleep, and the recovery owner's three paths — delegate non-owned failures,
- * probe without the planUsage service, and reset-aligned retry with it. */
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,13 +25,11 @@ function check(label, condition) {
   }
 }
 
-// ── defaults ─────────────────────────────────────────────────────────────────
 const config = Config({})
 console.log('plugin:', name, '| inject:', inject)
 check('maxWaitMs default 6h', config.maxWaitMs === 21_600_000)
 check('resetMarginMs default 60s', config.resetMarginMs === 60_000)
 
-// ── reset-wait planning ──────────────────────────────────────────────────────
 const now = 1_790_000_000_000
 const opts = { maxWaitMs: 6 * 3600_000, resetMarginMs: 60_000 }
 const exhaustedSnapshot = {
@@ -84,7 +79,6 @@ check('already-reset window retries immediately', overdue.kind === 'wait' && ove
 const budgetExhausted = planResetWait(exhaustedSnapshot, now, opts.maxWaitMs + 1, opts)
 check('no budget left gives up', budgetExhausted.kind === 'give-up')
 
-// ── probe planning ───────────────────────────────────────────────────────────
 const p0 = planProbeWait(now, 0, 0, opts)
 const p1 = planProbeWait(now, p0.kind === 'wait' ? p0.delayMs : 0, 1, opts)
 check(
@@ -98,7 +92,6 @@ check('final probe clipped to remaining budget', pClip.kind === 'wait' && pClip.
 const pOver = planProbeWait(now, opts.maxWaitMs, 0, opts)
 check('probe beyond budget gives up', pOver.kind === 'give-up')
 
-// ── cancellable sleep ────────────────────────────────────────────────────────
 const slept = await cancellableSleep(20, new AbortController().signal)
 check('sleep completes', slept === true)
 const aborted = new AbortController()
@@ -112,7 +105,6 @@ const sleeping = cancellableSleep(60_000, during.signal)
 setTimeout(() => during.abort(), 20)
 check('abort mid-sleep interrupts', (await sleeping) === false)
 
-// ── recovery flow with stubbed event payload ─────────────────────────────────
 function makeCtx(services) {
   const listeners = new Map()
   const effects = []
@@ -148,7 +140,6 @@ const events = []
 const session = { id: 'sess-1', append: (type, data) => events.push({ type, data }) }
 const deliver = (listener, payload) => listener(payload, async () => 'delegated')
 
-// 1) Non-owned code delegates downstream unchanged.
 const bare = makeCtx({})
 apply(bare.ctx, config)
 let delegated = undefined
@@ -163,8 +154,6 @@ delegated = await deliver(bare.listeners.get('agent/request-error'), {
 check('non-owned failure delegates', delegated === 'delegated')
 check('no retry event for non-owned failure', events.length === 0)
 
-// 2) Owned failure without planUsage → staged probe; aborting the turn
-//    signal cancels the sleep and leaves the failure terminal.
 {
   const ctrl = new AbortController()
   const pending = deliver(bare.listeners.get('agent/request-error'), {
@@ -195,7 +184,6 @@ check('no retry event for non-owned failure', events.length === 0)
   check('no retry-started after cancellation', !events.some((e) => e.type === 'llm/retry-started'))
 }
 
-// 2b) A cancelled wait is re-armed in-process and resumes at retryAt.
 {
   const sp = new WaitSpool({ path: join(await mkdtemp(join(tmpdir(), 'ac-cr-')), 'p.json') })
   await sp.load()
@@ -218,8 +206,7 @@ check('no retry event for non-owned failure', events.length === 0)
     },
     followup: (m) => sent.push(m),
   }
-  // agents registry absent in rearmCtx (recovery never needs it); the adopter
-  // resolves through it — give wired.ctx a live agents registry instead.
+
   wired.ctx.get = (serviceName) => (serviceName === 'agents' ? { get: () => fakeAgent } : undefined)
   const cancelEvents = []
   const cancelSession = {
@@ -229,7 +216,7 @@ check('no retry event for non-owned failure', events.length === 0)
       return { seq: 5 }
     },
   }
-  // exhausted 5h resetting in 120ms → retryAt ≈ now+120ms; abort at 40ms.
+
   const stubPlan = {
     get: async () => ({
       provider: 'p',
@@ -269,9 +256,6 @@ check('no retry event for non-owned failure', events.length === 0)
   await rearmCtx.effects[0]()()
 }
 
-// 3) Owned failure with a planUsage stub reporting an exhausted 5h window
-//    resetting in 80ms (margin 0) → the full happy path: durable retry event,
-//    short sleep, retry-started, and { kind: 'retry' } returned.
 {
   const stubUsage = {
     get: async () => ({
@@ -307,7 +291,6 @@ check('no retry event for non-owned failure', events.length === 0)
   )
 }
 
-// 4) planUsage present but throwing/snapshot-less still degrades to probing.
 {
   const throwingUsage = { get: async () => undefined }
   const wired = makeCtx({ planUsage: throwingUsage })
@@ -331,12 +314,9 @@ check('no retry event for non-owned failure', events.length === 0)
   check('snapshot-less service degrades to probe', action === undefined)
 }
 
-// 5) Disposal drains: the registered effect aborts the lifetime.
-// (ctx.effect(fn) contract: fn() returns the disposer; invoke that.)
 await bare.effects[0]()()
 console.log('disposed OK')
 
-// ── spool roundtrip ──────────────────────────────────────────────────────────
 const spoolDir = await mkdtemp(join(tmpdir(), 'ac-spool-'))
 const spoolPath = join(spoolDir, 'pending.json')
 const spool = new WaitSpool({ path: spoolPath })
@@ -363,9 +343,21 @@ check(
 )
 
 await writeFile(spoolPath, '{not json', 'utf8')
-const corrupted = new WaitSpool({ path: spoolPath })
+const spoolWarnings = []
+const corrupted = new WaitSpool({
+  path: spoolPath,
+  logger: {
+    warn: (format, ...args) => {
+      spoolWarnings.push([format, ...args])
+    },
+  },
+})
 await corrupted.load()
 check('corrupt spool starts empty', corrupted.all().length === 0)
+check(
+  'corrupt spool is reported',
+  spoolWarnings.some(([format]) => String(format).includes('corrupt pending-wait spool')),
+)
 
 const stale = new WaitSpool({ path: join(spoolDir, 'stale.json') })
 await stale.load()
@@ -378,9 +370,7 @@ check(
 )
 await rm(spoolDir, { recursive: true, force: true })
 
-// ── recovery × spool: user cancel deletes, plugin disposal keeps ─────────────
 {
-  // user-cancel path: abort the turn signal → record removed
   const cancelSpool = new WaitSpool({
     path: join(await mkdtemp(join(tmpdir(), 'ac-c-')), 'p.json'),
   })
@@ -414,11 +404,9 @@ await rm(spoolDir, { recursive: true, force: true })
   check('wait record persisted before sleeping', cancelSpool.get('sess-c') !== undefined)
   ctrl.abort()
   await pendingCancel
-  // A turn abort must NOT abandon the wait (it can be a user stop, a relay
-  // teardown, or shutdown ordering) — the record survives for resumption.
+
   check('turn abort keeps the wait record', cancelSpool.get('sess-c') !== undefined)
 
-  // disposal path: abort lifetime via the effect → record kept
   const disposeSpool = new WaitSpool({
     path: join(await mkdtemp(join(tmpdir(), 'ac-d-')), 'p.json'),
   })
@@ -449,9 +437,7 @@ await rm(spoolDir, { recursive: true, force: true })
   )
 }
 
-// ── resume adopter ───────────────────────────────────────────────────────────
 {
-  // expired record is pruned at boot
   {
     const sp = new WaitSpool({ path: join(await mkdtemp(join(tmpdir(), 'ac-r1-')), 'p.json') })
     await sp.load()
@@ -463,7 +449,6 @@ await rm(spoolDir, { recursive: true, force: true })
     await resumeCtx.effects[0]()()
   }
 
-  // live idle agent + no newer user activity → followup fires, record consumed
   {
     const sp = new WaitSpool({ path: join(await mkdtemp(join(tmpdir(), 'ac-r2-')), 'p.json') })
     await sp.load()
@@ -498,7 +483,6 @@ await rm(spoolDir, { recursive: true, force: true })
     await resumeCtx.effects[0]()()
   }
 
-  // newer user activity → stand down without firing
   {
     const sp = new WaitSpool({ path: join(await mkdtemp(join(tmpdir(), 'ac-r3-')), 'p.json') })
     await sp.load()
@@ -522,7 +506,6 @@ await rm(spoolDir, { recursive: true, force: true })
     await resumeCtx.effects[0]()()
   }
 
-  // cold-open through sessionController when no live agent exists
   {
     const sp = new WaitSpool({ path: join(await mkdtemp(join(tmpdir(), 'ac-r4-')), 'p.json') })
     await sp.load()
@@ -548,7 +531,6 @@ await rm(spoolDir, { recursive: true, force: true })
   }
 }
 
-// ── adoption countdown notice + cancel ───────────────────────────────────────
 {
   const noticeEvents = []
   const noticeAgent = {
@@ -579,9 +561,7 @@ await rm(spoolDir, { recursive: true, force: true })
   }
   const handle = registerResume(noticeCtx, { maxWaitMs: 6 * 3600_000 }, sp)
   await settle(120)
-  // llm/retry events carry a turn/step invariant the persistence reader
-  // enforces; adoption must NEVER append one outside a live open step. The
-  // notice is a user/message row with form:'notice' (auto-permit pattern).
+
   check(
     'adoption appends a collapsed notice row',
     noticeEvents.some(
@@ -608,12 +588,11 @@ await rm(spoolDir, { recursive: true, force: true })
     (await handle.cancel('sess-n')) === true && sp.get('sess-n') === undefined,
   )
   check('cancel of nothing reports false', (await handle.cancel('sess-n')) === false)
-  // timer fires into a missing record: no followup sent
+
   await settle(50)
   check('cancelled timer never sends a followup', noticeAgent.followupCalls === undefined)
 }
 
-// ── recovery honours the shared cancel set at wake ──────────────────────────
 {
   const cancelSpool = new WaitSpool({
     path: join(await mkdtemp(join(tmpdir(), 'ac-w-')), 'p.json'),
@@ -673,7 +652,6 @@ await rm(spoolDir, { recursive: true, force: true })
   )
 }
 
-// ── restart-resume: mirror + boot adoption ──────────────────────────────────
 {
   const { registerRestartResume, defaultMirrorPath } = await import('./lib/index.js')
   const mirrorPath = join(await mkdtemp(join(tmpdir(), 'ac-rr-')), 'running.json')
@@ -710,7 +688,6 @@ await rm(spoolDir, { recursive: true, force: true })
     followup: (m) => sent.push(m),
   }
 
-  // 1) mirror tracks running/idle transitions durably
   const ctxA = mkCtx()
   registerRestartResume(
     ctxA,
@@ -730,7 +707,6 @@ await rm(spoolDir, { recursive: true, force: true })
   check('mirror drops the idle session', doc.entries.length === 0)
   await effectsRestart[0]()()
 
-  // 2) boot adoption: interrupted turn → followup; completed turn → skip; stale → skip
   const ctxB = mkCtx()
   const bootNow = Date.now()
   const doneAgent = {
@@ -779,7 +755,6 @@ await rm(spoolDir, { recursive: true, force: true })
   check('mirror consumed once at boot', doc.entries.length === 0)
   await effectsRestart[1]()()
 
-  // 2b) controller absent at boot → entries survive for the next boot
   {
     const mirrorPath2 = join(await mkdtemp(join(tmpdir(), 'ac-rr2-')), 'running.json')
     const ctxNoCtl = mkCtx()
@@ -806,7 +781,6 @@ await rm(spoolDir, { recursive: true, force: true })
     await effectsRestart[2]()()
   }
 
-  // 3) resumeOnRestart: false → mirror still maintained, boot does nothing
   const ctxC = mkCtx()
   const before = sent.length
   await writeFile(
@@ -830,9 +804,5 @@ if (failures > 0) {
   process.exit(1)
 }
 console.log('smoke OK')
-// Every scenario above mounts a real recovery/resume lifetime on a stub ctx and
-// only some of them are disposed, so the retry sleeps they armed stay pending
-// and keep the event loop alive. The checks are all awaited by this point;
-// exiting explicitly keeps this script usable as a one-shot command. Draining
-// every lifetime belongs to the vitest suite, which owns real teardown.
+
 process.exit(0)

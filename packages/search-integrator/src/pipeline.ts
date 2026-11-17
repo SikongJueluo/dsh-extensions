@@ -1,16 +1,5 @@
 /**
- * The bounded research pipeline: plan → multi-source retrieval → deterministic
- * evidence → integration → one optional follow-up round → result.
- *
- * Failure semantics (product decisions):
- * - single-source failures continue; the gap is recorded in `coverage.failed`;
- * - zero usable sources or zero results → `failed` with an explicit reason —
- *   never a silent success;
- * - a dead or unusable integrator → `degraded`: a clearly labeled,
- *   deterministically deduplicated digest, never an unmarked raw dump;
- * - every network and model call shares one wall-clock budget derived from
- *   the tool's `exec.signal`.
- *
+ * The bounded research pipeline: plan -> multi-source retrieval -> deterministic evidence -> integration -> one optional follow-up round -> result.
  * @module dsh-search-integrator/pipeline
  */
 import { buildDigest, buildEvidence, buildRetrievalContext } from './evidence.js'
@@ -34,13 +23,11 @@ import type {
 /** Everything one execution needs, injected for testability. */
 export interface PipelineDeps {
   readonly adapters: readonly SearchAdapter[]
-  /** Sources enabled in config but unusable (e.g. missing key). */
   readonly configFailures: readonly SourceFailure[]
-  /** Integrator port; absent when no route is configured. */
   readonly llm: LlmPort | undefined
   readonly audit: { save(payload: string, suggestedName: string): Promise<AuditRef | undefined> }
+  readonly warn: (message: string, error: unknown) => void
   readonly settings: SearchIntegratorSettings
-  /** Best-effort page fetcher for thin top sources (tests inject). */
   readonly fetchPage?: PageFetcher
 }
 
@@ -50,17 +37,45 @@ export interface ResearchArgs {
   readonly queries?: readonly string[]
 }
 
-/** Never start a follow-up round with less than this much budget left. */
 const FOLLOWUP_MIN_REMAINING_MS = 25_000
 
-/** Cap on follow-up queries per round. */
-const MAX_FOLLOWUP_QUERIES = 2
+const ERROR_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u
+const ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/u
+
+function errorCodeOf(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || !('code' in value)) return undefined
+  return typeof value.code === 'string' && ERROR_CODE_PATTERN.test(value.code)
+    ? value.code
+    : undefined
+}
 
 /**
- * Cancellation must propagate, not masquerade as a source failure: the
- * fan-out below settles with allSettled, so an aborted budget would otherwise
- * silently become "no results". Checked between stages.
+ * Secret-safe label for a thrown value: a bounded error name plus an optional machine-code-shaped
+ * code, never a message or arbitrary payload.
  */
+function errorLabelOf(error: unknown): string {
+  if (!(error instanceof Error)) return typeof error
+  const name = ERROR_NAME_PATTERN.test(error.name) ? error.name : 'object'
+  const code = errorCodeOf(error)
+  return code === undefined ? name : `${name}/${code}`
+}
+
+/**
+ * Best-effort warning for a failed side artifact: passes only a secret-safe label to `warn`, and
+ * returns false instead of aborting the research result when the log destination throws.
+ */
+function warnQuietly(warn: PipelineDeps['warn'], message: string, error: unknown): boolean {
+  try {
+    warn(message, errorLabelOf(error))
+    return true
+  } catch {
+    return false
+  }
+}
+
+const MAX_FOLLOWUP_QUERIES = 2
+
+/** Cancellation must propagate, not masquerade as a source failure: the fan-out below settles with allSettled, so an aborted budget would otherwise silently become "no results". Checked between stages. */
 function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw signal.reason ?? new Error('research run aborted')
 }
@@ -71,10 +86,6 @@ interface RoundRecord {
   failures: SourceFailure[]
 }
 
-/** Generation-backed sources are too slow to also fund a follow-up round:
- * a web_search-inside-a-model call can legally take tens of seconds, and the
- * remaining budget after round 1 plus the second integration would not fit
- * another one. Follow-ups close factual gaps; fast SERP entries suffice. */
 const GENERATIVE_SOURCES = new Set(['chatgpt', 'openai'])
 
 /** One fan-out round across all adapters and queries. */
@@ -162,7 +173,6 @@ function addUsage(a: LlmUsage, b: LlmUsage | undefined): LlmUsage {
 
 /**
  * Run one research task under a shared wall-clock budget.
- *
  * @param deps - adapters, integrator port, audit port, settings snapshot.
  * @param args - validated tool arguments.
  * @param callerSignal - the tool execution's cancellation signal.
@@ -177,7 +187,6 @@ export async function runResearch(
   const budget = new AbortController()
   const onCallerAbort = (): void => budget.abort()
   callerSignal.addEventListener('abort', onCallerAbort, { once: true })
-  // An already-aborted caller never fires the listener above — propagate manually.
   if (callerSignal.aborted) onCallerAbort()
   const timer = setTimeout(() => budget.abort(), deps.settings.totalBudgetMs)
   const signal = budget.signal
@@ -194,7 +203,6 @@ export async function runResearch(
       )
     }
 
-    // 1. Seed queries: caller-provided, else planned, else the raw question.
     const seedQueries =
       args.queries !== undefined && args.queries.length > 0
         ? args.queries.slice(0, MAX_QUERIES)
@@ -205,7 +213,6 @@ export async function runResearch(
     const effectiveQueries = queries.length > 0 ? queries : [args.question]
     const terms = termsOf(args.question, effectiveQueries)
 
-    // 2. Round 1 retrieval.
     const round1 = await searchRound(deps.adapters, effectiveQueries, signal)
     throwIfAborted(signal)
     const searched = new Set(round1.succeeded)
@@ -222,7 +229,6 @@ export async function runResearch(
       )
     }
 
-    // 3. Evidence + first integration.
     const evidence1 = await enrichThinSources(
       buildEvidence(round1.hits, terms, deps.settings.maxEvidence),
       deps,
@@ -260,7 +266,6 @@ export async function runResearch(
       }
     }
 
-    // 4. Optional follow-up round (only when round 1 integrated cleanly).
     let evidence = evidence1
     let digestUsed = digest1
     let coverageRounds = 1
@@ -308,8 +313,6 @@ export async function runResearch(
       coverageRounds = 2
       coverageQueries = [...effectiveQueries, ...followupQueries]
       if (outcome2.kind === 'ok') {
-        // Adopt the second round only as a whole: its citations match evidence2's
-        // numbering, so the evidence and the integration switch together.
         integration = outcome2.integration
         evidence = evidence2
         digestUsed = digest2
@@ -324,7 +327,6 @@ export async function runResearch(
       }
     }
 
-    // 5. Compose the result.
     const durationMs = Date.now() - started
     let auditRef: AuditRef | undefined
     if (deps.settings.auditEnabled) {
@@ -359,8 +361,12 @@ export async function runResearch(
       )
       try {
         auditRef = await deps.audit.save(payload, 'web-research-audit.json')
-      } catch {
-        // Audit is best-effort by design; the research result stands.
+      } catch (error) {
+        warnQuietly(
+          deps.warn,
+          'search-integrator: audit save failed (continuing without audit):',
+          error,
+        )
       }
     }
 
@@ -403,13 +409,9 @@ export async function runResearch(
   }
 }
 
-/** Below this many content characters a top source counts as thin. */
 const THIN_CONTENT_CHARS = 600
 
-/**
- * Fetch page bodies for the top ranked sources whose provider content is
- * thin, in parallel and best-effort: any failure keeps the provider snippet.
- */
+/** Fetch page bodies for the top ranked sources whose provider content is thin, in parallel and best-effort: any failure keeps the provider snippet. */
 async function enrichThinSources(
   evidence: readonly EvidenceSource[],
   deps: PipelineDeps,
@@ -431,8 +433,6 @@ async function enrichThinSources(
   const settled = await Promise.all(
     evidence.map(async (source) => {
       if (!targets.has(source.id)) return source
-      // Each page fetch gets its own deadline: a slow site must not eat the
-      // shared budget the sources and the integrator still need.
       const fetchSignal = AbortSignal.any([
         signal,
         AbortSignal.timeout(deps.settings.perRequestTimeoutMs),

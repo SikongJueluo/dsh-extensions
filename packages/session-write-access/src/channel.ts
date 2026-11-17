@@ -1,16 +1,4 @@
-/**
- * Browser ↔ host channel for the write-scope panel and the plugin Fork entry.
- *
- * A same-origin relative route speaking a small JSON envelope. Admission uses
- * the connection service's Host/Origin fence and authenticated live-peer
- * check — the same boundary the rest of the page uses.
- *
- * This is the same owner-cookie / live-peer boundary the rest of the Web app
- * uses; the plugin adds no second identity gate. The management route is absent
- * from the model tool surface, and only the browser panel calls its mutations.
- *
- * @module dsh-session-write-access/channel
- */
+/** @module dsh-session-write-access/channel */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -19,11 +7,8 @@ import type { SessionWriteAccessPolicy } from './service.js'
 import { AccessError } from './access.js'
 import { InvalidWriteRootError, ProtectedWriteRootError } from './paths.js'
 
-/** Route prefix owned by this plugin. */
 export const RPC_CHANNEL = '/dsh-session-write-access'
-/** One endpoint segment (same grammar as the connection RPC). */
 const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
-/** Panel payloads are tiny; anything bigger is a misbehaving client. */
 const MAX_BODY_BYTES = 16 * 1024
 
 /** Whether a parsed-JSON value is a plain object record (never an array). */
@@ -36,8 +21,7 @@ type RpcResult =
   | { ok: false; error: { code: string; message: string } }
 
 /**
- * Mount the route once connection and a web server exist. The route is an
- * effect of the plugin fiber, so unloading the bundle removes it.
+ * Mount the route once connection and a web server exist. The route is an effect of the plugin fiber, so unloading the bundle removes it.
  * @param ctx - plugin context.
  * @param policy - the policy service whose store the panel manages.
  */
@@ -72,9 +56,6 @@ export function registerWriteAccessChannel(ctx: Context, policy: SessionWriteAcc
     }
     const chunks: Buffer[] = []
     let received = 0
-    // IncomingMessage is `AsyncIterable<any>` in the node typings; the request
-    // stream yields Buffers unless an encoding was set (never here), so the
-    // annotation records that fact instead of casting every chunk.
     const body: AsyncIterable<Buffer> = req
     for await (const chunk of body) {
       received += chunk.byteLength
@@ -126,11 +107,7 @@ export function registerWriteAccessChannel(ctx: Context, policy: SessionWriteAcc
   })
 }
 
-/**
- * Route one admitted payload. Every branch re-reads the durable store; none
- * trusts a path, revision, or identity the browser invented beyond the
- * session it is managing.
- */
+/** Route one admitted payload. Every branch re-reads the durable store; none trusts a path, revision, or identity the browser invented beyond the session it is managing. */
 async function dispatch(
   policy: SessionWriteAccessPolicy,
   method: string,

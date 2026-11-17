@@ -1,7 +1,5 @@
 /**
- * The two prompts: the instruction that asks the current agent to write a
- * brief, and the first prompt of the fresh session.
- *
+ * The two prompts: the instruction that asks the current agent to write a brief, and the first prompt of the fresh session.
  * @module dsh-handoff/prompt
  */
 import type { PendingHandoff } from './pending.js'

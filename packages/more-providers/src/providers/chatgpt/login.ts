@@ -1,15 +1,8 @@
 /**
  * ChatGPT sign-in: the authorization flow on the harness seam.
- *
- * The flow speaks the OAuth protocol from `./oauth.js` (PKCE + loopback
- * callback + manual paste fallback, following pi-ai's `openai-codex` flow)
- * and commits its grant into the credential record this package owns. Any
- * surface that can host an authorization conversation — the shared browser
- * channel in this package, or a future standard surface — may run it.
- *
  * @module dsh-more-providers/providers/chatgpt/login
  */
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Logger } from '@deepseek-ai/cordis'
 import type { CredentialKey } from '@deepseek-ai/dsh-credentials'
 import type { AuthChannel } from '../../oauth/channel.js'
 import {
@@ -28,8 +21,8 @@ export interface ChatGptSignInDeps {
   key: CredentialKey
   fetch: FetchLike
   channel: AuthChannel
-  /** Settings namespace (the plugin row's entry id) this provider is edited under. */
   settingsNs: string
+  logger: Logger
 }
 
 /** Parse and state-check a pasted authorization answer. */
@@ -45,15 +38,11 @@ function grantRecord(grant: OAuthGrant): { kind: 'grant'; payload: OAuthGrant } 
   return { kind: 'grant', payload: { ...grant } }
 }
 
-/**
- * Register the ChatGPT authorization flow and declare the provider on the
- * shared browser sign-in channel.
- */
+/** Register the ChatGPT authorization flow and declare the provider on the shared browser sign-in channel. */
 export function registerChatGptSignIn(
   ctx: Context,
-  { key, fetch, channel, settingsNs }: ChatGptSignInDeps,
+  { key, fetch, channel, settingsNs, logger }: ChatGptSignInDeps,
 ): void {
-  // Registry entry first: `providers`/`status` answer with or without the seam.
   channel.register({ id: PROVIDER, label: DISPLAY_NAME, settingsNs, key })
 
   ctx.inject(['authorization'], (authCtx) => {
@@ -63,7 +52,7 @@ export function registerChatGptSignIn(
       methods: [{ id: 'browser', label: 'Sign in with ChatGPT (browser)' }],
       async run(session) {
         const { verifier, state, url } = await createAuthorizationRequest(PACKAGE_NAME)
-        const server = await startCallbackServer(state)
+        const server = await startCallbackServer(state, logger)
         const manualAbort = new AbortController()
         const onAbort = () => server.cancelWait()
         session.signal.addEventListener('abort', onAbort, { once: true })
@@ -102,7 +91,6 @@ export function registerChatGptSignIn(
             code = codeOf(manual.input, state)
           }
           if (!code) {
-            // The callback never arrived; wait for the human's paste.
             await manualPromise
             if (manual?.error) throw manual.error
             if (manual?.input !== undefined) code = codeOf(manual.input, state)
@@ -110,7 +98,6 @@ export function registerChatGptSignIn(
           if (!code) throw new Error('Missing authorization code')
 
           const grant = await exchangeAuthorizationCode(fetch, code, verifier, session.signal)
-          // The commit the seam confirms: run() resolving means this record is stored.
           await authCtx.credentials.modifyRecord(key, async () => grantRecord(grant))
         } finally {
           session.signal.removeEventListener('abort', onAbort)

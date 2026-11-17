@@ -1,12 +1,3 @@
-/**
- * Container-boundary pins. `containerRisk` decides which container shapes
- * never reach the judge model (they go straight to the human dialog), and
- * `isMutableFileDependent` decides which commands the exact-repeat memory
- * must re-judge. Both are conservative token heuristics, so every test also
- * pins the benign side that must stay auto-approvable.
- *
- * @module dsh-auto-permit/container.test
- */
 import { describe, expect, it } from 'vitest'
 import { containerRisk, isMutableFileDependent, CONTAINER_RISKS } from '../src/container.js'
 import { isHighRisk } from '../src/rules.js'

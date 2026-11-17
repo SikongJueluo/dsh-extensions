@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Toast } from '@base-ui/react/toast'
 import { X } from 'lucide-react'
-import type { ConnectionClientLike } from '../types'
+import type { ClientLogger, ConnectionClientLike } from '../types'
 import { cn } from '../lib/cn'
 import { Root } from './root'
 
@@ -22,12 +22,10 @@ export interface ConfigStatusPayload {
 }
 
 export interface ConfigStatusToastProps {
-  /** Same-origin relative URL of the owning plugin's status route. */
   statusUrl: string
-  /** Poll interval while the page is visible. @default 5000 */
   pollMs?: number
-  /** Host connection generation; a new generation re-announces current errors. */
   connection?: ConnectionClientLike
+  logger?: ClientLogger
 }
 
 const DEFAULT_POLL_MS = 5_000
@@ -56,13 +54,6 @@ function statusInstances(value: unknown): ConfigInstanceStatus[] | undefined {
   return value.instances.filter(isInstanceStatus)
 }
 
-/**
- * One page-wide notice coordinator, shared by every plugin bundle through a
- * global property. Each plugin's browser half registers its status URL; the
- * first registered component renders the single toast viewport and polls every
- * URL, so two plugins with errors stack their notices instead of covering each
- * other. When that component unmounts, the next registration takes over.
- */
 interface NoticeSource {
   url: string
   pollMs: number
@@ -104,11 +95,7 @@ function hubVersion(): number {
   return noticeHub().version
 }
 
-/**
- * One logical configuration: a plugin's file. Several plugin instances (agent
- * preset generations) can read the same file; they are one notice, and the
- * group is invalid when any instance is invalid.
- */
+/** One logical configuration: a plugin's file. Several plugin instances (agent preset generations) can read the same file; they are one notice, and the group is invalid when any instance is invalid. */
 function groupKey(instance: ConfigInstanceStatus): string {
   return `${instance.title}\u0000${instance.file}`
 }
@@ -120,9 +107,7 @@ interface GroupState {
   state: 'valid' | 'invalid'
   error?: string
   recovery: 'auto' | 'restart'
-  /** Live error toast id, when one is open. */
   toastId?: string
-  /** The user closed this generation's error toast and it is still invalid. */
   dismissed: boolean
 }
 
@@ -137,9 +122,7 @@ interface IncomingGroup {
 }
 
 interface Tracking {
-  /** Logical configuration state, keyed by title + file. */
   groups: React.MutableRefObject<Map<string, GroupState>>
-  /** Group keys last reported by each status source. */
   groupsBySource: React.MutableRefObject<Map<string, Set<string>>>
 }
 
@@ -151,6 +134,17 @@ function errorDescription(group: {
   return `${group.error ?? '未知错误'} — ${group.file}${
     group.recovery === 'auto' ? '；修好后会自动恢复' : '；修好后需重启 dsh'
   }`
+}
+
+/** Report one source's first poll failure without letting a broken logger export skip the next poll. */
+function reportPollFailure(logger: ClientLogger | undefined, error: unknown): void {
+  try {
+    logger?.debug('config notice poll failed; keeping the last reported state', {
+      error: error instanceof Error ? error.name : typeof error,
+    })
+  } catch {
+    return undefined
+  }
 }
 
 function ToastList({ onDismiss }: { onDismiss: (key: string) => void }) {
@@ -199,10 +193,12 @@ function ToastList({ onDismiss }: { onDismiss: (key: string) => void }) {
 function StatusWatcher({
   sources,
   connection,
+  logger,
   tracking,
 }: {
   sources: readonly NoticeSource[]
   connection?: ConnectionClientLike
+  logger?: ClientLogger
   tracking: Tracking
 }) {
   const { add, close, update } = Toast.useToastManager()
@@ -214,11 +210,8 @@ function StatusWatcher({
         title: `${group.title} 配置错误`,
         description: errorDescription(group),
         type: 'error',
-        // A broken config blocks the plugin's work; keep the notice until the
-        // user closes it or the file is fixed.
         timeout: 0,
         data: { key: group.key },
-        // Covers every close path, including a swipe, not only the button.
         onClose: () => {
           const current = groups.current.get(group.key)
           if (current === undefined || current.toastId !== toastId) return
@@ -233,11 +226,9 @@ function StatusWatcher({
 
   React.useEffect(() => {
     let cancelled = false
+    const failedSources = new Set<string>()
 
     const applySource = (url: string, instances: readonly ConfigInstanceStatus[]): void => {
-      // Collapse every instance into one state per plugin file. Any invalid
-      // instance keeps the group invalid; the newest invalid revision owns the
-      // message.
       const incoming = new Map<string, IncomingGroup>()
       for (const instance of instances) {
         if (instance.state === 'loading') continue
@@ -271,8 +262,6 @@ function StatusWatcher({
         }
       }
 
-      // A group that disappeared means the plugin instance unloaded, not that
-      // the file became valid: drop its notice without a recovery message.
       for (const key of groupsBySource.current.get(url) ?? []) {
         if (incoming.has(key)) continue
         const previous = groups.current.get(key)
@@ -287,9 +276,6 @@ function StatusWatcher({
           const changed = previous?.state === 'invalid' && previous.error !== next.error
           if (previous?.state === 'invalid' && !changed) {
             previous.recovery = next.recovery
-            // A new connection generation clears `dismissed`; the next fresh
-            // poll is what re-opens the still-current error. A same-generation
-            // poll after a manual close stays suppressed.
             if (previous.toastId === undefined && !previous.dismissed) {
               previous.toastId = openError(previous)
             }
@@ -314,8 +300,6 @@ function StatusWatcher({
           continue
         }
 
-        // Valid. Only an invalid -> valid transition is a recovery; a plugin
-        // that unloads or a message that merely changes is not.
         if (previous?.state === 'invalid') {
           if (previous.toastId !== undefined) close(previous.toastId)
           add({
@@ -349,9 +333,11 @@ function StatusWatcher({
         const instances = statusInstances(payload)
         if (cancelled || instances === undefined) return
         applySource(source.url, instances)
-      } catch {
-        // Offline, or the route is not mounted yet: keep the last known state
-        // and retry on the next poll or connection generation.
+        failedSources.delete(source.url)
+      } catch (error) {
+        if (cancelled || failedSources.has(source.url)) return
+        failedSources.add(source.url)
+        reportPollFailure(logger, error)
       }
     }
 
@@ -359,8 +345,6 @@ function StatusWatcher({
       await Promise.all(sources.map((source) => read(source)))
     }
 
-    // Drop state for plugins that unloaded; their stale errors must not keep
-    // the viewport occupied.
     const urls = new Set(sources.map((source) => source.url))
     for (const url of groupsBySource.current.keys()) {
       if (urls.has(url)) continue
@@ -381,11 +365,6 @@ function StatusWatcher({
       if (document.visibilityState === 'visible') void poll()
     }
     document.addEventListener('visibilitychange', onVisible)
-    // A new DSH connection generation re-announces errors the user dismissed in
-    // the previous one; the browser `online` event is not that signal.
-    // Only a newly established generation is a reconnect. The connection
-    // controller publishes `undefined` on loss and while reconnecting; reacting
-    // to that would replay cached errors before the fresh status is known.
     let lastGeneration = connection?.generation.getSnapshot()?.id
     const stopGeneration =
       connection?.generation.subscribe(() => {
@@ -393,9 +372,6 @@ function StatusWatcher({
         if (snapshot === undefined || snapshot.id === lastGeneration) return
         lastGeneration = snapshot.id
         for (const group of groups.current.values()) group.dismissed = false
-        // Do not open cached errors here: the fresh status decides. A still
-        // invalid group re-opens in applySource after a successful poll; a
-        // fixed one only reports recovery.
         void poll()
       }) ?? (() => {})
     return () => {
@@ -404,23 +380,17 @@ function StatusWatcher({
       document.removeEventListener('visibilitychange', onVisible)
       stopGeneration()
     }
-  }, [add, close, connection, groups, groupsBySource, openError, sources, update])
+  }, [add, close, connection, groups, groupsBySource, logger, openError, sources, update])
 
   return null
 }
 
-/**
- * Config-status notices for one plugin, mounted through `shell.overlay`.
- *
- * The viewport is rendered inline in the slot subtree (never portaled to
- * `document.body`), so it inherits the host theme and unloads with the plugin.
- * All plugins share one viewport through {@link noticeHub}; notices from both
- * config files stack instead of overlapping.
- */
+/** Config-status notices for one plugin, mounted through `shell.overlay`. */
 export function ConfigStatusToast({
   statusUrl,
   pollMs = DEFAULT_POLL_MS,
   connection,
+  logger,
 }: ConfigStatusToastProps) {
   const id = React.useState(() => Symbol('config-notice'))[0]
   const groups = React.useRef(new Map<string, GroupState>())
@@ -436,8 +406,6 @@ export function ConfigStatusToast({
     }
   }, [id, pollMs, statusUrl])
 
-  // Re-render when a source registers or unregisters; the snapshot itself is
-  // only the version counter, while `hub.sources` is the live registry.
   React.useSyncExternalStore(subscribeHub, hubVersion, () => 0)
   const hub = noticeHub()
   const sources = [...hub.sources.values()]
@@ -450,8 +418,6 @@ export function ConfigStatusToast({
     group.toastId = undefined
   }
 
-  // Every registration returns one Root; only the leader fills it, so a second
-  // plugin never adds a competing fixed viewport.
   return (
     <Root className="dshx:pointer-events-none">
       {leader === id ? (
@@ -459,6 +425,7 @@ export function ConfigStatusToast({
           <StatusWatcher
             sources={sources}
             connection={connection}
+            logger={logger}
             tracking={{ groups, groupsBySource }}
           />
           <Toast.Viewport

@@ -1,9 +1,3 @@
-/* Live check: run the real DirenvLoader against the real direnv binary.
- *
- * Not part of `pnpm smoke` (the model bash sandbox denies direnv's allow
- * record writes — run manually with full access):
- *   direnv allow .live-probe && node live-check.mjs "$PWD/.live-probe"
- */
 import { spawn } from 'node:child_process'
 import { DirenvLoader, mergeOverlay } from './lib/index.js'
 
@@ -12,6 +6,7 @@ const ctx = {
     return {
       info: (...a) => console.log(`[${name}]`, ...a),
       warn: (...a) => console.log(`[${name} warn]`, ...a),
+      debug: (...a) => console.log(`[${name} debug]`, ...a),
     }
   },
   subprocess: {

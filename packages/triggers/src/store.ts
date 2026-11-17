@@ -1,17 +1,4 @@
-/**
- * Storage-domain access: open the trigger domain, seed the built-in
- * templates, and expose small typed helpers over the four tables. The domain
- * is the ONLY persistence — no localStorage, no side JSON files — and every
- * mutation goes through `put`/`update` so durability and `domain/changed`
- * events stay consistent for the UI.
- *
- * Authority note: the `runs` table holds each run's state AND its
- * transactional outbox in one record (one write = one atomic transition);
- * the `deliveries` table is a rebuildable projection of outbox entries kept
- * for UI history and manual-redelivery lookup.
- *
- * @module dsh-triggers/store
- */
+/** @module dsh-triggers/store */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-storage-domain'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'

@@ -134,13 +134,10 @@ describe('configuration', () => {
   })
 
   it('derives no deployment root from the process cwd', () => {
-    // Nothing stated: the load check has no candidate, so a host started inside
-    // a protected path (a service manager unit runs in $HOME) cannot refuse it.
     expect(resolveConfiguredWorkspaceRoot(Config({}))).toBeUndefined()
     expect(() =>
       assertDeploymentRootsSafe(Config({ additionalWritableRoots: [] }), [process.cwd()]),
     ).not.toThrow()
-    // A stated root is still checked.
     expect(() =>
       assertDeploymentRootsSafe(Config({ workspaceRoot: process.cwd() }), [process.cwd()]),
     ).toThrow(/overlaps protected/u)

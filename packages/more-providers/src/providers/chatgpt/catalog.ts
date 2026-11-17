@@ -1,16 +1,10 @@
 /**
  * ChatGPT model catalog.
- *
- * There is no static fallback model list: the adapter only advertises what the
- * live ChatGPT backend `/models` endpoint reports. A failed live fetch raises
- * (so the harness model selector can mark the provider offline), while a
- * successful fetch is cached for a two-hour TTL so the selector stays responsive.
- *
- * Derived from werifu/dsh-oai-oauth (MIT) — see THIRD-PARTY-NOTICE.md.
- *
  * @module dsh-more-providers/providers/chatgpt/catalog
  */
+import type { Logger } from '@deepseek-ai/cordis'
 import { LlmError } from '@deepseek-ai/dsh-llm'
+import { debugQuietly } from '../../diagnostics.js'
 import { readJson } from '../../oauth/transport.js'
 import type { FetchLike } from '../../oauth/transport.js'
 import { isRecord } from '../../record.js'
@@ -18,11 +12,6 @@ import { isRecord } from '../../record.js'
 /** Input modality vocabulary shared with the harness model catalog. */
 export type InputModality = 'text' | 'image'
 
-/**
- * Modalities assumed when the backend does not disclose them. The ChatGPT
- * backend follows the same conservative default as Codex: absent
- * `input_modalities` means text and images are both accepted.
- */
 const DEFAULT_INPUT_MODALITIES: readonly InputModality[] = ['text', 'image']
 
 /** One model entry in the internal catalog. */
@@ -34,19 +23,15 @@ export interface ModelEntry {
   inputModalities: readonly InputModality[]
 }
 
-/** Bundled fallback when neither config nor the npm registry answers. */
 const FALLBACK_CLIENT_VERSION = '0.157.1'
-/** Where the newest published Codex client version is read from. */
 const NPM_CODEX_LATEST_URL = 'https://registry.npmjs.org/@openai/codex/latest'
 
 /** Connection facts the catalog fetcher needs. */
 export interface CatalogOptions {
   baseURL: string
-  /** Explicit client-version override; absent = derive from npm. */
   clientVersion?: string
 }
 
-/** Reasoning-effort vocabulary shared by the ChatGPT backend (not a model list). */
 export const DEFAULT_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const
 
 export const REASONING_EFFORT_NAMES: Record<string, string> = {
@@ -101,14 +86,15 @@ function parseModelsPayload(payload: unknown): ModelEntry[] {
 export interface ModelCatalogOptions {
   fetch: FetchLike
   options: CatalogOptions
-  /** How long a successful fetch may be served from cache. */
   ttlMs?: number
+  logger?: Logger
 }
 
 export class ModelCatalog {
   private readonly fetch: FetchLike
   private readonly options: CatalogOptions
   private readonly ttlMs: number
+  private readonly logger: Logger | undefined
   private live: ModelEntry[] | null = null
   private liveAt = 0
   private liveVersion = ''
@@ -116,10 +102,11 @@ export class ModelCatalog {
   private versionCache: { value: string; at: number } | undefined
   private versionFetching: Promise<string> | null = null
 
-  constructor({ fetch, options, ttlMs = 2 * 60 * 60 * 1000 }: ModelCatalogOptions) {
+  constructor({ fetch, options, ttlMs = 2 * 60 * 60 * 1000, logger }: ModelCatalogOptions) {
     this.fetch = fetch
     this.options = options
     this.ttlMs = ttlMs
+    this.logger = logger
   }
 
   /** Last-good live catalog (empty until a fetch succeeds). Never a static list. */
@@ -136,9 +123,7 @@ export class ModelCatalog {
   }
 
   /**
-   * Return the live catalog, fetching when the cache is empty or stale.
-   * Throws when the live fetch fails, so callers surface the provider as
-   * offline instead of advertising a fabricated model list.
+   * Return the live catalog, fetching when the cache is empty or stale. Throws when the live fetch fails, so callers surface the provider as offline instead of advertising a fabricated model list.
    * @param headers - optional request headers (e.g. OAuth auth) for the fetch.
    */
   async refresh(headers?: Record<string, string>): Promise<ModelEntry[]> {
@@ -159,12 +144,7 @@ export class ModelCatalog {
     return this.fetchLive(headers, await this.resolveClientVersion())
   }
 
-  /**
-   * The client version reported to the backend: explicit config, then the
-   * latest published `@openai/codex` from the npm registry (cached for the
-   * same TTL as the catalog), then the bundled fallback for offline hosts.
-   * The registry query failing never fails the catalog.
-   */
+  /** The client version reported to the backend: explicit config, then the latest published `@openai/codex` from the npm registry (cached for the same TTL as the catalog), then the bundled fallback for offline hosts. The registry query failing never fails the catalog. */
   private async resolveClientVersion(): Promise<string> {
     const explicit = this.options.clientVersion
     if (explicit) return explicit
@@ -181,8 +161,13 @@ export class ModelCatalog {
           const version = isRecord(body) ? body.version : undefined
           if (typeof version === 'string' && /^\d+\.\d+\.\d+/u.test(version)) value = version
         }
-      } catch {
-        // Registry unreachable: keep the last good or the bundled fallback.
+      } catch (error) {
+        debugQuietly(
+          this.logger,
+          'chatgpt catalog: npm client-version lookup failed (%s); using %s',
+          error,
+          value,
+        )
       }
       this.versionCache = { value, at: Date.now() }
       return value

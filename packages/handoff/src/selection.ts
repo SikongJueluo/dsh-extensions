@@ -1,20 +1,9 @@
 /**
  * Resolving the origin session's *effective* model route.
- *
- * `agent.options` only records what the agent was created with; a `/model`
- * switch — provider, model, and the reasoning effort — lands in the session's
- * durable `modelSelection` projection instead. Inheriting from `agent.options`
- * therefore handed the fresh session a stale or missing effort. The Agent owns
- * that fold: `agent.model.current()` reads the pending selection first, the
- * last used one second, and falls back to the creation options — the same
- * order the /model popup shows, without this plugin reading another service's
- * projection or casting its untyped state.
- *
  * @module dsh-handoff/selection
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
-// Type-only: pull the `Context.sessionController` augmentation in.
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm/brand'
 import { PACKAGE_NAME } from './identity.js'
@@ -42,11 +31,7 @@ function toRoute(selection: {
   }
 }
 
-/**
- * The route the origin session is actually on: the Agent's durable selection
- * (pending first, then last used), falling back to its creation options.
- * Returns `undefined` only when neither source names a route.
- */
+/** The route the origin session is actually on: the Agent's durable selection (pending first, then last used), falling back to its creation options. Returns `undefined` only when neither source names a route. */
 export function sessionRoute(agent: Agent): RouteSummary | undefined {
   const selection = agent.model.current()
   return selection === undefined ? undefined : toRoute(selection)
@@ -58,11 +43,7 @@ export function defaultRoute(ctx: Context): RouteSummary | undefined {
   return selection === undefined ? undefined : toRoute(selection)
 }
 
-/**
- * Turn a route into agent-creation options. `maxTokens` is deliberately not
- * part of a route: callers that inherit from the origin session add it
- * separately, and a switched model keeps its own default.
- */
+/** Turn a route into agent-creation options. `maxTokens` is deliberately not part of a route: callers that inherit from the origin session add it separately, and a switched model keeps its own default. */
 export function toAgentOptions(route: RouteSummary | undefined): AgentOptions | undefined {
   if (route === undefined) return undefined
   return {
@@ -74,9 +55,6 @@ export function toAgentOptions(route: RouteSummary | undefined): AgentOptions | 
   }
 }
 
-// ── remembered-model validation ────────────────────────────────────────────
-
-/** Budget for one catalog snapshot; past it the default is used unvalidated. */
 const CATALOG_TIMEOUT_MS = 8_000
 
 /** One selectable reasoning effort, as the catalog advertises it. */
@@ -92,7 +70,6 @@ export interface CatalogModel {
   readonly model: string
   readonly name: string
   readonly description?: string
-  /** Advertised efforts; absent/empty means the model exposes no choice. */
   readonly efforts?: readonly CatalogEffort[]
   readonly defaultEffort?: string
 }
@@ -108,13 +85,7 @@ export interface CatalogFailure {
 export interface CatalogSnapshot {
   readonly models: readonly CatalogModel[]
   readonly failures: readonly CatalogFailure[]
-  /** Every provider route the catalog could enumerate. */
   readonly providers: readonly string[]
-  /**
-   * Whether {@link CatalogModel.efforts} reflects adapter metadata. The plain
-   * LLM registry lists models without reasoning metadata, so an absent effort
-   * there means "unknown", never "unsupported".
-   */
   readonly effortsKnown: boolean
 }
 
@@ -133,15 +104,7 @@ async function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<
   }
 }
 
-/**
- * Snapshot the catalog the /model popup reads (provider groups, display
- * names, reasoning efforts). The session controller's catalog is preferred
- * because it carries effort metadata; a composition without it falls back to
- * the plain LLM registry, which still proves model presence but not efforts.
- *
- * A slow or failing catalog yields `undefined`: validation must never turn a
- * possibly valid remembered route into a hard failure.
- */
+/** Snapshot the catalog the /model popup reads (provider groups, display names, reasoning efforts). The session controller's catalog is preferred because it carries effort metadata; a composition without it falls back to the plain LLM registry, which still proves model presence but not efforts. */
 export async function loadModelCatalog(ctx: Context): Promise<CatalogSnapshot | undefined> {
   const controller = ctx.get('sessionController')
   if (controller !== undefined) {
@@ -222,15 +185,7 @@ export async function loadModelCatalog(ctx: Context): Promise<CatalogSnapshot | 
   return settleWithin(collect(), CATALOG_TIMEOUT_MS)
 }
 
-/**
- * Why a remembered explicit route cannot be used, or `undefined` when it can
- * (or when the catalog cannot prove it gone).
- *
- * Absence is only evidence when the provider itself answered: a provider
- * listed under `failures` was not enumerated, and a provider missing from the
- * catalog entirely may still route a manually spelled model. An effort is
- * checked only against a model that advertises efforts.
- */
+/** Why a remembered explicit route cannot be used, or `undefined` when it can (or when the catalog cannot prove it gone). */
 export function modelChoiceIssue(
   catalog: CatalogSnapshot,
   choice: ModelChoice,
@@ -244,8 +199,6 @@ export function modelChoiceIssue(
   if (model === undefined) {
     return `上次使用的模型已不可用：${choice.provider}/${choice.model}`
   }
-  // Without adapter reasoning metadata an effort cannot be judged; leave it to
-  // the first request instead of rejecting a potentially valid route.
   if (!catalog.effortsKnown || choice.reasoningEffort === undefined) return undefined
   const efforts = model.efforts ?? []
   if (efforts.length === 0 || !efforts.some((effort) => effort.id === choice.reasoningEffort)) {

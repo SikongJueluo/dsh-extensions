@@ -1,12 +1,4 @@
-/**
- * Service-level orchestration tests over a fake host surface: the loop end to
- * end (bind → signal → turn end → queued prompt), duplicate/replayed turn
- * ends, late signals, failed deliveries parking the run, and the restart
- * recovery scan (pending signal parks, pending delivery re-sends under the
- * same requestId).
- *
- * @module dsh-triggers/service.test
- */
+/** @module dsh-triggers/service.test */
 import { beforeEach, describe, expect, it } from 'vitest'
 import { TriggerService } from '../src/service.js'
 import type { RunRecord } from '../src/model.js'
@@ -47,7 +39,6 @@ function createFakeHost() {
   }
   const listeners = new Map<string, ((session: { id: string }, event: unknown) => void)[]>()
   const prompts: FakePromptCall[] = []
-  /** Flip to true to make the queue refuse every send (failure drills). */
   const queue = { fail: false }
 
   const tableFor = (name: keyof typeof tables) => ({
@@ -95,8 +86,6 @@ function createFakeHost() {
       },
       list: async () => ({ items: [] }),
     },
-    // The host's log reader: no persisted history in this fake, so every
-    // session reads as a genuinely empty log.
     sessionQuery: {
       readSession: async (sessionId: string) => ({
         session: { id: sessionId },
@@ -133,12 +122,10 @@ describe('loop end to end', () => {
       maxRounds: 5,
     })
     expect(bound.runId).toMatch(/^run-/u)
-    // handoff-style bind sends no start prompt of its own
     expect(host.prompts).toHaveLength(0)
     const run = host.tables.runs.get(bound.runId) as RunRecord
     expect(run.phase).toBe('awaiting-delivery')
 
-    // executor signals inside turn 3
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 3 } })
     const accepted = await svc.signal(EXECUTOR, {
       runId: bound.runId,
@@ -146,7 +133,6 @@ describe('loop end to end', () => {
       summary: '实现完成，测试 12/12',
     })
     expect(accepted).toMatchObject({ ok: true })
-    // the turn has NOT ended yet: nothing queued
     expect(host.prompts).toHaveLength(0)
 
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 3, reason: { kind: 'completed' } } })
@@ -212,7 +198,6 @@ describe('abuse and stop paths through the service', () => {
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(1)
-    // replay of the same persisted event (restart replay, at-least-once observer…)
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(1)
@@ -271,7 +256,7 @@ describe('abuse and stop paths through the service', () => {
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 4, reason: { kind: 'aborted' } } })
     await host.flush()
     expect((host.tables.runs.get(bound.runId) as RunRecord).status).toBe('paused-error')
-    expect(host.prompts).toHaveLength(1) // only the resume note; nothing advanced
+    expect(host.prompts).toHaveLength(1)
   })
 
   it('needs_user from the executor notifies the parent and pauses', async () => {
@@ -324,7 +309,6 @@ describe('delivery failures', () => {
     expect(delivery.state).toBe('failed')
     expect(delivery.error).toBeDefined()
 
-    // The queue heals; redelivering reuses the SAME requestId.
     host.queue.fail = false
     await svc.controlRun(bound.runId, 'redeliver', { deliveryId: delivery.id })
     const resent = present(host.prompts.at(-1), 'last prompt')
@@ -351,10 +335,6 @@ describe('restart recovery', () => {
     }
     expect(startDelivery.state).toBe('sent')
 
-    // Crash before the turn ends: a signal is pending, and (simulated) a
-    // queued-but-unconfirmed delivery. The host log carries no turn/end for
-    // the signal's turn, so the run keeps waiting (parking on restart
-    // uncertainty alone is gone); the pending delivery still re-sends.
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 2 } })
     await svc1.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 's' })
     host.tables.deliveries.set(startDelivery.id, { ...startDelivery, state: 'pending' })
@@ -364,7 +344,6 @@ describe('restart recovery', () => {
     const run = host.tables.runs.get(bound.runId) as RunRecord
     expect(run.status).toBe('active')
     expect(run.pendingSignal).toBeDefined()
-    // pending delivery re-sent with the SAME requestId (idempotent replay)
     const resent = host.prompts.filter((p) => p.requestId === startDelivery.requestId)
     expect(resent).toHaveLength(2)
     void svc2
@@ -395,7 +374,6 @@ describe('turn-end auto-delivery', () => {
       (host.tables.bindings.get(bound.bindingId) as { autoDeliver?: boolean }).autoDeliver,
     ).toBe(true)
 
-    // The executor works and just… finishes its reply. No tool call.
     host.emit(EXECUTOR, {
       type: 'assistant/message',
       data: {
@@ -408,7 +386,7 @@ describe('turn-end auto-delivery', () => {
       },
     })
     await host.flush()
-    expect(host.prompts).toHaveLength(0) // nothing until the turn ends
+    expect(host.prompts).toHaveLength(0)
 
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
     await host.flush()
@@ -481,7 +459,7 @@ describe('turn-end auto-delivery', () => {
     })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.prompts).toHaveLength(0) // goal may continue: no premature delivery
+    expect(host.prompts).toHaveLength(0)
 
     host.emit(EXECUTOR, {
       type: 'goal/change',
@@ -536,7 +514,6 @@ describe('turn-end auto-delivery', () => {
     })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 6, reason: { kind: 'completed' } } })
     await host.flush()
-    // only the explicit run advanced; the second loop was not dragged along
     expect((host.tables.runs.get(first.runId) as RunRecord).phase).toBe('awaiting-review')
     expect((host.tables.runs.get(second.runId) as RunRecord).phase).toBe('awaiting-delivery')
     expect(host.prompts).toHaveLength(1)
@@ -559,7 +536,7 @@ describe('turn-end auto-delivery', () => {
 
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.prompts).toHaveLength(1) // bounded: no second nudge in the same round
+    expect(host.prompts).toHaveLength(1)
     expect((host.tables.runs.get(bound.runId) as RunRecord).phase).toBe('awaiting-delivery')
   })
 })
@@ -572,7 +549,7 @@ describe('missing-conclusion nudges', () => {
     expect(saved.autoDeliver).toBeUndefined()
     await svc.startRunFromBinding(saved.id)
     await host.flush()
-    const startPrompts = host.prompts.length // the start delivery itself
+    const startPrompts = host.prompts.length
 
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
@@ -593,14 +570,12 @@ describe('missing-conclusion nudges', () => {
       executorSession: EXECUTOR,
       parentSession: PARENT,
     })
-    // deliver round 1 explicitly so a review delivery record exists
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 1 } })
     await svc.signal(EXECUTOR, { runId: bound.runId, outcome: 'deliver', summary: 's' })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(1)
 
-    // reviewer chats with the user and ends the turn without a verdict
     host.emit(PARENT, { type: 'turn/end', data: { turn: 4, reason: { kind: 'completed' } } })
     await host.flush()
     expect(host.prompts).toHaveLength(2)
@@ -609,7 +584,7 @@ describe('missing-conclusion nudges', () => {
 
     host.emit(PARENT, { type: 'turn/end', data: { turn: 5, reason: { kind: 'completed' } } })
     await host.flush()
-    expect(host.prompts).toHaveLength(2) // once per round, no loop
+    expect(host.prompts).toHaveLength(2)
   })
 
   it('no review nudge before the review prompt has actually been sent', async () => {
@@ -622,7 +597,6 @@ describe('missing-conclusion nudges', () => {
       deliverStart: true,
     })
     await host.flush()
-    // run is awaiting-delivery; a reviewer turn end must not nudge for review
     host.emit(PARENT, { type: 'turn/end', data: { turn: 9, reason: { kind: 'completed' } } })
     await host.flush()
     const reviewNudges = host.prompts.filter((p) => p.text.includes('仍在等待审核结论'))
@@ -638,7 +612,7 @@ describe('missing-conclusion nudges', () => {
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     const run = [...host.tables.runs.values()].at(-1) as RunRecord
-    expect(run.status).toBe('active') // not parked by a failed reminder
+    expect(run.status).toBe('active')
     const nudge = [...host.tables.deliveries.values()].at(-1) as { kind: string; state: string }
     expect(nudge.kind).toBe('nudge')
     expect(nudge.state).toBe('failed')
@@ -671,14 +645,11 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 5, reason: { kind: 'completed' } } })
     await host.flush()
 
-    // No review anywhere: the reply cannot be attributed to one task.
     expect(
       host.prompts.filter((p) => p.sessionId === PARENT || p.sessionId === 'sess-parent-2'),
     ).toHaveLength(0)
     expect((host.tables.runs.get(first.runId) as RunRecord).phase).toBe('awaiting-delivery')
     expect((host.tables.runs.get(second.runId) as RunRecord).phase).toBe('awaiting-delivery')
-    // Each waiting run reminds once (bounded per round); the FULL composed
-    // prompt must demand an explicit trigger_signal naming its runId…
     const nudges = host.prompts.filter(
       (p) => p.sessionId === EXECUTOR && p.text.includes('必须调用 trigger_signal'),
     )
@@ -693,17 +664,14 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
     )
     expect(nudgeForFirst).toBeDefined()
     expect(nudgeForSecond).toBeDefined()
-    // …and must NOT carry the standing auto rules, whose "a normal turn end
-    // delivers itself" promise would cancel the only recovery path.
     for (const nudge of [nudgeForFirst, nudgeForSecond]) {
       expect(nudge.text).not.toContain('无需调用工具')
       expect(nudge.text).not.toContain('正常结束回合即自动送审')
       expect(nudge.text).not.toContain('即视为交付')
-      expect(nudge.text).not.toContain('执行—审核循环') // the standing block is absent entirely
+      expect(nudge.text).not.toContain('执行—审核循环')
       expect(nudge.text).not.toContain('对方发来的内容')
     }
 
-    // A later explicit signal for ONE run still works and advances only it.
     host.emit(EXECUTOR, { type: 'turn/start', data: { turn: 6 } })
     await svc.signal(EXECUTOR, { runId: first.runId, outcome: 'deliver', summary: '显式交付 A' })
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 6, reason: { kind: 'completed' } } })
@@ -742,7 +710,7 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
 
-    expect(host.prompts.filter((p) => p.sessionId === PARENT)).toHaveLength(0) // no review
+    expect(host.prompts.filter((p) => p.sessionId === PARENT)).toHaveLength(0)
     const run = host.tables.runs.get(bound.runId) as RunRecord
     expect(run.phase).toBe('awaiting-delivery')
     const nudge = host.prompts.find((p) => p.sessionId === EXECUTOR)
@@ -786,7 +754,6 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
     const host = createFakeHost()
     const svc1 = host.service()
     await svc1.bindReviewLoop({ task: 't', executorSession: EXECUTOR, parentSession: PARENT })
-    // Produce one persisted nudge and force it back to pending (crash window).
     host.emit(EXECUTOR, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await host.flush()
     const nudge = [...host.tables.deliveries.values()].at(-1) as {
@@ -803,7 +770,7 @@ describe('rework round 2: turn ownership, empty finals, and nudge recovery', () 
     await host.flush()
 
     const run = [...host.tables.runs.values()].at(-1) as RunRecord
-    expect(run.status).toBe('active') // best-effort semantics survive the restart
+    expect(run.status).toBe('active')
     const after = host.tables.deliveries.get(nudge.id) as { kind: string; state: string }
     expect(after.state).toBe('failed')
     void svc2
@@ -825,7 +792,6 @@ describe('session-scoped snapshot', () => {
       parentSession: 'sess-b-parent',
     })
 
-    // Advance the first loop far enough to persist a review delivery.
     host.emit('sess-a-exec', { type: 'turn/start', data: { turn: 1 } })
     await svc.signal('sess-a-exec', { runId: first.runId, outcome: 'deliver', summary: '完成' })
     host.emit('sess-a-exec', { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
@@ -865,8 +831,6 @@ describe('session-scoped snapshot', () => {
       name: '改过配对的绑定',
     })
 
-    // The old reviewer is no longer on the binding, but the in-flight run
-    // still carries the pair it started with.
     const oldParent = await svc.snapshot(PARENT)
     expect(oldParent.bindings).toEqual([])
     expect(oldParent.runs.map((run) => run.id)).toEqual([bound.runId])
@@ -907,7 +871,6 @@ describe('session-scoped snapshot', () => {
     const scoped = await svc.snapshot(EXECUTOR)
     expect(scoped.runs.map((run) => run.id)).toEqual([bound.runId])
 
-    // The unscoped snapshot still prefers the unfinished run and caps the rest.
     const global = await svc.snapshot()
     expect(global.runs).toHaveLength(50)
     expect(present(global.runs[0], 'the first global run').id).toBe(bound.runId)

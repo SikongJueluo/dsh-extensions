@@ -1,13 +1,3 @@
-# dsh-crew bundle layer.
-#
-# 用户配置的委派工具组(subagent + create_agent)。路由、用途说明与批准模型
-# 候选全部来自 $DSH_HOME/crew.yaml(或插件行的 configFile);模型只选路由名,
-# 不能选 provider/model。改 YAML 会热加载并自动恢复,插件行不再有三档配置。
-# 示例与字段规则见 README.md / example.yaml。
-#
-# 按行 id 关闭 stock 委派行:宿主把它们放在顶层还是 preset 的 delegation
-# 组内都能命中。保留 tool-subagent-control(send_message / interrupt_agent /
-# list_agents 是 crew 的配套控制面)。
 - id: tool-subagent
   name: '@deepseek-ai/dsh-tool-subagent'
   disabled: true

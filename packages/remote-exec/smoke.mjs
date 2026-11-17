@@ -1,22 +1,3 @@
-/* Runtime smoke test for dsh-remote-exec.
- *
- * Part 1 — plugin surface: config defaults, target-dict defaults.
- * Part 2 — target resolution: required defaultCwd, invalid paths rejected.
- * Part 3 — exec.ts protocol: shQuote, buildRemoteScript (cwd/command argv,
- *          nonce control lines, env-log separation, autoStart on/off,
- *          prep markers/exits), buildSshArgv ordering, control parsing,
- *          classifyOutcome truth table.
- * Part 4 — display.ts: ANSI/CR/repeat cleanup and hard-bounded excerpts.
- * Part 5 — GrantStore session memory + eviction.
- * Part 6 — RemoteRunner against a stub ctx.subprocess + stub spillStore:
- *          outcome/exit-code classification, bounded display, full-output
- *          spill retrieval, lossy-tail handling, timeout/spawn errors.
- * Part 7 — tool registration surface (target enum, cwd parameter, output).
- *
- * The real ssh/docker path is deliberately not exercised here (no target is
- * reachable from CI, and host-side ssh needs the operator's ~/.ssh); see the
- * package README for the live verification recipe.
- */
 import { execFileSync, spawn as spawnChild, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -64,7 +45,6 @@ function throws(label, fn) {
   check(label, threw)
 }
 
-// ── Part 1: plugin surface ────────────────────────────────────────────────
 const defaults = Config({})
 check('default sshPath', defaults.sshPath === 'ssh')
 check('default approvalMode', defaults.approvalMode === 'session')
@@ -104,7 +84,6 @@ throws('legacy workdir cannot replace defaultCwd', () =>
   Config({ targets: { box: { sshHost: 'gpu', container: 'nav', workdir: '/w' } } }),
 )
 
-// ── Part 2: target resolution: required defaultCwd ───────────────────────
 {
   const cfg = Config({
     targets: { modern: { sshHost: 'h', container: 'c', defaultCwd: '/modern' } },
@@ -141,7 +120,6 @@ throws('NUL defaultCwd rejected', () =>
   ),
 )
 
-// ── Part 3: protocol ──────────────────────────────────────────────────────
 check('shQuote plain', shQuote('plain') === "'plain'")
 check('shQuote with single quote', shQuote("a'b") === "'a'\\''b'")
 check('shQuote empty', shQuote('') === "''")
@@ -391,7 +369,6 @@ function controlRecord(kind, detail = '') {
   check('ssh exit constant is 255', SSH_EXIT_CODE === 255)
 }
 
-// ── Part 4: display ──────────────────────────────────────────────────────
 check('display strips ANSI', formatDisplay('\u001B[31mred\u001B[0m\n', 1024).text === 'red\n')
 check(
   'display collapses CR progress',
@@ -427,7 +404,6 @@ check(
   )
 }
 
-// ── Part 5: GrantStore ────────────────────────────────────────────────────
 const grants = new GrantStore()
 grants.add('s1', 'gpu')
 check('grant visible in the same session', grants.has('s1', 'gpu'))
@@ -441,7 +417,6 @@ check(
   !grants.has('bulk-0', 'gpu') && grants.has('bulk-399', 'gpu'),
 )
 
-// ── Part 6: RemoteRunner against stub subprocess/spillStore ──────────────
 function controlLine(token, kind, detail = '') {
   return `\nremote-exec:${token}:${kind}${detail === '' ? '' : `:${detail}`}\n`
 }
@@ -457,14 +432,24 @@ function stubSubprocess({
   stdoutTotalBytes,
   stdoutSpillPath,
   hang = false,
+  doneRejects = null,
+  doneRejectsOnAbort = null,
   resolveThrows = null,
   spillStore,
 } = {}) {
   const spawns = []
+  const logs = []
   return {
     spawns,
+    logs,
     ctx: {
       get: (name) => (name === 'spillStore' ? spillStore : undefined),
+      logger: () => ({
+        debug: (...args) => logs.push({ level: 'debug', args }),
+        warn: (...args) => logs.push({ level: 'warn', args }),
+        info: () => {},
+        error: () => {},
+      }),
       subprocess: {
         resolveExecutable: async () => {
           if (resolveThrows !== null) throw resolveThrows
@@ -478,15 +463,24 @@ function stubSubprocess({
               ? stderr
               : `${stderr}${controlLine(token, control.kind, control.detail)}`
           return {
-            done: hang
-              ? new Promise((resolve) => {
-                  spec.signal.addEventListener(
-                    'abort',
-                    () => resolve({ exitCode: null, signal: 'SIGTERM' }),
-                    { once: true },
-                  )
-                })
-              : Promise.resolve({ exitCode }),
+            done:
+              doneRejects !== null
+                ? Promise.reject(doneRejects)
+                : doneRejectsOnAbort !== null
+                  ? new Promise((resolve, reject) => {
+                      spec.signal.addEventListener('abort', () => reject(doneRejectsOnAbort), {
+                        once: true,
+                      })
+                    })
+                  : hang
+                    ? new Promise((resolve) => {
+                        spec.signal.addEventListener(
+                          'abort',
+                          () => resolve({ exitCode: null, signal: 'SIGTERM' }),
+                          { once: true },
+                        )
+                      })
+                    : Promise.resolve({ exitCode }),
             collected: {
               stdout: {
                 readFrom: () => ({
@@ -880,8 +874,45 @@ async function runStub(stub, { displayMaxBytes, cwd: workdir = '/w', timeoutMs =
     formatResult(result).includes('STILL BE RUNNING'),
   )
 }
+{
+  const stub = stubSubprocess({
+    doneRejects: new Error('secret command body'),
+    exitCode: 1,
+  })
+  const result = await runStub(stub)
+  check(
+    'an unexplained ssh exit loss still classifies as ssh-error',
+    result.outcome === 'ssh-error',
+  )
+  const warning = stub.logs.find((entry) => entry.level === 'warn')
+  check(
+    'an unexplained ssh exit loss is warn-logged with the target',
+    warning !== undefined &&
+      String(warning.args[0]).includes('without an exit code') &&
+      warning.args[1] === 'gpu',
+  )
+  check(
+    'the ssh exit-loss log does not echo the raw error',
+    !JSON.stringify(stub.logs).includes('secret command body'),
+  )
+}
+{
+  const stub = stubSubprocess({ doneRejectsOnAbort: 'secret-timeout-body' })
+  const result = await runStub(stub, { timeoutMs: 100 })
+  check('a timed-out ssh rejection stays timeout-unknown', result.outcome === 'timeout-unknown')
+  const debug = stub.logs.find((entry) => entry.level === 'debug')
+  check(
+    'a timed-out ssh rejection is debug-logged with the target',
+    debug !== undefined &&
+      String(debug.args[0]).includes('without an exit code') &&
+      debug.args[1] === 'gpu',
+  )
+  check(
+    'a timed-out string rejection is classified without echoing it',
+    debug?.args[2] === 'string' && !JSON.stringify(stub.logs).includes('secret-timeout-body'),
+  )
+}
 
-// ── Part 7: tool registration surface ────────────────────────────────────
 function fakeToolCtx() {
   const registered = []
   return {
@@ -965,11 +996,6 @@ function fakeToolCtx() {
   check('no-target description says NONE', tool.description.includes('NONE'))
 }
 
-// ── Part 8: local fixture through fake ssh/docker + real bash/fish ───────
-// The fixture drives the real `fish` binary as the container shell and asserts
-// that login-shell noise is diverted into the env log. An image without fish
-// (a plain CI runner) skips this part with the reason printed instead of
-// failing the gate on a shell the package does not itself require.
 /** Read one collected stream slice the way the host's subprocess reader does. */
 function readCollected(chunks) {
   const text = Buffer.concat(chunks).toString('utf8')

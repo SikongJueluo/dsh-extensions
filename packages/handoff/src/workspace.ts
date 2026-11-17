@@ -1,16 +1,9 @@
 /**
  * Workspace roster and target resolution for cross-workspace handoffs.
- *
- * The registry is consumed exactly the way the Web sidebar does: `list()` for
- * enumeration, `resolveByPath()` for the origin, `status()` to grey out
- * workspaces whose directory disappeared. Everything here is host-side and
- * therefore unsandboxed; agents never write through this module.
- *
  * @module dsh-handoff/workspace
  */
 import { realpath } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
-// Type-only: pulls the `Context.workspaceRegistry` augmentation in.
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { DEFAULT_BRIEF_DIR } from './identity.js'
 
@@ -21,29 +14,22 @@ type WorkspaceEntity = NonNullable<Awaited<ReturnType<Registry['resolveByPath']>
 
 /** One workspace row as pickers show it (browser wire and question card alike). */
 export interface WorkspaceSummary {
-  /** Registry id; empty for an unregistered origin cwd. */
   readonly id: string
   readonly title: string
   readonly path: string
-  /** `status()` reported the directory gone; pickers grey the row out. */
   readonly missing: boolean
 }
 
 /** Where the fresh session should live. */
 export interface HandoffTarget {
-  /** Registry id when the target is a registered workspace. */
   readonly workspaceId?: string
-  /** Canonical absolute cwd for the fresh session (`meta.cwd`). */
   readonly path: string
-  /** Display title; the origin fallback is the final path segment. */
   readonly title: string
 }
 
 /** Everything the pickers need, snapshotted at command time. */
 export interface WorkspaceRoster {
-  /** The origin session's workspace (or its bare cwd when ungrouped). */
   readonly origin: WorkspaceSummary
-  /** Registered workspaces other than the origin's, in registry order. */
   readonly others: readonly WorkspaceSummary[]
 }
 
@@ -59,18 +45,12 @@ async function summarize(entity: WorkspaceEntity): Promise<WorkspaceSummary> {
   try {
     missing = (await entity.status()) !== 'ok'
   } catch {
-    // A failing status check degrades to "missing" rather than blocking the roster.
     missing = true
   }
   return { id: String(entity.id), title: entity.title, path: entity.path, missing }
 }
 
-/**
- * Snapshot the roster for one origin cwd: its own workspace (registry-resolved
- * when registered, the bare cwd otherwise) plus every other registered
- * workspace with a `status()` precheck. Compositions without the registry
- * service get an origin-only roster, which reproduces today's behavior.
- */
+/** Snapshot the roster for one origin cwd: its own workspace (registry-resolved when registered, the bare cwd otherwise) plus every other registered workspace with a `status()` precheck. Compositions without the registry service get an origin-only roster, which reproduces today's behavior. */
 export async function snapshotRoster(ctx: Context, cwd: string): Promise<WorkspaceRoster> {
   const registry = ctx.get('workspaceRegistry')
   if (registry === undefined) {
@@ -95,10 +75,7 @@ export function targetForOrigin(roster: WorkspaceRoster): HandoffTarget {
   }
 }
 
-/**
- * Resolve a picked registry id back into a target, re-checking that the
- * workspace is still registered (the pick may outlive a registry edit).
- */
+/** Resolve a picked registry id back into a target, re-checking that the workspace is still registered (the pick may outlive a registry edit). */
 export async function resolveTargetById(
   ctx: Context,
   id: string,
@@ -110,13 +87,6 @@ export async function resolveTargetById(
   return { workspaceId: id, path: entity.path, title: entity.title }
 }
 
-/**
- * Consume a `--workspace` argument that names a workspace by its (possibly
- * space-bearing) title: the longest registered title that prefixes `rest`
- * wins, so `--workspace Target Space fix readme` splits into spec
- * "Target Space" + task "fix readme". Path specs fall through (returned as
- * undefined) for the caller's single-token handling.
- */
 export function consumeTitleSpec(
   ctx: Context,
   rest: string,
@@ -138,11 +108,7 @@ export function consumeTitleSpec(
 /** Outcome of parsing a `--workspace` spec (or a question card's custom input). */
 export type FlagTargetResult = { target: HandoffTarget } | { error: string }
 
-/**
- * Resolve a typed workspace spec against the registry: a unique exact title,
- * or a path that realpaths onto a registered workspace's canonical path.
- * Misses and ambiguities come back as user-facing errors naming the candidates.
- */
+/** Resolve a typed workspace spec against the registry: a unique exact title, or a path that realpaths onto a registered workspace's canonical path. Misses and ambiguities come back as user-facing errors naming the candidates. */
 export async function resolveFlagTarget(ctx: Context, spec: string): Promise<FlagTargetResult> {
   const registry = ctx.get('workspaceRegistry')
   if (registry === undefined) {
@@ -165,8 +131,6 @@ export async function resolveFlagTarget(ctx: Context, spec: string): Promise<Fla
       error: `无法解析工作区 "${trimmed}"（按 title 或 workspace 根路径写；候选：${spell(entities)}）`,
     }
   }
-  // Registry canonical paths are unique by construction (`create` reuses the
-  // entity for an existing canonical path), so one match is the only live case.
   const byPathEntity = entities.find((entity) => entity.path === canonical)
   if (byPathEntity !== undefined) return check(registry, byPathEntity)
   return { error: `"${trimmed}" 不是已注册的工作区根路径（候选：${spell(entities)}）` }

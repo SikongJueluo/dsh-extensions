@@ -1,9 +1,3 @@
-/**
- * Notice rendering: the collapsed row stays one line, while the expanded body
- * carries the stable defer category and the evidence references.
- *
- * @module dsh-auto-permit/notice.test
- */
 import { describe, expect, it } from 'vitest'
 import { buildNoticeMessage } from '../src/notice.js'
 

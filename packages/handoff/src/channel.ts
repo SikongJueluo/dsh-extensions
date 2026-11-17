@@ -1,18 +1,8 @@
 /**
- * The package's browser channel: one web-server prefix route speaking the
- * connection RPC envelope, over which the Web half polls for a pending model
- * pick and submits the answer.
- *
- * The host holds each pending pick in memory; the browser's poll is also the
- * liveness signal that decides whether waiting for a real picker is worthwhile
- * (a TUI deployment never polls, so the command falls back to the shipped
- * question card instead of blocking).
- *
+ * The package's browser channel: one web-server prefix route speaking the connection RPC envelope, over which the Web half polls for a pending model pick and submits the answer.
  * @module dsh-handoff/channel
  */
 import type { Context } from '@deepseek-ai/cordis'
-// Type-only imports: pull the `Context.connection` / `Context.webServer`
-// module augmentations in.
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -25,11 +15,8 @@ import {
   type PresetChoice,
 } from './choice.js'
 
-/** One endpoint segment of the channel (same grammar as connection RPC). */
 const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
-/** Picks are tiny; anything bigger is a misbehaving client. */
 const MAX_BODY_BYTES = 64 * 1024
-/** A browser that polled this recently counts as attached to this command surface. */
 const ATTACHED_WINDOW_MS = 8_000
 
 /** One route the browser may show as a base option, with the effort in force. */
@@ -44,18 +31,14 @@ export interface PresetWire {
   readonly id: string
   readonly name?: string
   readonly description?: string
-  /** Non-empty when the preset cannot compose a session right now. */
   readonly broken?: string
 }
 
 /** The preset block of a pending pick; absent when the composition has no registry. */
 export interface PresetRequestWire {
-  /** The origin session's live preset; absent when it runs none. */
   readonly inherited?: string
   readonly options: readonly PresetWire[]
-  /** The preset the card preselects (a retry's pick, else inherit). */
   readonly default: PresetChoice
-  /** Why that default cannot mount as-is; the card must ask for a reselect. */
   readonly defaultIssue?: string
 }
 
@@ -64,7 +47,6 @@ export interface WorkspaceWire {
   readonly id: string
   readonly title: string
   readonly path: string
-  /** The directory disappeared; the row renders greyed and unselectable. */
   readonly missing: boolean
 }
 
@@ -75,47 +57,18 @@ export interface ChoiceRequestWire {
   readonly task: string
   readonly inherited?: RouteWire
   readonly fallback?: RouteWire
-  /**
-   * The model the card preselects: the retry's previous pick, else the
-   * remembered handoff preference, else inherit. The browser validates it
-   * against the catalog it already loads and asks for a reselect when the
-   * issue field is set.
-   */
   readonly defaultChoice?: ModelChoice
-  /** Why {@link defaultChoice} cannot run as-is (stale model or effort). */
   readonly defaultChoiceIssue?: string
-  /**
-   * Preset selection block (present = the composition registers presets).
-   * Preset and model are independent intents in one card.
-   */
   readonly preset?: PresetRequestWire
-  /** The origin session's workspace (or bare cwd when ungrouped). */
   readonly origin?: WorkspaceWire
-  /** Registered workspaces other than the origin's; absent/empty = no step. */
   readonly workspaces?: readonly WorkspaceWire[]
-  /** Whether the browser must run the workspace step before answering. */
   readonly pickWorkspace?: boolean
-  /** The model came from `--model`; the picker starts at the workspace step. */
   readonly modelFixed?: boolean
-  /** The flag-fixed route, shown in the confirmation summary (`modelFixed` only). */
   readonly fixedModel?: RouteWire
-  /** The `--workspace` flag's resolved target, shown as fixed in the summary. */
   readonly fixedWorkspace?: WorkspaceWire
-  /**
-   * Retry defaults from the previous attempt's sidecar meta: the picker
-   * pre-fills this workspace so a retry starts one click from where it left
-   * off. The model and preset defaults arrive pre-resolved above.
-   */
   readonly previous?: {
     readonly workspaceId?: WorkspacePick
   }
-  /**
-   * The auto-review block (present = dsh-triggers is mounted, or the flags
-   * already decided it): the card shows the toggle with these defaults and
-   * returns the verdict with the choice. `enabled` pre-checks the box (a
-   * retry's previous verdict); `fixed` marks a flag-decided verdict that the
-   * card displays read-only — the summary must never contradict the flags.
-   */
   readonly review?: {
     readonly defaultRounds: number
     readonly enabled?: boolean
@@ -123,10 +76,7 @@ export interface ChoiceRequestWire {
   }
 }
 
-/**
- * The workspace verdict riding a choice: `'origin'` (the literal the callers
- * compare against) or a registry id.
- */
+/** The workspace verdict riding a choice: `'origin'` (the literal the callers compare against) or a registry id. */
 export type WorkspacePick = string
 
 /** The auto-review verdict riding a choice. */
@@ -168,11 +118,7 @@ function parseModelChoice(record: Record<string, unknown>): ModelChoice | undefi
   return coerceModelChoice(record)
 }
 
-/**
- * Narrow the preset verdict of an untrusted browser payload. The caller has
- * already treated an absent field as "no opinion"; an explicit id here must
- * be one the host actually offered.
- */
+/** Narrow the preset verdict of an untrusted browser payload. The caller has already treated an absent field as "no opinion"; an explicit id here must be one the host actually offered. */
 function parsePresetChoice(
   value: unknown,
   block: PresetRequestWire | undefined,
@@ -188,10 +134,7 @@ function parsePresetChoice(
   return parsed
 }
 
-/**
- * Narrow the review verdict of an untrusted browser payload: absent means
- * "not offered / left off".
- */
+/** Narrow the review verdict of an untrusted browser payload: absent means "not offered / left off". */
 function parseReview(value: unknown, defaultRounds: number): ReviewPick | undefined {
   if (!isRecord(value)) return undefined
   const record = value
@@ -202,11 +145,7 @@ function parseReview(value: unknown, defaultRounds: number): ReviewPick | undefi
   return { enabled: record.enabled, rounds }
 }
 
-/**
- * Narrow untrusted browser payloads into a choice plus its workspace and
- * preset verdicts. An absent workspace field means `'origin'` (single-workspace
- * deployments and flag-resolved targets never run the browser step).
- */
+/** Narrow untrusted browser payloads into a choice plus its workspace and preset verdicts. An absent workspace field means `'origin'` (single-workspace deployments and flag-resolved targets never run the browser step). */
 function parseChoice(
   value: unknown,
   defaultReviewRounds: number | undefined,
@@ -218,9 +157,6 @@ function parseChoice(
   const record = value
   const choice = parseModelChoice(record)
   if (choice === undefined) return undefined
-  // An absent field is NO opinion: the caller keeps the host's resolved
-  // intent (a retry's sidecar preset, else inherit). Only an explicit field
-  // is narrowed, and it must name one of the offered rows.
   let preset: PresetChoice | undefined
   if (record.preset !== undefined) {
     preset = parsePresetChoice(record.preset, presetBlock)
@@ -242,10 +178,7 @@ function parseChoice(
   }
 }
 
-/**
- * Register the channel route (when a connection service and a web server are
- * composed) and return the host-side handle the command uses.
- */
+/** Register the channel route (when a connection service and a web server are composed) and return the host-side handle the command uses. */
 export function registerHandoffChannel(ctx: Context): HandoffChannel {
   const pending = new Map<string, PendingChoice>()
   let lastPollAt = 0
@@ -317,11 +250,7 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
     }
   }
 
-  /**
-   * Serve one channel request: the same client-request / server-response
-   * envelope the connection RPC carriers use, on this package's own
-   * web-server prefix route.
-   */
+  /** Serve one channel request: the same client-request / server-response envelope the connection RPC carriers use, on this package's own web-server prefix route. */
   const serve = async (
     svcCtx: Context,
     req: IncomingMessage,
@@ -353,9 +282,6 @@ export function registerHandoffChannel(ctx: Context): HandoffChannel {
     const chunks: Buffer[] = []
     let received = 0
     for await (const chunk of req) {
-      // HTTP request chunks are always Buffers; a non-Buffer would have made
-      // the old arithmetic produce NaN and crash at Buffer.concat — respond
-      // 400 instead of crashing the handler.
       if (!Buffer.isBuffer(chunk)) {
         respond(400, '{}')
         req.destroy()

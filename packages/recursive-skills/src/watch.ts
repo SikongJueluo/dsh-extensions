@@ -1,19 +1,5 @@
 /**
  * Watcher for the recursive skills provider.
- *
- * The filesystem service watches one file or one directory's direct entries;
- * it is not recursive. Nested discovery therefore keeps one watcher per
- * scanned root or category (child skill addition/removal) plus one per
- * discovered bundle directory (instruction edits and symlink re-targeting).
- * Watching the directory is what makes a `SKILL.md` symlink re-point observable:
- * the filesystem service watches the resolved instruction target, not the
- * directory entry that selects it. Any event only invalidates the provider;
- * the next catalog read rescans and reconciles this watcher set.
- *
- * Every close, including one started from a runtime watcher error and never
- * awaited by a catalog read, is tracked until it settles so provider disposal
- * can wait for it.
- *
  * @module dsh-recursive-skills/watch
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -22,12 +8,6 @@ import type { FileSystem, FsTarget, FsVersion } from '@deepseek-ai/dsh-fs'
 interface WatchState {
   readonly target: FsTarget
   readonly controller: AbortController
-  /**
-   * Opaque path version observed when this watcher was opened. The backend
-   * fixes the observation mode from the path state at initialization (absent
-   * paths watch their parent filtered to the path; directories watch their
-   * direct entries), so a version change means the mode may no longer match.
-   */
   version: FsVersion | undefined
   opening?: Promise<void>
   close?: () => Promise<void>
@@ -57,12 +37,9 @@ export class SkillWatcher {
   }
 
   /**
-   * Make the active watcher set match `targets` exactly. Opens and closes run
-   * serialized so two overlapping catalog reads cannot fight over the set.
-   * @param targets - directories that currently belong to the discovered tree,
-   *   including an absent root observed for later creation.
-   * @returns whether at least one watcher was newly opened, meaning the caller's
-   *   scan ran before that part of the tree was observable and must be repeated.
+   * Make the active watcher set match `targets` exactly. Opens and closes run serialized so two overlapping catalog reads cannot fight over the set.
+   * @param targets - directories that currently belong to the discovered tree, including an absent root observed for later creation.
+   * @returns whether at least one watcher was newly opened, meaning the caller's scan ran before that part of the tree was observable and must be repeated.
    */
   async reconcile(targets: readonly FsTarget[]): Promise<boolean> {
     if (this.closed) return false
@@ -85,7 +62,6 @@ export class SkillWatcher {
     const states = [...this.states.values()]
     this.states.clear()
     await Promise.all(states.map((state) => this.closeState(state)))
-    // Error-path closes are detached from any catalog read; disposal owns them.
     while (this.retiring.size > 0) await Promise.all(this.retiring)
   }
 
@@ -96,10 +72,6 @@ export class SkillWatcher {
       if (this.closed) break
       const existing = this.states.get(key)
       if (existing !== undefined) {
-        // Replace a watcher when the path version changed since it opened:
-        // absent → directory (and the reverse), a deleted and recreated
-        // directory, or a changed direct-entry set. Keeping the old handle
-        // would leave it in the mode the backend fixed at initialization.
         const current = await this.versionOf(target)
         if (this.closed) break
         if (!current.ok || current.version === existing.version) continue
@@ -164,8 +136,6 @@ export class SkillWatcher {
   private changed(key: string, error?: Error): void {
     if (this.closed) return
     if (error !== undefined) {
-      // A failed watcher is dropped so the next catalog read retries it; the
-      // catalog itself remains valid, only its hot-refresh path is degraded.
       const state = this.states.get(key)
       const target = state?.target.displayPath ?? key
       this.ctx.logger.warn(`recursive-skills: watcher for ${target} failed: ${String(error)}`)

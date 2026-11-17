@@ -73,10 +73,7 @@ function fakeSessionQuery(headers: Map<string, Record<string, unknown>>) {
   }
 }
 
-/**
- * A real detached `Session` carrying exactly the header the fixture states —
- * the SDK-advertised constructor instead of an `as never` payload.
- */
+/** A real detached `Session` carrying exactly the header the fixture states - the SDK-advertised constructor instead of an `as never` payload. */
 function fakeSession(
   id: string,
   header?: { cwd?: string; parentSession?: string; origin?: 'subagent'; isSeeded?: boolean },
@@ -147,7 +144,6 @@ function preStep(ctx: Context, sessionId: string) {
 
 async function mount(options: {
   workspace: string
-  /** Omit to mount a deployment that states no fallback workspace root. */
   workspaceRoot?: string | null
   protectedRoots?: string[]
   headers?: Map<string, Record<string, unknown>>
@@ -273,8 +269,6 @@ describe('SessionWriteAccessPolicy mounting', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-swa-service-'))
     const workspace = join(root, 'workspace')
     mkdirSync(workspace)
-    // The host process runs inside a protected path: with no stated fallback
-    // there is nothing to refuse at load, so the provider must still mount.
     const { service } = await mount({
       workspace,
       workspaceRoot: null,
@@ -282,7 +276,6 @@ describe('SessionWriteAccessPolicy mounting', () => {
     })
     const cwdless = fakeSession('agentless')
     expect(() => service.resolve({ session: cwdless })).toThrow(/no workspaceRoot/u)
-    // A call that carries a session cwd keeps working.
     const stated = service.resolve({ session: fakeSession('root', { cwd: workspace }) })
     expect(stated.mode).toBe('workspace-write')
   })
@@ -315,7 +308,6 @@ describe('SessionWriteAccessPolicy live-child attribution', () => {
       },
     })
     liveAgents.set('child', { session: childSession })
-    // The synchronous resolver must refuse, not fall back to child.cwd.
     expect(() => service.resolve({ session: childSession })).toThrow(
       /has no committed write-access group/u,
     )
@@ -607,6 +599,17 @@ describe('SessionWriteAccessPolicy fork intent and host failure', () => {
     mkdirSync(workspace)
     mkdirSync(extra)
     const { ctx, service, storage, liveAgents } = await mount({ workspace })
+    const warnings: string[] = []
+    ctx.logger.exporter({
+      export(message) {
+        if (message.type === 'warn') warnings.push(String(message.args[0]))
+      },
+    })
+    ctx.logger.exporter({
+      export() {
+        throw new Error('exporter failed')
+      },
+    })
     await ctx.serial('agent/created', {
       agent: fakeAgent(fakeSession('root', { cwd: workspace }), ctx),
       source: 'startup',
@@ -628,11 +631,68 @@ describe('SessionWriteAccessPolicy fork intent and host failure', () => {
       },
     })
     await expect(service.forkSession('root')).rejects.toThrow(/default workspace only/u)
+    expect(warnings).toContain(
+      'could not finalize the Fork target; checking the created session before cleanup',
+    )
+    expect(warnings).toContain(
+      'could not give the Fork-created session its default workspace after cleanup; it stays unattributed',
+    )
     members.put = put
     const record = service.view('root').forks[0]
     expect(record?.stage).toBe('failed')
     expect(record?.targetSessionId).toBe('forked')
     await service.ensureSession('forked')
     expect(service.view('forked').grants).toEqual([])
+  })
+
+  it('warns when failure bookkeeping and default attribution both fail', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-fork-'))
+    const workspace = join(root, 'workspace')
+    const extra = join(root, 'extra')
+    mkdirSync(workspace)
+    mkdirSync(extra)
+    const { ctx, service, storage, liveAgents } = await mount({ workspace })
+    const warnings: string[] = []
+    ctx.logger.exporter({
+      export(message) {
+        if (message.type === 'warn') warnings.push(String(message.args[0]))
+      },
+    })
+    await ctx.serial('agent/created', {
+      agent: fakeAgent(fakeSession('root', { cwd: workspace }), ctx),
+      source: 'startup',
+    })
+    await service.addDirectory('root', extra)
+    const members = storage.tables.get('members')
+    if (members === undefined) throw new Error('members table is missing')
+    const putMember = members.put.bind(members)
+    members.put = async (key, value) => {
+      if (key === 'forked') throw new Error('member write failed')
+      return putMember(key, value)
+    }
+    const forks = storage.tables.get('forks')
+    if (forks === undefined) throw new Error('forks table is missing')
+    const putFork = forks.put.bind(forks)
+    forks.put = async (key, value) => {
+      if (value.stage === 'failed' && value.targetSessionId === 'forked') {
+        throw new Error('failure marker write failed')
+      }
+      return putFork(key, value)
+    }
+    ctx.provide('sessionController', {
+      fork: async () => {
+        const child = fakeSession('forked', { cwd: workspace, isSeeded: true })
+        liveAgents.set('forked', { session: child })
+        await ctx.serial('agent/created', { agent: fakeAgent(child, ctx), source: 'startup' })
+        throw Object.assign(new Error('workspace attach failed'), {
+          details: { sessionId: 'forked' },
+        })
+      },
+    })
+    await expect(service.forkSession('root')).rejects.toThrow(/workspace attach failed/u)
+    expect(warnings).toContain('could not mark the failed Fork target; cleanup continues')
+    expect(warnings).toContain(
+      'could not give the Fork-created session its default workspace; it stays unattributed',
+    )
   })
 })

@@ -1,23 +1,8 @@
 /**
  * The shared browser sign-in channel.
- *
- * One web-server prefix route (speaking the connection RPC envelope) serves
- * every provider module in this package: the browser lists providers, starts
- * an attempt, polls its notice/prompt, submits a pasted answer, declines, or
- * signs out — all addressed by provider id. The per-provider OAuth protocol
- * lives in each provider's authorization flow; this channel only relays the
- * conversation.
- *
- * The route appears when the authorization seam, the connection service, and
- * a web server are all present (soft-injected); providers register into the
- * registry at plugin load regardless, so `providers`/`status` answer even in
- * compositions without the seam.
- *
  * @module dsh-more-providers/oauth/channel
  */
 import type { Context } from '@deepseek-ai/cordis'
-// Type-only imports: pull the `Context.connection` / `Context.webServer`
-// module augmentations in.
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {
@@ -31,9 +16,7 @@ import { OAUTH_CREDENTIAL_SCOPE, RPC_CHANNEL } from '../identity.js'
 import { isRecord } from '../record.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-/** One endpoint segment of the channel (same grammar as connection RPC). */
 const ENDPOINT_PATTERN = /^[A-Za-z0-9_$.-]+$/u
-/** Sign-in requests are tiny; anything bigger is a misbehaving client. */
 const MAX_CHANNEL_BODY_BYTES = 64 * 1024
 
 /** One question pending on a provider's bridge, as the browser sees it. */
@@ -57,13 +40,9 @@ interface BridgeState {
 
 /** What a provider module registers into the channel. */
 export interface ProviderRegistration {
-  /** Provider id (its LLM route and channel address). */
   id: string
-  /** User-facing name for cards and pickers. */
   label: string
-  /** The settings namespace holding this provider's editable configuration. */
   settingsNs: string
-  /** The credential record its sign-in flow writes. */
   key: CredentialKey
 }
 
@@ -107,7 +86,7 @@ function failure(
   return { ok: false, error: { code, message, details: {} } }
 }
 
-/** Look up a registered provider by its id (absent → `undefined`). */
+/** Look up a registered provider by its id (absent -> `undefined`). */
 function entryOf(
   providers: Map<string, ProviderEntry>,
   id: string | undefined,
@@ -115,19 +94,10 @@ function entryOf(
   return id !== undefined ? providers.get(id) : undefined
 }
 
-/**
- * Create the shared sign-in channel: a provider registry plus, once the
- * authorization seam / connection / web server are present, its HTTP route.
- */
+/** Create the shared sign-in channel: a provider registry plus, once the authorization seam / connection / web server are present, its HTTP route. */
 export function registerAuthChannel(ctx: Context): AuthChannel {
   const providers = new Map<string, ProviderEntry>()
 
-  // A sign-in record changing flips what listModels returns for its provider
-  // (failure ↔ models), which is exactly the provider-topology fact every
-  // open selector refreshes on. The stock surfaces listen for adapter and
-  // API-key-reference updates only, so a record committed by an authorization
-  // flow would otherwise leave a stale failure in each already-open model
-  // picker until a full page reload.
   ctx.on('credentials/record-updated', (key: CredentialKey) => {
     if (credentialKeyScope(key) === OAUTH_CREDENTIAL_SCOPE) ctx.emit('llm/adapters-updated')
   })
@@ -144,7 +114,6 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
         }
         const pending = { prompt: wirePrompt(prompt), resolve, reject }
         entry.bridge.pending = pending
-        // The flow withdrawing its own (losing) question is not a decline.
         prompt.signal?.addEventListener(
           'abort',
           () => {
@@ -250,12 +219,6 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
                 return failure('NO_PROMPT', 'No sign-in question is waiting for an answer')
               }
               state.pending = undefined
-              // Withdraw the whole attempt rather than rejecting the prompt
-              // with a decline: an out-of-tree plugin's error classes are
-              // distinct module instances from the host's, so the seam's
-              // instanceof check would not recognize ours. `cancel()` aborts
-              // the attempt signal, which settles it as `cancelled`, and the
-              // rejected prompt unblocks the flow so it finishes its cleanup.
               pending.reject(new Error('Declined in the settings page'))
               svcCtx.authorization.cancel(entry.key)
               return { ok: true, value: { accepted: true } }
@@ -278,11 +241,7 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
     }
   }
 
-  /**
-   * Serve one channel request: the same client-request / server-response
-   * envelope the connection RPC carriers use, on this package's own
-   * web-server prefix route.
-   */
+  /** Serve one channel request: the same client-request / server-response envelope the connection RPC carriers use, on this package's own web-server prefix route. */
   const serve = async (
     svcCtx: Context,
     req: IncomingMessage,

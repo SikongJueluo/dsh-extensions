@@ -1,7 +1,3 @@
-/* Runtime smoke test for dsh-jj-workspace: mounts the real provider on a real
- * Cordis context with plain host stubs, then drives the jj arm (workspace,
- * bookmark, record, cwd) and the Git arm (stock service on its private
- * realm) against temporary repositories. */
 import { execFileSync } from 'node:child_process'
 import {
   mkdir,
@@ -53,7 +49,6 @@ function git(cwd, args) {
   return execFileSync('git', args, { cwd, env: process.env, encoding: 'utf8' })
 }
 
-// ── host stubs: plain local processes, a path-only fs, a fixed cwd ───────────
 const { spawn } = await import('node:child_process')
 const subprocess = {
   resolveExecutable: async (command) => command,
@@ -169,7 +164,6 @@ const service = new JjWorktreeService(ctx, Config({}))
 check('provider registers the worktrees service', ctx.get('worktrees') instanceof JjWorktreeService)
 const agent = { session: { id: 'session-1' } }
 
-// ── jj arm ──────────────────────────────────────────────────────────────────
 const jjRepo = join(root, 'jj-repo')
 await mkdir(jjRepo)
 execFileSync('jj', ['--no-pager', '--color=never', 'git', 'init', '--no-colocate'], {
@@ -263,7 +257,6 @@ check(
   initialStates.length === 1 && initialStates[0].state === 'ok',
 )
 
-// restore is refused for a recorded jj workspace.
 let jjRestoreRefused = false
 try {
   await service.restore(agent, {
@@ -277,7 +270,6 @@ try {
 }
 check('jj restore is refused', jjRestoreRefused)
 
-// ── tool plugin: registration, schema, and execution through the service ─────
 let toolDefinition
 applyTool({
   tools: {
@@ -312,7 +304,6 @@ check(
 check('tool execution enters the workspace', cwd === toolResult.path)
 check('tool execution appends its own record', (await service.tasks(jjRepo)).length === 2)
 
-// ── unified task state: UI-created task, live bookmark changes, restart ─────
 cwd = toolResult.path
 const uiResult = await service.create(agent, { name: 'ui-task', origin: 'ui' })
 check(
@@ -329,8 +320,6 @@ check(
   before.length === 3 && before.every((task) => task.state === 'ok'),
 )
 
-// A tracked remote row must not stand in for a local bookmark after a move or
-// delete. Push at the recorded target, then move and delete locally.
 const remoteRepo = join(root, 'remote.git')
 git(root, ['init', '--bare', '-q', remoteRepo])
 execFileSync('jj', ['--no-pager', '--color=never', 'git', 'remote', 'add', 'origin', remoteRepo], {
@@ -392,7 +381,6 @@ check(
   Array.isArray(statusAfterDelete.bookmarks) && !statusAfterDelete.bookmarks.includes('tool-task'),
 )
 
-// Remove one workspace directory while its registration and bookmark remain.
 await rm(join(jjRepo, '.agents/workspaces/task'), { recursive: true, force: true })
 const afterRemoval = await service.taskStates('session-1')
 check(
@@ -417,7 +405,6 @@ check(
     restartedStates.find((task) => task.workspace === 'task')?.state === 'workspace-missing',
 )
 
-// ── Git arm through the stock service on its private realm ──────────────────
 const gitRepo = join(root, 'git-repo')
 await mkdir(gitRepo)
 git(gitRepo, ['init', '-q'])

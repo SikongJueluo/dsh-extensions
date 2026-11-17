@@ -1,35 +1,5 @@
 /**
- * dsh-execution-guard — argument preflight and repeated-failure hints.
- *
- * Two seams, both read-only toward the host's own decisions:
- *
- * - `tools/pre-execute` (prepended): re-validate the pending call's
- *   arguments against the PUBLIC schema surface (`ctx.tools.schemas`) with
- *   the shared subset validators, BEFORE approval and side effects. The
- *   host appends `tool/call` events one call at a time, so the whole native
- *   batch is read from the current step's settled `assistant/message`
- *   tool-call blocks and validated together: any invalid member denies
- *   every member, with per-tool/callId violations — the step's entire
- *   output is rejected (this is a whole-step denial, not a scheduler
- *   concurrency group). Without an assistant tool-call message only the
- *   live execution is checked and whole-batch atomicity is explicitly not
- *   claimed. A `run_code` sub-dispatch is checked alone (the dynamic
- *   current sub-call only). Unknown tools and unsupported schemas stay the
- *   host's call: we defer with a diagnostic instead of inventing a verdict.
- *   Arguments are never rewritten or auto-filled; no
- *   `multi_tool_use.parallel` tool exists here (that name belongs to outer
- *   transports).
- * - `tools/result` (final-outcome observer): on the second same-shape
- *   INVALID_ARGS failure of the same tool, attach a concrete correction hint
- *   (error code + expected schema shape). The host's own repeat-reminder only
- *   catches IDENTICAL arguments, so it never fires on a model that keeps
- *   changing values while missing the same field; legitimate repeats are
- *   never suppressed; a success or a new human turn resets.
- *
- * The recovery anchor (`checkpoint_task` + the resume comparison) lives in
- * the sibling bundle `dsh-task-anchor` — it is session continuity, not
- * execution guarding, and it shares no runtime state with this half.
- *
+ * dsh-execution-guard - argument preflight and repeated-failure hints.
  * @module dsh-execution-guard
  */
 import Schema from '@deepseek-ai/schemastery'
@@ -62,17 +32,12 @@ export {
 } from './preflight.js'
 export { RepeatTracker, fingerprint, hintableCalls, MAX_FINGERPRINTS } from './repeat.js'
 
-/**
- * Plugin-row configuration. Both halves of the pre-split bundle are switches
- * here; the anchor's own keys now live in `dsh-task-anchor`.
- */
+/** Plugin-row configuration. Both halves of the pre-split bundle are switches here; the anchor's own keys now live in `dsh-task-anchor`. */
 export interface Config {
   readonly preflight: boolean
   readonly repeatHints: boolean
 }
 
-// No `Schema<Config>` annotation: schemastery ≥ 3.18.4 bakes volatile modes
-// into the schema generics and the loader checks the inferred shape.
 export const Config = Schema.object({
   preflight: Schema.boolean()
     .default(true)
@@ -131,9 +96,7 @@ class SchemaCache {
 /** Per-agent weak state: final-outcome accounting for repeat hints. */
 interface AgentState {
   readonly tracker: RepeatTracker
-  /** callId → our structured violations for OUR OWN invalid deny. */
   readonly deniedViolations: Map<string, readonly string[]>
-  /** callIds whose arguments were valid but the batch denied them. */
   readonly validDenied: Set<string>
   /** forget one settled callId, keeping the maps bounded. */
   forget(callId: string): void
@@ -174,17 +137,13 @@ function sessionOf(ctx: Context, agent: AgentLike | undefined): AgentLike['sessi
   return ctx.get('sessions')?.get(agent.id)
 }
 
-/**
- * Run the preflight for one pending execution; pure decision, no host calls.
- */
+/** Run the preflight for one pending execution; pure decision, no host calls. */
 function preflightDecision(
   ctx: Context,
   cache: SchemaCache,
   exec: ToolExecution,
 ): { decision: ReturnType<typeof checkBatch>; note?: string } {
   const agent: AgentLike | undefined = exec.agent
-  // PTC sub-dispatch: only the dynamic current sub-call is checkable —
-  // nothing here claims the enclosing program is atomic.
   if (exec.parent !== undefined) {
     const parameters = (exec.schema as { parameters?: unknown } | undefined)?.parameters
     if (parameters === undefined) {
@@ -211,8 +170,6 @@ function preflightDecision(
     }
   }
   const events = session.snapshotEvents()
-  // Whole-batch source: the settled assistant message (the tool/call tail
-  // grows one call at a time and cannot show the full batch yet).
   const siblings = currentStepCalls(events)
   const present = siblings.some((call) => call.callId === exec.callId)
   const state = agent !== undefined ? stateOf(agent) : undefined
@@ -253,11 +210,6 @@ export function apply(ctx: Context, config: Config): void {
           const agent: AgentLike | undefined = exec.agent
           if (agent !== undefined) {
             const state = stateOf(agent)
-            // Record ONLY this execution's own facts for the final-outcome
-            // observer: its own violations when its arguments are the
-            // invalid ones, or a valid-denied marker when the batch-mate
-            // caused the denial (a valid sibling's own parameters are not
-            // its error). Counting happens at `tools/result`, never here.
             const own = decision.invalid.find((entry) => entry.callId === exec.callId)
             if (own !== undefined) {
               state.deniedViolations.set(String(exec.callId), own.violations)
@@ -272,7 +224,6 @@ export function apply(ctx: Context, config: Config): void {
           }
         }
       } catch (error) {
-        // Our own bug must not become a phantom verdict; degrade to host.
         logger.warn('%s: preflight failed open to host pipeline: %o', GUARD_NAME, error)
       }
       return next()
@@ -280,12 +231,6 @@ export function apply(ctx: Context, config: Config): void {
     true,
   )
 
-  // Final-outcome observer: counting, reset, and hint delivery all live
-  // HERE, not in post-execute — the host may cancel after post-execute and
-  // pipeline-failure results bypass it entirely, while `tools/result` fires
-  // once for every frozen final outcome. Hints are appended to the session
-  // with the standard 'execution-guard' source (not a fake user message),
-  // so the notice itself never resets the tracker.
   ctx.on('tools/result', (exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>) => {
     try {
       const agent: AgentLike | undefined = exec.agent
@@ -296,15 +241,11 @@ export function apply(ctx: Context, config: Config): void {
       const ownViolations = state.deniedViolations.get(callId)
       state.forget(callId)
       if (!result.isError) {
-        // A genuine final success of the tool resets its failure shapes. A
-        // cancelled call settles as an error (ABORTED) and lands below.
         state.tracker.noteSuccess(exec.name)
         return
       }
       if (result.error?.info?.code !== INVALID_ARGS_CODE) return
       if (wasValidDenied) return
-      // Host-final INVALID_ARGS outcomes count too: our own structured
-      // violations when preflight denied, else the error message lines.
       const violations =
         ownViolations ?? result.error.message.split(/\n|; /u).filter((line) => line !== '')
       const count = state.tracker.noteFailure(exec.name, violations)
@@ -312,10 +253,7 @@ export function apply(ctx: Context, config: Config): void {
         const session = sessionOf(ctx, agent)
         const parameters = cache.schemaOf(agent)(exec.name)
         if (session !== undefined && parameters !== undefined) {
-          // Through deliverNotice, never a bare surface append: this observer
-          // runs per call inside the batch, so an append here would split a
-          // parallel batch's call/result pairing (see notice.ts).
-          deliverNotice(agent, buildHintMessage(exec.name, describeShape(parameters)))
+          deliverNotice(agent, buildHintMessage(exec.name, describeShape(parameters)), logger)
         }
       }
     } catch (error) {

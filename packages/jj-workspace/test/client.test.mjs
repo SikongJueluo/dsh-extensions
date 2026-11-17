@@ -3,10 +3,6 @@ import TestRenderer, { act } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Menu, Tooltip } from '@dsh-extensions/ui/host'
 
-// The browser module registers through the page loader; this harness keeps the
-// real component, effects, and Forge Remote calls, and replaces only the page
-// services around them. Panel frames are queued so tests can drive several
-// directory/permission states through the real stream effect.
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 import { apply as applyClient, inject as clientInject } from '../src/client/index.tsx'
 const client = { apply: applyClient, inject: clientInject }
@@ -18,6 +14,8 @@ let renderers
 let panels
 let panelWaiters
 let statusCalls
+let loggerCalls
+let loggerThrows
 
 /** Resolve once a panel frame is pushed or the stream is aborted. */
 function waitForPanel(signal) {
@@ -28,22 +26,44 @@ function waitForPanel(signal) {
   })
 }
 
+function failingStream() {
+  return {
+    [Symbol.asyncIterator]() {
+      return this
+    },
+    next() {
+      return Promise.reject(new TypeError('transport reset'))
+    },
+  }
+}
+
 function mount() {
   calls.length = 0
   registrations = {}
   panels = []
   panelWaiters = []
   statusCalls = 0
+  loggerCalls = []
+  loggerThrows = false
   let slot = ''
   const ctx = {
     effect(fn) {
       fn()
       return () => {}
     },
-    // The worktree control is scoped to the Forge Remote namespace; this fake
-    // context stands in for a page where that namespace is already mounted.
     inject(_deps, callback) {
       return callback(ctx)
+    },
+    logger(name) {
+      return {
+        debug(...args) {
+          if (loggerThrows) throw new Error('logger export failed')
+          loggerCalls.push({ name, args })
+        },
+        info() {},
+        warn() {},
+        error() {},
+      }
     },
     locale: {
       register() {},
@@ -393,6 +413,53 @@ describe('new-session worktree control', () => {
     })
     expect(statusCall).toBe(2)
     expect(renderer.root.findByType('input')).toBeDefined()
+  })
+
+  it('logs one panel-stream failure and keeps retrying', async () => {
+    vi.useFakeTimers()
+    let followCalls = 0
+    const follow = () => {
+      followCalls += 1
+      return failingStream()
+    }
+    await renderToggle({
+      panel: jjPanel(),
+      status: () => Promise.resolve({ kind: 'jj', hasGit: false, blocker: null, bookmarks: [] }),
+      override: { follow },
+    })
+    expect(followCalls).toBe(1)
+    expect(loggerCalls).toHaveLength(1)
+    expect(loggerCalls[0].name).toBe('jj-workspace')
+    expect(loggerCalls[0].args[0]).toContain('panel stream ended')
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+      await flush()
+    })
+    expect(followCalls).toBe(2)
+    expect(loggerCalls).toHaveLength(1)
+  })
+
+  it('keeps retrying when the logger export throws', async () => {
+    vi.useFakeTimers()
+    loggerThrows = true
+    let followCalls = 0
+    const follow = () => {
+      followCalls += 1
+      return failingStream()
+    }
+    await renderToggle({
+      panel: jjPanel(),
+      status: () => Promise.resolve({ kind: 'jj', hasGit: false, blocker: null, bookmarks: [] }),
+      override: { follow },
+    })
+    expect(followCalls).toBe(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+      await flush()
+    })
+    expect(followCalls).toBe(2)
   })
 
   it('disables creation with a clear read-only reason', async () => {

@@ -1,5 +1,3 @@
-// Smoke checks for the pure matcher (run after `pnpm build`):
-//   node packages/cmd-permit/smoke.mjs
 import { isHighRisk } from 'dsh-auto-permit'
 import { compileRules, decideAllow, segmentHead, splitSegments } from './lib/index.js'
 

@@ -1,17 +1,5 @@
 /**
  * Minimal MCP streamable-HTTP client for one tool call per session.
- *
- * Scope: exactly what the Zhipu web-search broker needs — initialize,
- * initialized notification, (cached) tools/list discovery, tools/call. No
- * resources, prompts, sampling, or transports beyond HTTP POST.
- *
- * Protocol hardening from the live broker probe (2026-10-11):
- * - auth failures arrive as a PLAIN JSON body (`{code, msg, success}`), not
- *   a JSON-RPC error, so transport errors are detected before RPC parsing;
- * - responses may be `application/json` OR `text/event-stream` (SSE `data:`
- *   lines); both are accepted;
- * - `mcp-session-id` from the initialize response rides every later request.
- *
  * @module dsh-search-integrator/mcp
  */
 
@@ -52,7 +40,6 @@ export class McpTransportError extends Error {
   }
 }
 
-/** Tool-name cache per endpoint: tools/list once per process per URL. */
 const knownTools = new Map<string, string>()
 
 /** Extract the first JSON-RPC message from a JSON or SSE-encoded body. */
@@ -71,7 +58,6 @@ export function parseRpcBody(contentType: string, text: string): JsonRpcResponse
         return parse(payload)
       } catch (error) {
         if (error instanceof McpTransportError) continue
-        // Skip malformed SSE frames; a later data line may carry the answer.
       }
     }
     throw new McpTransportError('SSE body carried no parsable JSON-RPC message')
@@ -119,7 +105,6 @@ function requireResult(exchange: Exchange, stage: string): Record<string, unknow
 
 /**
  * Run one MCP tool call over a fresh session.
- *
  * @param post - injectable raw POST.
  * @param url - the broker's streamable-http endpoint.
  * @param apiKey - credential value (sent as `Authorization: Bearer`).
@@ -149,7 +134,6 @@ export async function mcpCallTool(
     }
     const response = await post(url, JSON.stringify(payload), headers, signal)
     if (response.text.trim() === '') {
-      // Notifications legally settle as 202 with an empty body.
       return { parsed: {}, headers: response.headers }
     }
     const parsed = parseRpcBody(response.contentType, response.text)
@@ -161,7 +145,6 @@ export async function mcpCallTool(
     return { parsed, headers: response.headers }
   }
 
-  // 1. initialize — a fresh session per call; brokers may expire sessions.
   const init = await send({
     jsonrpc: '2.0',
     id: nextId++,
@@ -175,13 +158,10 @@ export async function mcpCallTool(
   requireResult(init, 'initialize')
   const sessionId = init.headers['mcp-session-id'] ?? init.headers['Mcp-Session-Id']
 
-  // 2. initialized notification — no id, empty response expected.
   await send({ jsonrpc: '2.0', method: 'notifications/initialized' }, sessionId)
 
-  // 3. Resolve the tool name (cached per endpoint).
   let toolName = knownTools.get(url) ?? tool
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    // 4. tools/call.
     const call = await send(
       {
         jsonrpc: '2.0',
@@ -198,7 +178,6 @@ export async function mcpCallTool(
         error.code === -32601 ||
         /unknown.*tool|tool.*not/iu.test(typeof error.message === 'string' ? error.message : ''))
     if (unknownTool && attempt === 1) {
-      // Unknown tool: discover the real name once, then retry.
       const listed = await send({ jsonrpc: '2.0', id: nextId++, method: 'tools/list' }, sessionId)
       const listedResult = requireResult(listed, 'tools/list')
       const tools: unknown[] =
@@ -247,10 +226,7 @@ export class McpRpcFailure extends Error {
   }
 }
 
-/**
- * The raw-post adapter over the global fetch (used by the real wiring; tests
- * inject their own RawPost).
- */
+/** The raw-post adapter over the global fetch (used by the real wiring; tests inject their own RawPost). */
 export function fetchRawPost(): RawPost {
   return async (url, body, headers, signal) => {
     const response = await fetch(url, { method: 'POST', headers, body, signal })

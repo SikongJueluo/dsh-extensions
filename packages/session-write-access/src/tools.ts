@@ -1,11 +1,4 @@
-/**
- * Model-facing tools. They can only read the write scope and submit a
- * request; add, allow, deny, revoke, and Fork remain user-only paths in the
- * browser channel. Neither tool goes through the ordinary approval waterfall,
- * so an auto-approved command can never become a directory grant.
- *
- * @module dsh-session-write-access/tools
- */
+/** @module dsh-session-write-access/tools */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { SessionWriteAccessPolicy } from './service.js'

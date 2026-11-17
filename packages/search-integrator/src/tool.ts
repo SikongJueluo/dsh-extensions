@@ -1,11 +1,5 @@
 /**
- * The model-facing tool: schema, argument validation, and the execution that
- * wires one pipeline run (credentials → adapters, llm port, audit port).
- *
- * The description promises exactly what the pipeline delivers — one
- * integrated, citation-checked answer — and not a hit list, so the main model
- * has no reason to expect raw candidates it must filter itself.
- *
+ * The model-facing tool: schema, argument validation, and the execution that wires one pipeline run (credentials -> adapters, llm port, audit port).
  * @module dsh-search-integrator/tool
  */
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -36,23 +30,14 @@ const TOOL_DESCRIPTION = [
 
 /** Per-execution wiring over the host context. */
 export interface ToolHost {
-  /** Live settings snapshot reader. */
   readonly readSettings: () => SearchIntegratorSettings
-  /** Resolve one credential reference; never logged. */
   readonly resolveCredential: (ref: string) => Promise<string | undefined>
-  /** Build the llm port for one execution. */
   readonly llmFor: (settings: SearchIntegratorSettings) => ToolHostLlm | undefined
-  /** Build the audit port for one execution. */
   readonly auditFor: (callId: ToolCallId, sessionId?: string) => ReturnType<typeof createAuditPort>
-  /** Injectable JSON POST for the provider adapters (tests). */
   readonly postJson: typeof postJson
-  /** Injectable JSON GET for the provider adapters (tests). */
   readonly getJson: typeof getJson
-  /** Injectable raw POST for the MCP broker transport (tests). */
   readonly rawPost: RawPost
-  /** Fresh ChatGPT OAuth token via the oauth-providers service (subscription source). */
   readonly chatgptToken: () => Promise<{ access: string; accountId?: string } | undefined>
-  /** Log a contained failure at warn level. */
   readonly warn: (message: string, error: unknown) => void
 }
 
@@ -105,8 +90,6 @@ export function createToolHost(ctx: Context, config: Config): ToolHost {
     getJson,
     rawPost: fetchRawPost(),
     chatgptToken: async () => {
-      // Opportunistic: the oauthProviders service exists only while the
-      // oauth-providers plugin is mounted and signed in.
       const service: unknown = ctx.get('oauthProviders')
       if (!isOAuthProviders(service)) return undefined
       return service.token?.('chatgpt')
@@ -148,7 +131,6 @@ function sessionIdOf(exec: ToolRunContext): string | undefined {
 
 /**
  * Build the tool definition.
- *
  * @param host - per-execution wiring.
  * @param options - registration-time facts (name, timeout).
  */
@@ -313,6 +295,7 @@ export function makeResearchTool(
             configFailures: failures,
             llm: host.llmFor(settings),
             audit: host.auditFor(exec.callId, sessionId),
+            warn: host.warn,
             settings,
           },
           parsed,
@@ -321,8 +304,6 @@ export function makeResearchTool(
       } catch (error) {
         if (exec.signal.aborted) throw error
         host.warn('search-integrator: research run crashed:', error)
-        // A crash outside the pipeline's own semantics still returns an
-        // explicit failure value rather than an opaque tool error.
         const crash: ResearchResult = {
           status: 'failed',
           question: parsed.question,

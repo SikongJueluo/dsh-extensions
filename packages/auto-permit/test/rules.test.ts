@@ -1,11 +1,3 @@
-/**
- * High-risk shape regressions, including the real `podman run --rm` false
- * positive observed in the RealSense session: the old `rm` regex could start
- * at `--rm`, take `f` from an image tag such as `realsense-official`, and
- * pair it with the in-container path `/app/...`.
- *
- * @module dsh-auto-permit/rules.test
- */
 import { describe, expect, it } from 'vitest'
 import { isHighRisk } from '../src/rules.js'
 import { containerRisk } from '../src/container.js'
@@ -81,7 +73,6 @@ describe('the rm scan still ignores unrelated tokens', () => {
   })
 
   it('does not continue into the next command unit', () => {
-    // The force flag belongs to a later command, not to the leading rm.
     expect(isHighRisk('rm ./build/out.bin; git status -f /etc/hosts')).toBe(false)
   })
 })
