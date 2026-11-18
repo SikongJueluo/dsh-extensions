@@ -382,6 +382,8 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 | A27 | 同一文件 `props.useSessions(...)` 加一条带理由的 `react/hooks` 抑制：该 hook 由宿主 slot 以 prop 传入，是宿主 store 的模块级函数，跨渲染同一（`client.test.mjs` 用同一 prop 形态验证），规则无法静态证明 | 批准 |
 | A28 | `crew/src/index.ts` 的 `ContentBlock[] → JsonValue[]` 加一条带理由的 `no-unsafe-type-assertion` 抑制：工具 output schema 推断出 `JsonValue[]`，而 SDK 的 block 接口是结构上可 JSON 但不带 index signature 的 interface，二者无公开转换器可桥接（深拷贝会改变非 JSON block 的运行期行为） | 批准 |
 
+2026-11-18 session-write-access 改用宿主悬浮列表后不再在 effect 中写组件状态，移除原 `react/set-state-in-effect` 抑制及其登记；没有新增豁免。
+
 若希望更严：`require-unicode-regexp`（228）、`prefer-strict-equal` 与
 `prefer-to-be-truthy/falsy`（vitest 风格，606）、`strict-boolean-expressions`（B2）
 都可以改为保留，代价是相应存量必须一起改。

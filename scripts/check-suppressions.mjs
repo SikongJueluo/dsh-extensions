@@ -58,7 +58,6 @@ const APPROVED = [
 
   ['packages/handoff/src/preferences.ts', ['typescript/no-unsafe-type-assertion']],
   ['packages/session-write-access/src/service.ts', ['typescript/no-unsafe-type-assertion']],
-  ['packages/session-write-access/src/client/index.tsx', ['react/set-state-in-effect']],
   ['packages/triggers/src/client/index.tsx', ['react/set-state-in-effect']],
 
   ['packages/triggers/src/client/index.tsx', ['eslint/no-alert', 'react/hooks']],
