@@ -222,6 +222,19 @@ provider 映射。此配置不添加模型，只为目录或静态列表中已�
 `modelsURL` 拉取成功时优先用目录；目录缺的字段会由同 id 的静态 `models` 补齐。目录失败/为空时
 整体回退静态 `models`；两者都没有则跳过该 provider（只影响这一条路由）。
 
+## Command Code
+
+`kind: command-code` 的模型清单与协议仍来自普通 `/models`；启动时还会请求固定的
+`https://api.commandcode.ai/provider/v1/models?view=client`，只为同一份清单中 id 完全相同的
+模型补上下文窗口与思考档位：
+
+- 两个来源都有值时以普通 `/models` 为准；普通目录明确 `reasoning: false` 时忽略能力目录的
+  档位，其余情况采用能力目录的非空 `reasoningEfforts`（不合并默认档位）。
+- 能力目录里多出来的模型（隐藏/免费等）不会加入选择器。
+- 请求失败、`schemaVersion` 不是 `1`、或单行/单字段格式不对时只丢弃对应字段并回退现有默认
+  （上下文 `131072`、思考 `low/medium/high`），不影响该路由的普通模型清单。
+- 该能力地址不随 `modelsURL` 覆盖而变化；每次 DSH 启动拉取一次，不做运行期刷新。
+
 ## ChatGPT 订阅（OAuth）
 
 - **路由**：`chatgpt`，显示名 `ChatGPT (OpenAI)`；模型目录从 Codex 后端动态拉取，

@@ -1,5 +1,5 @@
 /** @module dsh-more-providers/providers */
-import type { Api, Model, Provider } from '@earendil-works/pi-ai'
+import type { Api, Model, Provider, ThinkingLevelMap } from '@earendil-works/pi-ai'
 import { createProvider, envApiKeyAuth } from '@earendil-works/pi-ai'
 import {
   anthropicMessagesApi,
@@ -13,22 +13,24 @@ import type { ModelConfig, ModelDefault, ModelMetadata, ResolvedProvider } from 
 import { ConfigError } from './config.js'
 import {
   DEFAULT_BASE_URL as COMMAND_CODE_BASE_URL,
+  DEFAULT_CAPABILITIES_URL as COMMAND_CODE_CAPABILITIES_URL,
   DEFAULT_MODELS_URL as COMMAND_CODE_MODELS_URL,
   ZDR_HEADER,
   buildCommandCodeProvider,
+  fetchCapabilities,
   fetchCatalog,
+  mergeCapabilities,
 } from './commandcode.js'
+import type { CommandCodeCapability } from './commandcode.js'
 import type { KeySource } from './keys.js'
 import { readKey } from './keys.js'
+import { DEFAULT_THINKING_LEVELS, THINKING_LEVEL_SET, thinkingLevelMapOf } from './reasoning.js'
 import { isRecord } from './record.js'
 import type { ProviderImageServices } from './runtime.js'
 
 const FALLBACK_CONTEXT_WINDOW = 131_072
 const FALLBACK_MAX_TOKENS = 32_768
 const MODELS_TIMEOUT_MS = 10_000
-const ALL_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
-const THINKING_LEVELS = new Set<string>(ALL_THINKING_LEVELS)
-const DEFAULT_THINKING_LEVELS = ['low', 'medium', 'high']
 
 const DEFAULT_RETRY_POLICY = {
   mode: 'normal' as const,
@@ -75,19 +77,13 @@ export interface BuildResult {
 
 function reasoningOf(model: ModelConfig): {
   reasoning: boolean
-  thinkingLevelMap?: Record<string, string | null>
+  thinkingLevelMap?: ThinkingLevelMap
 } {
   if (model.reasoning === false) return { reasoning: false }
-  const levels = model.reasoning ?? DEFAULT_THINKING_LEVELS
-  const thinkingLevelMap: Record<string, string | null> = {}
-  for (const level of ALL_THINKING_LEVELS) {
-    if (levels.includes(level)) {
-      if (level !== 'off') thinkingLevelMap[level] = level
-    } else {
-      thinkingLevelMap[level] = null
-    }
+  return {
+    reasoning: true,
+    thinkingLevelMap: thinkingLevelMapOf(model.reasoning ?? DEFAULT_THINKING_LEVELS),
   }
-  return { reasoning: true, thinkingLevelMap }
 }
 
 function customModel(model: ModelConfig, resolved: ResolvedProvider): Model<Api> {
@@ -148,7 +144,7 @@ function catalogReasoning(value: unknown): false | string[] | undefined {
   if (value === false) return false
   if (!Array.isArray(value) || value.length === 0) return undefined
   if (!value.every((level): level is string => typeof level === 'string')) return undefined
-  return value.every((level) => THINKING_LEVELS.has(level)) ? value : undefined
+  return value.every((level) => THINKING_LEVEL_SET.has(level)) ? value : undefined
 }
 
 function inputModalities(value: unknown): ('text' | 'image')[] | undefined {
@@ -342,12 +338,25 @@ async function customProvider(
   }
 }
 
-async function commandCodeProvider(resolved: ResolvedProvider): Promise<BuiltProvider> {
+async function commandCodeProvider(
+  resolved: ResolvedProvider,
+  log: ProviderLogger,
+): Promise<BuiltProvider> {
   const baseURL = resolved.baseURL ?? COMMAND_CODE_BASE_URL
   const modelsURL = resolved.modelsURL ?? COMMAND_CODE_MODELS_URL
   const zdr = resolved.zdr ?? process.env.CMD_ZDR === '1'
   const items = await fetchCatalog(modelsURL, MODELS_TIMEOUT_MS)
-  const { provider, models } = buildCommandCodeProvider(items, {
+  let capabilities: ReadonlyMap<string, CommandCodeCapability> = new Map()
+  try {
+    capabilities = await fetchCapabilities(COMMAND_CODE_CAPABILITIES_URL, MODELS_TIMEOUT_MS)
+  } catch (error) {
+    log.warn(
+      'more-providers: %s model capability catalog failed; using /models metadata only: %o',
+      resolved.route,
+      error,
+    )
+  }
+  const { provider, models } = buildCommandCodeProvider(mergeCapabilities(items, capabilities), {
     route: resolved.route,
     displayName: resolved.displayName,
     baseURL,
@@ -371,7 +380,7 @@ async function buildOne(
     case 'custom':
       return customProvider(resolved, key, log)
     case 'command-code':
-      return commandCodeProvider(resolved)
+      return commandCodeProvider(resolved, log)
     default:
       throw new ConfigError(`more-providers: unsupported provider kind "${String(resolved.kind)}"`)
   }

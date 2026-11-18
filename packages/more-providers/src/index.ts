@@ -37,9 +37,13 @@ export type { KeySource } from './keys.js'
 export { buildAdapter, buildProviders } from './providers.js'
 export {
   DEFAULT_BASE_URL,
+  DEFAULT_CAPABILITIES_URL,
   DEFAULT_MODELS_URL,
   buildCommandCodeProvider,
+  fetchCapabilities,
   fetchCatalog,
+  mergeCapabilities,
+  parseCapabilities,
   parseCatalog,
   toPiModels,
 } from './commandcode.js'
