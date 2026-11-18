@@ -89,6 +89,9 @@ providers:
         contextWindow: 524288
         maxTokens: 32768
         input: [text, image]
+    contextWindows:                # 窗口值须确认适用于该 MDKJ 路由；此处 272000 仅作示例
+      gpt-6.2-sol: 272000
+      gpt-6.2-astra: 272000
     accounts:
       stable:
         displayName: MDKJ Stable
@@ -133,7 +136,7 @@ ChatGPT 的 LLM 路由固定是 `chatgpt`（保留名：其他 provider / accoun
 
 | kind | 含义 | 必填 |
 |---|---|---|
-| `builtin` | 使用 pi-ai 内置 catalog（ZAI / OpenCode / Moonshot / MiniMax …） | `catalog` 可省，默认 provider id；**不接受** `api` / `baseURL` / `modelsURL` / `models` / `compat` / `headers` / `zdr` |
+| `builtin` | 使用 pi-ai 内置 catalog（ZAI / OpenCode / Moonshot / MiniMax …） | `catalog` 可省，默认 provider id；**不接受** `api` / `baseURL` / `modelsURL` / `models` / `contextWindows` / `compat` / `headers` / `zdr` |
 | `custom` | 手写 OpenAI/Anthropic 兼容 endpoint | `api`、`baseURL`；`modelsURL` 或 `models` 至少一个 |
 | `command-code` | Command Code 的混合协议目录 | 只有 key；可选 `baseURL` / `modelsURL` / `zdr` |
 
@@ -147,9 +150,9 @@ ChatGPT 的 LLM 路由固定是 `chatgpt`（保留名：其他 provider / accoun
 - provider 是模板，**不注册**；
 - 每个 account 生成路由 `${provider}-${account}`（可用 `routeId` 覆盖）；
 - 默认显示名 `${displayName} (${account})`；
-- account 继承 provider 的 `api` / `baseURL` / `modelsURL` / `models` / `compat` / `headers` / `zdr`；
+- account 继承 provider 的 `api` / `baseURL` / `modelsURL` / `models` / `contextWindows` / `compat` / `headers` / `zdr`；
 - account 可覆盖 `displayName` / `routeId` / key；`custom` 还可覆盖 `api` / `baseURL` /
-  `modelsURL` / `models` / `compat` / `headers`；`command-code` 可覆盖 `baseURL` / `modelsURL` / `zdr`；
+  `modelsURL` / `models` / `contextWindows` / `compat` / `headers`；`command-code` 可覆盖 `baseURL` / `modelsURL` / `zdr`；
   `builtin` 只允许 key/displayName/routeId/enabled。
 - 对象深合并（`compat`/`headers`），数组整体替换（`models`）；`enabled: false` 跳过该 account。
 
@@ -181,6 +184,17 @@ apiKeyEnv: MDKJ_STABLE_GPT_API_KEY                           # 环境变量
 | `maxTokens` | `32768` | 输出上限 |
 | `input` | `[text]` | 支持 `text` / `image` |
 | `reasoning` | `[low, medium, high]` | `false` 关闭；数组可用 `off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` |
+
+当模型目录未提供上下文窗口时，可在 provider 或 account 上用 `contextWindows` 按模型 ID 补充：
+
+```yaml
+contextWindows:
+  gpt-6.2-sol: 272000 # 示例值；请填已确认适用于该路由的窗口
+```
+
+目录返回的窗口和 `models` 中显式配置的 `contextWindow` 优先于此映射；账号映射按 ID 覆盖
+provider 映射。此配置不添加模型，只为目录或静态列表中已有的模型补窗口；思考强度仍由
+各模型的 `reasoning` 字段配置。
 
 `reasoning` 是字符串数组，内部映射为 pi-ai 的 `reasoningEfforts` 同名 wire 值；默认不暴露
 `off`（要关就整个 `reasoning: false`），数组里写 `off` 才会出现该档。

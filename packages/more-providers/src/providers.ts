@@ -290,11 +290,15 @@ async function customProvider(
   const api = resolved.api
   if (api === undefined)
     throw new ConfigError(`providers.${resolved.providerId}: custom provider is missing api`)
+  const configuredModels = models.map((model) => {
+    const contextWindow = model.contextWindow ?? resolved.contextWindows?.get(model.id)
+    return contextWindow === undefined ? model : { ...model, contextWindow }
+  })
   const provider = createProvider({
     id: resolved.route,
     name: resolved.displayName,
     auth: { apiKey: envApiKeyAuth('more-providers API key', ['MORE_PROVIDERS_API_KEY']) },
-    models: models.map((model) => customModel(model, resolved)),
+    models: configuredModels.map((model) => customModel(model, resolved)),
     api: { [api]: apiStreams(api) },
   })
   return {

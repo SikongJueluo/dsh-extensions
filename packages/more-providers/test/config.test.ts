@@ -69,6 +69,63 @@ describe('resolveConfig: strictness and route reservation', () => {
     ).toThrow(ConfigError)
   })
 
+  it('resolves per-model context windows and lets account values override provider values', () => {
+    const resolved = resolveConfig({
+      providers: {
+        gateway: {
+          kind: 'custom',
+          api: 'openai-responses',
+          baseURL: 'https://gateway.invalid/v1',
+          apiKeyEnv: TEST_ENV_KEY,
+          models: [{ id: 'model-a' }, { id: 'model-b' }],
+          contextWindows: { 'model-a': 200000, 'model-b': 300000 },
+          accounts: {
+            one: { contextWindows: { 'model-a': 250000 } },
+          },
+        },
+      },
+    })
+    expect(resolved.providers[0]?.contextWindows).toEqual(
+      new Map([
+        ['model-a', 250000],
+        ['model-b', 300000],
+      ]),
+    )
+  })
+
+  it('supplements dynamically catalogued model context windows', () => {
+    const resolved = resolveConfig({
+      providers: {
+        gateway: {
+          kind: 'custom',
+          api: 'openai-responses',
+          baseURL: 'https://gateway.invalid/v1',
+          modelsURL: 'https://gateway.invalid/v1/models',
+          apiKeyEnv: TEST_ENV_KEY,
+          contextWindows: { 'model-a': 200000 },
+        },
+      },
+    })
+    expect(resolved.providers[0]?.contextWindows).toEqual(new Map([['model-a', 200000]]))
+  })
+
+  it('rejects invalid context window entries', () => {
+    expect(() =>
+      resolveConfig({
+        providers: {
+          gateway: {
+            kind: 'custom',
+            api: 'openai-responses',
+            baseURL: 'https://gateway.invalid/v1',
+            modelsURL: 'https://gateway.invalid/v1/models',
+            apiKeyEnv: TEST_ENV_KEY,
+            contextWindows: { 'model-a': 0 },
+          },
+        },
+      }),
+    ).toThrow(ConfigError)
+  })
+
   it('resolves routes with account ids and env keys', () => {
     const resolved = resolveConfig({ providers: { gateway } })
     expect(resolved.providers).toHaveLength(1)

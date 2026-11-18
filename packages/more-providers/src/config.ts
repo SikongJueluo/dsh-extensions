@@ -41,6 +41,7 @@ export interface ResolvedProvider {
   baseURL?: string
   modelsURL?: string
   models?: ModelConfig[]
+  contextWindows?: ReadonlyMap<string, number>
   compat?: PiAiCompatProfile
   headers?: Record<string, string>
   zdr?: boolean
@@ -60,6 +61,7 @@ const PROVIDER_KEYS = new Set([
   'baseURL',
   'modelsURL',
   'models',
+  'contextWindows',
   'compat',
   'headers',
   'apiKeyFile',
@@ -76,6 +78,7 @@ const ACCOUNT_KEYS = new Set([
   'baseURL',
   'modelsURL',
   'models',
+  'contextWindows',
   'compat',
   'headers',
   'apiKeyFile',
@@ -84,6 +87,7 @@ const ACCOUNT_KEYS = new Set([
   'zdr',
 ])
 const MODEL_KEYS = new Set(['id', 'name', 'contextWindow', 'maxTokens', 'input', 'reasoning'])
+const CUSTOM_FIELDS = ['api', 'models', 'contextWindows', 'compat', 'headers']
 const API_VALUES = new Set<Api>(['openai-completions', 'openai-responses', 'anthropic-messages'])
 const KEY_FIELDS = ['apiKeyFile', 'secretName', 'apiKeyEnv'] as const
 
@@ -306,6 +310,24 @@ function parseModels(raw: Record<string, unknown>, path: string): ModelConfig[] 
   })
 }
 
+function parseContextWindows(
+  raw: Record<string, unknown>,
+  path: string,
+): ReadonlyMap<string, number> | undefined {
+  const value = raw.contextWindows
+  if (value === undefined || value === null) return undefined
+  const windowPath = `${path}.contextWindows`
+  const windows = new Map<string, number>()
+  for (const [id, tokens] of Object.entries(asRecord(value, windowPath))) {
+    if (id.trim() === '') fail(windowPath, 'expected a non-empty model id')
+    if (typeof tokens !== 'number' || !Number.isSafeInteger(tokens) || tokens <= 0) {
+      fail(`${windowPath}.${id}`, 'expected a positive integer')
+    }
+    windows.set(id, tokens)
+  }
+  return windows
+}
+
 interface BaseFields {
   providerId: string
   kind: ProviderKind
@@ -314,6 +336,7 @@ interface BaseFields {
   baseURL?: string
   modelsURL?: string
   models?: ModelConfig[]
+  contextWindows?: ReadonlyMap<string, number>
   compat?: PiAiCompatProfile
   headers?: Record<string, string>
   zdr?: boolean
@@ -326,7 +349,16 @@ function parseBaseFields(
   kind: ProviderKind,
 ): BaseFields {
   if (kind === 'builtin') {
-    for (const key of ['api', 'baseURL', 'modelsURL', 'models', 'compat', 'headers', 'zdr']) {
+    for (const key of [
+      'api',
+      'baseURL',
+      'modelsURL',
+      'zdr',
+      'models',
+      'contextWindows',
+      'compat',
+      'headers',
+    ]) {
       if (raw[key] !== undefined && raw[key] !== null)
         fail(`${path}.${key}`, 'is not supported on a builtin provider')
     }
@@ -336,7 +368,7 @@ function parseBaseFields(
   }
 
   if (kind === 'command-code') {
-    for (const key of ['catalog', 'api', 'models', 'compat', 'headers']) {
+    for (const key of ['catalog', ...CUSTOM_FIELDS]) {
       if (raw[key] !== undefined && raw[key] !== null)
         fail(`${path}.${key}`, 'is not supported on a command-code provider')
     }
@@ -359,6 +391,7 @@ function parseBaseFields(
   const baseURL = optionalUrl(raw, 'baseURL', path, true)
   const modelsURL = optionalUrl(raw, 'modelsURL', path, false)
   const models = parseModels(raw, path)
+  const contextWindows = parseContextWindows(raw, path)
   if (modelsURL === undefined && models === undefined) {
     fail(path, 'custom provider needs modelsURL or models')
   }
@@ -371,6 +404,7 @@ function parseBaseFields(
     baseURL,
     ...(modelsURL === undefined ? {} : { modelsURL }),
     ...(models === undefined ? {} : { models }),
+    ...(contextWindows === undefined ? {} : { contextWindows }),
     ...(compat === undefined ? {} : { compat }),
     ...(headers === undefined ? {} : { headers }),
   }
@@ -422,7 +456,7 @@ function parseProvider(providerId: string, value: unknown, secretDir: string): R
       fail(accountPath, 'no key source (apiKeyFile, secretName, or apiKeyEnv)')
 
     if (kind === 'builtin') {
-      for (const key of ['api', 'baseURL', 'modelsURL', 'models', 'compat', 'headers', 'zdr']) {
+      for (const key of ['baseURL', 'modelsURL', 'zdr', ...CUSTOM_FIELDS]) {
         if (account[key] !== undefined && account[key] !== null)
           fail(`${accountPath}.${key}`, 'is not supported on a builtin account')
       }
@@ -431,7 +465,7 @@ function parseProvider(providerId: string, value: unknown, secretDir: string): R
     }
 
     if (kind === 'command-code') {
-      for (const key of ['catalog', 'api', 'models', 'compat', 'headers']) {
+      for (const key of ['catalog', ...CUSTOM_FIELDS]) {
         if (account[key] !== undefined && account[key] !== null)
           fail(`${accountPath}.${key}`, 'is not supported on a command-code account')
       }
@@ -458,6 +492,11 @@ function parseProvider(providerId: string, value: unknown, secretDir: string): R
     const baseURL = optionalUrl(account, 'baseURL', accountPath, false) ?? base.baseURL
     const modelsURL = optionalUrl(account, 'modelsURL', accountPath, false) ?? base.modelsURL
     const models = parseModels(account, accountPath) ?? base.models
+    const contextWindows = parseContextWindows(account, accountPath)
+    const effectiveContextWindows =
+      contextWindows === undefined
+        ? base.contextWindows
+        : new Map([...(base.contextWindows ?? []), ...contextWindows])
     if (modelsURL === undefined && models === undefined)
       fail(accountPath, 'needs modelsURL or models')
     const compat = optionalCompat(account, 'compat', accountPath)
@@ -468,6 +507,7 @@ function parseProvider(providerId: string, value: unknown, secretDir: string): R
       ...(baseURL === undefined ? {} : { baseURL }),
       ...(modelsURL === undefined ? {} : { modelsURL }),
       ...(models === undefined ? {} : { models }),
+      ...(effectiveContextWindows === undefined ? {} : { contextWindows: effectiveContextWindows }),
       ...(compat === undefined ? {} : { compat: { ...base.compat, ...compat } }),
       ...(headers === undefined ? {} : { headers: { ...base.headers, ...headers } }),
       route: routeId,
