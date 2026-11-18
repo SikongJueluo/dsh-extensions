@@ -24,7 +24,14 @@ export {
   resolveConfig,
   resolveConfigPath,
 } from './config.js'
-export type { ModelConfig, ProviderKind, ResolvedConfig, ResolvedProvider } from './config.js'
+export type {
+  ModelConfig,
+  ModelDefault,
+  ModelMetadata,
+  ProviderKind,
+  ResolvedConfig,
+  ResolvedProvider,
+} from './config.js'
 export { ProviderKeys, readKey } from './keys.js'
 export type { KeySource } from './keys.js'
 export { buildAdapter, buildProviders } from './providers.js'

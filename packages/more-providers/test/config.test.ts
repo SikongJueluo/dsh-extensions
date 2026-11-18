@@ -162,3 +162,140 @@ describe('resolveConfig: strictness and route reservation', () => {
     expect(() => resolveConfig({})).toThrow(ConfigError)
   })
 })
+
+describe('resolveConfig: regex model defaults', () => {
+  const catalogProvider = {
+    kind: 'custom',
+    api: 'openai-responses',
+    baseURL: 'https://gateway.invalid/v1',
+    modelsURL: 'https://gateway.invalid/v1/models',
+    apiKeyEnv: TEST_ENV_KEY,
+  }
+
+  function documentWith(modelDefaults: unknown): unknown {
+    return { providers: { gateway: { ...catalogProvider, modelDefaults } } }
+  }
+
+  it('keeps ordered rules with compiled patterns, flags, and fields', () => {
+    const resolved = resolveConfig(
+      documentWith([
+        { match: '^gpt-6', contextWindow: 272000, reasoning: ['low', 'high'] },
+        { match: 'astra$', flags: 'i', maxTokens: 64000 },
+      ]),
+    )
+    const rules = resolved.providers[0]?.modelDefaults ?? []
+    expect(rules.map((rule) => rule.pattern.source)).toEqual(['^gpt-6', 'astra$'])
+    expect(rules.map((rule) => rule.pattern.flags)).toEqual(['', 'i'])
+    expect(rules[0]).toMatchObject({ contextWindow: 272000, reasoning: ['low', 'high'] })
+    expect(rules[1]?.reasoning).toBeUndefined()
+  })
+
+  it('rejects an invalid pattern or flag with the rule path', () => {
+    expect(() => resolveConfig(documentWith([{ match: '(', contextWindow: 1 }]))).toThrow(
+      /providers\.gateway\.modelDefaults\[0\]\.match/u,
+    )
+    expect(() =>
+      resolveConfig(documentWith([{ match: '^gpt', flags: 'ii', contextWindow: 1 }])),
+    ).toThrow(/providers\.gateway\.modelDefaults\[0\]\.match/u)
+  })
+
+  it('rejects rules that set no model field, unknown keys, and bad values', () => {
+    expect(() => resolveConfig(documentWith([{ match: '^gpt' }]))).toThrow(ConfigError)
+    expect(() => resolveConfig(documentWith([{ match: '^gpt', context_window: 1 }]))).toThrow(
+      ConfigError,
+    )
+    expect(() => resolveConfig(documentWith([{ match: '^gpt', contextWindow: 0 }]))).toThrow(
+      ConfigError,
+    )
+    expect(() => resolveConfig(documentWith([{ match: '^gpt', reasoning: ['extreme'] }]))).toThrow(
+      ConfigError,
+    )
+    expect(() => resolveConfig(documentWith([]))).toThrow(ConfigError)
+  })
+
+  it('rejects model defaults on a builtin provider', () => {
+    expect(() =>
+      resolveConfig({
+        providers: {
+          zai: {
+            kind: 'builtin',
+            apiKeyEnv: TEST_ENV_KEY,
+            modelDefaults: [{ match: '^glm', contextWindow: 200000 }],
+          },
+        },
+      }),
+    ).toThrow(ConfigError)
+  })
+
+  it('inherits provider rules into accounts but refuses account-level rules', () => {
+    const resolved = resolveConfig({
+      providers: {
+        gateway: {
+          ...catalogProvider,
+          modelDefaults: [{ match: '^gpt-6', contextWindow: 272000 }],
+          accounts: { one: {} },
+        },
+      },
+    })
+    expect(resolved.providers[0]?.route).toBe('gateway-one')
+    expect(resolved.providers[0]?.modelDefaults).toHaveLength(1)
+    expect(() =>
+      resolveConfig({
+        providers: {
+          gateway: {
+            ...catalogProvider,
+            accounts: { one: { modelDefaults: [{ match: '^gpt', contextWindow: 1 }] } },
+          },
+        },
+      }),
+    ).toThrow(ConfigError)
+  })
+})
+
+describe('resolveConfig: model default patterns', () => {
+  const catalogProvider = {
+    kind: 'custom',
+    api: 'openai-responses',
+    baseURL: 'https://gateway.invalid/v1',
+    modelsURL: 'https://gateway.invalid/v1/models',
+    apiKeyEnv: TEST_ENV_KEY,
+  }
+
+  it('compiles match and flags without trimming it', () => {
+    const resolved = resolveConfig({
+      providers: {
+        gateway: {
+          ...catalogProvider,
+          modelDefaults: [{ match: ' gpt ', contextWindow: 272000 }],
+        },
+      },
+    })
+    expect(resolved.providers[0]?.modelDefaults?.[0]?.pattern.source).toBe(' gpt ')
+    expect(resolved.providers[0]?.modelDefaults?.[0]?.pattern.test('gpt')).toBe(false)
+  })
+
+  it('rejects padded flags instead of trimming them', () => {
+    expect(() =>
+      resolveConfig({
+        providers: {
+          gateway: {
+            ...catalogProvider,
+            modelDefaults: [{ match: '^gpt', flags: ' i ', contextWindow: 272000 }],
+          },
+        },
+      }),
+    ).toThrow(/providers\.gateway\.modelDefaults\[0\]\.match/u)
+  })
+
+  it('keeps rejecting baseURL and modelsURL on a builtin provider', () => {
+    for (const key of ['baseURL', 'modelsURL']) {
+      expect(() =>
+        resolveConfig({
+          providers: {
+            zai: { kind: 'builtin', apiKeyEnv: TEST_ENV_KEY, [key]: 'https://zai.invalid/v1' },
+          },
+        }),
+      ).toThrow(ConfigError)
+    }
+  })
+})

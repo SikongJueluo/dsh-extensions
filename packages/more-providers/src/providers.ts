@@ -9,7 +9,7 @@ import {
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { PiAiAdapterOptions, ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
-import type { ModelConfig, ResolvedProvider } from './config.js'
+import type { ModelConfig, ModelDefault, ModelMetadata, ResolvedProvider } from './config.js'
 import { ConfigError } from './config.js'
 import {
   DEFAULT_BASE_URL as COMMAND_CODE_BASE_URL,
@@ -27,6 +27,7 @@ const FALLBACK_CONTEXT_WINDOW = 131_072
 const FALLBACK_MAX_TOKENS = 32_768
 const MODELS_TIMEOUT_MS = 10_000
 const ALL_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+const THINKING_LEVELS = new Set<string>(ALL_THINKING_LEVELS)
 const DEFAULT_THINKING_LEVELS = ['low', 'medium', 'high']
 
 const DEFAULT_RETRY_POLICY = {
@@ -143,6 +144,13 @@ function positiveInteger(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
 }
 
+function catalogReasoning(value: unknown): false | string[] | undefined {
+  if (value === false) return false
+  if (!Array.isArray(value) || value.length === 0) return undefined
+  if (!value.every((level): level is string => typeof level === 'string')) return undefined
+  return value.every((level) => THINKING_LEVELS.has(level)) ? value : undefined
+}
+
 function inputModalities(value: unknown): ('text' | 'image')[] | undefined {
   if (!Array.isArray(value)) return undefined
   const input = value.filter(
@@ -172,12 +180,14 @@ function catalogModels(body: unknown): ModelConfig[] {
       positiveInteger(item.maxTokens)
     const modalities = asRecord(item.modalities)?.input ?? item.input_modalities
     const input = inputModalities(modalities)
+    const reasoning = catalogReasoning(item.reasoning)
     models.push({
       id,
       ...(name === undefined ? {} : { name }),
       ...(contextWindow === undefined ? {} : { contextWindow }),
       ...(maxTokens === undefined ? {} : { maxTokens }),
       ...(input === undefined ? {} : { input }),
+      ...(reasoning === undefined ? {} : { reasoning }),
     })
   }
   return models
@@ -240,28 +250,51 @@ function builtinProvider(resolved: ResolvedProvider): BuiltProvider {
   return { provider, models }
 }
 
-function withStaticMetadata(
-  discovered: readonly ModelConfig[],
+function matches(pattern: RegExp, id: string): boolean {
+  pattern.lastIndex = 0
+  return pattern.test(id)
+}
+
+function modelMetadata(defaults: readonly ModelDefault[] | undefined, id: string): ModelMetadata {
+  const metadata: ModelMetadata = {}
+  for (const rule of defaults ?? []) {
+    if (!matches(rule.pattern, id)) continue
+    metadata.contextWindow ??= rule.contextWindow
+    metadata.maxTokens ??= rule.maxTokens
+    metadata.reasoning ??= rule.reasoning
+  }
+  return metadata
+}
+
+function mergeModels(
+  catalog: readonly ModelConfig[],
   staticModels: readonly ModelConfig[] | undefined,
+  defaults: readonly ModelDefault[] | undefined,
+  contextWindows: ReadonlyMap<string, number> | undefined,
 ): ModelConfig[] {
-  if (staticModels === undefined) return [...discovered]
-  const byId = new Map(staticModels.map((model) => [model.id, model]))
-  return discovered.map((model) => {
-    const fallback = byId.get(model.id)
-    if (fallback === undefined) return model
-    const name = model.name ?? fallback.name
-    const contextWindow = model.contextWindow ?? fallback.contextWindow
-    const maxTokens = model.maxTokens ?? fallback.maxTokens
-    const input = model.input ?? fallback.input
-    const reasoning = model.reasoning ?? fallback.reasoning
-    return {
-      id: model.id,
-      ...(name === undefined ? {} : { name }),
-      ...(contextWindow === undefined ? {} : { contextWindow }),
-      ...(maxTokens === undefined ? {} : { maxTokens }),
-      ...(input === undefined ? {} : { input }),
-      ...(reasoning === undefined ? {} : { reasoning }),
-    }
+  const fromCatalog = new Map(catalog.map((model) => [model.id, model]))
+  const fromStatic = new Map((staticModels ?? []).map((model) => [model.id, model]))
+  const entries = catalog.length === 0 ? (staticModels ?? []) : catalog
+  return entries.map((entry) => {
+    const discovered = fromCatalog.get(entry.id)
+    const fallback = fromStatic.get(entry.id)
+    const metadata = catalog.length === 0 ? {} : modelMetadata(defaults, entry.id)
+    const name = discovered?.name ?? fallback?.name
+    const contextWindow =
+      discovered?.contextWindow ??
+      metadata.contextWindow ??
+      fallback?.contextWindow ??
+      contextWindows?.get(entry.id)
+    const maxTokens = discovered?.maxTokens ?? metadata.maxTokens ?? fallback?.maxTokens
+    const input = discovered?.input ?? fallback?.input
+    const reasoning = discovered?.reasoning ?? metadata.reasoning ?? fallback?.reasoning
+    const model: ModelConfig = { id: entry.id }
+    if (name !== undefined) model.name = name
+    if (contextWindow !== undefined) model.contextWindow = contextWindow
+    if (maxTokens !== undefined) model.maxTokens = maxTokens
+    if (input !== undefined) model.input = input
+    if (reasoning !== undefined) model.reasoning = reasoning
+    return model
   })
 }
 
@@ -270,12 +303,11 @@ async function customProvider(
   key: string,
   log: ProviderLogger,
 ): Promise<BuiltProvider> {
-  let models = resolved.models
+  let catalog: ModelConfig[] = []
   if (resolved.modelsURL !== undefined) {
     try {
-      const fetched = await fetchModels(resolved.modelsURL, key)
-      if (fetched.length > 0) models = withStaticMetadata(fetched, resolved.models)
-      else
+      catalog = await fetchModels(resolved.modelsURL, key)
+      if (catalog.length === 0)
         log.warn(
           'more-providers: %s model catalog was empty; using the static fallback',
           resolved.route,
@@ -284,21 +316,23 @@ async function customProvider(
       log.warn('more-providers: %s model catalog failed: %o', resolved.route, error)
     }
   }
-  if (models === undefined || models.length === 0) {
+  const models = mergeModels(
+    catalog,
+    resolved.models,
+    resolved.modelDefaults,
+    resolved.contextWindows,
+  )
+  if (models.length === 0) {
     throw new Error('no models: model catalog failed and no static models were configured')
   }
   const api = resolved.api
   if (api === undefined)
     throw new ConfigError(`providers.${resolved.providerId}: custom provider is missing api`)
-  const configuredModels = models.map((model) => {
-    const contextWindow = model.contextWindow ?? resolved.contextWindows?.get(model.id)
-    return contextWindow === undefined ? model : { ...model, contextWindow }
-  })
   const provider = createProvider({
     id: resolved.route,
     name: resolved.displayName,
     auth: { apiKey: envApiKeyAuth('more-providers API key', ['MORE_PROVIDERS_API_KEY']) },
-    models: configuredModels.map((model) => customModel(model, resolved)),
+    models: models.map((model) => customModel(model, resolved)),
     api: { [api]: apiStreams(api) },
   })
   return {

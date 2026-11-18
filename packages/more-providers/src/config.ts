@@ -22,6 +22,18 @@ export interface ModelConfig {
   reasoning?: false | string[]
 }
 
+/** Model fields a `modelDefaults` rule can supply. */
+export interface ModelMetadata {
+  contextWindow?: number
+  maxTokens?: number
+  reasoning?: false | string[]
+}
+
+/** One ordered `modelDefaults` rule; the first rule declaring a field wins for that field. */
+export interface ModelDefault extends ModelMetadata {
+  pattern: RegExp
+}
+
 export type ProviderKind = 'builtin' | 'custom' | 'command-code'
 
 /** Validated startup configuration; omitted ChatGPT means explicitly disabled. */
@@ -42,6 +54,7 @@ export interface ResolvedProvider {
   modelsURL?: string
   models?: ModelConfig[]
   contextWindows?: ReadonlyMap<string, number>
+  modelDefaults?: readonly ModelDefault[]
   compat?: PiAiCompatProfile
   headers?: Record<string, string>
   zdr?: boolean
@@ -62,6 +75,7 @@ const PROVIDER_KEYS = new Set([
   'modelsURL',
   'models',
   'contextWindows',
+  'modelDefaults',
   'compat',
   'headers',
   'apiKeyFile',
@@ -87,7 +101,8 @@ const ACCOUNT_KEYS = new Set([
   'zdr',
 ])
 const MODEL_KEYS = new Set(['id', 'name', 'contextWindow', 'maxTokens', 'input', 'reasoning'])
-const CUSTOM_FIELDS = ['api', 'models', 'contextWindows', 'compat', 'headers']
+const MODEL_DEFAULT_KEYS = new Set(['match', 'flags', 'contextWindow', 'maxTokens', 'reasoning'])
+const CUSTOM_FIELDS = ['api', 'models', 'contextWindows', 'modelDefaults', 'compat', 'headers']
 const API_VALUES = new Set<Api>(['openai-completions', 'openai-responses', 'anthropic-messages'])
 const KEY_FIELDS = ['apiKeyFile', 'secretName', 'apiKeyEnv'] as const
 
@@ -126,6 +141,13 @@ function optionalString(
 function requiredString(raw: Record<string, unknown>, key: string, path: string): string {
   const value = optionalString(raw, key, path)
   return value ?? fail(`${path}.${key}`, 'is required')
+}
+
+function rawString(raw: Record<string, unknown>, key: string, path: string): string | undefined {
+  const value = raw[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string') return fail(`${path}.${key}`, 'expected a string')
+  return value
 }
 
 function optionalBoolean(
@@ -261,6 +283,30 @@ function keySourceOf(
   return undefined
 }
 
+function optionalReasoning(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
+): false | string[] | undefined {
+  const value = raw[key]
+  if (value === undefined || value === null) return undefined
+  const fieldPath = `${path}.${key}`
+  if (value === false) return false
+  if (!Array.isArray(value) || value.length === 0) {
+    fail(fieldPath, 'expected false or a non-empty array of thinking levels')
+  }
+  const levels: string[] = []
+  for (const level of value) {
+    if (typeof level !== 'string')
+      fail(fieldPath, 'expected false or a non-empty array of thinking levels')
+    levels.push(level)
+  }
+  for (const level of levels) {
+    if (!THINKING_LEVELS.has(level)) fail(fieldPath, `unknown thinking level "${level}"`)
+  }
+  return levels
+}
+
 function parseModels(raw: Record<string, unknown>, path: string): ModelConfig[] | undefined {
   const value = raw.models
   if (value === undefined || value === null) return undefined
@@ -280,26 +326,7 @@ function parseModels(raw: Record<string, unknown>, path: string): ModelConfig[] 
         fail(`${modelPath}.input`, 'only "text" and "image" are supported')
       return mode
     })
-    const reasoningRaw = record.reasoning
-    let reasoning: false | string[] | undefined
-    if (reasoningRaw === false) {
-      reasoning = false
-    } else if (reasoningRaw !== undefined && reasoningRaw !== null) {
-      if (!Array.isArray(reasoningRaw) || reasoningRaw.length === 0) {
-        fail(`${modelPath}.reasoning`, 'expected false or a non-empty array of thinking levels')
-      }
-      const levels: string[] = []
-      for (const level of reasoningRaw) {
-        if (typeof level !== 'string')
-          fail(`${modelPath}.reasoning`, 'expected false or a non-empty array of thinking levels')
-        levels.push(level)
-      }
-      for (const level of levels) {
-        if (!THINKING_LEVELS.has(level))
-          fail(`${modelPath}.reasoning`, `unknown thinking level "${level}"`)
-      }
-      reasoning = levels
-    }
+    const reasoning = optionalReasoning(record, 'reasoning', modelPath)
     const model: ModelConfig = { id }
     if (name !== undefined) model.name = name
     if (contextWindow !== undefined) model.contextWindow = contextWindow
@@ -307,6 +334,45 @@ function parseModels(raw: Record<string, unknown>, path: string): ModelConfig[] 
     if (input !== undefined) model.input = input
     if (reasoning !== undefined) model.reasoning = reasoning
     return model
+  })
+}
+
+function compilePattern(record: Record<string, unknown>, path: string): RegExp {
+  const match = rawString(record, 'match', path) ?? fail(`${path}.match`, 'is required')
+  if (match === '') return fail(`${path}.match`, 'expected a non-empty string')
+  const flags = rawString(record, 'flags', path)
+  try {
+    return new RegExp(match, flags)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    return fail(`${path}.match`, `invalid regular expression: ${reason}`)
+  }
+}
+
+function parseModelDefaults(
+  raw: Record<string, unknown>,
+  path: string,
+): ModelDefault[] | undefined {
+  const value = raw.modelDefaults
+  if (value === undefined || value === null) return undefined
+  const listPath = `${path}.modelDefaults`
+  if (!Array.isArray(value) || value.length === 0) fail(listPath, 'expected a non-empty array')
+  return value.map((entry, index) => {
+    const rulePath = `${listPath}[${index}]`
+    const record = asRecord(entry, rulePath)
+    rejectUnknown(record, MODEL_DEFAULT_KEYS, rulePath)
+    const pattern = compilePattern(record, rulePath)
+    const contextWindow = optionalPositiveInteger(record, 'contextWindow', rulePath)
+    const maxTokens = optionalPositiveInteger(record, 'maxTokens', rulePath)
+    const reasoning = optionalReasoning(record, 'reasoning', rulePath)
+    if (contextWindow === undefined && maxTokens === undefined && reasoning === undefined) {
+      fail(rulePath, 'set at least one of contextWindow, maxTokens, reasoning')
+    }
+    const rule: ModelDefault = { pattern }
+    if (contextWindow !== undefined) rule.contextWindow = contextWindow
+    if (maxTokens !== undefined) rule.maxTokens = maxTokens
+    if (reasoning !== undefined) rule.reasoning = reasoning
+    return rule
   })
 }
 
@@ -337,6 +403,7 @@ interface BaseFields {
   modelsURL?: string
   models?: ModelConfig[]
   contextWindows?: ReadonlyMap<string, number>
+  modelDefaults?: readonly ModelDefault[]
   compat?: PiAiCompatProfile
   headers?: Record<string, string>
   zdr?: boolean
@@ -356,6 +423,7 @@ function parseBaseFields(
       'zdr',
       'models',
       'contextWindows',
+      'modelDefaults',
       'compat',
       'headers',
     ]) {
@@ -392,6 +460,7 @@ function parseBaseFields(
   const modelsURL = optionalUrl(raw, 'modelsURL', path, false)
   const models = parseModels(raw, path)
   const contextWindows = parseContextWindows(raw, path)
+  const modelDefaults = parseModelDefaults(raw, path)
   if (modelsURL === undefined && models === undefined) {
     fail(path, 'custom provider needs modelsURL or models')
   }
@@ -405,6 +474,7 @@ function parseBaseFields(
     ...(modelsURL === undefined ? {} : { modelsURL }),
     ...(models === undefined ? {} : { models }),
     ...(contextWindows === undefined ? {} : { contextWindows }),
+    ...(modelDefaults === undefined ? {} : { modelDefaults }),
     ...(compat === undefined ? {} : { compat }),
     ...(headers === undefined ? {} : { headers }),
   }
