@@ -124,7 +124,12 @@ function createContext(registrations, cleanups) {
       const cleanup = effect()
       if (typeof cleanup === 'function') cleanups.push(cleanup)
     },
-    get() {
+    get(name) {
+      if (name === 'workspaces') {
+        const snapshot = { items: [] }
+        return { list: { getSnapshot: () => snapshot, subscribe: () => () => {} } }
+      }
+      if (name === 'sessions') return { binding: () => undefined }
       return undefined
     },
     logger: () => ({

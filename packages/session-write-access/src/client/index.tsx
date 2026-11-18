@@ -1,5 +1,5 @@
 /* oxlint-disable react/set-state-in-effect -- the effect mirrors external data into local UI state; deriving it would change render timing */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import {
   Alert,
   Badge,
@@ -10,122 +10,80 @@ import {
   Root,
   Spinner,
   type DshClientContext,
+  type WorkspaceClientLike,
 } from '@dsh-extensions/ui'
+import { directoryOptions, type WorkspaceOption } from './checklist'
 import './styles.css'
 
 const NS = 'session-write-access'
 const RPC = '/dsh-session-write-access'
 
+type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
+
 const en: Record<string, string> = {
   panel: 'Write scope',
-  panelCompact: '{dirs} dirs',
-  panelPending: '{n} pending',
-  title: 'Write scope',
+  title: 'Writable workspaces',
   close: 'Close',
-  mode: 'Mode',
-  workspace: 'Workspace',
-  deploymentRoots: 'Deployment directories',
-  deploymentNote: 'Granted by the deployment; not revocable here.',
-  grants: 'Extra writable directories',
-  noGrants: 'No extra directory yet. The workspace above is writable.',
-  sourceUser: 'user',
-  sourceFork: 'forked',
-  coveredBy: 'still writable via {path}',
-  revoke: 'Revoke',
-  confirmRevoke: 'Confirm revoke',
+  current: 'Current workspace',
+  fixed: 'Always writable',
+  coveredBy: 'Writable via {path}',
   pendingTitle: 'Pending requests',
-  noPending: 'No pending request.',
   allow: 'Allow',
   deny: 'Deny',
-  requestedBy: 'requested by {session}',
-  addTitle: 'Add a directory',
-  addPlaceholder: 'Absolute path of an existing directory',
+  addTitle: 'Other directory',
+  addPlaceholder: 'Absolute directory path',
   add: 'Add',
   pick: 'Choose directory',
-  forkTitle: 'Fork with grants',
+  more: 'More',
   fork: 'Fork and inherit grants',
-  forkNote:
-    'Copies the directories granted at click time into an independent group. The stock Fork button does NOT inherit these directories; it keeps only the workspace and deployment roots.',
-  oldProcessNote:
-    'New grants apply to new calls. Shells and background processes already running keep the permissions they started with; revoking does not terminate them.',
-  error: 'Failed: {message}',
+  forkNote: 'The stock Fork button does not inherit extra directories.',
+  oldProcessNote: 'Changes apply to new calls. Running processes keep their starting permissions.',
   loading: 'Loading…',
   refresh: 'Refresh',
   forkCreated: 'Forked session {id} is now open.',
   forkFailed: 'Fork failed: {message}',
-  forkPreviousFailed:
-    "The previous Fork did not finish. Check that session's write scope before relying on inherited directories.",
+  forkPreviousFailed: "The previous Fork did not finish. Check that session's write scope.",
   forkSeq: 'Event seq (optional)',
-  notAttributed:
-    'This session has no write-access group yet. Send a message or reopen the session, then retry.',
   recent: 'Recent decisions',
-  reason: 'Reason',
-  session: 'session',
-  allowNote:
-    'Allows this session and its local subagents to create, modify, and delete files under this directory and its subdirectories until revoked.',
-  empty: '—',
   alreadyCovered: 'Already writable via {path}.',
 }
 
 const zh: Record<string, string> = {
   panel: '写入范围',
-  panelCompact: '{dirs} 个目录',
-  panelPending: '{n} 项待确认',
-  title: '写入范围',
+  title: '可写工作区',
   close: '关闭',
-  mode: '模式',
-  workspace: '工作区',
-  deploymentRoots: '部署级目录',
-  deploymentNote: '由部署配置授予，此处不可撤销。',
-  grants: '额外可写目录',
-  noGrants: '还没有额外目录。上方工作区可写。',
-  sourceUser: '用户授权',
-  sourceFork: 'Fork 继承',
-  coveredBy: '仍可经 {path} 写入',
-  revoke: '撤销',
-  confirmRevoke: '确认撤销',
+  current: '当前工作区',
+  fixed: '固定授权',
+  coveredBy: '经 {path} 可写',
   pendingTitle: '待确认申请',
-  noPending: '没有待确认申请。',
   allow: '允许',
   deny: '拒绝',
-  requestedBy: '由 {session} 申请',
-  addTitle: '添加目录',
-  addPlaceholder: '已存在目录的绝对路径',
+  addTitle: '其他目录',
+  addPlaceholder: '目录的绝对路径',
   add: '添加',
   pick: '选择目录',
-  forkTitle: 'Fork 并继承授权',
+  more: '更多',
   fork: 'Fork 并继承授权',
-  forkNote:
-    '把点击时有效的额外目录复制到一个独立授权组。原生 Fork 按钮不会继承这些目录，只保留工作区与部署级目录。',
-  oldProcessNote:
-    '新授权对后续调用生效。已经运行的终端和后台进程保留启动时的权限；撤销不会终止它们。',
-  error: '操作失败：{message}',
+  forkNote: '原生 Fork 按钮不会继承额外目录。',
+  oldProcessNote: '变更对后续调用生效，已运行的进程保留启动时的权限。',
   loading: '加载中…',
   refresh: '刷新',
   forkCreated: '已创建并打开会话 {id}。',
   forkFailed: 'Fork 失败：{message}',
-  forkPreviousFailed: '上次 Fork 未完成。请在依赖继承目录前检查该会话的写入范围。',
+  forkPreviousFailed: '上次 Fork 未完成，请检查该会话的写入范围。',
   forkSeq: '事件序号（可选）',
-  notAttributed: '此会话还没有写入授权组。请先发送消息或重新打开会话后重试。',
   recent: '最近决定',
-  reason: '理由',
-  session: '会话',
-  allowNote: '允许此会话及其本地子 Agent 在该目录及子目录内新建、修改、删除文件，直到撤销。',
-  empty: '—',
-  alreadyCovered: 'Already writable via {path}.',
+  alreadyCovered: '已通过 {path} 获得写入权限。',
 }
 
 interface Grant {
   path: string
-  source?: string
-  coveredBy?: string
 }
 
 interface PendingRequest {
   requestId: string
   path: string
   reason?: string
-  sessionId?: string | number
 }
 
 interface RecentDecision {
@@ -139,21 +97,23 @@ interface ForkRecord {
 }
 
 interface WriteAccessView {
-  effectiveMode?: string
-  defaultMode?: string
-  workspaceRoot?: string
-  revision?: number
+  effectiveMode: SandboxMode
+  defaultMode: SandboxMode
+  workspaceRoot: string
+  revision: number
   coveredBy?: string
-  deploymentRoots?: string[]
-  grants?: Grant[]
-  pending?: PendingRequest[]
-  recent?: RecentDecision[]
-  forks?: ForkRecord[]
+  stillCoveredBy?: string
+  deploymentRoots: string[]
+  grants: Grant[]
+  pending: PendingRequest[]
+  recent: RecentDecision[]
+  forks: ForkRecord[]
 }
 
 interface SharedState {
   open: boolean
   sessionId: string | null
+  mode: SandboxMode | null
   view: WriteAccessView | null
   busy: boolean
   error: string | null
@@ -164,6 +124,7 @@ interface SharedState {
 const S: SharedState = {
   open: false,
   sessionId: null,
+  mode: null,
   view: null,
   busy: false,
   error: null,
@@ -186,7 +147,6 @@ function subscribe(listener: () => void) {
   }
 }
 
-/** Close the panel; shared by the Dialog's onOpenChange. */
 function close() {
   setState({ open: false, error: null, notice: null })
 }
@@ -224,341 +184,311 @@ function messageOf(error: unknown): string {
   return error instanceof Error && error.message ? error.message : String(error)
 }
 
+let requestVersion = 0
+
 function refresh() {
   const sessionId = S.sessionId
   if (!sessionId) return Promise.resolve()
+  const version = ++requestVersion
   setState({ busy: true, error: null })
   return rpc('state', { sessionId })
     .then((view) => {
-      if (S.sessionId === sessionId) setState({ view, busy: false })
+      if (S.sessionId === sessionId && requestVersion === version) setState({ view, busy: false })
       return undefined
     })
     .catch((error: unknown) => {
-      setState({ busy: false, error: messageOf(error) })
+      if (S.sessionId === sessionId && requestVersion === version)
+        setState({ busy: false, error: messageOf(error) })
     })
 }
 
-function apply(ctx: DshClientContext) {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'session-write-access: locale')
-  const t = ctx.locale.bind(NS)
-  const workspaceClient = ctx.get('uiWorkspace')
+interface SnapshotSource<T> {
+  getSnapshot(): T
+  subscribe(listener: () => void): () => void
+}
 
-  function mutate(method: string, extra: Record<string, unknown>) {
-    const sessionId = S.sessionId
-    setState({ busy: true, error: null, notice: null })
-    return rpc(method, { sessionId, ...extra })
-      .then((view) => {
-        if (S.sessionId === sessionId) {
-          setState({
-            view,
-            busy: false,
-            notice: view && view.coveredBy ? t('alreadyCovered', { path: view.coveredBy }) : null,
-          })
-        }
-        return view
-      })
-      .catch((error: unknown) => {
-        setState({ busy: false, error: messageOf(error) })
-        throw error
-      })
-  }
+interface SessionSources {
+  binding(
+    sessionId: string,
+  ): { session: { projections: { faceOf(key: string): SnapshotSource<unknown> } } } | undefined
+}
 
-  function fork(atSeq?: number) {
-    const sessionId = S.sessionId
-    setState({ busy: true, error: null, notice: null })
-    const args: Record<string, unknown> = { sessionId }
-    if (typeof atSeq === 'number') args.atSeq = atSeq
-    return rpc<{ sessionId: string }>('fork', args)
-      .then((created) => {
-        setState({ busy: false, notice: t('forkCreated', { id: created.sessionId }) })
-        if (workspaceClient && typeof workspaceClient.openSession === 'function') {
-          workspaceClient.openSession(created.sessionId)
-        }
-        return refresh()
-      })
-      .catch((error: unknown) => {
-        setState({ busy: false, error: t('forkFailed', { message: messageOf(error) }) })
-      })
-  }
-
-  function PanelButton({ sessionId }: { sessionId?: string }) {
-    const shared = useShared()
-    const dirs = shared.view?.grants?.length ?? 0
-    const pending = shared.view?.pending?.length ?? 0
-    useEffect(() => {
-      if (!sessionId) return undefined
-      if (shared.open && S.sessionId !== sessionId) {
-        setState({ sessionId, view: null })
-        void refresh()
-      } else if (!shared.open) {
-        setState({ sessionId })
-        rpc('state', { sessionId })
-          .then((view) => {
-            if (!S.open && S.sessionId === sessionId) setState({ view })
-            return undefined
-          })
-          .catch(() => {})
-      }
-      return undefined
-    }, [sessionId, shared.open])
-    return (
-      <Root className="dshx:inline-flex">
-        <Button
-          variant="secondary"
-          size="md"
-          title={t('panel')}
-          aria-label={t('panel')}
-          onClick={() => {
-            setState({ open: true, sessionId, view: null, error: null, notice: null })
-            void refresh()
-          }}
-        >
-          <span>{t('panelCompact', { dirs })}</span>
-          {pending > 0 ? <Badge variant="brand">{String(pending)}</Badge> : null}
-        </Button>
-      </Root>
-    )
-  }
-
-  function Overlay() {
-    const shared = useShared()
-    const [path, setPath] = useState('')
-    const [confirmPath, setConfirmPath] = useState<string | null>(null)
-    const [forkSeq, setForkSeq] = useState('')
-    useEffect(() => {
-      if (!shared.open) {
-        setConfirmPath(null)
-        setPath('')
-      }
-    }, [shared.open])
-
-    function choose() {
-      if (!workspaceClient || typeof workspaceClient.pickDirectory !== 'function') return
-      Promise.resolve(workspaceClient.pickDirectory())
-        .then((picked) => {
-          if (typeof picked === 'string' && picked.length > 0) {
-            setPath(picked)
-            void mutate('add', { path: picked })
-          }
-          return undefined
-        })
-        .catch((error: unknown) => {
-          setState({ error: messageOf(error) })
-        })
+declare module '@dsh-extensions/ui' {
+  interface DshClientServices {
+    readonly workspaces?: {
+      readonly list: SnapshotSource<{ readonly items: readonly WorkspaceOption[] }>
     }
+    readonly sessions?: SessionSources
+  }
+}
 
-    const view = shared.view
-    const busy = shared.busy
-    const grants = view?.grants ?? []
-    const pending = view?.pending ?? []
-    const recent = view?.recent ?? []
+interface PanelButtonProps {
+  sessionId: string
+  sessions: SessionSources
+  t: Translate
+}
 
-    return (
-      <Root>
-        <Dialog
-          open={shared.open}
-          onOpenChange={(open) => {
-            if (open) setState({ open: true })
-            else close()
-          }}
-          title={t('title')}
-          closeLabel={t('close')}
-        >
-          {!view && busy ? (
-            <div className="dshx:flex dshx:items-center dshx:gap-2 dshx:text-xs dshx:text-fg-muted">
-              <Spinner />
-              {t('loading')}
-            </div>
-          ) : null}
+type Translate = (key: string, params?: Record<string, unknown>) => string
 
-          {view ? (
-            <div className="dshx:mb-3.5 dshx:grid dshx:grid-cols-[auto_1fr] dshx:gap-x-3 dshx:gap-y-1.5 dshx:text-xs dshx:leading-[18px]">
-              <span className="dshx:text-fg-muted">{t('mode')}</span>
-              <span className="dshx:break-all">
-                {view.effectiveMode === undefined || view.effectiveMode === ''
-                  ? view.defaultMode
-                  : view.effectiveMode}
-              </span>
-              <span className="dshx:text-fg-muted">{t('workspace')}</span>
-              <span className="dshx:break-all">{view.workspaceRoot}</span>
-            </div>
-          ) : null}
+interface OverlayProps {
+  t: Translate
+  mutate: (method: string, extra: Record<string, unknown>) => Promise<unknown>
+  fork: (atSeq?: number) => Promise<void>
+  workspaceClient: WorkspaceClientLike | undefined
+  workspaces: SnapshotSource<{ readonly items: readonly WorkspaceOption[] }>
+}
 
-          {view && view.deploymentRoots && view.deploymentRoots.length > 0 ? (
-            <Field label={t('deploymentRoots')}>
-              <div>
-                {view.deploymentRoots.map((root) => (
-                  <div
-                    key={root}
-                    className="dshx:flex dshx:items-start dshx:justify-between dshx:gap-2.5 dshx:border-t dshx:border-border dshx:py-2 dshx:first:border-t-0"
+function PanelButton(props: PanelButtonProps) {
+  const { sessionId, t } = props
+  const shared = useShared()
+  const source = props.sessions.binding(sessionId)?.session.projections.faceOf('sandboxMode')
+  const mode = useSyncExternalStore(
+    (listener) => source?.subscribe(listener) ?? (() => {}),
+    () => source?.getSnapshot(),
+    () => undefined,
+  )
+  useEffect(() => {
+    setState({ sessionId, view: null, busy: false, error: null, notice: null, open: false })
+    void refresh()
+    return () => {
+      if (S.sessionId === sessionId) {
+        requestVersion += 1
+        close()
+        setState({ sessionId: null, view: null, mode: null })
+      }
+    }
+  }, [sessionId])
+  useEffect(() => {
+    setState({
+      mode:
+        mode === 'read-only' || mode === 'workspace-write' || mode === 'danger-full-access'
+          ? mode
+          : null,
+    })
+    if (mode !== undefined && mode !== null && mode !== 'workspace-write') close()
+  }, [mode])
+
+  if (shared.sessionId !== sessionId) return null
+  const effectiveMode = mode ?? shared.view?.defaultMode
+  if (effectiveMode !== 'workspace-write') return null
+  const pending = shared.view?.pending.length ?? 0
+  return (
+    <Root className="dshx:inline-flex">
+      <Button
+        variant="ghost"
+        size="md"
+        title={t('panel')}
+        aria-label={t('panel')}
+        disabled={shared.busy}
+        onClick={() => {
+          setState({ open: true, error: null, notice: null })
+          void refresh()
+        }}
+      >
+        <span>{t('panel')}</span>
+        {pending > 0 ? <Badge variant="brand">{String(pending)}</Badge> : null}
+      </Button>
+    </Root>
+  )
+}
+
+function Overlay(props: OverlayProps) {
+  const { t, mutate, fork, workspaceClient } = props
+  const shared = useShared()
+  const workspaces = useSyncExternalStore(
+    (listener) => props.workspaces.subscribe(listener),
+    () => props.workspaces.getSnapshot(),
+    () => props.workspaces.getSnapshot(),
+  )
+  const [path, setPath] = useState('')
+  const [forkSeq, setForkSeq] = useState('')
+  useEffect(() => {
+    if (!shared.open) {
+      setPath('')
+      setForkSeq('')
+    }
+  }, [shared.open])
+
+  function choose() {
+    if (!workspaceClient?.pickDirectory) return
+    const sessionId = S.sessionId
+    const version = requestVersion
+    Promise.resolve(workspaceClient.pickDirectory())
+      .then((picked) => {
+        if (
+          S.sessionId !== sessionId ||
+          requestVersion !== version ||
+          !S.open ||
+          (S.mode ?? S.view?.defaultMode) !== 'workspace-write'
+        )
+          return undefined
+        if (typeof picked === 'string' && picked.length > 0) {
+          setPath(picked)
+          return mutate('add', { path: picked })
+        }
+        return undefined
+      })
+      .catch((error: unknown) => {
+        if (S.sessionId === sessionId) setState({ error: messageOf(error) })
+      })
+  }
+
+  const view = shared.view
+  const busy = shared.busy
+  const visible = (shared.mode ?? view?.defaultMode) === 'workspace-write'
+  const options = view
+    ? directoryOptions(view.workspaceRoot, view.deploymentRoots, view.grants, workspaces.items)
+    : []
+
+  return (
+    <Root>
+      <Dialog
+        open={shared.open && visible}
+        onOpenChange={(open) => {
+          if (open) setState({ open: true })
+          else close()
+        }}
+        title={t('title')}
+        closeLabel={t('close')}
+        className="dshx:w-[min(480px,94vw)]"
+      >
+        {!view && busy ? (
+          <output className="dshx:flex dshx:items-center dshx:gap-2 dshx:text-xs dshx:text-fg-muted">
+            <Spinner />
+            {t('loading')}
+          </output>
+        ) : null}
+
+        {view ? (
+          <fieldset
+            disabled={busy}
+            aria-label={t('title')}
+            className="dshx:m-0 dshx:min-w-0 dshx:border-0 dshx:p-0"
+          >
+            {options.map((option) => {
+              const locked = option.fixed || (option.checked && !option.grant)
+              return (
+                <label
+                  key={option.path}
+                  className="dshx:flex dshx:min-h-11 dshx:cursor-pointer dshx:items-center dshx:gap-3 dshx:rounded-control dshx:px-2 dshx:py-2.5 dshx:hover:bg-surface-2 dshx:has-disabled:cursor-default"
+                >
+                  <input
+                    type="checkbox"
+                    checked={option.checked}
+                    disabled={locked}
+                    className="dshx:size-4 dshx:shrink-0 dshx:accent-brand dshx:focus-visible:outline-2 dshx:focus-visible:outline-offset-2 dshx:focus-visible:outline-brand"
+                    onChange={() => {
+                      void mutate(option.grant ? 'remove' : 'add', { path: option.path })
+                    }}
+                  />
+                  <span className="dshx:min-w-0 dshx:flex-1">
+                    <span className="dshx:block dshx:break-all dshx:text-sm">
+                      {option.title ?? option.path}
+                    </span>
+                    {option.title ? (
+                      <span className="dshx:block dshx:break-all dshx:text-2xs dshx:text-fg-muted">
+                        {option.path}
+                      </span>
+                    ) : null}
+                    {option.coveredBy ? (
+                      <span className="dshx:block dshx:break-all dshx:text-2xs dshx:text-fg-muted">
+                        {t('coveredBy', { path: option.coveredBy })}
+                      </span>
+                    ) : null}
+                  </span>
+                  {option.path === view.workspaceRoot || option.fixed ? (
+                    <span className="dshx:shrink-0 dshx:text-2xs dshx:text-fg-muted">
+                      {t(option.path === view.workspaceRoot ? 'current' : 'fixed')}
+                    </span>
+                  ) : null}
+                </label>
+              )
+            })}
+          </fieldset>
+        ) : null}
+
+        {view && view.pending.length > 0 ? (
+          <Field
+            label={t('pendingTitle')}
+            className="dshx:mt-4 dshx:border-t dshx:border-border dshx:pt-4"
+          >
+            {view.pending.map((request) => (
+              <div
+                key={request.requestId}
+                className="dshx:flex dshx:flex-wrap dshx:items-center dshx:gap-2 dshx:py-2"
+              >
+                <div className="dshx:min-w-0 dshx:basis-48 dshx:grow dshx:break-all dshx:text-xs">
+                  {request.path}
+                  {request.reason ? (
+                    <div className="dshx:mt-1 dshx:text-fg-muted">{request.reason}</div>
+                  ) : null}
+                </div>
+                {(['allow', 'deny'] as const).map((decision) => (
+                  <Button
+                    key={decision}
+                    size="md"
+                    variant={decision === 'allow' ? 'default' : 'ghost'}
+                    disabled={busy}
+                    onClick={() => {
+                      void mutate('decide', {
+                        requestId: request.requestId,
+                        decision,
+                        expectedRevision: view.revision,
+                      })
+                    }}
                   >
-                    <div className="dshx:break-all dshx:text-xs dshx:leading-[18px]">{root}</div>
-                    <Badge variant="outline">{t('deploymentNote')}</Badge>
-                  </div>
+                    {t(decision)}
+                  </Button>
                 ))}
               </div>
-            </Field>
-          ) : null}
+            ))}
+          </Field>
+        ) : null}
 
-          {view ? (
-            <Field label={t('grants')} className="dshx:mt-4">
-              <div>
-                {grants.length === 0 ? (
-                  <div className="dshx:text-xs dshx:text-fg-muted">{t('noGrants')}</div>
-                ) : null}
-                {grants.map((grant) => (
-                  <div
-                    key={grant.path}
-                    className="dshx:flex dshx:items-start dshx:justify-between dshx:gap-2.5 dshx:border-t dshx:border-border dshx:py-2 dshx:first:border-t-0"
-                  >
-                    <div>
-                      <div className="dshx:break-all dshx:text-xs dshx:leading-[18px]">
-                        {grant.path}
-                        <Badge variant="outline" className="dshx:ml-1.5">
-                          {grant.source === 'fork' ? t('sourceFork') : t('sourceUser')}
-                        </Badge>
-                      </div>
-                      {grant.coveredBy ? (
-                        <div className="dshx:mt-0.5 dshx:text-2xs dshx:leading-4 dshx:text-fg-muted">
-                          {t('coveredBy', { path: grant.coveredBy })}
-                        </div>
-                      ) : null}
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      disabled={busy}
-                      onClick={() => {
-                        if (confirmPath !== grant.path) {
-                          setConfirmPath(grant.path)
-                          return
-                        }
-                        setConfirmPath(null)
-                        mutate('remove', { path: grant.path }).catch(() => {})
-                      }}
-                    >
-                      {confirmPath === grant.path ? t('confirmRevoke') : t('revoke')}
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </Field>
-          ) : null}
-
-          {view ? (
-            <Field label={t('pendingTitle')} className="dshx:mt-4">
-              <div>
-                {pending.length === 0 ? (
-                  <div className="dshx:text-xs dshx:text-fg-muted">{t('noPending')}</div>
-                ) : null}
-                {pending.map((request) => (
-                  <div
-                    key={request.requestId}
-                    className="dshx:flex dshx:items-start dshx:justify-between dshx:gap-2.5 dshx:border-t dshx:border-border dshx:py-2 dshx:first:border-t-0"
-                  >
-                    <div>
-                      <div className="dshx:break-all dshx:text-xs dshx:leading-[18px]">
-                        {request.path}
-                      </div>
-                      <div className="dshx:mt-0.5 dshx:text-2xs dshx:leading-4 dshx:text-fg-muted">
-                        {t('reason')}:{' '}
-                        {request.reason === undefined || request.reason === ''
-                          ? t('empty')
-                          : request.reason}
-                      </div>
-                      <div className="dshx:mt-0.5 dshx:text-2xs dshx:leading-4 dshx:text-fg-muted">
-                        {t('requestedBy', { session: String(request.sessionId).slice(-8) })}
-                      </div>
-                      <div className="dshx:mt-0.5 dshx:text-2xs dshx:leading-4 dshx:text-fg-muted">
-                        {t('allowNote')}
-                      </div>
-                    </div>
-                    <div className="dshx:flex dshx:flex-wrap dshx:items-center dshx:gap-2">
-                      <Button
-                        size="sm"
-                        variant="default"
-                        disabled={busy}
-                        onClick={() => {
-                          mutate('decide', {
-                            requestId: request.requestId,
-                            decision: 'allow',
-                            expectedRevision: view.revision,
-                          }).catch(() => {})
-                        }}
-                      >
-                        {t('allow')}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={busy}
-                        onClick={() => {
-                          mutate('decide', {
-                            requestId: request.requestId,
-                            decision: 'deny',
-                            expectedRevision: view.revision,
-                          }).catch(() => {})
-                        }}
-                      >
-                        {t('deny')}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Field>
-          ) : null}
-
-          {view ? (
-            <Field label={t('addTitle')} className="dshx:mt-4">
+        {view ? (
+          <details className="dshx:mt-3 dshx:border-t dshx:border-border dshx:pt-1">
+            <summary className="dshx:flex dshx:min-h-11 dshx:cursor-pointer dshx:items-center dshx:text-xs dshx:text-fg-muted">
+              {t('more')}
+            </summary>
+            <Field label={t('addTitle')}>
               <div className="dshx:flex dshx:flex-wrap dshx:items-center dshx:gap-2">
                 <Input
-                  className="dshx:w-auto dshx:min-w-0 dshx:flex-1"
                   value={path}
+                  aria-label={t('addTitle')}
                   placeholder={t('addPlaceholder')}
+                  disabled={busy}
+                  className="dshx:min-w-0 dshx:flex-1"
                   onChange={(event) => setPath(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter' && path.trim())
-                      mutate('add', { path: path.trim() }).catch(() => {})
+                    if (event.key === 'Enter' && !busy && path.trim())
+                      void mutate('add', { path: path.trim() })
                   }}
                 />
                 <Button
                   size="md"
-                  variant="default"
                   disabled={busy || !path.trim()}
                   onClick={() => {
-                    mutate('add', { path: path.trim() }).catch(() => {})
+                    void mutate('add', { path: path.trim() })
                   }}
                 >
                   {t('add')}
                 </Button>
-                {workspaceClient && typeof workspaceClient.pickDirectory === 'function' ? (
+                {workspaceClient?.pickDirectory ? (
                   <Button size="md" variant="secondary" disabled={busy} onClick={choose}>
                     {t('pick')}
                   </Button>
                 ) : null}
               </div>
             </Field>
-          ) : null}
-
-          {view ? (
-            <Field
-              label={t('forkTitle')}
-              hint={
-                <>
-                  {t('forkNote')}
-                  <br />
-                  {t('oldProcessNote')}
-                </>
-              }
-              className="dshx:mt-4"
-            >
+            <Field label={t('fork')} hint={t('forkNote')} className="dshx:mt-4">
               <div className="dshx:flex dshx:flex-wrap dshx:items-center dshx:gap-2">
                 <Input
-                  className="dshx:w-auto dshx:max-w-[140px] dshx:min-w-0 dshx:flex-1"
                   value={forkSeq}
+                  aria-label={t('forkSeq')}
                   placeholder={t('forkSeq')}
                   inputMode="numeric"
+                  disabled={busy}
+                  className="dshx:min-w-0 dshx:flex-1"
                   onChange={(event) => setForkSeq(event.target.value)}
                 />
                 <Button
@@ -576,56 +506,105 @@ function apply(ctx: DshClientContext) {
                 >
                   {t('fork')}
                 </Button>
-                <Button
-                  size="md"
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => {
-                    void refresh()
-                  }}
-                >
-                  {t('refresh')}
-                </Button>
               </div>
-              {(view.forks ?? []).some((record) => record.stage === 'failed') ? (
-                <div className="dshx:mt-2.5 dshx:text-xs dshx:text-danger">
+              {view.forks.some((record) => record.stage === 'failed') ? (
+                <Alert variant="error" className="dshx:mt-2">
                   {t('forkPreviousFailed')}
-                </div>
+                </Alert>
               ) : null}
             </Field>
-          ) : null}
-
-          {recent.length > 0 ? (
-            <Field label={t('recent')} className="dshx:mt-4">
-              <div>
-                {recent.map((request) => (
+            {view.recent.length > 0 ? (
+              <details className="dshx:mt-4 dshx:text-xs">
+                <summary className="dshx:min-h-11 dshx:cursor-pointer dshx:py-3 dshx:text-fg-muted">
+                  {t('recent')}
+                </summary>
+                {view.recent.map((request) => (
                   <div
                     key={request.requestId}
-                    className="dshx:flex dshx:items-start dshx:justify-between dshx:gap-2.5 dshx:border-t dshx:border-border dshx:py-2 dshx:first:border-t-0"
+                    className="dshx:flex dshx:items-start dshx:justify-between dshx:gap-2 dshx:py-2"
                   >
-                    <div className="dshx:break-all dshx:text-xs dshx:leading-[18px]">
-                      {request.path}
-                    </div>
+                    <span className="dshx:break-all">{request.path}</span>
                     <Badge variant="outline">{request.status}</Badge>
                   </div>
                 ))}
-              </div>
-            </Field>
-          ) : null}
+              </details>
+            ) : null}
+            <p className="dshx:mt-4 dshx:text-2xs dshx:text-fg-muted">{t('oldProcessNote')}</p>
+            <Button
+              size="md"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                void refresh()
+              }}
+            >
+              {t('refresh')}
+            </Button>
+          </details>
+        ) : null}
 
-          {shared.notice ? (
-            <Alert variant="info" className="dshx:mt-4">
-              {shared.notice}
-            </Alert>
-          ) : null}
-          {shared.error ? (
-            <Alert variant="error" className="dshx:mt-2.5 dshx:whitespace-pre-wrap">
-              {shared.error}
-            </Alert>
-          ) : null}
-        </Dialog>
-      </Root>
-    )
+        {shared.notice ? (
+          <Alert variant="info" className="dshx:mt-3">
+            {shared.notice}
+          </Alert>
+        ) : null}
+        {shared.error ? (
+          <Alert variant="error" className="dshx:mt-3 dshx:whitespace-pre-wrap">
+            {shared.error}
+          </Alert>
+        ) : null}
+      </Dialog>
+    </Root>
+  )
+}
+
+function apply(ctx: DshClientContext) {
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'session-write-access: locale')
+  const t = ctx.locale.bind(NS)
+  const workspaceClient = ctx.get('uiWorkspace')
+  const workspaces = ctx.get('workspaces')
+  const sessions = ctx.get('sessions')
+  if (!workspaces || !sessions)
+    throw new Error('Session write access requires workspaces and sessions')
+
+  function mutate(method: string, extra: Record<string, unknown>) {
+    const sessionId = S.sessionId
+    const version = ++requestVersion
+    setState({ busy: true, error: null, notice: null })
+    return rpc(method, { sessionId, ...extra })
+      .then((view) => {
+        if (S.sessionId === sessionId && requestVersion === version) {
+          const coveredBy = view.coveredBy ?? view.stillCoveredBy
+          setState({
+            view,
+            busy: false,
+            notice: coveredBy ? t('alreadyCovered', { path: coveredBy }) : null,
+          })
+        }
+        return view
+      })
+      .catch((error: unknown) => {
+        if (S.sessionId === sessionId && requestVersion === version)
+          setState({ busy: false, error: messageOf(error) })
+      })
+  }
+
+  function fork(atSeq?: number) {
+    const sessionId = S.sessionId
+    const version = ++requestVersion
+    setState({ busy: true, error: null, notice: null })
+    return rpc<{ sessionId: string }>('fork', { sessionId, atSeq })
+      .then((created) => {
+        if (S.sessionId !== sessionId || requestVersion !== version) return undefined
+        setState({ busy: false, notice: t('forkCreated', { id: created.sessionId }) })
+        workspaceClient?.openSession?.(created.sessionId)
+        return undefined
+      })
+      .catch((error: unknown) => {
+        if (S.sessionId === sessionId && requestVersion === version) {
+          setState({ busy: false, error: t('forkFailed', { message: messageOf(error) }) })
+        }
+      })
   }
 
   ctx.slots.inject('conversation.input.left', () => {
@@ -635,7 +614,7 @@ function apply(ctx: DshClientContext) {
         id: 'dsh-session-write-access',
         order: 40,
         label: () => t('panel'),
-        inject: () => ({}),
+        inject: () => ({ t, sessions }),
       },
       PanelButton,
     )
@@ -646,7 +625,7 @@ function apply(ctx: DshClientContext) {
         name: 'shell.overlay',
         id: 'dsh-session-write-access',
         order: 60,
-        inject: () => ({}),
+        inject: () => ({ t, mutate, fork, workspaceClient, workspaces: workspaces.list }),
       },
       Overlay,
     )
@@ -654,4 +633,4 @@ function apply(ctx: DshClientContext) {
 }
 
 export { apply }
-export const inject = ['slots', 'locale', 'uiWorkspace']
+export const inject = ['slots', 'locale', 'uiWorkspace', 'workspaces', 'sessions']
