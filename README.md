@@ -19,7 +19,7 @@ Out-of-tree [DeepSeek Harness](https://www.deepseek.com/harness/en/) 插件 bund
 | [`dsh-rtk-rewrite`](packages/rtk-rewrite/) | rtk 命令改写执行器：模型跑 `git status`、实际执行 `rtk git status`，用确定性压缩输出降低上下文压力 |
 | [`dsh-search-integrator`](packages/search-integrator/) | 多源检索 + 整合模型一次成文：`web_research` 吃整个问题，去重排序后返回带引文校验的综合答案与覆盖说明 |
 | [`dsh-session-write-access`](packages/session-write-access/) | 持久化的 Session 多项目写入授权：替换 `sandboxPolicy`，用户可在面板提前添加或批准 Agent 申请的目录，主会话与本地子 Agent 共享、重启恢复；文件工具与 bash 同一策略，显式「Fork 并继承授权」；接入与回滚见包 README |
-| [`dsh-toolchain-access`](packages/toolchain-access/) | 沙箱窄目录授权：默认开启 uv/Cargo/pnpm/Gradle/Maven 缓存、共享锁目录与 Semgrep 私有 state，workspace-write 下精确 bind（钉版 bwrap 布局、fail-closed）；可显式缩减或全关，整套工具链安装另行 opt-in；接入见 [plan-dsh-toolchain-access.md](docs/plan-dsh-toolchain-access.md) |
+| [`dsh-toolchain-access`](packages/toolchain-access/) | 沙箱窄目录授权：默认开启 uv/Typst/Cargo/pnpm/Gradle/Maven 缓存、共享锁目录与 Semgrep 私有 state，workspace-write 下精确 bind（钉版 bwrap 布局、fail-closed）；可显式缩减或全关，整套工具链安装另行 opt-in；接入见 [plan-dsh-toolchain-access.md](docs/plan-dsh-toolchain-access.md) |
 | [`dsh-recursive-skills`](packages/recursive-skills/) | 分类目录里嵌套的 `SKILL.md` 自动进入原生技能目录：追加 provider、按需加载、增删与 frontmatter 变化热刷新；原生直接技能仍优先；接入见 [plan-dsh-recursive-skills.md](docs/plan-dsh-recursive-skills.md) |
 | [`dsh-more-providers`](packages/more-providers/) | YAML 注册额外 LLM 厂商（builtin / custom / Command Code，三种 wire 协议映射），并内建默认启用的 ChatGPT 订阅 OAuth（原 `dsh-oauth-providers` 并入本包，桥接回环登录需在桌面浏览器完成） |
 | [`dsh-triggers`](packages/triggers/) | 双会话 execute → review → rework 触发循环：轮次预算、暂停/恢复、会话内浏览器视图 |

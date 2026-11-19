@@ -1,7 +1,7 @@
 # dsh-toolchain-access
 
 DSH 沙箱的**窄目录授权**：让 `workspace-write` 下的命令可以写工具链共享缓存
-（uv、Cargo、pnpm、Gradle、Maven）与 Semgrep 的私有 state，而不需要每次撞
+（uv、Typst、Cargo、pnpm、Gradle、Maven）与 Semgrep 的私有 state，而不需要每次撞
 EROFS 后申请 Full access。
 
 原理：替换 profile 里的 `sandbox` 行，挂一个 `LocalSandboxProvider` 子类。
@@ -26,6 +26,7 @@ sandbox adapter               （super.confine() 官方行为原样保留）
 | 预设 | 默认 | 授权路径（默认） | 说明 |
 |---|---|---|---|
 | `uv-cache` | 开 | `$XDG_CACHE_HOME`/`~/.cache` 下 `uv/` | uv 唯一的共享缓存根 |
+| `typst-cache` | 开 | `$XDG_CACHE_HOME`/`~/.cache` 下 `typst/` | Typst 把下载的包写入其中的 `packages/`。授权位置由宿主缓存环境决定，`--package-cache-path` 和 `TYPST_PACKAGE_CACHE_PATH` 无权追加可写目录 |
 | `cargo-cache` | 开 | `CARGO_HOME`/`~/.cargo` 下 `registry/`、`git/`、`.package-cache`、`.package-cache-mutate`、`.global-cache` | registry/git 缓存 + Cargo 1.74+ 的**两把**全局锁（共享下载锁与 mutate 锁——只绑第一把时 mutate 锁 EROFS，cargo 会**静默降级为无锁**，与宿主侧并发 cargo 互斥失效）+ use-tracking sqlite；**不是**整个 `~/.cargo`（credentials、config 保持只读） |
 | `pnpm-store` | 开 | pnpm home 下 `store/` | 共享包 store（本仓这类 store 在 workspace 内的项目会自动按「已覆盖」扣除） |
 | `pnpm-runtime-locks` | 开 | `$XDG_RUNTIME_DIR/pnpm-store-operation-locks-<uid>` | pnpm 12 的 operation lock 域。**必须**绑定宿主原目录：绑到私有 `/tmp` 会拆散共享锁域。要求 `$XDG_RUNTIME_DIR` 满足 pnpm 自己的条件（本 uid 目录、属主可写可搜索、group/other 不可写——0775 会被 pnpm 拒绝回退 `/tmp`）；未设置或不合格时预设拒绝，且 **`paths.pnpmRuntimeLocks` 不能代为修复/迁移**（pnpm 的锁目录只由 `XDG_RUNTIME_DIR` 决定，override 只允许换拼写、不允许换位置）。`/run/user` 是 tmpfs，重启清空——confine 时受控自建 0700 锁目录 |
@@ -39,8 +40,8 @@ sandbox adapter               （super.confine() 官方行为原样保留）
 
 行配置对 `presets` 键的处理：
 
-- **省略**（不写这个键）：默认开启上表标「开」的七项常规缓存/state 预设
-  （`uv-cache`、`cargo-cache`、`pnpm-store`、`pnpm-runtime-locks`、
+- **省略**（不写这个键）：默认开启上表标「开」的八项常规缓存/state 预设
+  （`uv-cache`、`typst-cache`、`cargo-cache`、`pnpm-store`、`pnpm-runtime-locks`、
   `gradle-cache`、`maven-cache`、`semgrep-state`）。本包的 bundle/dev patch
   都按此省略，由插件 schema 默认生效。
 - **`presets: []`**：全部关闭，行为与官方 stock sandbox 逐字节一致。
@@ -48,7 +49,7 @@ sandbox adapter               （super.confine() 官方行为原样保留）
   home）与 `gradle-jdks`（自动下载的 JDK）是**整套工具链安装**，维持单独
   opt-in，永不默认。
 
-默认授权的含义：这七项**确切子树**对沙箱内**所有进程**可写（缓存本身也可含
+默认授权的含义：这八项**确切子树**对沙箱内**所有进程**可写（缓存本身也可含
 可执行内容，如构建脚本、wrapper 发行版）——不是打开 `~/.cache`、`~/.gradle`
 或任何父目录整体；父目录与邻居仍只读，`gradle.properties`、`settings.xml`、
 credentials 仍只读。`semgrep-state` 是唯一的**影子挂载**：宿主可写的只有
@@ -56,7 +57,7 @@ credentials 仍只读。`semgrep-state` 是唯一的**影子挂载**：宿主可
 只是前者的挂载点；宿主 `~/.semgrep/settings.yml`（可能含 token）既不可写也
 不可见。
 
-默认**不做可用性筛选**：任一启用的预设（含默认七项）无法兑现时，整个
+默认**不做可用性筛选**：任一启用的预设（含默认八项）无法兑现时，整个
 confined 命令 fail-closed，不会静默漏掉预设换取运行成功——典型如
 `pnpm-runtime-locks` 在 `$XDG_RUNTIME_DIR` 缺失或不合格时拒绝；非 Linux 平台
 或非 stock bwrap 布局（形状不同的 `runnerCommand`、Landlock/Seatbelt rung）下
@@ -98,11 +99,12 @@ settings.yml 在沙箱内不可见；不授 state 目录时启动即崩（settin
   （`.ssh`、`.gnupg`、`.netrc`、`.git-credentials`、`.npmrc`、`.config`…）；
   纯默认推导的路径还必须在用户基底树内（基底与 HOME 均按 realpath 对齐，
   HOME 为符号链接或带尾斜杠的宿主不受影响）。显式 `paths` 可以越过基底树
-  （操作者声明），但永远不能越过底线。
+  （操作者声明），但永远不能越过底线。`typst-cache` 只允许规范化后的缓存根下
+  的 `typst/`，指向其他位置的目录链接会被拒绝。
 - 缺失目录**不会**放宽父目录来迁就；也不会用 `--bind-try` 静默漏挂。要么在
   宿主准备好目录（见下），要么关预设。
 - `read-only` 模式不加任何写授权；显式 `presets: []` 时行为与官方逐字节一致
-  （省略 `presets` 则为七项默认，见上）。
+  （省略 `presets` 则为八项默认，见上）。
 
 ## 宿主准备（缺失目录怎么办）
 
@@ -180,9 +182,9 @@ pnpm build && pnpm check
 ```
 
 - dev overlay：`dsh --profile web --patch $PWD/packages/toolchain-access/dev.patch.yml --no-open --port <端口>`
-  （dev.patch.yml 省略 `presets`，走七项默认；要显式定制就在其 config 里写
+  （dev.patch.yml 省略 `presets`，走八项默认；要显式定制就在其 config 里写
   `presets: [...]`，`[]` = 全关，改后重启 dsh）。
 - 装进 profile：`dsh plugin --profile <profile> add ./packages/toolchain-access`，
-  未配置 `presets` 时七项缓存/state 即默认开启；Settings 的 `toolchain-sandbox`
+  未配置 `presets` 时八项缓存/state 即默认开启；Settings 的 `toolchain-sandbox`
   分区可缩减或关闭授权。本机 Nix overlay 优先于 Settings，需按上述接入计划删除
   旧的 `presets = [];` 后部署并重启。

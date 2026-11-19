@@ -73,6 +73,7 @@ export interface Config extends LocalSandboxConfig {
 
 export const DEFAULT_PRESETS = [
   'uv-cache',
+  'typst-cache',
   'cargo-cache',
   'pnpm-store',
   'pnpm-runtime-locks',
@@ -100,7 +101,7 @@ export const configFields = {
   presets: Schema.array(Schema.union([...PRESET_IDS]))
     .default([...DEFAULT_PRESETS])
     .description(
-      "Enabled writable-directory presets; the per-preset grant paths are in the package README. Omitted: the seven ordinary cache/state presets default on (uv-cache, cargo-cache, pnpm-store, pnpm-runtime-locks, gradle-cache, maven-cache, semgrep-state). presets: [] turns every preset off (stock sandbox); a non-empty list replaces the default exactly. pnpm-engine and gradle-jdks are whole toolchain installs and stay opt-in only, never default. Each enabled preset makes its exact directories writable for EVERY process in the sandbox under workspace-write, never a parent tree; semgrep-state instead mounts a private writable state directory over semgrep's data folder, so its credential-bearing settings.yml never becomes writable. A preset that cannot be honored (missing/invalid path, missing/invalid XDG_RUNTIME_DIR, non-stock backend) fails the confined command with a reason instead of being silently skipped.",
+      "Enabled writable-directory presets; the per-preset grant paths are in the package README. Omitted: the eight ordinary cache/state presets default on (uv-cache, typst-cache, cargo-cache, pnpm-store, pnpm-runtime-locks, gradle-cache, maven-cache, semgrep-state). presets: [] turns every preset off (stock sandbox); a non-empty list replaces the default exactly. pnpm-engine and gradle-jdks are whole toolchain installs and stay opt-in only, never default. Each enabled preset makes its exact directories writable for EVERY process in the sandbox under workspace-write, never a parent tree; semgrep-state instead mounts a private writable state directory over semgrep's data folder, so its credential-bearing settings.yml never becomes writable. A preset that cannot be honored (missing/invalid path, missing/invalid XDG_RUNTIME_DIR, non-stock backend) fails the confined command with a reason instead of being silently skipped.",
     ),
   paths: Schema.object({
     uvCache: Schema.string().description(

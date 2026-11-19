@@ -6,6 +6,7 @@ import { sep } from 'node:path'
 
 export const PRESET_IDS = [
   'uv-cache',
+  'typst-cache',
   'cargo-cache',
   'pnpm-store',
   'pnpm-runtime-locks',
@@ -93,6 +94,7 @@ export interface GrantIssue {
     | 'runtime-dir-unset'
     | 'runtime-dir-unwritable'
     | 'lock-dir-mismatch'
+    | 'cache-dir-mismatch'
   readonly message: string
 }
 
@@ -339,6 +341,9 @@ function derivePaths(
         }
         break
       }
+      case 'typst-cache':
+        push(preset, joinDir(cacheBase, 'typst'), false, cacheBase, 'cache-dir')
+        break
       case 'cargo-cache': {
         const cargoHome =
           overrides.cargoHome !== undefined && overrides.cargoHome !== ''
@@ -803,6 +808,15 @@ export function resolveGrants(input: {
       })
       continue
     }
+    if (entry.preset === 'typst-cache' && !stat.isDirectory) {
+      issues.push({
+        preset: entry.preset,
+        path: entry.path,
+        reason: 'not-a-directory',
+        message: `${entry.preset}: ${entry.path} is not a directory`,
+      })
+      continue
+    }
     if (entry.destination !== undefined && !stat.isDirectory) {
       issues.push({
         preset: entry.preset,
@@ -845,6 +859,18 @@ export function resolveGrants(input: {
           return fs.realpath(candidate)
         } catch {
           return candidate
+        }
+      }
+      if (entry.preset === 'typst-cache') {
+        const cacheDir = joinDir(canonicalOf(entry.base), 'typst')
+        if (canonical !== cacheDir) {
+          issues.push({
+            preset: entry.preset,
+            path: entry.path,
+            reason: 'cache-dir-mismatch',
+            message: `${entry.preset}: ${entry.path} resolves to ${canonical}, outside its exact cache location ${cacheDir}`,
+          })
+          continue
         }
       }
       const spelled = defaultBaseTrees(env)

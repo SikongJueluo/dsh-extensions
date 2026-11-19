@@ -67,6 +67,7 @@ const ENTRIES = {
 
 const DEFAULT_ENTRIES: Record<string, FakeEntry> = {
   ...ENTRIES,
+  '/home/u/.cache/typst': { dir: true },
   '/home/u/.cargo/.package-cache-mutate': { file: true, mode: 0o644 },
   '/home/u/.cargo/.global-cache': { file: true, mode: 0o644 },
   '/home/u/.local/share/pnpm/store': { dir: true },
@@ -85,6 +86,7 @@ const DEFAULT_ENTRIES: Record<string, FakeEntry> = {
 
 const DEFAULT_BINDS: [source: string, destination: string][] = [
   ['/home/u/.cache/uv', '/home/u/.cache/uv'],
+  ['/home/u/.cache/typst', '/home/u/.cache/typst'],
   ['/home/u/.cargo/registry', '/home/u/.cargo/registry'],
   ['/home/u/.cargo/git', '/home/u/.cargo/git'],
   ['/home/u/.cargo/.package-cache', '/home/u/.cargo/.package-cache'],
@@ -370,9 +372,10 @@ describe('ToolchainAccessSandboxProvider.confine', () => {
 })
 
 describe('config default presets', () => {
-  it('omitting presets enables the seven ordinary cache/state presets, never the whole-toolchain presets', () => {
+  it('omitting presets enables the eight ordinary cache/state presets, never the whole-toolchain presets', () => {
     expect(DEFAULT_PRESETS).toEqual([
       'uv-cache',
+      'typst-cache',
       'cargo-cache',
       'pnpm-store',
       'pnpm-runtime-locks',
@@ -395,7 +398,7 @@ describe('config default presets', () => {
     ])
   })
 
-  it('the schema default reaches confine: binds for exactly the seven presets', async () => {
+  it('the schema default reaches confine: binds for exactly the eight presets', async () => {
     const provider = mountedProvider(Config({}), DEFAULT_ENTRIES)
     const result = await provider.confine(COMMAND, WS_POLICY)
     expect(result.enforcement).toBe('full')

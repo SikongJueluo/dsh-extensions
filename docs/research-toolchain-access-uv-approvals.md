@@ -2,7 +2,7 @@
 
 日期：2026-10-30。环境：当前 `web` profile，DSH 0.2.0-rc.2、uv 0.13.0、Linux bwrap、`workspace-write`。
 
-> 后续策略变更：仓库已改为省略 `presets` 时默认开启普通缓存（现为七项，2026-11-04 起含 `semgrep-state`）；本文记录的是变更前的调研现场。已有显式 `presets: []` 仍表示全关，当前 Nix 需按 [迁移计划](plan-dsh-toolchain-access.md#2-nix-落点用户执行) 删除空列表并部署，不能仅靠升级恢复授权。
+> 后续策略变更：仓库已改为省略 `presets` 时默认开启普通缓存（参见[当前预设](../packages/toolchain-access/README.md#预设)）；本文记录的是变更前的调研现场。已有显式 `presets: []` 仍表示全关，当前 Nix 需按 [迁移计划](plan-dsh-toolchain-access.md#2-nix-落点用户执行) 删除空列表并部署，不能仅靠升级恢复授权。
 
 本轮只新增此文档；未修改插件、Nix、`~/.dsh` 或许可配置，未申请 Full access。源码合同由独立后台 agent 调查，运行时探针与配置核对由主 agent 完成。没有审计某个历史 agent 的完整会话，因此结论限于当前运行链路，不推断用户以前在哪个界面或 profile 保存过设置。
 

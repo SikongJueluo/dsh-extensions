@@ -250,6 +250,40 @@ describe('default derivation', () => {
   })
 })
 
+describe('typst-cache', () => {
+  it.each([
+    [undefined, '/home/u/.cache/typst'],
+    ['/data/cache/', '/data/cache/typst'],
+  ])('binds exactly the Typst cache for XDG_CACHE_HOME=%s', (xdgCacheHome, cache) => {
+    const result = plan(['typst-cache'], { [cache]: dir() }, { env: { xdgCacheHome } })
+    expect(result.issues).toEqual([])
+    expect(result.binds).toEqual([{ source: cache, destination: cache, preset: 'typst-cache' }])
+  })
+
+  it('prepares only the missing Typst cache at confine time', () => {
+    const result = plan(['typst-cache'], {}, { prepare: true })
+    expect(result.issues).toEqual([])
+    expect(result.ensured).toEqual([{ path: '/home/u/.cache/typst', kind: 'cache-dir' }])
+  })
+
+  it.each(['/home/u/.cache', '/home/u/.cache/neighbour'])('rejects a symlink to %s', (target) => {
+    const result = plan(['typst-cache'], {
+      '/home/u/.cache/typst': { target },
+      [target]: dir(),
+    })
+    expect(result.binds).toEqual([])
+    expect(result.issues[0]?.reason).toBe('cache-dir-mismatch')
+  })
+
+  it('rejects a regular file at the cache path', () => {
+    const result = plan(['typst-cache'], {
+      '/home/u/.cache/typst': { file: true, mode: 0o644 },
+    })
+    expect(result.binds).toEqual([])
+    expect(result.issues[0]?.reason).toBe('not-a-directory')
+  })
+})
+
 describe('fail-closed validation', () => {
   it('reports a missing path with the preset named', () => {
     const result = plan(['uv-cache'], {})
