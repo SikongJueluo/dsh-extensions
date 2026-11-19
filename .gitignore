@@ -1,45 +1,24 @@
-# dependencies
+###--------------------###
+###  File: /dev/stdin  ###
+###--------------------###
+
 node_modules/
 .pnpm-store/
-
-# build output only at package roots (source dirs such as src/lib stay tracked)
 /packages/*/lib/
 *.tsbuildinfo
-
-# pack output
 *.tgz
-
-# local smoke-test harness home (see README "验证安装")
 .smoke-dsh-home/
-
-# editor / OS
 .DS_Store
-
-# Vibe
 .dsh/
-
-# pnpm runtime-dir workaround (sandbox)
 .pnpm-run/
 .pnpm-state/
 .dsmoke/
-
-# bwrap/toolchain-access verification fixtures (sandbox)
 .bw-fixture/
 .tca-runtime-*/
-
-# storybook output
 storybook-static/
-
-# local scratch
 .tmp/
-
-# Devenv
 .devenv*
 devenv.local.nix
 devenv.local.yaml
-
-# direnv
 .direnv
-
-# pre-commit
 .pre-commit-config.yaml

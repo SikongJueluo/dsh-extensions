@@ -41,7 +41,19 @@ dsh --profile <profile>
 
 ## 开发
 
-见 [AGENTS.md](AGENTS.md)。
+安装 Nix 和 [devenv](https://devenv.sh/) 后，在仓库根目录运行：
+
+```sh
+devenv shell
+pnpm install --frozen-lockfile
+pnpm typecheck
+```
+
+使用 direnv 时，运行 `direnv allow` 即可在进入仓库时加载同一环境。devenv 提供 Node 24 和 JS/TS 语言服务器，Corepack 按 [package.json](package.json) 选择 pnpm；TypeScript 编译器仍由 workspace 锁定（`pnpm exec tsc --version`）。测试与检查所需的 Git、jj、Fish 和 Python 也在环境中；`dsh` CLI 仍由宿主提供。
+
+[.gitignore](.gitignore) 由 [devenv.nix](devenv.nix) 中的 `integrations.gitnr` 生成。修改规则后运行 `devenv tasks run devenv:gitnr:install`，并把生成结果一同纳入版本控制，让未进入开发环境的 Git 和 jj 也能使用。
+
+完整开发命令见 [AGENTS.md](AGENTS.md)。
 
 ## 许可
 
