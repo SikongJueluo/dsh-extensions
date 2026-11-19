@@ -84,8 +84,9 @@ export function apply(ctx: Context, config: Config): void {
   if (adopter !== undefined && spool !== undefined) {
     registerCommands(ctx, { adopter, spool, cancelled })
   }
-  registerRestartResume(ctx, {
-    resumeOnRestart: config.resumeOnRestart,
-    resumeMaxAgeMs: config.resumeMaxAgeMs,
-  })
+  registerRestartResume(
+    ctx,
+    { resumeOnRestart: config.resumeOnRestart, resumeMaxAgeMs: config.resumeMaxAgeMs },
+    { spool },
+  )
 }

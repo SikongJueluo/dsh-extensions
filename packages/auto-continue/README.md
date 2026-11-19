@@ -1,10 +1,13 @@
 # dsh-auto-continue
 
-GLM Coding Plan 限额后**自动续跑**：当模型请求因套餐限额失败（`QUOTA`，如 *"The usage limit has been reached"*；或内置重试耗尽后的 `RATE_LIMIT`），插件接管恢复——经 `planUsage` 服务（[dsh-plan-usage](../plan-usage/)）读套餐配额窗口，**睡到重置点后原样重试失败的 step**。不需要你再手动发 "continue"。
+在 DSH 模型请求失败或宿主重启后自动续跑，减少手动发送 `continue`。配额错误等待重置；短时服务故障在同一 turn 内补试；重启后的恢复从已记录的进度开始。
 
 ## 工作原理
 
-DSH 的 agent loop 在模型请求失败后、turn 关闭前会派发 `agent/request-error` waterfall。返回 `{ kind: 'retry' }` 即可让 loop **在同一个打开的 turn 内、基于同一份持久化历史重跑失败的 step**——没有新的用户消息、没有额外 prompt token，重建的请求还能吃到 provider 的 prompt cache。内置 `llm-retry` 只为短瞬断设计（默认不重试 `QUOTA`，backoff 上限 10s），本插件作为它的下游接管长窗口场景：
+DSH 在模型请求失败后、turn 关闭前派发 `agent/request-error` waterfall。返回 `{ kind: 'retry' }` 会在原 turn、原 step 中重新发请求，不追加用户消息，也不重做此前已记录的工具步骤。
+
+- **短时故障**：优先沿用宿主重试。宿主未接管时，对 `SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE` 以及 pi-ai 归为 `PI_AI_ERROR` 的精确提示 `The service is temporarily unavailable. Please retry later.`，每个失败 step 最多补试 4 次，间隔 5、15、30、60 秒。服务商要求更长等待时尊重 `Retry-After`，单次超过 2 分钟则不补试。身份验证、其他未分类错误以及显式关闭重试的路由不接管；不切换模型或服务商。
+- **配额耗尽**：`QUOTA` 或原生重试未接管的 `RATE_LIMIT` 仍按套餐重置点等待。
 
 ```
 QUOTA 失败 ──▶ planUsage 服务在？──▶ 查配额窗口 ──▶ 睡到 nextResetTime + 余量 ──▶ 同 turn 重试
@@ -39,15 +42,16 @@ pnpm -C packages/auto-continue build
 dsh --profile web --patch ./packages/plan-usage/dev.patch.yml --patch ./packages/auto-continue/dev.patch.yml --no-open --port 3180
 ```
 
-验证：`pnpm -C packages/auto-continue smoke`（调度数学 + 恢复流三路径：委派 / 探测 / 重置对齐重试）。
+验证：`pnpm -C packages/auto-continue smoke`（退避、配额调度、停止、公开的冷恢复接口和连续重启）。
 
-## restart-resume（跑动任务的跨重启续跑）
+## 重启恢复
 
-限额等待之外，**重启时正在运行的会话**也会自动续跑：插件把 RUNNING 会话集合在每次状态变化时镜像到 `storages/dsh-auto-continue/running.json`（停机顺序无关，硬杀也基本覆盖）；下次 boot 在 `resumeMaxAgeMs`（默认 12h）窗口内逐个冷启动并发送续跑消息。护栏：最后一 turn 已 `completed` 的跳过（状态写入与死亡的竞态）；用户手动停止的会话不在镜像中（停止即写 idle）；subagent 会话不独立恢复（由父会话继续编排）；恢复后若撞限额则自然进入配额等待路径。`resumeOnRestart: false` 可关。
+插件在 `turn/start` 时将普通会话记录到 `storages/dsh-auto-continue/running.json`，在正常结束或手动停止时清除。正常停机留下的 `aborted/disposed` 和硬中断后由宿主补记的 `interrupted` 都可恢复。启动时，在 `resumeMaxAgeMs`（默认 12 小时）内通过公开的 `sessionController.resolveAgent()` 逐个打开会话。忙碌、归档、已完成或已收到新输入的会话不会被额外唤醒；子任务由父会话继续编排；已有配额等待记录的会话仍等到原定时间。`resumeOnRestart: false` 可关闭普通重启恢复。
+
+已关闭的 turn 不能原地重试，因此重启恢复会由插件发送一条可见的续跑消息，提醒模型核实执行结果不明的工具调用后再继续。它不会重新激活已暂停的持久化 Goal，也不会回扫历史失败。如果旧版在关机时已经清空记录，升级不能补回那次中断。
 
 ## 已知限制
 
-- 跨重启的恢复走**新 turn + 续跑消息**（重启后原 turn 已被 crash-recovery 标记 interrupted），非同 turn 原样重试；语义等价于准点自动发送 continue。
-- 单 dsh 进程假设：多进程共用同一 spool 最坏会重复一条续跑消息。
-- dsh 0.2 无宿主插件热重载（`patchReload` 为残留字段）；换插件版本仍需重启进程——restart-resume 即为重启的补偿。
-- 无 planUsage（或该路由无 monitor）时只能探测，恢复延迟 = 探测间隔。
+- 瞬时补试只覆盖模型适配器已经报告给 `agent/request-error` 的失败，不兜底插件或宿主内部抛错。
+- 两种持久化记录均假定一个 DSH 进程写入；共享同一目录的多个进程不受支持。新 turn 的镜像尚未写入就被硬杀，也可能没有可恢复记录。
+- 无 planUsage（或该路由无 monitor）时，配额路径只能按探测间隔恢复。

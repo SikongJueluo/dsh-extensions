@@ -1,12 +1,33 @@
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
-import type {} from './shims.js'
+import type { LlmFailure } from '@deepseek-ai/dsh-llm'
+import type { LlmRetryEventData } from './shims.js'
 import type { ScheduleOptions, WaitPlan } from './schedule.js'
 import { planProbeWait, planResetWait } from './schedule.js'
 import type { PendingWait, WaitSpool } from './spool.js'
 
-const OWNED_CODES = new Set(['QUOTA', 'RATE_LIMIT'])
+const QUOTA_CODES = new Set(['QUOTA', 'RATE_LIMIT'])
+const TRANSIENT_CODES = new Set(['SERVER', 'TIMEOUT', 'TRANSPORT', 'EMPTY_RESPONSE'])
+const TRANSIENT_BACKOFF_MS = [5_000, 15_000, 30_000, 60_000]
+const MAX_TRANSIENT_DELAY_MS = 120_000
+const OUTAGE_MESSAGE = 'the service is temporarily unavailable. please retry later.'
+
+function isTransientFailure(failure: LlmFailure): boolean {
+  return (
+    TRANSIENT_CODES.has(failure.code) ||
+    (failure.code === 'PI_AI_ERROR' && failure.message.trim().toLowerCase() === OUTAGE_MESSAGE)
+  )
+}
+
+function transientDelay(failure: LlmFailure, attempts: number): number | undefined {
+  const backoff = TRANSIENT_BACKOFF_MS[attempts]
+  if (backoff === undefined) return undefined
+  const retryAfter = failure.providerRetryAfterMs
+  if (retryAfter === undefined || !Number.isFinite(retryAfter)) return backoff
+  if (retryAfter > MAX_TRANSIENT_DELAY_MS) return undefined
+  return Math.max(backoff, retryAfter)
+}
 
 interface RetryChain {
   retryId: string
@@ -109,12 +130,54 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
   const disposeListener = ctx.on('agent/request-error', (payload, next) => {
     if (lifetime.signal.aborted) return Promise.resolve(undefined)
     const operation = (async () => {
-      const { agent, turn, step, provider, failure, signal } = payload
-      if (!OWNED_CODES.has(failure.code)) return next()
-      const state = stateFor(agent.session.id, turn)
+      const { agent, turn, step, provider, failure, retryPolicy, signal } = payload
+      const quota = QUOTA_CODES.has(failure.code)
+      if (
+        !quota &&
+        (!isTransientFailure(failure) ||
+          retryPolicy?.mode === 'always' ||
+          retryPolicy?.maxRetries === 0)
+      ) {
+        return next()
+      }
       const fused = AbortSignal.any([signal, lifetime.signal])
+      if (fused.aborted) return undefined
+      if (!quota) {
+        const downstream = await next()
+        if (fused.aborted) return undefined
+        if (downstream !== undefined) return downstream
+      }
+
+      const state = stateFor(agent.session.id, turn)
+      const policyKey = quota ? '"auto-continue"' : '"auto-continue-transient"'
+      const chainKey = JSON.stringify([step, provider, policyKey])
+      let chain = state.chains.get(chainKey)
+      if (chain === undefined) {
+        chain = { retryId: randomUUID(), attempts: 0 }
+        state.chains.set(chainKey, chain)
+      }
+
+      if (!quota) {
+        const delayMs = transientDelay(failure, chain.attempts)
+        if (delayMs === undefined) return undefined
+        const retry = ++chain.attempts
+        const position = { retryId: chain.retryId, turn, step, retry }
+        agent.session.append('llm/retry', {
+          ...position,
+          provider,
+          failure,
+          mode: 'normal',
+          policyKey,
+          maxRetries: TRANSIENT_BACKOFF_MS.length,
+          delayMs,
+        } satisfies LlmRetryEventData)
+        if (!(await cancellableSleep(delayMs, fused))) return undefined
+        agent.session.append('llm/retry-started', position)
+        return { kind: 'retry' as const }
+      }
 
       const wait = await plan(provider, state)
+      if (fused.aborted) return undefined
       if (wait.kind === 'give-up') {
         ctx.logger.warn(
           `auto-continue: giving up on ${failure.code} from "${provider}" — ${wait.reason}`,
@@ -125,13 +188,6 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
       }
 
       state.attempts += 1
-
-      const chainKey = `${turn}#${step}#${provider}`
-      let chain = state.chains.get(chainKey)
-      if (chain === undefined) {
-        chain = { retryId: randomUUID(), attempts: 0 }
-        state.chains.set(chainKey, chain)
-      }
       chain.attempts += 1
       const recorded = agent.session.append('llm/retry', {
         retryId: chain.retryId,
@@ -167,6 +223,8 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
         probes: state.probes,
         retryAt: Date.now() + wait.delayMs,
       }
+      await spool?.load()
+      if (fused.aborted) return undefined
       await spool?.set(entry)
 
       const slept = await cancellableSleep(wait.delayMs, fused)

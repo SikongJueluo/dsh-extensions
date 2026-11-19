@@ -25,17 +25,16 @@ export interface PlanUsageServiceShim {
   ): Promise<PlanUsageSnapshot | undefined>
 }
 
-export interface LlmRetryEventData {
+export type LlmRetryEventData = {
   retryId: string
   turn: number
   step: number
   provider: string
-  mode: 'always'
   policyKey: string
   retry: number
   delayMs: number
   failure: LlmFailure
-}
+} & ({ mode: 'always' } | { mode: 'normal'; maxRetries: number })
 
 export interface LlmRetryStartedEventData {
   retryId: string
@@ -45,9 +44,7 @@ export interface LlmRetryStartedEventData {
 }
 
 export interface SessionControllerShim {
-  agents: {
-    resolveAgent(sessionId: SessionId): Promise<{ agent: Agent } | { error: unknown }>
-  }
+  resolveAgent(sessionId: SessionId): Promise<{ agent: Agent } | { error: { code: string } }>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -55,6 +52,8 @@ declare module '@deepseek-ai/cordis' {
     planUsage?: PlanUsageServiceShim
 
     sessionController?: SessionControllerShim
+
+    workspaceRegistry?: { readonly archivedSessionIds: readonly SessionId[] }
   }
 }
 

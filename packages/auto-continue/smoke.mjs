@@ -1,6 +1,7 @@
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { mock } from 'node:test'
 import {
   name,
   inject,
@@ -131,11 +132,6 @@ const settle = (ms = 80) =>
     setTimeout(r, ms)
   })
 
-const settleFast = (ms = 60) =>
-  new Promise((r) => {
-    setTimeout(r, ms)
-  })
-
 const events = []
 const session = { id: 'sess-1', append: (type, data) => events.push({ type, data }) }
 const deliver = (listener, payload) => listener(payload, async () => 'delegated')
@@ -153,6 +149,85 @@ delegated = await deliver(bare.listeners.get('agent/request-error'), {
 })
 check('non-owned failure delegates', delegated === 'delegated')
 check('no retry event for non-owned failure', events.length === 0)
+
+{
+  const wired = makeCtx({})
+  apply(wired.ctx, Config({ persist: false, resumeOnRestart: false }))
+  const retries = []
+  const ctrl = new AbortController()
+  const payload = {
+    agent: {
+      session: {
+        id: 'sess-outage',
+        append: (type, data) => {
+          retries.push({ type, data })
+          return { seq: retries.length }
+        },
+      },
+    },
+    turn: 1,
+    step: 1,
+    provider: 'unstable-provider',
+    failure: {
+      code: 'PI_AI_ERROR',
+      message: 'The service is temporarily unavailable. Please retry later.',
+    },
+    signal: ctrl.signal,
+  }
+  const listener = wired.listeners.get('agent/request-error')
+  const nativeRetry = { kind: 'retry' }
+  check(
+    'native retry takes precedence',
+    (await listener(payload, async () => nativeRetry)) === nativeRetry && retries.length === 0,
+  )
+  check(
+    'unclassified provider errors remain terminal',
+    (await listener(
+      { ...payload, failure: { code: 'PI_AI_ERROR', message: 'bad credentials' } },
+      async () => undefined,
+    )) === undefined && retries.length === 0,
+  )
+  const backoffs = [5000, 15_000, 30_000, 60_000]
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    for (const [index, delay] of backoffs.entries()) {
+      const action = listener(payload, async () => undefined)
+      await Promise.resolve()
+      const event = retries.at(-1)
+      check(
+        `outage retry ${index + 1} records the open step and delay`,
+        event?.type === 'llm/retry' &&
+          event.data.retry === index + 1 &&
+          event.data.delayMs === delay &&
+          event.data.turn === 1 &&
+          event.data.step === 1,
+      )
+      mock.timers.tick(delay)
+      check(`outage retry ${index + 1} returns retry`, (await action)?.kind === 'retry')
+    }
+    check(
+      'outage retry budget is finite',
+      (await listener(payload, async () => undefined)) === undefined && retries.length === 8,
+    )
+    const abortedRetry = listener(
+      {
+        ...payload,
+        step: 2,
+        failure: { code: 'SERVER', status: 503, message: 'Service unavailable' },
+      },
+      async () => undefined,
+    )
+    await Promise.resolve()
+    ctrl.abort()
+    check(
+      'stopping an outage retry never starts another attempt',
+      (await abortedRetry) === undefined && retries.at(-1)?.type === 'llm/retry',
+    )
+  } finally {
+    mock.timers.reset()
+  }
+  await wired.effects[0]()()
+}
 
 {
   const ctrl = new AbortController()
@@ -202,6 +277,7 @@ check('no retry event for non-owned failure', events.length === 0)
     status: 'idle',
     session: {
       id: 'sess-cr',
+      header: {},
       ownEvents: () => [{ seq: 5, type: 'user/message', data: { source: { kind: 'user' } } }],
     },
     followup: (m) => sent.push(m),
@@ -458,6 +534,7 @@ await rm(spoolDir, { recursive: true, force: true })
       status: 'idle',
       session: {
         id: 'sess-r',
+        header: {},
         ownEvents: () => [
           { seq: 49, type: 'user/message', data: { source: { kind: 'user' } } },
           { seq: 50, type: 'llm/retry', data: {} },
@@ -492,6 +569,7 @@ await rm(spoolDir, { recursive: true, force: true })
       status: 'idle',
       session: {
         id: 'sess-u',
+        header: {},
         ownEvents: () => [{ seq: 55, type: 'user/message', data: { source: { kind: 'user' } } }],
       },
       followup: (m) => sent.push(m),
@@ -513,13 +591,17 @@ await rm(spoolDir, { recursive: true, force: true })
     const sent = []
     const coldAgent = {
       status: 'idle',
-      session: { id: 'sess-k', ownEvents: () => [{ seq: 12, type: 'llm/retry', data: {} }] },
+      session: {
+        id: 'sess-k',
+        header: {},
+        ownEvents: () => [{ seq: 12, type: 'llm/retry', data: {} }],
+      },
       followup: (m) => sent.push(m),
     }
     const resumeCtx = makeCtx({})
     resumeCtx.ctx.get = (serviceName) =>
       serviceName === 'sessionController'
-        ? { agents: { resolveAgent: async () => ({ agent: coldAgent }) } }
+        ? { resolveAgent: async () => ({ agent: coldAgent }) }
         : undefined
     registerResume(resumeCtx.ctx, { maxWaitMs: 6 * 3600_000 }, sp)
     await settle()
@@ -652,151 +734,105 @@ await rm(spoolDir, { recursive: true, force: true })
   )
 }
 
+const mirrorSession = (id) => ({ id, header: {} })
+const turnEvent = (type, turn, reason) => ({ type, time: Date.now(), data: { turn, reason } })
+const stopped = (kind) => ({ kind: 'aborted', reason: { kind } })
+
 {
-  const { registerRestartResume, defaultMirrorPath } = await import('./lib/index.js')
+  const { registerRestartResume } = await import('./lib/index.js')
   const mirrorPath = join(await mkdtemp(join(tmpdir(), 'ac-rr-')), 'running.json')
-  const statusListeners = []
-  const sent = []
-
-  const mkCtx = () => ({
-    logger: { info() {}, warn() {} },
-    get: (serviceName) =>
-      serviceName === 'sessionController'
-        ? { agents: { resolveAgent: async () => ({ agent: fakeAgent }) } }
-        : undefined,
-    on: (e, l) => {
-      if (e === 'agent/status') statusListeners.push(l)
-      return () => {}
-    },
-    effect: (fn) => {
-      effectsRestart.push(fn)
-      return () => {}
-    },
-    inject: () => {},
-  })
-  const effectsRestart = []
-  const fakeAgent = {
-    status: 'idle',
-    session: {
-      id: 'sess-rr',
-      ownEvents: () => [
-        { seq: 1, type: 'user/message', data: { source: { kind: 'user' } } },
-        { seq: 3, type: 'turn/end', data: { reason: { kind: 'interrupted' } } },
-      ],
-      append: () => ({ seq: 4 }),
-    },
-    followup: (m) => sent.push(m),
-  }
-
-  const ctxA = mkCtx()
-  registerRestartResume(
-    ctxA,
-    { resumeOnRestart: true, resumeMaxAgeMs: 12 * 3600_000 },
-    { mirrorPath, settleMs: 10, staggerMs: 5 },
-  )
-  for (const l of statusListeners) l({ agent: { id: 'sess-rr' }, status: 'running' })
-  await settleFast()
-  let doc = JSON.parse(await readFile(mirrorPath, 'utf8'))
-  check(
-    'mirror records the running session',
-    doc.entries.some((e) => e.sessionId === 'sess-rr'),
-  )
-  for (const l of statusListeners) l({ agent: { id: 'sess-rr' }, status: 'idle' })
-  await settleFast()
-  doc = JSON.parse(await readFile(mirrorPath, 'utf8'))
-  check('mirror drops the idle session', doc.entries.length === 0)
-  await effectsRestart[0]()()
-
-  const ctxB = mkCtx()
-  const bootNow = Date.now()
-  const doneAgent = {
-    ...fakeAgent,
-    session: {
-      ...fakeAgent.session,
-      ownEvents: () => [{ seq: 3, type: 'turn/end', data: { reason: { kind: 'completed' } } }],
-    },
-  }
-  await writeFile(
+  const options = {
     mirrorPath,
-    JSON.stringify({
-      version: 1,
-      entries: [
-        { sessionId: 'sess-rr', at: bootNow - 1000 },
-        { sessionId: 'sess-done', at: bootNow - 1000 },
-        { sessionId: 'sess-old', at: bootNow - 13 * 3600_000 },
-      ],
-    }),
-    'utf8',
+    settleMs: 0,
+    staggerMs: 0,
+    controllerWaitMs: 10,
+    controllerPollMs: 2,
+  }
+  const settings = { resumeOnRestart: true, resumeMaxAgeMs: 12 * 3600_000 }
+  const readMirror = async () => JSON.parse(await readFile(mirrorPath, 'utf8')).entries
+  const shutdown = makeCtx({})
+  registerRestartResume(shutdown.ctx, settings, options)
+  const record = shutdown.listeners.get('session/event')
+  for (const id of ['graceful', 'manual', 'crash', 'completed', 'archived', 'quota', 'new-input']) {
+    record(mirrorSession(id), turnEvent('turn/start', 1))
+  }
+  record(mirrorSession('graceful'), turnEvent('turn/end', 1, stopped('disposed')))
+  record(mirrorSession('manual'), turnEvent('turn/end', 1, stopped('user')))
+  record({ id: 'child', header: { origin: 'subagent' } }, turnEvent('turn/start', 1))
+  await shutdown.effects[0]()()
+  const saved = await readMirror()
+  check(
+    'graceful shutdown keeps the interrupted turn',
+    saved.some((e) => e.sessionId === 'graceful' && e.turn === 1),
   )
-  const which = 'sess-rr'
-  ctxB.get = (serviceName) =>
-    serviceName === 'sessionController'
-      ? {
-          agents: {
-            resolveAgent: async (id) => ({
-              agent: String(id) === 'sess-done' ? doneAgent : fakeAgent,
-            }),
+  check(
+    'mirror excludes explicit cancellation and subagents',
+    !saved.some((e) => ['manual', 'child'].includes(e.sessionId)),
+  )
+
+  const sp = new WaitSpool({ path: join(mirrorPath, '..', 'pending.json') })
+  await sp.load()
+  await sp.set({ ...entry, sessionId: 'quota' })
+  const sent = []
+  const opened = []
+  const boot = makeCtx({
+    workspaceRegistry: { archivedSessionIds: ['archived'] },
+    sessionController: {
+      async resolveAgent(id) {
+        opened.push(id)
+        const reason =
+          id === 'graceful'
+            ? stopped('disposed')
+            : { kind: id === 'completed' ? 'completed' : 'interrupted' }
+        const log = [turnEvent('turn/end', 1, reason)]
+        if (id === 'new-input')
+          log.push({ type: 'user/message', data: { source: { kind: 'user' } } })
+        return {
+          agent: {
+            status: 'idle',
+            session: { ...mirrorSession(id), ownEvents: () => log },
+            followup(message) {
+              sent.push({ id, message })
+              boot.listeners.get('session/event')(mirrorSession(id), turnEvent('turn/start', 2))
+            },
           },
         }
-      : undefined
-  void which
-  registerRestartResume(
-    ctxB,
-    { resumeOnRestart: true, resumeMaxAgeMs: 12 * 3600_000 },
-    { mirrorPath, settleMs: 10, staggerMs: 5 },
-  )
-  await settleFast(200)
-  check(
-    'restart mirror resumes the interrupted session',
-    sent.length === 1 && sent[0].content[0].text.includes('harness restarted'),
-  )
-  check('completed turn is not resumed', !sent.some((m) => m === undefined))
-  doc = JSON.parse(await readFile(mirrorPath, 'utf8'))
-  check('mirror consumed once at boot', doc.entries.length === 0)
-  await effectsRestart[1]()()
-
-  {
-    const mirrorPath2 = join(await mkdtemp(join(tmpdir(), 'ac-rr2-')), 'running.json')
-    const ctxNoCtl = mkCtx()
-    ctxNoCtl.get = () => undefined
-    await writeFile(
-      mirrorPath2,
-      JSON.stringify({ version: 1, entries: [{ sessionId: 'sess-rr', at: Date.now() - 1000 }] }),
-      'utf8',
-    )
-    registerRestartResume(
-      ctxNoCtl,
-      { resumeOnRestart: true, resumeMaxAgeMs: 12 * 3600_000 },
-      {
-        mirrorPath: mirrorPath2,
-        settleMs: 5,
-        staggerMs: 5,
-        controllerWaitMs: 20,
-        controllerPollMs: 10,
       },
-    )
-    await settleFast(120)
-    const doc2 = JSON.parse(await readFile(mirrorPath2, 'utf8'))
-    check('controller-absent boot keeps the mirror for retry', doc2.entries.length === 1)
-    await effectsRestart[2]()()
-  }
+    },
+  })
+  registerRestartResume(boot.ctx, settings, { ...options, spool: sp })
+  await settle(150)
+  await boot.effects[0]()()
+  check(
+    'public cold resolver recovers graceful and hard shutdown',
+    sent.map((item) => item.id).join(',') === 'graceful,crash',
+  )
+  check(
+    'follow-up tells the agent to verify uncertain tool outcomes',
+    sent.every(({ message }) => message.content[0].text.includes('marked unknown')),
+  )
+  check(
+    'archived and quota-owned sessions are not cold-opened by the mirror',
+    !opened.includes('archived') && !opened.includes('quota'),
+  )
+  const active = await readMirror()
+  check(
+    'boot keeps new turns for a second restart',
+    active.length === 2 && active.every((e) => e.turn === 2),
+  )
 
-  const ctxC = mkCtx()
-  const before = sent.length
-  await writeFile(
-    mirrorPath,
-    JSON.stringify({ version: 1, entries: [{ sessionId: 'sess-rr', at: Date.now() - 1000 }] }),
-    'utf8',
+  const noController = makeCtx({})
+  registerRestartResume(noController.ctx, settings, options)
+  await settle(45)
+  await noController.effects[0]()()
+  check('controller-absent boot keeps the mirror for retry', (await readMirror()).length === 2)
+
+  const disabled = makeCtx({})
+  registerRestartResume(disabled.ctx, { ...settings, resumeOnRestart: false }, options)
+  check(
+    'resumeOnRestart=false does not track or adopt',
+    disabled.listeners.size === 0 && disabled.effects.length === 0,
   )
-  registerRestartResume(
-    ctxC,
-    { resumeOnRestart: false, resumeMaxAgeMs: 12 * 3600_000 },
-    { mirrorPath, settleMs: 10, staggerMs: 5 },
-  )
-  await settleFast(100)
-  check('resumeOnRestart=false sends nothing', sent.length === before)
-  await effectsRestart[2]()()
-  void defaultMirrorPath
 }
 
 if (failures > 0) {

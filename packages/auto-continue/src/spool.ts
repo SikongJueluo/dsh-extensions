@@ -64,7 +64,7 @@ export class WaitSpool {
   private readonly path: string
   private readonly logger: Pick<LoggerService, 'warn'> | undefined
   private readonly entries = new Map<string, PendingWait>()
-  private loaded = false
+  private loading?: Promise<void>
 
   private writeChain: Promise<void> = Promise.resolve()
 
@@ -73,9 +73,12 @@ export class WaitSpool {
     this.logger = options.logger
   }
 
-  async load(): Promise<void> {
-    if (this.loaded) return
-    this.loaded = true
+  load(): Promise<void> {
+    this.loading ??= this.read()
+    return this.loading
+  }
+
+  private async read(): Promise<void> {
     let raw: string
     try {
       raw = await readFile(this.path, 'utf8')

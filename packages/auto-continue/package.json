@@ -1,7 +1,7 @@
 {
   "name": "dsh-auto-continue",
   "version": "0.3.0",
-  "description": "DSH auto-continue plugin: owns recovery of quota/rate-limited model requests — waits until the coding-plan window resets (via the planUsage service from dsh-plan-usage) and retries the failed step in the same open turn; falls back to staged probing without it",
+  "description": "DSH plugin that retries transient provider failures, waits for quota resets, and resumes interrupted sessions after a host restart",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "main": "./lib/index.js",

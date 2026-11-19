@@ -1,24 +1,22 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent, AgentRegistry } from '@deepseek-ai/dsh-agent'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
-import { join } from 'node:path'
+import { SessionId, type TurnEndReason } from '@deepseek-ai/dsh-session'
+import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import type { SessionControllerShim } from './shims.js'
+import type { WaitSpool } from './spool.js'
+import { cancellableSleep } from './recovery.js'
 import { isRecord } from './guards.js'
 
 export const RESTART_RESUME_MESSAGE =
-  '[auto-continue] The harness restarted while this session was working and the running turn was interrupted. Continue that work from exactly where it stopped.'
+  '[auto-continue] The harness restarted while this session was working and the running turn was interrupted. Continue from its recorded progress. Verify the outcome of any tool call marked unknown before repeating it.'
 
 interface RunningEntry {
   sessionId: string
   at: number
-}
-
-interface MirrorFile {
-  version: 1
-  entries: RunningEntry[]
+  turn?: number
 }
 
 export function defaultMirrorPath(): string {
@@ -27,31 +25,40 @@ export function defaultMirrorPath(): string {
 }
 
 const RESUME_STAGGER_MS = 2_000
-
 const BOOT_SETTLE_MS = 5_000
-
 const CONTROLLER_WAIT_MS = 30_000
 const CONTROLLER_POLL_MS = 1_000
 
 function isEntry(value: unknown): value is RunningEntry {
-  if (!isRecord(value)) return false
-  const v = value
   return (
-    typeof v.sessionId === 'string' &&
-    v.sessionId.length > 0 &&
-    typeof v.at === 'number' &&
-    Number.isFinite(v.at)
+    isRecord(value) &&
+    typeof value.sessionId === 'string' &&
+    value.sessionId.length > 0 &&
+    typeof value.at === 'number' &&
+    Number.isFinite(value.at) &&
+    (value.turn === undefined ||
+      (typeof value.turn === 'number' && Number.isSafeInteger(value.turn)))
   )
 }
 
-function lastTurnCompleted(agent: Agent): boolean {
+function isDisposal(reason: TurnEndReason | null): boolean {
+  return reason?.kind === 'aborted' && reason.reason.kind === 'disposed'
+}
+
+function canResume(agent: Agent, entry: RunningEntry): boolean {
+  if (agent.status !== 'idle' || agent.session.header.origin === 'subagent') return false
   // oxlint-disable-next-line typescript/no-deprecated -- A25: the deprecated synchronous session-log readers have no sync replacement; the sanctioned ones are async and optional, so migrating changes exported contracts and control flow.
   const events = agent.session.ownEvents()
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i]
-    if (event === undefined || event.type !== 'turn/end') continue
-    const reason = event.data.reason
-    return reason?.kind === 'completed'
+    if (event?.type === 'user/message' && event.data.source.kind === 'user') return false
+    if (event?.type === 'turn/start') return false
+    if (event?.type !== 'turn/end') continue
+    const { reason, turn } = event.data
+    return (
+      (entry.turn === undefined || entry.turn === turn) &&
+      (reason?.kind === 'interrupted' || isDisposal(reason))
+    )
   }
   return false
 }
@@ -65,137 +72,128 @@ export function registerRestartResume(
     staggerMs?: number
     controllerWaitMs?: number
     controllerPollMs?: number
+    spool?: WaitSpool
   } = {},
 ): void {
+  if (!config.resumeOnRestart) return
   const path = options.mirrorPath ?? defaultMirrorPath()
-  const settleMs = options.settleMs ?? BOOT_SETTLE_MS
-  const staggerMs = options.staggerMs ?? RESUME_STAGGER_MS
   const lifetime = new AbortController()
-  const running = new Map<string, number>()
-  let writeChain: Promise<void> = Promise.resolve()
+  const { signal } = lifetime
+  const running = new Map<string, RunningEntry>()
 
-  const persist = (entries: RunningEntry[]): void => {
-    const snapshot: MirrorFile = { version: 1, entries }
-    writeChain = writeChain
+  const load = async (): Promise<RunningEntry[]> => {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(path, 'utf8'))
+      const stored = isRecord(parsed) ? parsed.entries : undefined
+      const entries = Array.isArray(stored) ? stored.filter((entry) => isEntry(entry)) : []
+      for (const entry of entries) running.set(entry.sessionId, entry)
+      return [...running.values()]
+    } catch (error) {
+      if (!isRecord(error) || error.code !== 'ENOENT') {
+        ctx.logger.warn('auto-continue: cannot read restart mirror: %o', error)
+      }
+      return []
+    }
+  }
+  const loaded = load()
+  let writes: Promise<void> = loaded.then(() => undefined)
+  const update = (mutate: () => boolean): Promise<void> => {
+    writes = writes
       .then(async () => {
-        await mkdir(join(path, '..'), { recursive: true })
+        if (!mutate()) return undefined
+        await mkdir(dirname(path), { recursive: true })
         const tmp = `${path}.tmp`
-        await writeFile(tmp, `${JSON.stringify(snapshot, null, 1)}\n`, 'utf8')
-        await rename(tmp, path)
-        return undefined
+        await writeFile(tmp, `${JSON.stringify({ version: 1, entries: [...running.values()] })}\n`)
+        return rename(tmp, path)
       })
-      .catch(() => {})
+      .catch((error: unknown) =>
+        ctx.logger.warn('auto-continue: cannot write restart mirror: %o', error),
+      )
+    return writes
   }
 
-  ctx.on('agent/status', (payload) => {
-    if (lifetime.signal.aborted) return
-    const sessionId = String(payload.agent.id)
-    if (payload.status === 'running') running.set(sessionId, Date.now())
-    else running.delete(sessionId)
-    persist([...running.entries()].map(([id, at]) => ({ sessionId: id, at })))
-  })
-
-  const resumeMessage = createUserMessage({
-    content: [{ type: 'text', text: RESTART_RESUME_MESSAGE }],
-    source: { kind: 'user' },
+  ctx.on('session/event', (session, event) => {
+    if (signal.aborted || session.header.origin === 'subagent') return
+    if (event.type === 'turn/start') {
+      void update(() => {
+        running.set(session.id, { sessionId: session.id, at: event.time, turn: event.data.turn })
+        return true
+      })
+    } else if (event.type === 'turn/end' && !isDisposal(event.data.reason)) {
+      void update(() => running.delete(session.id))
+    }
   })
 
   const awaitController = async (): Promise<SessionControllerShim | undefined> => {
     const deadline = Date.now() + (options.controllerWaitMs ?? CONTROLLER_WAIT_MS)
-    for (;;) {
+    while (!signal.aborted) {
       const controller = ctx.get('sessionController')
-      if (controller !== undefined || lifetime.signal.aborted || Date.now() >= deadline) {
-        return controller ?? undefined
-      }
-      await new Promise((resolve) => {
-        setTimeout(resolve, options.controllerPollMs ?? CONTROLLER_POLL_MS)
-      })
+      if (controller !== undefined || Date.now() >= deadline) return controller
+      await cancellableSleep(options.controllerPollMs ?? CONTROLLER_POLL_MS, signal)
     }
+    return undefined
   }
 
   const resumeOne = async (entry: RunningEntry): Promise<boolean> => {
-    const registry: AgentRegistry | undefined = ctx.get('agents')
-    let agent: Agent | undefined = registry?.get(SessionId(entry.sessionId))
+    const id = SessionId(entry.sessionId)
+    const archived = (): boolean =>
+      ctx.get('workspaceRegistry')?.archivedSessionIds.includes(id) === true
+    if (options.spool?.get(id) !== undefined || archived()) return true
+    let agent = ctx.get('agents')?.get(id)
     if (agent === undefined) {
       const controller = await awaitController()
+      if (signal.aborted) return false
       if (controller === undefined) {
-        ctx.logger.warn(
-          'auto-continue: no sessionController to resume "%s" after restart',
-          entry.sessionId,
-        )
+        ctx.logger.warn('auto-continue: no sessionController to resume "%s" after restart', id)
         return false
       }
-      const result = await controller.agents.resolveAgent(SessionId(entry.sessionId))
+      const result = await controller.resolveAgent(id)
       if ('error' in result) {
-        ctx.logger.warn(
-          'auto-continue: cannot reopen "%s" after restart (%o)',
-          entry.sessionId,
-          result.error,
-        )
-        return true
+        ctx.logger.warn('auto-continue: cannot reopen "%s" after restart (%o)', id, result.error)
+        return result.error.code === 'session/not-found'
       }
       agent = result.agent
     }
-    if (agent === undefined || lastTurnCompleted(agent)) {
-      if (agent !== undefined)
-        ctx.logger.info(
-          'auto-continue: "%s" finished its turn before the restart — not resumed',
-          entry.sessionId,
-        )
-      return true
-    }
-    agent.followup(resumeMessage)
-    ctx.logger.info('auto-continue: resumed "%s" after restart', entry.sessionId)
+    if (signal.aborted) return false
+    if (running.get(id) !== entry || archived() || !canResume(agent, entry)) return true
+    agent.followup(
+      createUserMessage({
+        content: [{ type: 'text', text: RESTART_RESUME_MESSAGE }],
+        source: { kind: 'user' },
+      }),
+    )
+    ctx.logger.info('auto-continue: resumed "%s" after restart', id)
     return true
   }
 
-  const adoptAtBoot = async (): Promise<void> => {
-    if (!config.resumeOnRestart || lifetime.signal.aborted) return
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(await readFile(path, 'utf8'))
-    } catch {
-      return
-    }
-    const record = isRecord(parsed) ? parsed : undefined
-    const rawEntries = record?.entries
-    const entries = Array.isArray(rawEntries) ? rawEntries.filter((entry) => isEntry(entry)) : []
-
-    const now = Date.now()
-    const fresh = entries.filter((entry) => now - entry.at < config.resumeMaxAgeMs)
-    const stale = entries.length - fresh.length
-    if (stale > 0)
-      ctx.logger.info(
-        'auto-continue: %d restart-resume entr%s past the max-age window — skipped',
-        stale,
-        stale === 1 ? 'y is' : 'ies are',
-      )
-    if (fresh.length === 0) return
-
-    await new Promise((resolve) => {
-      setTimeout(resolve, settleMs)
-    })
-    for (const entry of fresh) {
-      if (lifetime.signal.aborted) return
+  const adopt = async (): Promise<void> => {
+    const entries = await loaded
+    if (entries.length === 0) return
+    await options.spool?.load()
+    if (!(await cancellableSleep(options.settleMs ?? BOOT_SETTLE_MS, signal))) return
+    for (const entry of entries) {
+      if (signal.aborted) return
+      if (running.get(entry.sessionId) !== entry) continue
       try {
-        if (!(await resumeOne(entry))) return
+        if (Date.now() - entry.at >= config.resumeMaxAgeMs || (await resumeOne(entry))) {
+          await update(
+            () => running.get(entry.sessionId) === entry && running.delete(entry.sessionId),
+          )
+        }
       } catch (error) {
         ctx.logger.warn('auto-continue: restart-resume of "%s" failed: %o', entry.sessionId, error)
       }
-      await new Promise((resolve) => {
-        setTimeout(resolve, staggerMs)
-      })
+      await cancellableSleep(options.staggerMs ?? RESUME_STAGGER_MS, signal)
     }
-
-    persist([])
   }
 
-  void adoptAtBoot()
-
+  const adoption = adopt()
   ctx.effect(
-    () => () => {
-      lifetime.abort(new Error('auto-continue plugin disposed'))
+    () => async () => {
+      lifetime.abort()
+      await adoption
+      await writes
     },
-    'auto-continue: stop restart-resume',
+    'auto-continue: drain restart mirror',
   )
 }

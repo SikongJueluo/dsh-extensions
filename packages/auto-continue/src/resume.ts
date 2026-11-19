@@ -70,8 +70,15 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
       return
     }
 
+    const id = SessionId(entry.sessionId)
+    const archived = (): boolean =>
+      ctx.get('workspaceRegistry')?.archivedSessionIds.includes(id) === true
+    if (archived()) {
+      await spool.delete(id)
+      return
+    }
     const registry: AgentRegistry | undefined = ctx.get('agents')
-    let agent: Agent | undefined = registry?.get(SessionId(entry.sessionId))
+    let agent: Agent | undefined = registry?.get(id)
     if (agent === undefined) {
       const controller = ctx.get('sessionController')
       if (controller === undefined) {
@@ -81,19 +88,24 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
         )
         throw new RetryLater()
       }
-      const result = await controller.agents.resolveAgent(SessionId(entry.sessionId))
+      const result = await controller.resolveAgent(id)
       if ('error' in result) {
-        await spool.delete(entry.sessionId)
-        ctx.logger.warn(
-          'auto-continue: cannot resume "%s" (%o) — record dropped',
-          entry.sessionId,
-          result.error,
-        )
+        if (result.error.code !== 'session/not-found') {
+          ctx.logger.warn('auto-continue: cannot resume "%s" yet (%o)', id, result.error)
+          throw new RetryLater()
+        }
+        await spool.delete(id)
+        ctx.logger.warn('auto-continue: cannot resume "%s" (%o) — record dropped', id, result.error)
         return
       }
       agent = result.agent
     }
 
+    if (lifetime.signal.aborted || spool.get(id) !== entry) return
+    if (archived() || agent.session.header.origin === 'subagent') {
+      await spool.delete(id)
+      return
+    }
     if (agent.status !== 'idle') {
       ctx.logger.info(
         'auto-continue: "%s" is busy — retrying in %d ms',
@@ -129,38 +141,39 @@ export function registerResume(ctx: Context, config: ResumeConfig, spool: WaitSp
     )
   }
 
+  const waitAndResume = async (initial: PendingWait): Promise<void> => {
+    let entry = initial
+    let nextCheck = entry.retryAt
+    while (await cancellableSleep(Math.max(0, nextCheck - Date.now()), lifetime.signal)) {
+      const fresh = spool.get(entry.sessionId)
+      if (fresh === undefined) return
+      if (fresh !== entry) {
+        entry = fresh
+        nextCheck = entry.retryAt
+        continue
+      }
+      try {
+        await attemptResume(entry)
+        return
+      } catch (error) {
+        if (!(error instanceof RetryLater)) {
+          ctx.logger.warn(
+            'auto-continue: resuming "%s" failed: %o — record kept for the next start',
+            entry.sessionId,
+            error,
+          )
+          return
+        }
+        nextCheck = Math.min(Date.now() + RETRY_LATER_MS, entry.firstFailureAt + config.maxWaitMs)
+      }
+    }
+  }
+
   const schedule = (entry: PendingWait): void => {
     if (lifetime.signal.aborted || pending.has(entry.sessionId)) return
-    const task = cancellableSleep(Math.max(0, entry.retryAt - Date.now()), lifetime.signal)
-      .then(async (slept) => {
-        if (!slept) return undefined
-        const fresh = spool.get(entry.sessionId)
-        if (fresh === undefined) return undefined
-
-        if (fresh.retryAt !== entry.retryAt) {
-          schedule(fresh)
-          return undefined
-        }
-        try {
-          await attemptResume(fresh)
-        } catch (error) {
-          if (error instanceof RetryLater && !expired(fresh)) {
-            schedule({ ...fresh, retryAt: Date.now() + RETRY_LATER_MS })
-            return undefined
-          }
-          if (!(error instanceof RetryLater)) {
-            ctx.logger.warn(
-              'auto-continue: resuming "%s" failed: %o — record kept for the next start',
-              entry.sessionId,
-              error,
-            )
-          }
-        }
-        return undefined
-      })
-      .finally(() => {
-        pending.delete(entry.sessionId)
-      })
+    const task = waitAndResume(entry).finally(() => {
+      pending.delete(entry.sessionId)
+    })
     pending.set(entry.sessionId, task)
   }
 
