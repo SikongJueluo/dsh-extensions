@@ -6,7 +6,7 @@
 
 DSH 在模型请求失败后、turn 关闭前派发 `agent/request-error` waterfall。返回 `{ kind: 'retry' }` 会在原 turn、原 step 中重新发请求，不追加用户消息，也不重做此前已记录的工具步骤。
 
-- **短时故障**：优先沿用宿主重试。宿主未接管时，对 `SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE` 以及 pi-ai 归为 `PI_AI_ERROR` 的精确提示 `The service is temporarily unavailable. Please retry later.`，每个失败 step 最多补试 4 次，间隔 5、15、30、60 秒。服务商要求更长等待时尊重 `Retry-After`，单次超过 2 分钟则不补试。身份验证、其他未分类错误以及显式关闭重试的路由不接管；不切换模型或服务商。
+- **短时故障**：优先沿用宿主重试。宿主未接管时，对 `SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE` 以及 pi-ai 归为 `PI_AI_ERROR` 的精确提示 `The service is temporarily unavailable. Please retry later.`，每个失败 step 最多补试 4 次，间隔 5、15、30、60 秒。服务商要求更长等待时尊重结构化 `providerRetryAfterMs`；该字段缺失时，也识别报错末尾完整 JSON 正文中以秒为单位的非负数值 `retry_after`，并在宿主重试前传递等待提示。例如 Cloudflare 502 的 `"retry_after": 60` 会让下一次请求至少等待 60 秒。正文提示超过 2 分钟时直接停止这条普通重试路径；格式错误或非数值提示忽略。身份验证、其他未分类错误、显式关闭重试以及 `always` 路由不接管；不切换模型或服务商。
 - **配额耗尽**：`QUOTA` 或原生重试未接管的 `RATE_LIMIT` 仍按套餐重置点等待。
 
 ```

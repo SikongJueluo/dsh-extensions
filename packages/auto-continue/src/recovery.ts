@@ -20,6 +20,22 @@ function isTransientFailure(failure: LlmFailure): boolean {
   )
 }
 
+function bodyRetryAfterSeconds(message: string): number | undefined {
+  const start = message.indexOf('{')
+  if (start === -1) return undefined
+  let body: unknown
+  try {
+    body = JSON.parse(message.slice(start))
+  } catch {
+    return undefined
+  }
+  if (typeof body !== 'object' || body === null || !('retry_after' in body)) return undefined
+  const seconds = body.retry_after
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0
+    ? seconds
+    : undefined
+}
+
 function transientDelay(failure: LlmFailure, attempts: number): number | undefined {
   const backoff = TRANSIENT_BACKOFF_MS[attempts]
   if (backoff === undefined) return undefined
@@ -257,8 +273,30 @@ export function registerRecovery(ctx: Context, config: RecoveryConfig): void {
     return operation
   })
 
+  const disposeHintListener = ctx.on(
+    'agent/request-error',
+    (payload, next) => {
+      const { failure, retryPolicy } = payload
+      if (
+        !isTransientFailure(failure) ||
+        retryPolicy?.mode === 'always' ||
+        retryPolicy?.maxRetries === 0 ||
+        failure.providerRetryAfterMs !== undefined
+      ) {
+        return next()
+      }
+      const retryAfterSeconds = bodyRetryAfterSeconds(failure.message)
+      if (retryAfterSeconds === undefined) return next()
+      if (retryAfterSeconds > MAX_TRANSIENT_DELAY_MS / 1000) return Promise.resolve(undefined)
+      payload.failure = { ...failure, providerRetryAfterMs: retryAfterSeconds * 1000 }
+      return next()
+    },
+    { prepend: true },
+  )
+
   ctx.effect(
     () => async () => {
+      disposeHintListener()
       disposeListener()
       lifetime.abort(new Error('auto-continue plugin disposed'))
       await Promise.allSettled(active)
