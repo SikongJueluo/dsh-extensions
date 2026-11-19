@@ -12,10 +12,12 @@ import type {
   ImageAttachmentRef,
   RequestImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
+import type { ConnectionRequestRejection } from '@deepseek-ai/dsh-client-connection'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { CredentialKey, CredentialRecord } from '@deepseek-ai/dsh-credentials'
+import type { WebResourceRoute, WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { GenerateOptions, RequestMessage, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { apply } from '../src/index.js'
+import { apply, inject, name } from '../src/index.js'
 
 export const TEST_ENV_KEY = 'MORE_PROVIDERS_TEST_KEY'
 export const TEST_API_KEY = 'sk-static-test-key'
@@ -64,14 +66,32 @@ function fakeLlmService() {
 function dispose(): void {}
 
 function fakeWebServerService() {
-  const routes: { def: Record<string, unknown>; dispose: () => void }[] = []
+  const routes: { def: WebRoute | WebResourceRoute; dispose: () => void }[] = []
   const service = {
-    register(def: Record<string, unknown>): () => void {
+    register(def: WebRoute | WebResourceRoute): () => void {
       routes.push({ def, dispose })
       return dispose
     },
   }
   return { routes, service }
+}
+
+/** The one host `authorization` member the ChatGPT mount path calls. */
+function fakeAuthorizationService() {
+  return {
+    registerFlow(): () => void {
+      return () => {}
+    },
+  }
+}
+
+/** The one host `connection` member the sign-in route consults before dispatch. */
+function fakeConnectionService() {
+  return {
+    requestRejection(): ConnectionRequestRejection {
+      return undefined
+    },
+  }
 }
 
 /** In-memory host `credentials` service that emits the record-update event. */
@@ -318,7 +338,7 @@ export interface HarnessOptions {
   envKey?: string
 }
 
-/** Build a context with fixture services and run the real plugin apply. */
+/** Build a context with fixture services and mount the real plugin through `ctx.plugin`, so its declared `inject` list is what the plugin actually sees. */
 export async function createHarness(options: HarnessOptions): Promise<Harness> {
   const ctx = new Context()
   const llm = fakeLlmService()
@@ -328,16 +348,24 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     records.set(String(credentialKey('oauth-providers', 'chatgpt')), chatgptGrant())
   }
   const credentials = fakeCredentialsService(ctx, records)
+  const authorization = fakeAuthorizationService()
   const attachments = options.attachments === false ? undefined : fixtureAttachmentStore()
 
-  ctx.provide('llm', llm.service as never)
-  ctx.provide('webServer', web.service as never)
-  ctx.provide('credentials', credentials.service as never)
-  if (attachments !== undefined) ctx.provide('attachments', attachments.store as never)
+  await ctx.plugin({
+    name: 'more-providers-test-host',
+    apply(hostCtx) {
+      hostCtx.provide('llm', llm.service as never)
+      hostCtx.provide('webServer', web.service as never)
+      hostCtx.provide('credentials', credentials.service as never)
+      hostCtx.provide('authorization', authorization as never)
+      hostCtx.provide('connection', fakeConnectionService() as never)
+      if (attachments !== undefined) hostCtx.provide('attachments', attachments.store as never)
+    },
+  })
   process.env[TEST_ENV_KEY] = options.envKey ?? TEST_API_KEY
 
   const file = await writeYaml(options.yaml)
-  await apply(ctx, { configFile: file })
+  await ctx.plugin({ name, inject, apply }, { configFile: file })
   const harness: Harness = { ctx, llm, web, credentials, attachments, file }
   liveHarnesses.push(harness)
   return harness

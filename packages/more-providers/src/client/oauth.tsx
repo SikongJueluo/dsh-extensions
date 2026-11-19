@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -37,6 +38,9 @@ const en: Record<string, string> = {
   statusHttpError: 'Backend error: {detail}',
   statusModelsError: 'Cannot load the model catalog: {detail}',
   statusCheckError: 'Status check failed: {detail}',
+  providersLoadFailed: 'Could not load sign-in providers: {detail}',
+  providersEmpty: 'No OAuth sign-in providers are registered.',
+  retry: 'Retry',
   refresh: 'Refresh',
   signIn: 'Sign in',
   signOut: 'Sign out',
@@ -67,6 +71,9 @@ const zh: Record<string, string> = {
   statusHttpError: '后端返回错误：{detail}',
   statusModelsError: '无法读取模型目录：{detail}',
   statusCheckError: '状态检测失败：{detail}',
+  providersLoadFailed: '无法读取登录项：{detail}',
+  providersEmpty: '没有已注册的 OAuth 登录项。',
+  retry: '重试',
   refresh: '刷新',
   signIn: '登录',
   signOut: '退出登录',
@@ -233,23 +240,33 @@ interface SectionProps {
 
 interface ProviderCardProps extends SectionProps {
   provider: Provider
-  refreshProviders: () => Promise<RpcResult<{ providers?: Provider[] }> | null>
+  refreshProviders: () => Promise<void>
 }
 
+/** The channel's provider list, keeping already loaded cards when a refresh fails. */
+type ProviderList =
+  | { status: 'loading'; providers: Provider[] }
+  | { status: 'ready'; providers: Provider[] }
+  | { status: 'failed'; providers: Provider[]; detail: string }
+
 function Section({ operations, t }: SectionProps) {
-  const [providers, setProviders] = useState<Provider[]>([])
+  const [list, setList] = useState<ProviderList>({ status: 'loading', providers: [] })
   const aliveRef = useRef(true)
 
-  const refreshChannelProviders = useCallback(
-    () =>
-      callRpc<{ providers?: Provider[] }>('providers')
-        .then((result) => {
-          if (result.ok && aliveRef.current) setProviders(result.value?.providers ?? [])
-          return result
-        })
-        .catch(() => null),
-    [],
-  )
+  const refreshChannelProviders = useCallback(async () => {
+    const result = await callRpc<{ providers?: Provider[] }>('providers').catch(
+      (error: unknown): RpcResult<{ providers?: Provider[] }> => ({
+        ok: false,
+        error: { message: error instanceof Error ? error.message : String(error) },
+      }),
+    )
+    if (!aliveRef.current) return
+    setList((current) =>
+      result.ok
+        ? { status: 'ready', providers: result.value?.providers ?? [] }
+        : { status: 'failed', providers: current.providers, detail: result.error?.message ?? '' },
+    )
+  }, [])
 
   useEffect(() => {
     aliveRef.current = true
@@ -266,7 +283,26 @@ function Section({ operations, t }: SectionProps) {
       </h2>
       <p className="dshx:mb-4 dshx:mt-1 dshx:text-sm dshx:text-fg-muted">{t('intro')}</p>
       <div className="dshx:flex dshx:flex-col dshx:gap-3.5">
-        {providers.map((provider) => (
+        {list.status === 'failed' ? (
+          <Alert variant="error" className="dshx:flex dshx:items-center dshx:gap-2">
+            <span className="dshx:flex-1">
+              {t('providersLoadFailed', { detail: shorten(list.detail) })}
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                void refreshChannelProviders()
+              }}
+            >
+              {t('retry')}
+            </Button>
+          </Alert>
+        ) : null}
+        {list.status === 'ready' && list.providers.length === 0 ? (
+          <p className="dshx:text-sm dshx:text-fg-muted">{t('providersEmpty')}</p>
+        ) : null}
+        {list.providers.map((provider) => (
           <ProviderCard
             key={provider.id}
             provider={provider}

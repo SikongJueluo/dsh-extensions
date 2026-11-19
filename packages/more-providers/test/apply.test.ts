@@ -2,9 +2,12 @@
  * Startup contract of the merged plugin: default-on ChatGPT, strict fail-closed configuration, preserved host surfaces, and the status route that keeps serving the error to the browser half.
  * @module dsh-more-providers/test/apply
  */
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { Readable } from 'node:stream'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { ConfigStatusPayload } from '@dsh-extensions/config'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { RPC_CHANNEL } from '../src/identity.js'
 import { OAuthProvidersService } from '../src/oauth/service.js'
 import {
   TEST_API_KEY,
@@ -30,6 +33,63 @@ async function awaitMount(harness: Harness): Promise<void> {
     () => harness.llm.adapters.some((entry) => entry.providers.includes('chatgpt')),
     'the ChatGPT adapter to mount',
   )
+}
+
+/** One provider row as the browser sign-in channel serves it. */
+interface ProviderRow {
+  id: string
+  label?: string
+  signedIn?: boolean
+}
+
+/** POST `providers` through the HTTP route the plugin registered and return the RPC result. */
+async function listChannelProviders(harness: Harness): Promise<{
+  ok: boolean
+  value?: { providers?: ProviderRow[] }
+  error?: { code?: string; message?: string }
+}> {
+  await waitFor(
+    () => harness.web.routes.some((route) => route.def.path === RPC_CHANNEL),
+    'the sign-in channel route',
+  )
+  const route = harness.web.routes.find((entry) => entry.def.path === RPC_CHANNEL)
+  if (route === undefined || !('handler' in route.def))
+    throw new Error('the sign-in channel route was not registered')
+  const req = Readable.from([
+    Buffer.from(
+      JSON.stringify({
+        type: 'client-request',
+        rpcId: 'test-providers',
+        method: 'providers',
+        payload: {},
+      }),
+    ),
+  ]) as unknown as IncomingMessage
+  req.method = 'POST'
+  req.url = `${RPC_CHANNEL}/providers`
+  req.headers = { 'content-type': 'application/json' }
+  const captured = { status: 0, body: '' }
+  const res = {
+    writeHead(status: number): unknown {
+      captured.status = status
+      return res
+    },
+    end(body?: string): unknown {
+      captured.body = body ?? ''
+      return res
+    },
+  } as unknown as ServerResponse
+  await route.def.handler(req, res)
+  expect(captured.status).toBe(200)
+  return (
+    JSON.parse(captured.body) as {
+      result: {
+        ok: boolean
+        value?: { providers?: ProviderRow[] }
+        error?: { code?: string; message?: string }
+      }
+    }
+  ).result
 }
 
 describe('apply: ChatGPT default-on and API-key routes', () => {
@@ -102,6 +162,34 @@ describe('apply: ChatGPT default-on and API-key routes', () => {
   })
 })
 
+describe('apply: browser sign-in channel', () => {
+  it('serves the signed-in ChatGPT card from the preserved grant', async () => {
+    const harness = await createHarness({ yaml: 'providers: {}\n' })
+    await awaitMount(harness)
+
+    const result = await listChannelProviders(harness)
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        providers: [
+          expect.objectContaining({ id: 'chatgpt', label: 'ChatGPT (OpenAI)', signedIn: true }),
+        ],
+      },
+    })
+  })
+
+  it('serves the ChatGPT card as signed out without a grant', async () => {
+    const harness = await createHarness({ yaml: 'providers: {}\n', chatgptGrant: false })
+    await awaitMount(harness)
+
+    const result = await listChannelProviders(harness)
+    expect(result).toEqual({
+      ok: true,
+      value: { providers: [expect.objectContaining({ id: 'chatgpt', signedIn: false })] },
+    })
+  })
+})
+
 describe('apply: fail-closed configuration', () => {
   it('registers no routes and no services for an invalid document', async () => {
     const harness = await createHarness({
@@ -122,7 +210,8 @@ describe('apply: fail-closed configuration', () => {
     const status = harness.web.routes.find(
       (route) => route.def.path === '/dsh-more-providers/config-status',
     )
-    const resource = status?.def.resource as (() => Promise<Response>) | undefined
+    const resource =
+      status !== undefined && 'resource' in status.def ? status.def.resource : undefined
     if (resource === undefined) throw new Error('the config-status route was not registered')
     const response = await resource()
     const payload = (await response.json()) as ConfigStatusPayload

@@ -309,7 +309,7 @@ export function registerAuthChannel(ctx: Context): AuthChannel {
     respond(200, JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId, result }))
   }
 
-  ctx.inject(['authorization', 'connection', 'webServer'], (svcCtx) => {
+  ctx.inject(['authorization', 'connection', 'credentials', 'webServer'], (svcCtx) => {
     svcCtx.effect(
       () =>
         svcCtx.webServer.register({
