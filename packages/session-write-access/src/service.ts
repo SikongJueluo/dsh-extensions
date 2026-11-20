@@ -1,7 +1,7 @@
 /** @module dsh-session-write-access/service */
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-agent'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
@@ -10,7 +10,8 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-system-prompt'
-import type {} from '@deepseek-ai/dsh-tools'
+import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
+import type { ToolExecutionInput } from '@deepseek-ai/dsh-tools'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { AccessError, AccessStore } from './access.js'
 import type {
@@ -29,7 +30,7 @@ import {
 } from './config.js'
 import type { Config } from './config.js'
 import { ACCESS_DOMAIN, SESSION_WRITE_ACCESS_DOMAIN } from './domain.js'
-import type { ForkRecord } from './domain.js'
+import type { ForkRecord, RequestRecord } from './domain.js'
 import { applyGroupPolicy } from './policy.js'
 import { registerWriteAccessTools } from './tools.js'
 
@@ -60,6 +61,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
   private readonly protectedRoots: readonly string[]
   private readonly configuredWorkspaceRoot: string | undefined
   private readonly held = new Map<string, { cwd?: string }>()
+  private readonly awaitingApproval = new Set<string>()
   private readonly blocked = new Map<string, string>()
   private forkActive = false
   private domainOwned = false
@@ -458,6 +460,7 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
       .slice(0, 5)
     return {
       ...status,
+      pending: status.pending.filter((request) => !this.awaitingApproval.has(request.requestId)),
       deploymentRoots: this.additionalWritableRoots ?? [],
       defaultMode: this.defaultMode,
       effectiveMode:
@@ -494,6 +497,57 @@ export class SessionWriteAccessPolicy extends SandboxPolicyService {
   /** Submit an Agent request; returns the pending record (or the existing grant). */
   async requestDirectory(sessionId: string, path: string, reason: string): Promise<RequestResult> {
     return this.requireAccess().request(sessionId, path, reason)
+  }
+
+  /**
+   * Block a request on the Host approval seam until the user answers, then commit
+   * that answer; `unavailable` means no interactive channel answered and the
+   * caller keeps the non-blocking pending flow.
+   * @param request - the pending request this answer settles.
+   * @param options - the asking tool, its agent, call and cancellation signal.
+   * @returns how the request settled.
+   */
+  async awaitApproval(
+    request: RequestRecord,
+    options: {
+      toolName: string
+      agent: Agent | undefined
+      callId: ToolExecutionInput['callId']
+      signal: AbortSignal
+    },
+  ): Promise<'allow' | 'deny' | 'cancelled' | 'unavailable'> {
+    const approval = this.ctx.get('approval')
+    if (approval === undefined || options.agent === undefined) return 'unavailable'
+    this.awaitingApproval.add(request.requestId)
+    try {
+      let outcome: ApprovalOutcome
+      try {
+        outcome = await approval.request({
+          agent: options.agent,
+          toolName: options.toolName,
+          callId: options.callId,
+          reason: `write access under ${request.path}: ${request.reason}`,
+          displayReason: {
+            en: `Allow write access to ${request.path}? The directory stays writable for this session until you revoke it in the write-scope panel.`,
+            zh: `允许写入目录 ${request.path}？该目录会保持可写，直到你在「写入范围」面板撤销。`,
+          },
+          signal: options.signal,
+        })
+      } catch {
+        return 'unavailable'
+      }
+      if (outcome === 'allowed-once') {
+        await this.requireAccess().decideCurrent(request.requestId, 'allow')
+        return 'allow'
+      }
+      if (outcome === 'rejected') {
+        await this.requireAccess().decideCurrent(request.requestId, 'deny')
+        return 'deny'
+      }
+      return outcome === 'cancelled' ? 'cancelled' : 'unavailable'
+    } finally {
+      this.awaitingApproval.delete(request.requestId)
+    }
   }
 
   /** Apply a user decision and return the refreshed view plus the decision. */

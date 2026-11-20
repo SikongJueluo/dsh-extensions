@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -148,6 +148,7 @@ async function mount(options: {
   protectedRoots?: string[]
   headers?: Map<string, Record<string, unknown>>
   reject?: number
+  approval?: { request: (req: Record<string, unknown>) => Promise<string> }
   sessionQuery?: {
     observeSession: (id: string) => Promise<{ header: Record<string, unknown>; events: unknown[] }>
   }
@@ -169,6 +170,7 @@ async function mount(options: {
     get: (id: string) => liveAgents.get(id),
   })
   ctx.provide('connection', { requestRejection: () => options.reject })
+  if (options.approval !== undefined) ctx.provide('approval', options.approval)
   ctx.provide('webServer', {
     register(route: {
       kind: string
@@ -694,5 +696,130 @@ describe('SessionWriteAccessPolicy fork intent and host failure', () => {
     expect(warnings).toContain(
       'could not give the Fork-created session its default workspace; it stays unattributed',
     )
+  })
+})
+
+/** Mount one attributed root session (cwd = workspace) for an approval test. */
+async function rootSession(options: Parameters<typeof mount>[0]) {
+  const { ctx, service, liveAgents } = await mount(options)
+  const session = fakeSession('root', { cwd: options.workspace })
+  liveAgents.set('root', { session })
+  await ctx.serial('agent/created', { agent: fakeAgent(session, ctx), source: 'startup' })
+  await service.ensureSession('root')
+  return { ctx, service, session }
+}
+
+/** Ask one directory request through the seam with the given fake answer. */
+function ask(
+  service: SessionWriteAccessPolicy,
+  ctx: Context,
+  session: Session,
+  request: Parameters<SessionWriteAccessPolicy['awaitApproval']>[0],
+) {
+  return service.awaitApproval(request, {
+    toolName: 'write_access_request',
+    agent: fakeAgent(session, ctx),
+    callId: 'call-1' as never,
+    signal: new AbortController().signal,
+  })
+}
+
+describe('SessionWriteAccessPolicy blocking approval', () => {
+  it('commits an allow and stops exposing the request as pending', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-approval-'))
+    const workspace = join(root, 'workspace')
+    const extra = join(root, 'extra')
+    mkdirSync(workspace)
+    mkdirSync(extra)
+    let asked: Record<string, unknown> | undefined
+    const { ctx, service, session } = await rootSession({
+      workspace,
+      approval: {
+        request: async (req) => {
+          asked = req
+          return 'allowed-once'
+        },
+      },
+    })
+    const result = await service.requestDirectory('root', extra, 'read generated fixtures')
+    if (result.kind !== 'pending') throw new Error('expected a pending request')
+    const decision = await ask(service, ctx, session, result.request)
+    expect(decision).toBe('allow')
+    expect(asked?.toolName).toBe('write_access_request')
+    expect(String(asked?.reason)).toContain(realpathSync(extra))
+    const view = service.view('root')
+    expect(view.pending).toHaveLength(0)
+    expect(view.grants.map((grant) => grant.path)).toContain(realpathSync(extra))
+  })
+
+  it('hides the request from the pending list while the question is open', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-approval-open-'))
+    const workspace = join(root, 'workspace')
+    const extra = join(root, 'extra')
+    mkdirSync(workspace)
+    mkdirSync(extra)
+    const answer: { resolve?: (outcome: string) => void } = {}
+    const question = new Promise<string>((resolve) => {
+      answer.resolve = resolve
+    })
+    const { ctx, service, session } = await rootSession({
+      workspace,
+      approval: { request: () => question },
+    })
+    const result = await service.requestDirectory('root', extra, 'read generated fixtures')
+    if (result.kind !== 'pending') throw new Error('expected a pending request')
+    const settled = ask(service, ctx, session, result.request)
+    await Promise.resolve()
+    expect(service.view('root').pending).toHaveLength(0)
+    answer.resolve?.('rejected')
+    expect(await settled).toBe('deny')
+    expect(service.view('root').pending).toHaveLength(0)
+  })
+
+  it('records a rejection without granting anything', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-approval-deny-'))
+    const workspace = join(root, 'workspace')
+    const extra = join(root, 'extra')
+    mkdirSync(workspace)
+    mkdirSync(extra)
+    const { ctx, service, session } = await rootSession({
+      workspace,
+      approval: { request: async () => 'rejected' },
+    })
+    const result = await service.requestDirectory('root', extra, 'read generated fixtures')
+    if (result.kind !== 'pending') throw new Error('expected a pending request')
+    expect(await ask(service, ctx, session, result.request)).toBe('deny')
+    const view = service.view('root')
+    expect(view.grants.map((grant) => grant.path)).not.toContain(realpathSync(extra))
+    expect(view.pending).toHaveLength(0)
+  })
+
+  it('leaves a withdrawn question pending', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-approval-cancel-'))
+    const workspace = join(root, 'workspace')
+    const extra = join(root, 'extra')
+    mkdirSync(workspace)
+    mkdirSync(extra)
+    const { ctx, service, session } = await rootSession({
+      workspace,
+      approval: { request: async () => 'cancelled' },
+    })
+    const result = await service.requestDirectory('root', extra, 'read generated fixtures')
+    if (result.kind !== 'pending') throw new Error('expected a pending request')
+    expect(await ask(service, ctx, session, result.request)).toBe('cancelled')
+    expect(service.view('root').pending).toHaveLength(1)
+  })
+
+  it('reports unavailable and keeps the request pending without an approval channel', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-swa-approval-none-'))
+    const workspace = join(root, 'workspace')
+    const extra = join(root, 'extra')
+    mkdirSync(workspace)
+    mkdirSync(extra)
+    const { ctx, service, session } = await rootSession({ workspace })
+    const result = await service.requestDirectory('root', extra, 'read generated fixtures')
+    if (result.kind !== 'pending') throw new Error('expected a pending request')
+    expect(await ask(service, ctx, session, result.request)).toBe('unavailable')
+    expect(service.view('root').pending).toHaveLength(1)
   })
 })

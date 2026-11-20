@@ -2,7 +2,7 @@
 
 持久化的 Session 多项目写入授权。默认只允许会话原始 workspace；用户可以在面板里提前添加目录，或在 Agent 越界写入被拒绝后批准它的目录申请。授权按 session 家族共享、重启恢复，文件工具与 bash 读取同一份策略。
 
-本包**替换**宿主 `sandbox-policy` 行，继续提供同名 `sandboxPolicy` 服务：stock 的 mode、workspace 解析、部署级 roots 和 runtime context 都保留，只在 `workspace-write` 结果上追加当前授权组的目录。这不是稳定的第三方 roots 扩展点，而是对 DSH `0.2.2-rc.1` 组合的钉版集成。
+本包**替换**宿主 `sandbox-policy` 行，继续提供同名 `sandboxPolicy` 服务：stock 的 mode、workspace 解析、部署级 roots 和 runtime context 都保留，只在 `workspace-write` 结果上追加当前授权组的目录。这不是稳定的第三方 roots 扩展点，而是对 DSH `0.2.2-rc.5` 组合的钉版集成。
 
 ## 行为
 
@@ -58,9 +58,9 @@ dsh --profile web --patch "$PWD/packages/session-write-access/dev.patch.yml" --n
 
 composer 左侧的「写入范围」按钮仅在 `workspace-write` 模式下显示；切换到只读或全部权限时隐藏，已有授权记录保留：
 
-- 点击带权限图标的按钮，在按钮上方展开宿主 `MenuSurface` 悬浮多选列表：当前工作区置顶、固定勾选；其他工作区勾选即授权，取消即撤销，列表保持展开；
+- 点击带权限图标的按钮，在按钮上方展开宿主 `MenuSurface` 悬浮多选列表（卡片骨架用共享的 `MenuPanel`，见 [packages/ui](../ui/README.md)：trigger 上的 `anchor-name`、面板 `position-anchor` + `@position-try` 负责与 trigger 的 4px 间距、上/下翻转和 12px 视口边距，不做 JS 测量；只滚卡片内部的 viewport，标题与错误块固定）：当前工作区置顶、固定勾选；其他工作区勾选即授权，取消即撤销，列表保持展开；
 - 部署级目录及已被父目录覆盖的工作区保持勾选，固定权限不可在此取消；已有的非工作区目录也显示在同一列表中；
-- 待确认申请直接显示在输入框上方，保留路径、理由及宿主样式的允许/拒绝按钮；当前会话工具执行结束后刷新申请状态，无需先打开菜单；
+- Agent 申请走宿主 approval 通道并**阻塞**：composer 被宿主审批卡接管，卡片写明目录与理由，Agent 停在 `write_access_request` 里等用户点允许/拒绝（Enter / Esc 也可）。只有组合里没有审批通道（headless、无 browser owner）或本轮被取消时，申请才落到面板的待确认列表，Agent 拿到 `pending` 继续；
 - 不再显示「更多」及其中的目录输入/选择、刷新、历史记录和 Fork 入口。其他目录由 Agent 提交申请，错误时列表提供重试。
 
 列表和授权卡片是用户专用操作面；Agent 只有下面两个工具。
@@ -68,9 +68,9 @@ composer 左侧的「写入范围」按钮仅在 `workspace-write` 模式下显�
 ## Agent 工具
 
 - `write_access_status`：查看当前 workspace、授权目录、待确认申请。
-- `write_access_request`：提交一个明确存在的绝对目录和理由。
+- `write_access_request`：提交一个明确存在的绝对目录和理由；调用会阻塞到用户回答，返回 `granted` / `denied` / `cancelled`，没有审批通道时返回 `pending`（申请留在面板里）。
 
-工具不经过普通 approval waterfall；auto-permit 自动放行一次命令不会产生目录授权。审批后不会自动重放失败的 bash 命令，Agent 需要先检查副作用再继续。
+目录申请走宿主 `approval` waterfall（与 bash 升权同一条通道）；`auto-permit` / `cmd-permit` 只认领 `toolName === "bash"` 的请求，不会自动放行目录申请，一次命令的自动放行也不会产生目录授权。审批通过后不会自动重放失败的 bash 命令，Agent 需要先检查副作用再继续。
 
 `storageDomain` 是本包的硬依赖：没有 storage-domain 行时插件拒绝加载，而不是退回“授权只存在内存”。
 

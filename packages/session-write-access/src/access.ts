@@ -549,41 +549,76 @@ export class AccessStore {
           `the write scope changed since this page loaded (expected revision ${expectedRevision}, current ${group.revision}); reload and decide again`,
         )
       }
-      const now = this.now()
-      if (decision === 'deny') {
-        const denied: RequestRecord = {
-          ...request,
-          status: 'denied',
-          decidedAt: now,
-          decidedBy: 'user',
-        }
-        await this.tables.requests.put(denied.requestId, denied)
-        return { request: denied, group, changed: true }
+      return this.settle(request, group, decision)
+    })
+  }
+
+  /**
+   * Apply a decision made live rather than by a page that displayed a revision:
+   * a blocking approval the user answered just now has no stale page to guard,
+   * so this path skips the revision check and reads the request's own group.
+   * @param requestId - the request being decided.
+   * @param decision - allow or deny.
+   */
+  async decideCurrent(requestId: string, decision: 'allow' | 'deny'): Promise<DecisionResult> {
+    return this.enqueue(async () => {
+      const request = this.tables.requests.get(requestId)
+      if (request === undefined) {
+        throw new AccessError('REQUEST_MISSING', `request ${JSON.stringify(requestId)} is unknown`)
       }
-      const physical = admitWriteRoot(request.path, this.protectedRoots)
-      const broader = group.grants.find((grant) => covers(grant.path, physical))
-      let next = group
-      if (broader === undefined) {
-        next = {
-          ...group,
-          grants: [
-            ...group.grants,
-            { version: 1, path: physical, source: 'user', addedAt: now, requestId },
-          ],
-          revision: group.revision + 1,
-          updatedAt: now,
-        }
-        await this.tables.groups.put(next.groupId, next)
-      }
-      const allowed: RequestRecord = {
+      const group = this.group(request.groupId)
+      if (group === undefined) throw new AccessError('GROUP_MISSING', 'group vanished')
+      if (request.status !== 'pending') return { request, group, changed: false }
+      return this.settle(request, group, decision)
+    })
+  }
+
+  /** Commit one pending request's decision and, on allow, its grant. Caller holds the write chain. */
+  private async settle(
+    request: RequestRecord,
+    group: GroupRecord,
+    decision: 'allow' | 'deny',
+  ): Promise<DecisionResult> {
+    const now = this.now()
+    if (decision === 'deny') {
+      const denied: RequestRecord = {
         ...request,
-        status: 'allowed',
+        status: 'denied',
         decidedAt: now,
         decidedBy: 'user',
       }
-      await this.tables.requests.put(allowed.requestId, allowed)
-      return { request: allowed, group: next, changed: true }
-    })
+      await this.tables.requests.put(denied.requestId, denied)
+      return { request: denied, group, changed: true }
+    }
+    const physical = admitWriteRoot(request.path, this.protectedRoots)
+    const broader = group.grants.find((grant) => covers(grant.path, physical))
+    let next = group
+    if (broader === undefined) {
+      next = {
+        ...group,
+        grants: [
+          ...group.grants,
+          {
+            version: 1,
+            path: physical,
+            source: 'user',
+            addedAt: now,
+            requestId: request.requestId,
+          },
+        ],
+        revision: group.revision + 1,
+        updatedAt: now,
+      }
+      await this.tables.groups.put(next.groupId, next)
+    }
+    const allowed: RequestRecord = {
+      ...request,
+      status: 'allowed',
+      decidedAt: now,
+      decidedBy: 'user',
+    }
+    await this.tables.requests.put(allowed.requestId, allowed)
+    return { request: allowed, group: next, changed: true }
   }
 
   /**

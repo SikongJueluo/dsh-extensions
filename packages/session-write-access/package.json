@@ -56,6 +56,7 @@
     "@deepseek-ai/dsh-storage-domain": "^0.2.2-rc.5",
     "@deepseek-ai/dsh-system-prompt": "^0.2.2-rc.5",
     "@deepseek-ai/dsh-tools": "^0.2.2-rc.5",
+    "@deepseek-ai/dsh-user-approval": "^0.2.2-rc.5",
     "@deepseek-ai/schemastery": "^3.19.0",
     "zod": "^4.6.6"
   },
@@ -72,6 +73,7 @@
     "@deepseek-ai/dsh-storage-domain": "catalog:",
     "@deepseek-ai/dsh-system-prompt": "catalog:",
     "@deepseek-ai/dsh-tools": "catalog:",
+    "@deepseek-ai/dsh-user-approval": "catalog:",
     "@deepseek-ai/schemastery": "catalog:",
     "@dsh-extensions/ui": "workspace:*",
     "@tailwindcss/vite": "catalog:",
