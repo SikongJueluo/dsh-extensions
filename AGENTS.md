@@ -86,7 +86,7 @@ dsh 本体与 `$DSH_HOME`（`~/.dsh` 下 profiles、patch 层、bin 等运行时
 - [`packages/config`](packages/config/) 是 Host 侧共享外部配置库（私有 workspace 包，构建时打进各插件）：负责 `$DSH_HOME` 路径解析、YAML 读取、插件 validator、fail-closed 状态、可选 watch 与只读 `…/config-status` 路由。当前使用方是 crew（热加载）与 more-providers（仅启动读取）。业务 schema 仍留在各插件。
 - [`packages/ui`](packages/ui/) 是私有 workspace 包（不单独安装/启用）：shadcn 组合 API + Base UI 原语 + Tailwind CSS v4，颜色只映射公开的 `--dsw-alias-*` token。各插件构建时把用到的组件打进自己的 `lib/client.js`。
 - `tooling/host` 是共享 tsdown 预设；`tooling/client` 是共享 Vite→DSH factory 构建（含样式内联）。包内配置只写入口与真实差异。
-- `packages/ui/src/host/` 是有意接受的宿主耦合：把钉版 `@deepseek-ai/dsh-client-ui-primitives` 作为 `@dsh-extensions/ui/host` 子路径导出（不进 barrel），供需要原生控件观感的插件复用；它随宿主 release 精确钉版，升级 dsh 时核对组件类型/样式/行为，见 [docs/client-ui-migration.md](docs/client-ui-migration.md)。宿主 `Menu` 会自带一个 `aria-hidden` 的 `data-menu-backing` 装饰节点到 body（已批准的窄例外，关闭即移除）；业务代码仍不得向 body 挂载。
+- `packages/ui/src/host/` 是有意接受的宿主耦合：把钉版 `@deepseek-ai/dsh-client-ui-primitives` 作为 `@dsh-extensions/ui/host` 子路径导出（不进 barrel），供需要原生控件观感的插件复用；`MenuPanel`（`@dsh-extensions/ui/host/menu-panel`）封装宿主 `MenuSurface` 的锚定卡片骨架——卡片不滚、只滚内部 `.dshx-menu-panel-viewport`，避免 material 背景随内容滚走；它随宿主 release 精确钉版，升级 dsh 时核对组件类型/样式/行为，见 [docs/client-ui-migration.md](docs/client-ui-migration.md)。宿主 `Menu` 会自带一个 `aria-hidden` 的 `data-menu-backing` 装饰节点到 body（已批准的窄例外，关闭即移除）；业务代码仍不得向 body 挂载。
 - 版本集中在 `pnpm-workspace.yaml` 的 `catalog:`；包仍声明自己的真实 dev/peer/runtime 依赖。React 对齐宿主 18.3.1。新增客户端按 [packages/ui/README.md](packages/ui/README.md) 的三行 `styles.css` 与 `Root`/`dshx:` 规则写；本次迁移的范围、验证与未验证项见 [docs/client-ui-migration.md](docs/client-ui-migration.md)。
 
 ## 新增插件
@@ -99,7 +99,7 @@ dsh 本体与 `$DSH_HOME`（`~/.dsh` 下 profiles、patch 层、bin 等运行时
 
 ## 版本钉版
 
-`@deepseek-ai/*` 的 devDependencies 经 catalog 钉本机 dsh 内置的精确版本（dsh 0.2.2-rc.1：cordis 4.1.0 / schemastery 3.19.0 / dsh-* 0.2.2-rc.1），使类型检查与宿主运行时一致。schemastery 3.18.4 起类型把 volatile 模式编进 schema 泛型，**不要给 `Config` 写 `Schema<Config>` 注解**——声明 `interface Config`（volatile 字段用 `Volatile<T>`，见 dsh-llm-pi-ai 或本仓 auto-permit/settings.ts 的写法），让 `const Config = Schema.object({...})` 自行推断，loader 才能对上 `static Config`/`Config` 导出的形状。`peerDependencies` 保持宽松，交给安装方解析。升级 dsh 后同步核对这些钉版；API 演进（如 `CallId` → `ToolCallId`、0.2 删掉 `ctx.settings.installSection`、0.2.2 的 `subagents.startActivation` / `sessionQuery.readSession` / `agent.model.current()` / `workspaceWritableRoots`）正是靠钉版类型检查暴露的——契约变更与验证记录见 [docs/dsh-0.2.2-sdk-migration.md](docs/dsh-0.2.2-sdk-migration.md)。
+`@deepseek-ai/*` 的 devDependencies 经 catalog 钉本机 dsh 内置的精确版本（dsh 0.2.2-rc.5：cordis 4.1.0 / schemastery 3.19.0 / dsh-* 0.2.2-rc.5；`dsh-storage-domain` 用到 zod 4.6.6，handoff / session-write-access / triggers 同步钉同一版本），使类型检查与宿主运行时一致。schemastery 3.18.4 起类型把 volatile 模式编进 schema 泛型，**不要给 `Config` 写 `Schema<Config>` 注解**——声明 `interface Config`（volatile 字段用 `Volatile<T>`，见 dsh-llm-pi-ai 或本仓 auto-permit/settings.ts 的写法），让 `const Config = Schema.object({...})` 自行推断，loader 才能对上 `static Config`/`Config` 导出的形状。`peerDependencies` 保持宽松，交给安装方解析。升级 dsh 后同步核对这些钉版；API 演进（如 `CallId` → `ToolCallId`、0.2 删掉 `ctx.settings.installSection`、0.2.2 的 `subagents.startActivation` / `sessionQuery.readSession` / `agent.model.current()` / `workspaceWritableRoots`）正是靠钉版类型检查暴露的——契约变更与验证记录见 [docs/dsh-0.2.2-sdk-migration.md](docs/dsh-0.2.2-sdk-migration.md) 与 [docs/dsh-0.2.2-rc.5-migration.md](docs/dsh-0.2.2-rc.5-migration.md)。
 
 ## 参考
 

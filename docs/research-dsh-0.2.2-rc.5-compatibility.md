@@ -78,3 +78,23 @@ npm 制品可安装，隔离环境中的 `--version` 和 stock `web --dump-confi
 1. 在分开的 Nix 测试环境联动锁定 `rc.5` 与插件 SDK，移除重复的本地 Inspector 补丁，完整构建并确认 stock Web 与 Inspector 能启动。
 2. 先修复 `jj-workspace` 合成和归档策略、`session-write-access` 的 Web hook、`crew` 与 SpineJIT 的派发契约，再完成 LLM 错误和 Zod 对齐。一起修掉 triggers 的客户端清单及 context-audit 的 smoke fixture。
 3. 使用独立 `DSH_HOME`、会话/存储副本和测试凭据重跑上面的门禁与联调。候选须先合成成功，再在真实页面验证审批、写权限、归档/恢复、子代理与移动端核心路径。核查 Nix 构建和 Inspector Worker 后再更新生产 profile，保留 `rc.1` 的旧 generation 与数据快照以便回退。
+
+## 6. 迁移结果（2026-11-20）
+
+按上面的顺序完成了本仓范围的迁移，逐项契约与验证证据见
+[rc.5 迁移记录](dsh-0.2.2-rc.5-migration.md)。要点：
+
+- 47 个 DSH 钉版升到 `0.2.2-rc.5`，19 个 bundle 的 peer 改为 `^0.2.2-rc.5`；`zod` 在三处存储
+  schema 包对齐到宿主实际使用的 `4.6.6`。
+- 五处真实契约冲突全部按新 API 修：`jj-workspace` 组合与 `retainOnArchive`、`crew` 扁平子代理
+  请求、`more-providers` 的 `BuiltinLlmFailureCode`、`ui` 移除的 `useAnchoredPosition`、
+  `triggers` 的 locale 包名。两个 smoke fixture 的缺陷单独修正，未作为兼容性修复汇报。
+- 迁移后 `typecheck` 21/21、`build` 20/20、`test`、`check:client` 9/9、`check:smoke` 11/11
+  全过，`lint`/`fallow`/注释/抑制门禁保持原有规则。
+- 组合验证用 rc.5 的 `dsh-app-boot` 加载真实四层 profile，再用 Nix 启动器的
+  `validateRootComposition` 复算：210 行、`worktree` 禁用、`forge-panel` 顶层、两条 jj 行插入；
+  换回旧 patch 可复现本文第 2 节的两条报错。
+- 真实 rc.5 制品（非 Nix 构建）已在隔离 `DSH_HOME` 下启动 `web` profile，本仓 18 个 bundle
+  全部激活并监听；真实浏览器里的 CSS 锚定菜单、Nix 构建、归档清理与 Koffi 原生路径、
+  凭据/MCP/mobile 场景仍未验证。Nix 侧（llm-agents 输入、Inspector 重复 patch、生产 profile）
+  与外部 `spine-sdk-plugin` 属范围外，需要用户分别在 flake 与外部仓库落地。
