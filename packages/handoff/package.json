@@ -40,10 +40,10 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.1.0",
-    "@deepseek-ai/dsh-llm": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-storage-domain": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.2.2-rc.5",
+    "@deepseek-ai/dsh-storage-domain": "^0.2.2-rc.5",
     "@deepseek-ai/schemastery": "^3.19.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "catalog:",
@@ -70,6 +70,6 @@
     "tailwindcss": "catalog:",
     "vite": "catalog:",
     "vitest": "^3.2.4",
-    "zod": "4.4.3"
+    "zod": "4.6.6"
   }
 }
