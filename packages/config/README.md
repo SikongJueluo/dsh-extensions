@@ -18,7 +18,7 @@ const store = registerConfig(ctx, {
 })
 await store.ready                 // ConfigState<T>; never rejects
 store.get()                       // T | undefined (fail-closed when invalid)
-store.state()                     // { file, loaded, revision, value, error }
+store.state()                     // { file, loaded, revision, value, error, reason? }
 store.subscribe((state) => {})    // published changes only
 ```
 
@@ -48,6 +48,10 @@ plugin or its smoke test uses directly.
   `get()` is `undefined` while the file is unusable. A plugin that discovers a
   startup failure after validation can call `store.reportFailure(reason)`; the
   same status route then reports it as invalid.
+- A failed load also publishes a machine-readable `reason`: `missing` (the file
+  is absent), `unreadable` (present but not readable), or `invalid` (YAML or
+  validation). Consumers classify with `reason` instead of matching `error`
+  text; `reportFailure` publishes `invalid`.
 - `dispose()` (registered through `ctx.effect`) stops the watcher and prevents
   any later publication.
 

@@ -6,10 +6,24 @@ import { canonicalizeWatchPath, dshHomePath, expandHomePath } from '@deepseek-ai
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { parse } from 'yaml'
 
+/** Why a config file has no usable value. Consumers switch on this instead of matching error text. */
+export type ConfigFailure = 'missing' | 'unreadable' | 'invalid'
+
 export class ConfigError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'ConfigError'
+  }
+}
+
+/** A file that could not be read at all: absent (`missing`) or present but unreadable. */
+export class ConfigReadError extends ConfigError {
+  readonly failure: 'missing' | 'unreadable'
+
+  constructor(message: string, failure: 'missing' | 'unreadable') {
+    super(message)
+    this.name = 'ConfigReadError'
+    this.failure = failure
   }
 }
 
@@ -29,6 +43,8 @@ export interface ConfigState<T> {
   readonly value: T | undefined
 
   readonly error: string | undefined
+
+  readonly reason?: ConfigFailure
 }
 
 export interface ConfigStore<T> {
@@ -75,12 +91,18 @@ function reasonOf(error: unknown): string {
   return single.length > 500 ? `${single.slice(0, 497)}…` : single
 }
 
+function failureOf(error: unknown): 'missing' | 'unreadable' {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+    ? 'missing'
+    : 'unreadable'
+}
+
 export async function readConfigFile<T>(file: string, validate: (value: unknown) => T): Promise<T> {
   let text: string
   try {
     text = await readFile(file, 'utf8')
   } catch (error) {
-    throw new ConfigError(`cannot read the file: ${reasonOf(error)}`)
+    throw new ConfigReadError(`cannot read the file: ${reasonOf(error)}`, failureOf(error))
   }
   let value: unknown
   try {
@@ -107,11 +129,23 @@ export function registerConfig<T>(ctx: Context, options: ConfigOptions<T>): Conf
   let watcher: FSWatcher | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
 
-  const publish = (value: T | undefined, error: string | undefined): void => {
-    const next = value === undefined ? `!${error ?? ''}` : `=${JSON.stringify(value)}`
+  const publish = (
+    value: T | undefined,
+    error: string | undefined,
+    reason?: ConfigFailure,
+  ): void => {
+    const next =
+      value === undefined ? `!${reason ?? ''}:${error ?? ''}` : `=${JSON.stringify(value)}`
     if (current.loaded && next === fingerprint) return
     fingerprint = next
-    current = { file, loaded: true, revision: current.revision + 1, value, error }
+    current = {
+      file,
+      loaded: true,
+      revision: current.revision + 1,
+      value,
+      error,
+      ...(reason === undefined ? {} : { reason }),
+    }
     for (const listener of listeners) listener(current)
   }
 
@@ -119,12 +153,14 @@ export function registerConfig<T>(ctx: Context, options: ConfigOptions<T>): Conf
     const mine = ++generation
     let value: T | undefined
     let error: string | undefined
+    let reason: ConfigFailure | undefined
     try {
       value = await readConfigFile(file, (document) => options.validate(document))
     } catch (failure) {
       error = reasonOf(failure)
+      reason = failure instanceof ConfigReadError ? failure.failure : 'invalid'
     }
-    if (!disposed && mine === generation) publish(value, error)
+    if (!disposed && mine === generation) publish(value, error, reason)
     return current
   }
 
@@ -193,7 +229,7 @@ export function registerConfig<T>(ctx: Context, options: ConfigOptions<T>): Conf
       }
     },
     reportFailure(error) {
-      if (!disposed) publish(undefined, reasonOf(error))
+      if (!disposed) publish(undefined, reasonOf(error), 'invalid')
     },
     async dispose() {
       disposed = true

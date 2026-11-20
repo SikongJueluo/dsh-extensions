@@ -105,11 +105,13 @@ describe('config store', () => {
     expect(initial.loaded).toBe(true)
     expect(initial.value).toBeUndefined()
     expect(initial.error).toContain('cannot read the file')
+    expect(initial.reason).toBe('missing')
     expect(initial.revision).toBe(1)
 
     await writeFile(file, 'name: first\n')
     await waitFor(() => store.get()?.name === 'first', 'the created file to load')
     expect(store.state().error).toBeUndefined()
+    expect(store.state().reason).toBeUndefined()
     expect(store.state().revision).toBe(2)
   })
 
@@ -119,11 +121,13 @@ describe('config store', () => {
     await writeFile(file, 'name: [unclosed\n')
     const store = await watchedStore(file)
     expect((await store.ready).error).toContain('invalid YAML')
+    expect((await store.ready).reason).toBe('invalid')
     expect(store.get()).toBeUndefined()
 
     await writeFile(file, 'other: 1\n')
     await waitFor(() => store.state().revision === 2, 'the validator error')
     expect(store.state().error).toContain('config.name')
+    expect(store.state().reason).toBe('invalid')
 
     await writeFile(file, 'name: fixed\n')
     await waitFor(() => store.get()?.name === 'fixed', 'the repaired file')
@@ -156,6 +160,7 @@ describe('config store', () => {
 
     await rm(file)
     await waitFor(() => store.state().error?.includes('cannot read') === true, 'the deletion')
+    expect(store.state().reason).toBe('missing')
 
     await writeFile(file, 'name: back\n')
     await waitFor(() => store.get()?.name === 'back', 'the recreation')
