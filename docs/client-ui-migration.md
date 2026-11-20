@@ -15,7 +15,7 @@
 | `packages/<name>/vite.client.config.ts` | 三行 `defineClientConfig({ id, entry })` |
 | `packages/<name>/tsconfig.client.json` | DOM/JSX 客户端检查；宿主 `tsconfig.json` 排除 `src/client` |
 
-`pnpm-workspace.yaml` 的 `catalog:` 集中 React 18.3.1、Vite 7、Tailwind 4、Base UI 1.9、Storybook 10 与 DSH 0.2.2-rc.1 的精确 dev 版本；`nodeLinker: hoisted` 与单 lockfile 保持不变。
+`pnpm-workspace.yaml` 的 `catalog:` 集中 React 18.3.1、Vite 7、Tailwind 4、Base UI 1.9、Storybook 10 与 DSH 0.2.2-rc.5 的精确 dev 版本；`nodeLinker: hoisted` 与单 lockfile 保持不变。
 
 ## 命令
 
@@ -49,7 +49,9 @@ pnpm storybook      # 6006
 jj-workspace 的新会话 worktree 入口不再用 Base UI Select 复刻宿主 selector，而是复用宿主 `@deepseek-ai/dsh-client-ui-primitives` 的 `Menu`、`Tooltip` 和分支/箭头图标。范围只有这一组控件；共享 `Select` 保留给其他消费者。
 
 - **单一导入点**：`packages/ui/src/host/primitives.ts` 经 `@dsh-extensions/ui/host` 子路径导出，不进共享 barrel；其他插件不会请求该模块，生产 bundle 只有 `dsh-jj-workspace` 出现该 `require`。
-- **精确钉版**：`pnpm-workspace.yaml` 钉 `0.2.2-rc.1`。`tooling/client` 只 external 这个精确模块名；`dsh-jj-workspace` 在 `dsh.client.external` 声明；`check-client` 拒绝未声明请求、未知声明，并校验 installed 版本等于 catalog。该模块是宿主冻结表的一项，不是官方支持的第三方 SDK；check 只能核对 catalog 与 installed，运行中的 shell 版本仍需在升级 dsh 时人工核对（`dsh --version`、shell 的 module table，再跑 Storybook/真实页），并核对组件 props、CSS Modules 与行为。
+- **rc.5 变化**：primitives 删除了 `useAnchoredPosition`，定位改为 CSS anchor positioning（`anchor-name` / `position-anchor` / `@position-try`）。`session-write-access` 是唯一使用者，菜单已改为纯 CSS 锚定，见包 README。Chromium 实测：trigger 在页面下部时菜单位于其上方 4px，贴近顶部时用 `@position-try` 翻到下方 4px。
+- **卡片骨架进共享库**：`session-write-access` 的菜单曾把 `overflow-y: auto` 写在宿主 `MenuSurface` 卡片本身上，宿主的 `.material`（卡片内 `position: absolute; inset: 0` 的背景层）随内容滚出可视区，滚动后下半截透明。修法与宿主 `Menu` 一致——卡片不滚、内部 viewport 滚——并抽成 `packages/ui/src/host/menu-panel.tsx`（`@dsh-extensions/ui/host/menu-panel`）：`MenuPanel` 负责给 trigger 设 `anchor-name`、给卡片设 `position-anchor`、pin 住 header/footer，只让 `.dshx-menu-panel-viewport` 滚动；尺寸走 `--dshx-menu-panel-width` / `--dshx-menu-panel-max-height` 变量。Chromium 实测：21 行列表滚动 400px 前后，卡片 420px 高度上的 material 未覆盖率均为 0（修复前 304px 裸露），贴近顶部时翻到 trigger 下方并保持 4px 间距。
+- **精确钉版**：`pnpm-workspace.yaml` 钉 `0.2.2-rc.5`。`tooling/client` 只 external 这个精确模块名；`dsh-jj-workspace` 在 `dsh.client.external` 声明；`check-client` 拒绝未声明请求、未知声明，并校验 installed 版本等于 catalog。该模块是宿主冻结表的一项，不是官方支持的第三方 SDK；check 只能核对 catalog 与 installed，运行中的 shell 版本仍需在升级 dsh 时人工核对（`dsh --version`、shell 的 module table，再跑 Storybook/真实页），并核对组件 props、CSS Modules 与行为。
 - **运行身份**：生产 bundle 只 `require` 宿主表里的同一实例，Menu 的 CSS Modules class 与 shell 样式表天然一致；primitives 不被打进 bundle。
 - **预览/测试依赖**：上游包只把运行时 import 列在自己的 devDependencies，因此 Storybook 与 jsdom 测试用 catalog 中的 shiki、simple-icons、mdast/micromark、dsh-client-store 等 devDependency 补齐；这些不进生产。
 - **视觉参照**：同位置原生 Forge `WorktreeToggle`。28px 透明 trigger、4px 小间距、13px/20px/500、宿主 `radius-sm`、品牌色 focus ring、14px 原生 checkbox；Menu 卡片、34px 行、check 标记、Escape/Tab/焦点返回都由宿主原语提供。未复制宿主 hash class。未请求时 Tooltip 显示完整 base；请求后菜单列出 `@`/bookmark（Git 为分支，当前分支带 current 注记）；阻塞时保留已选项并允许撤回。

@@ -26,6 +26,7 @@ they serve Storybook and the jsdom tests and never reach a production bundle.
 | `src/lib/cn.ts` | `clsx` + `tailwind-merge`, configured for the `dshx:` utility prefix |
 | `src/types.ts` | the client-half context contract (`apply(ctx)` surface) |
 | `src/host/primitives.ts` | the pinned host `dsh-client-ui-primitives` re-exports, exposed as `@dsh-extensions/ui/host` |
+| `src/host/menu-panel.tsx` | `MenuPanel`: anchored host-menu card (header, scrolling viewport, footer) exposed as `@dsh-extensions/ui/host/menu-panel` |
 
 ## Rules
 
@@ -61,6 +62,12 @@ they serve Storybook and the jsdom tests and never reach a production bundle.
    `variant="ghost"` for DSH inline selectors; it stays the shared control for
    ordinary selects. Pass `align="end"` when the control sits at the right edge
    so the popup keeps its right edge fixed and expands left.
+   Anything that opens a host `MenuSurface` from a trigger uses `MenuPanel`
+   (`@dsh-extensions/ui/host/menu-panel`): it names the trigger as the CSS
+   anchor, pins the header and footer, and scrolls only the inner
+   `.dshx-menu-panel-viewport`. Never put `overflow` on the card itself — the
+   surface paints its material as an absolutely positioned child, so a
+   scrolling card loses its background below the first screen of rows.
    The jj-workspace worktree option is the exception: it uses the host `Menu`
    and `Tooltip` through `@dsh-extensions/ui/host`, renders the menu in place,
    flips to the side with room, and caps the list height instead of portaling

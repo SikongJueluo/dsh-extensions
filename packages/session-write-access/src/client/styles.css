@@ -6,43 +6,6 @@
 @source "./**/*.tsx";
 @source "../../../ui/src/**/*.tsx";
 
-.dsh-swa-anchor {
-  anchor-name: --dsh-swa-anchor;
-}
-
-.dsh-swa-menu {
-  position: fixed;
-  position-anchor: --dsh-swa-anchor;
-  bottom: max(12px, calc(anchor(top) + 4px));
-  left: max(12px, anchor(left));
-  z-index: 100;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  width: min(360px, calc(100vw - 24px));
-  max-height: min(420px, calc(100dvh - 24px));
-  padding: 6px;
-  position-try-fallbacks: --dsh-swa-below, --dsh-swa-window;
-}
-
-.dsh-swa-viewport {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-@position-try --dsh-swa-below {
-  top: max(12px, calc(anchor(bottom) + 4px));
-  bottom: auto;
-}
-
-@position-try --dsh-swa-window {
-  top: 12px;
-  bottom: 12px;
-}
-
 .dsh-swa-heading {
   padding: 6px 8px;
   color: var(--dsw-alias-label-secondary);

@@ -1,0 +1,42 @@
+/*
+ * Anchored card for a host `MenuSurface`: the card never scrolls, its viewport
+ * does, so the material behind the card stays put while rows move.
+ */
+.dshx-menu-panel {
+  --dshx-menu-panel-width: min(360px, calc(100vw - 24px));
+  --dshx-menu-panel-max-height: min(420px, calc(100dvh - 24px));
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: var(--dshx-menu-panel-width);
+  max-height: var(--dshx-menu-panel-max-height);
+  padding: 6px;
+  z-index: 100;
+  bottom: max(12px, calc(anchor(top) + 4px));
+  left: max(12px, anchor(left));
+  position-try-fallbacks: --dshx-menu-panel-below, --dshx-menu-panel-window;
+}
+
+.dshx-menu-panel-header,
+.dshx-menu-panel-footer {
+  flex: none;
+}
+
+.dshx-menu-panel-viewport {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+@position-try --dshx-menu-panel-below {
+  top: max(12px, calc(anchor(bottom) + 4px));
+  bottom: auto;
+}
+
+@position-try --dshx-menu-panel-window {
+  top: 12px;
+  bottom: 12px;
+}
