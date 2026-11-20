@@ -29,9 +29,17 @@ providers:
     models:
       - id: gpt-6.1-sol
         name: GPT-6.1 Sol
-        contextWindow: 524288
+        contextWindow: 500000
         maxTokens: 32768
         input: [text, image]
+    modelDefaults:
+      - match: '-sol$'
+        contextWindow: 500000
+    filter:
+      include:
+        - { match: '-(astra|sol|terra)$' }
+      exclude:
+        - { match: '-terra$' }
     accounts:
       stable:
         displayName: MDKJ Stable
@@ -39,3 +47,6 @@ providers:
       cheap:
         displayName: MDKJ Cheap
         secretName: mdkj-cheap-gpt-api-key
+
+  chatgpt:
+    kind: chatgpt
