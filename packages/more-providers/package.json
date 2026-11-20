@@ -1,6 +1,6 @@
 {
   "name": "dsh-more-providers",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "YAML-configured LLM providers and built-in ChatGPT OAuth sign-in for DSH, with shared host image integration",
   "type": "module",
   "license": "GPL-3.0-or-later",

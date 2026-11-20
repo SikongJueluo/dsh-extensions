@@ -8,6 +8,7 @@ import {
   disposeTracked,
   errorFinish,
   generateOptions,
+  chatgptYaml,
   gatewayYaml,
   imageRef,
   registeredAdapter,
@@ -18,7 +19,7 @@ import {
 import { imageContract } from './image-contract.js'
 
 const capture = capturingFetch()
-const GATEWAY_YAML = ['providers:', gatewayYaml(), '  chatgpt:', '    enabled: false'].join('\n')
+const GATEWAY_YAML = ['providers:', gatewayYaml(), chatgptYaml({ enabled: false })].join('\n')
 
 beforeEach(() => {
   vi.stubGlobal('fetch', capture.fetch)

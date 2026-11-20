@@ -1,5 +1,5 @@
 /**
- * The `more-providers.yaml` loader and validator.
+ * The `more-providers.yaml` loader and validator: one provider registers one route backed by an ordered account pool, and the ChatGPT section is a provider instance like any other.
  * @module dsh-more-providers/config
  */
 import type { Api } from '@earendil-works/pi-ai'
@@ -8,7 +8,9 @@ import { isAbsolute, join } from 'node:path'
 import { ConfigError, readConfigFile, resolveConfigFile } from '@dsh-extensions/config'
 import { isRecord } from './record.js'
 import type { KeySource } from './keys.js'
-import type { ResolvedChatGptConfig } from './providers/chatgpt/index.js'
+import type { ModelFilter, ModelPattern } from './catalog/filter.js'
+import { compileModelFilter } from './catalog/filter.js'
+import type { AccountSpec, ApiKeyProviderSpec, ChatGptProviderSpec } from './providers/spec.js'
 
 export { ConfigError }
 
@@ -34,41 +36,25 @@ export interface ModelDefault extends ModelMetadata {
   pattern: RegExp
 }
 
+/** The API-key provider kinds. */
 export type ProviderKind = 'builtin' | 'custom' | 'command-code'
 
-/** Validated startup configuration; omitted ChatGPT means explicitly disabled. */
+/** Validated startup configuration: one spec per configured provider, ChatGPT included only when configured. */
 export interface ResolvedConfig {
-  providers: ResolvedProvider[]
-  chatgpt?: ResolvedChatGptConfig
-}
-
-/** One enabled route after inheritance and key-source resolution. */
-export interface ResolvedProvider {
-  route: string
-  providerId: string
-  kind: ProviderKind
-  displayName: string
-  catalog?: string
-  api?: Api
-  baseURL?: string
-  modelsURL?: string
-  models?: ModelConfig[]
-  contextWindows?: ReadonlyMap<string, number>
-  modelDefaults?: readonly ModelDefault[]
-  compat?: PiAiCompatProfile
-  headers?: Record<string, string>
-  zdr?: boolean
-  keySource: KeySource
+  providers: ApiKeyProviderSpec[]
+  chatgpt?: ChatGptProviderSpec
 }
 
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-]*$/u
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
 const SECRET_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u
 const THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+const CHATGPT_ROUTE = 'chatgpt'
 const PROVIDER_KEYS = new Set([
   'kind',
   'enabled',
   'displayName',
+  'routeId',
   'catalog',
   'api',
   'baseURL',
@@ -76,6 +62,7 @@ const PROVIDER_KEYS = new Set([
   'models',
   'contextWindows',
   'modelDefaults',
+  'filter',
   'compat',
   'headers',
   'apiKeyFile',
@@ -83,26 +70,47 @@ const PROVIDER_KEYS = new Set([
   'apiKeyEnv',
   'accounts',
   'zdr',
+  'clientVersion',
+  'refreshMarginMs',
+  'defaultContextWindow',
+  'promptCacheKey',
 ])
-const ACCOUNT_KEYS = new Set([
-  'enabled',
-  'displayName',
-  'routeId',
-  'api',
-  'baseURL',
-  'modelsURL',
-  'models',
-  'contextWindows',
-  'compat',
-  'headers',
-  'apiKeyFile',
-  'secretName',
-  'apiKeyEnv',
-  'zdr',
+const ACCOUNT_KEYS = new Set(['enabled', 'displayName', 'apiKeyFile', 'secretName', 'apiKeyEnv'])
+const ACCOUNT_OVERRIDES = new Map([
+  ['routeId', 'one provider registers one route; set routeId on the provider instead'],
+  ['api', 'move it to the provider level; the accounts of a pool share the connection'],
+  ['baseURL', 'move it to the provider level; the accounts of a pool share the connection'],
+  ['modelsURL', 'move it to the provider level; the accounts of a pool share the model catalog'],
+  ['models', 'move it to the provider level; the accounts of a pool share the model catalog'],
+  ['contextWindows', 'move it to the provider level; the accounts of a pool share the metadata'],
+  ['compat', 'move it to the provider level; the accounts of a pool share the wire compatibility'],
+  ['headers', 'move it to the provider level; the accounts of a pool share the request headers'],
+  ['zdr', 'move it to the provider level; the accounts of a pool share the ZDR setting'],
 ])
+const CHATGPT_REJECTED = new Map([
+  ['routeId', 'the chatgpt route id is fixed for credential and session compatibility'],
+  ['api', 'the chatgpt provider speaks the Codex protocol; remove api'],
+  ['catalog', 'the chatgpt model catalog is discovered live; remove catalog'],
+  ['models', 'the chatgpt model catalog is discovered live; remove models'],
+  ['modelsURL', 'the chatgpt model catalog is discovered live; remove modelsURL'],
+  ['contextWindows', 'the chatgpt catalog carries its own context windows; remove contextWindows'],
+  ['modelDefaults', 'the chatgpt catalog carries its own model metadata; remove modelDefaults'],
+  ['compat', 'the chatgpt provider owns its wire compatibility; remove compat'],
+  ['headers', 'the chatgpt provider owns its request headers; remove headers'],
+  ['zdr', 'the chatgpt provider owns its request headers; remove zdr'],
+  [
+    'accounts',
+    'the chatgpt provider holds a single OAuth account; sign in from the providers page',
+  ],
+  ['apiKeyFile', 'the chatgpt provider signs in through OAuth; remove the API key fields'],
+  ['secretName', 'the chatgpt provider signs in through OAuth; remove the API key fields'],
+  ['apiKeyEnv', 'the chatgpt provider signs in through OAuth; remove the API key fields'],
+])
+const CHATGPT_ONLY = ['clientVersion', 'refreshMarginMs', 'defaultContextWindow', 'promptCacheKey']
 const MODEL_KEYS = new Set(['id', 'name', 'contextWindow', 'maxTokens', 'input', 'reasoning'])
 const MODEL_DEFAULT_KEYS = new Set(['match', 'flags', 'contextWindow', 'maxTokens', 'reasoning'])
-const CUSTOM_FIELDS = ['api', 'models', 'contextWindows', 'modelDefaults', 'compat', 'headers']
+const FILTER_KEYS = new Set(['include', 'exclude'])
+const PATTERN_KEYS = new Set(['match', 'flags'])
 const API_VALUES = new Set<Api>(['openai-completions', 'openai-responses', 'anthropic-messages'])
 const KEY_FIELDS = ['apiKeyFile', 'secretName', 'apiKeyEnv'] as const
 
@@ -124,6 +132,15 @@ function rejectUnknown(raw: Record<string, unknown>, allowed: Set<string>, path:
     }
     if (!allowed.has(key)) fail(path, `unknown key "${key}"`)
   }
+}
+
+function rejectIfSet(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
+  message: string,
+): void {
+  if (raw[key] !== undefined && raw[key] !== null) fail(`${path}.${key}`, message)
 }
 
 function optionalString(
@@ -315,6 +332,9 @@ function parseModels(raw: Record<string, unknown>, path: string): ModelConfig[] 
   return value.map((entry, index) => {
     const modelPath = `${path}.models[${index}]`
     const record = asRecord(entry, modelPath)
+    if (record.filter !== undefined && record.filter !== null) {
+      fail(`${modelPath}.filter`, 'is not supported here; set filter on the provider')
+    }
     rejectUnknown(record, MODEL_KEYS, modelPath)
     const id = requiredString(record, 'id', modelPath)
     const name = optionalString(record, 'name', modelPath)
@@ -376,6 +396,45 @@ function parseModelDefaults(
   })
 }
 
+function parseModelPatterns(
+  raw: Record<string, unknown>,
+  key: 'include' | 'exclude',
+  path: string,
+): ModelPattern[] | undefined {
+  const value = raw[key]
+  if (value === undefined || value === null) return undefined
+  const listPath = `${path}.${key}`
+  if (!Array.isArray(value) || value.length === 0) fail(listPath, 'expected a non-empty array')
+  return value.map((entry, index) => {
+    const entryPath = `${listPath}[${index}]`
+    const record = asRecord(entry, entryPath)
+    rejectUnknown(record, PATTERN_KEYS, entryPath)
+    const match = rawString(record, 'match', entryPath) ?? fail(`${entryPath}.match`, 'is required')
+    if (match === '') fail(`${entryPath}.match`, 'expected a non-empty string')
+    const flags = rawString(record, 'flags', entryPath)
+    return flags === undefined ? { match } : { match, flags }
+  })
+}
+
+function parseFilter(raw: Record<string, unknown>, path: string): ModelFilter | undefined {
+  const value = raw.filter
+  if (value === undefined || value === null) return undefined
+  const filterPath = `${path}.filter`
+  const record = asRecord(value, filterPath)
+  rejectUnknown(record, FILTER_KEYS, filterPath)
+  const include = parseModelPatterns(record, 'include', filterPath)
+  const exclude = parseModelPatterns(record, 'exclude', filterPath)
+  if (include === undefined && exclude === undefined) fail(filterPath, 'set include or exclude')
+  try {
+    return compileModelFilter({
+      ...(include === undefined ? {} : { include }),
+      ...(exclude === undefined ? {} : { exclude }),
+    })
+  } catch (error) {
+    return fail(filterPath, error instanceof Error ? error.message : String(error))
+  }
+}
+
 function parseContextWindows(
   raw: Record<string, unknown>,
   path: string,
@@ -394,239 +453,252 @@ function parseContextWindows(
   return windows
 }
 
-interface BaseFields {
-  providerId: string
-  kind: ProviderKind
-  catalog?: string
-  api?: Api
-  baseURL?: string
-  modelsURL?: string
-  models?: ModelConfig[]
-  contextWindows?: ReadonlyMap<string, number>
-  modelDefaults?: readonly ModelDefault[]
-  compat?: PiAiCompatProfile
-  headers?: Record<string, string>
-  zdr?: boolean
-}
-
-function parseBaseFields(
+/** Parse the pool: an absent `accounts` section means the provider's own key is its only member. */
+function parseAccounts(
   raw: Record<string, unknown>,
   path: string,
+  secretDir: string,
   providerId: string,
-  kind: ProviderKind,
-): BaseFields {
-  if (kind === 'builtin') {
-    for (const key of [
-      'api',
-      'baseURL',
-      'modelsURL',
-      'zdr',
-      'models',
-      'contextWindows',
-      'modelDefaults',
-      'compat',
-      'headers',
-    ]) {
-      if (raw[key] !== undefined && raw[key] !== null)
-        fail(`${path}.${key}`, 'is not supported on a builtin provider')
-    }
-    const catalog = optionalString(raw, 'catalog', path) ?? providerId
-    if (!PROVIDER_ID.test(catalog)) fail(`${path}.catalog`, 'expected a catalog provider id')
-    return { providerId, kind, catalog }
-  }
-
-  if (kind === 'command-code') {
-    for (const key of ['catalog', ...CUSTOM_FIELDS]) {
-      if (raw[key] !== undefined && raw[key] !== null)
-        fail(`${path}.${key}`, 'is not supported on a command-code provider')
-    }
-    const baseURL = optionalUrl(raw, 'baseURL', path, false)
-    const modelsURL = optionalUrl(raw, 'modelsURL', path, false)
-    const zdr = optionalBoolean(raw, 'zdr', path)
-    return {
-      providerId,
-      kind,
-      ...(baseURL === undefined ? {} : { baseURL }),
-      ...(modelsURL === undefined ? {} : { modelsURL }),
-      ...(zdr === undefined ? {} : { zdr }),
-    }
-  }
-
-  if (raw.catalog !== undefined && raw.catalog !== null)
-    fail(`${path}.catalog`, 'is not supported on a custom provider')
-  const api =
-    optionalApi(raw, 'api', path) ?? fail(`${path}.api`, 'is required for a custom provider')
-  const baseURL = optionalUrl(raw, 'baseURL', path, true)
-  const modelsURL = optionalUrl(raw, 'modelsURL', path, false)
-  const models = parseModels(raw, path)
-  const contextWindows = parseContextWindows(raw, path)
-  const modelDefaults = parseModelDefaults(raw, path)
-  if (modelsURL === undefined && models === undefined) {
-    fail(path, 'custom provider needs modelsURL or models')
-  }
-  const compat = optionalCompat(raw, 'compat', path)
-  const headers = optionalHeaderRecord(raw, 'headers', path)
-  return {
-    providerId,
-    kind,
-    api,
-    baseURL,
-    ...(modelsURL === undefined ? {} : { modelsURL }),
-    ...(models === undefined ? {} : { models }),
-    ...(contextWindows === undefined ? {} : { contextWindows }),
-    ...(modelDefaults === undefined ? {} : { modelDefaults }),
-    ...(compat === undefined ? {} : { compat }),
-    ...(headers === undefined ? {} : { headers }),
-  }
-}
-
-function parseProvider(providerId: string, value: unknown, secretDir: string): ResolvedProvider[] {
-  const path = `providers.${providerId}`
-  if (!PROVIDER_ID.test(providerId))
-    fail(path, 'provider ids must be lowercase letters, digits, or hyphens')
-  const raw = asRecord(value, path)
-  rejectUnknown(raw, PROVIDER_KEYS, path)
-  const kindRaw = requiredString(raw, 'kind', path)
-  if (kindRaw !== 'builtin' && kindRaw !== 'custom' && kindRaw !== 'command-code') {
-    fail(`${path}.kind`, 'expected builtin, custom, or command-code')
-  }
-  const kind = kindRaw
-  if (optionalBoolean(raw, 'enabled', path) === false) return []
-  const displayName = optionalString(raw, 'displayName', path) ?? providerId
-  const base = parseBaseFields(raw, path, providerId, kind)
-
+  displayName: string,
+  enabled: boolean,
+): AccountSpec[] {
+  const baseKey = keySourceOf(raw, path, secretDir)
   const accountsRaw = raw.accounts
   if (accountsRaw === undefined || accountsRaw === null) {
-    const keySource =
-      keySourceOf(raw, path, secretDir) ??
+    if (baseKey === undefined) {
+      if (!enabled) return []
       fail(path, 'no key source (apiKeyFile, secretName, or apiKeyEnv)')
-    return [{ ...base, route: providerId, displayName, keySource }]
+    }
+    return [{ id: providerId, displayName, keySource: baseKey }]
   }
 
   const accounts = asRecord(accountsRaw, `${path}.accounts`)
   const entries = Object.entries(accounts)
   if (entries.length === 0) fail(`${path}.accounts`, 'must not be empty')
-  const baseKey = keySourceOf(raw, path, secretDir)
-  const result: ResolvedProvider[] = []
+  const members: AccountSpec[] = []
   for (const [accountId, accountValue] of entries) {
     const accountPath = `${path}.accounts.${accountId}`
     if (!PROVIDER_ID.test(accountId))
       fail(accountPath, 'account ids must be lowercase letters, digits, or hyphens')
     const account = asRecord(accountValue, accountPath)
+    if (account.filter !== undefined && account.filter !== null)
+      fail(`${accountPath}.filter`, 'is not supported on an account; set filter on the provider')
+    for (const [key, hint] of ACCOUNT_OVERRIDES) {
+      rejectIfSet(account, key, accountPath, hint)
+    }
     rejectUnknown(account, ACCOUNT_KEYS, accountPath)
     if (optionalBoolean(account, 'enabled', accountPath) === false) continue
 
-    const routeId = optionalString(account, 'routeId', accountPath) ?? `${providerId}-${accountId}`
-    if (!PROVIDER_ID.test(routeId))
-      fail(`${accountPath}.routeId`, 'expected lowercase letters, digits, or hyphens')
     const accountDisplay =
       optionalString(account, 'displayName', accountPath) ?? `${displayName} (${accountId})`
     const keySource = hasKeyFields(account) ? keySourceOf(account, accountPath, secretDir) : baseKey
-    if (keySource === undefined)
+    if (keySource === undefined) {
+      if (!enabled) continue
       fail(accountPath, 'no key source (apiKeyFile, secretName, or apiKeyEnv)')
-
-    if (kind === 'builtin') {
-      for (const key of ['baseURL', 'modelsURL', 'zdr', ...CUSTOM_FIELDS]) {
-        if (account[key] !== undefined && account[key] !== null)
-          fail(`${accountPath}.${key}`, 'is not supported on a builtin account')
-      }
-      result.push({ ...base, route: routeId, displayName: accountDisplay, keySource })
-      continue
     }
+    members.push({ id: accountId, displayName: accountDisplay, keySource })
+  }
+  return members
+}
 
-    if (kind === 'command-code') {
-      for (const key of ['catalog', ...CUSTOM_FIELDS]) {
-        if (account[key] !== undefined && account[key] !== null)
-          fail(`${accountPath}.${key}`, 'is not supported on a command-code account')
+function parseKind(
+  raw: Record<string, unknown>,
+  path: string,
+  providerId: string,
+): ProviderKind | 'chatgpt' {
+  const value = raw.kind
+  if (value === undefined || value === null) {
+    if (providerId === CHATGPT_ROUTE) {
+      fail(
+        `${path}.kind`,
+        'is required: the ChatGPT section is now a provider instance, so add "kind: chatgpt"',
+      )
+    }
+    fail(`${path}.kind`, 'is required (builtin, custom, command-code, or chatgpt)')
+  }
+  if (typeof value !== 'string') fail(`${path}.kind`, 'expected a string')
+  const kind = value.trim()
+  if (kind === CHATGPT_ROUTE) {
+    if (providerId !== CHATGPT_ROUTE) {
+      fail(
+        `${path}.kind`,
+        'only the reserved provider id "chatgpt" may use kind chatgpt; its OAuth grant has a fixed address',
+      )
+    }
+    return 'chatgpt'
+  }
+  if (kind === 'builtin' || kind === 'custom' || kind === 'command-code') {
+    if (providerId === CHATGPT_ROUTE) {
+      fail(
+        `${path}.kind`,
+        'the reserved provider id "chatgpt" is the OAuth provider; use kind: chatgpt or rename the provider',
+      )
+    }
+    return kind
+  }
+  return fail(`${path}.kind`, 'expected builtin, custom, command-code, or chatgpt')
+}
+
+/** Parse one API-key provider into its build spec; every kind owns its fields, so the others are rejected. */
+function parseApiKeyProvider(
+  providerId: string,
+  raw: Record<string, unknown>,
+  path: string,
+  kind: ProviderKind,
+  secretDir: string,
+  filter: ModelFilter | undefined,
+  enabled: boolean,
+): ApiKeyProviderSpec {
+  const routeId = optionalString(raw, 'routeId', path)
+  if (routeId !== undefined) {
+    if (!PROVIDER_ID.test(routeId))
+      fail(`${path}.routeId`, 'expected lowercase letters, digits, or hyphens')
+    if (routeId === CHATGPT_ROUTE)
+      fail(`${path}.routeId`, 'the route id "chatgpt" is reserved for the OAuth provider')
+  }
+  const displayName = optionalString(raw, 'displayName', path) ?? providerId
+  const accounts = parseAccounts(raw, path, secretDir, providerId, displayName, enabled)
+  const common = {
+    providerId,
+    route: routeId ?? providerId,
+    displayName,
+    enabled,
+    accounts,
+    ...(filter === undefined ? {} : { filter }),
+  }
+
+  for (const key of CHATGPT_ONLY) {
+    rejectIfSet(raw, key, path, 'is only supported on the chatgpt provider')
+  }
+
+  switch (kind) {
+    case 'builtin': {
+      for (const key of [
+        'api',
+        'baseURL',
+        'modelsURL',
+        'zdr',
+        'models',
+        'contextWindows',
+        'modelDefaults',
+        'compat',
+        'headers',
+      ]) {
+        rejectIfSet(raw, key, path, 'is not supported on a builtin provider')
       }
-      const baseURL = optionalUrl(account, 'baseURL', accountPath, false)
-      const modelsURL = optionalUrl(account, 'modelsURL', accountPath, false)
-      const zdr = optionalBoolean(account, 'zdr', accountPath)
-      result.push({
-        ...base,
+      const catalog = optionalString(raw, 'catalog', path) ?? providerId
+      if (!PROVIDER_ID.test(catalog)) fail(`${path}.catalog`, 'expected a catalog provider id')
+      return { ...common, kind: 'builtin', catalog }
+    }
+    case 'command-code': {
+      for (const key of [
+        'catalog',
+        'api',
+        'models',
+        'contextWindows',
+        'modelDefaults',
+        'compat',
+        'headers',
+      ]) {
+        rejectIfSet(raw, key, path, 'is not supported on a command-code provider')
+      }
+      const baseURL = optionalUrl(raw, 'baseURL', path, false)
+      const modelsURL = optionalUrl(raw, 'modelsURL', path, false)
+      const zdr = optionalBoolean(raw, 'zdr', path)
+      return {
+        ...common,
+        kind: 'command-code',
         ...(baseURL === undefined ? {} : { baseURL }),
         ...(modelsURL === undefined ? {} : { modelsURL }),
         ...(zdr === undefined ? {} : { zdr }),
-        route: routeId,
-        displayName: accountDisplay,
-        keySource,
-      })
-      continue
+      }
     }
-
-    if (account.catalog !== undefined && account.catalog !== null)
-      fail(`${accountPath}.catalog`, 'is not supported')
-    if (account.zdr !== undefined && account.zdr !== null)
-      fail(`${accountPath}.zdr`, 'is not supported on a custom account')
-    const api = optionalApi(account, 'api', accountPath) ?? base.api
-    const baseURL = optionalUrl(account, 'baseURL', accountPath, false) ?? base.baseURL
-    const modelsURL = optionalUrl(account, 'modelsURL', accountPath, false) ?? base.modelsURL
-    const models = parseModels(account, accountPath) ?? base.models
-    const contextWindows = parseContextWindows(account, accountPath)
-    const effectiveContextWindows =
-      contextWindows === undefined
-        ? base.contextWindows
-        : new Map([...(base.contextWindows ?? []), ...contextWindows])
-    if (modelsURL === undefined && models === undefined)
-      fail(accountPath, 'needs modelsURL or models')
-    const compat = optionalCompat(account, 'compat', accountPath)
-    const headers = optionalHeaderRecord(account, 'headers', accountPath)
-    result.push({
-      ...base,
-      ...(api === undefined ? {} : { api }),
-      ...(baseURL === undefined ? {} : { baseURL }),
-      ...(modelsURL === undefined ? {} : { modelsURL }),
-      ...(models === undefined ? {} : { models }),
-      ...(effectiveContextWindows === undefined ? {} : { contextWindows: effectiveContextWindows }),
-      ...(compat === undefined ? {} : { compat: { ...base.compat, ...compat } }),
-      ...(headers === undefined ? {} : { headers: { ...base.headers, ...headers } }),
-      route: routeId,
-      displayName: accountDisplay,
-      keySource,
-    })
+    case 'custom': {
+      if (raw.catalog !== undefined && raw.catalog !== null)
+        fail(`${path}.catalog`, 'is not supported on a custom provider')
+      rejectIfSet(raw, 'zdr', path, 'is not supported on a custom provider')
+      const api =
+        optionalApi(raw, 'api', path) ?? fail(`${path}.api`, 'is required for a custom provider')
+      const baseURL = optionalUrl(raw, 'baseURL', path, true)
+      const modelsURL = optionalUrl(raw, 'modelsURL', path, false)
+      const models = parseModels(raw, path)
+      const contextWindows = parseContextWindows(raw, path)
+      const modelDefaults = parseModelDefaults(raw, path)
+      if (modelsURL === undefined && models === undefined) {
+        fail(path, 'custom provider needs modelsURL or models')
+      }
+      const compat = optionalCompat(raw, 'compat', path)
+      const headers = optionalHeaderRecord(raw, 'headers', path)
+      return {
+        ...common,
+        kind: 'custom',
+        api,
+        baseURL,
+        ...(modelsURL === undefined ? {} : { modelsURL }),
+        ...(models === undefined ? {} : { models }),
+        ...(contextWindows === undefined ? {} : { contextWindows }),
+        ...(modelDefaults === undefined ? {} : { modelDefaults }),
+        ...(compat === undefined ? {} : { compat }),
+        ...(headers === undefined ? {} : { headers }),
+      }
+    }
   }
-  return result
+  return fail(`${path}.kind`, 'expected builtin, custom, or command-code')
 }
 
-/** Validate built-in OAuth overrides even when the provider is disabled. */
-function parseChatGpt(value: unknown): ResolvedChatGptConfig | undefined {
-  const path = 'providers.chatgpt'
-  const raw = value === undefined ? {} : asRecord(value, path)
+function parseChatGptProvider(
+  raw: Record<string, unknown>,
+  path: string,
+  filter: ModelFilter | undefined,
+  enabled: boolean,
+): ChatGptProviderSpec {
   for (const [key, entry] of Object.entries(raw)) {
     if (entry === null) fail(`${path}.${key}`, 'null is not a valid provider option')
   }
-  rejectUnknown(
-    raw,
-    new Set([
-      'enabled',
-      'baseURL',
-      'clientVersion',
-      'refreshMarginMs',
-      'defaultContextWindow',
-      'promptCacheKey',
-    ]),
-    path,
-  )
-  const enabled = optionalBoolean(raw, 'enabled', path)
-  const baseURL = optionalUrl(raw, 'baseURL', path, false)
-  const clientVersion = raw.clientVersion
-  if (clientVersion !== undefined && typeof clientVersion !== 'string') {
-    fail(`${path}.clientVersion`, 'expected a string')
+  for (const [key, hint] of CHATGPT_REJECTED) {
+    rejectIfSet(raw, key, path, hint)
   }
+  const displayName = optionalString(raw, 'displayName', path) ?? 'ChatGPT (OpenAI)'
+  const baseURL = optionalUrl(raw, 'baseURL', path, false)
+  const clientVersion = rawString(raw, 'clientVersion', path)
   const refreshMarginMs = optionalPositiveInteger(raw, 'refreshMarginMs', path)
   const defaultContextWindow = optionalPositiveInteger(raw, 'defaultContextWindow', path)
   const promptCacheKey = optionalBoolean(raw, 'promptCacheKey', path)
-  if (enabled === false) return undefined
   return {
-    ...(baseURL === undefined ? {} : { baseURL }),
-    ...(clientVersion === undefined ? {} : { clientVersion }),
-    ...(refreshMarginMs === undefined ? {} : { refreshMarginMs }),
-    ...(defaultContextWindow === undefined ? {} : { defaultContextWindow }),
-    ...(promptCacheKey === undefined ? {} : { promptCacheKey }),
+    route: CHATGPT_ROUTE,
+    providerId: CHATGPT_ROUTE,
+    kind: 'chatgpt',
+    displayName,
+    enabled,
+    config: {
+      ...(baseURL === undefined ? {} : { baseURL }),
+      ...(clientVersion === undefined ? {} : { clientVersion }),
+      ...(refreshMarginMs === undefined ? {} : { refreshMarginMs }),
+      ...(defaultContextWindow === undefined ? {} : { defaultContextWindow }),
+      ...(promptCacheKey === undefined ? {} : { promptCacheKey }),
+      ...(filter === undefined ? {} : { filter }),
+    },
   }
 }
 
-/** Resolve API-key routes and default-on OAuth providers from one strict document. */
+function parseProvider(
+  providerId: string,
+  value: unknown,
+  secretDir: string,
+): ApiKeyProviderSpec | ChatGptProviderSpec {
+  const path = `providers.${providerId}`
+  if (!PROVIDER_ID.test(providerId))
+    fail(path, 'provider ids must be lowercase letters, digits, or hyphens')
+  const raw = asRecord(value, path)
+  rejectUnknown(raw, PROVIDER_KEYS, path)
+  const kind = parseKind(raw, path, providerId)
+  const filter = parseFilter(raw, path)
+  const enabled = optionalBoolean(raw, 'enabled', path) !== false
+  if (kind === 'chatgpt') return parseChatGptProvider(raw, path, filter, enabled)
+  return parseApiKeyProvider(providerId, raw, path, kind, secretDir, filter, enabled)
+}
+
+/** Resolve the API-key routes and the configured OAuth provider from one strict document. */
 export function resolveConfig(value: unknown): ResolvedConfig {
   const raw = asRecord(value, 'config')
   rejectUnknown(raw, new Set(['secretDir', 'providers']), 'config')
@@ -637,22 +709,21 @@ export function resolveConfig(value: unknown): ResolvedConfig {
   const providersRaw = raw.providers
   if (providersRaw === undefined || providersRaw === null) fail('config.providers', 'is required')
   const providers = asRecord(providersRaw, 'config.providers')
-  const chatgpt = parseChatGpt(providers.chatgpt)
-  const routes = new Set(['chatgpt'])
-  const result: ResolvedProvider[] = []
+  const routes = new Set<string>()
+  const result: ApiKeyProviderSpec[] = []
+  let chatgpt: ChatGptProviderSpec | undefined
   for (const [providerId, provider] of Object.entries(providers)) {
-    if (providerId === 'chatgpt') continue
-    for (const resolved of parseProvider(providerId, provider, effectiveSecretDir)) {
-      if (routes.has(resolved.route))
-        fail(`providers.${providerId}`, `duplicate or reserved route id "${resolved.route}"`)
-      routes.add(resolved.route)
-      result.push(resolved)
+    const parsed = parseProvider(providerId, provider, effectiveSecretDir)
+    if (parsed.kind === 'chatgpt') {
+      chatgpt = parsed
+      continue
     }
+    if (routes.has(parsed.route))
+      fail(`providers.${providerId}`, `duplicate route id "${parsed.route}"`)
+    routes.add(parsed.route)
+    result.push(parsed)
   }
-  return {
-    providers: result,
-    ...(chatgpt === undefined ? {} : { chatgpt }),
-  }
+  return { providers: result, ...(chatgpt === undefined ? {} : { chatgpt }) }
 }
 
 /** The effective `secretDir` (agenix's user runtime directory by default). */

@@ -7,6 +7,7 @@ import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import { OpenAiOauthAdapter } from './adapter.js'
 import { DEFAULT_REFRESH_MARGIN_MS, TokenStore } from './auth.js'
 import { DEFAULT_REASONING_EFFORTS, ModelCatalog } from './catalog.js'
+import type { CatalogStats } from './catalog.js'
 import { createDiscovery } from './discovery.js'
 import { registerChatGptSignIn } from './login.js'
 import type { AuthChannel } from '../../oauth/channel.js'
@@ -16,6 +17,7 @@ import type { FetchLike } from '../../oauth/transport.js'
 import { OAUTH_CREDENTIAL_SCOPE, PACKAGE_NAME } from '../../identity.js'
 import { isRecord } from '../../record.js'
 import type { ProviderImageServices } from '../../runtime.js'
+import type { ModelFilter } from '../../catalog/filter.js'
 import { CREDENTIAL_ID, PROVIDER, SETTINGS_NAMESPACE } from './identity.js'
 
 const CREDENTIAL_KEY = credentialKey(OAUTH_CREDENTIAL_SCOPE, CREDENTIAL_ID)
@@ -29,12 +31,14 @@ export interface ChatGptConfig {
   refreshMarginMs?: number
   defaultContextWindow?: number
   promptCacheKey?: boolean
+  filter?: ModelFilter
 }
 
 export type ResolvedChatGptConfig = ChatGptConfig
 
 /** Fully-resolved connection facts (defaults applied and validated). */
 interface ResolvedOptions {
+  displayName: string
   baseURL: string
   clientVersion?: string
   refreshMarginMs: number
@@ -45,8 +49,12 @@ interface ResolvedOptions {
 }
 
 /** Apply connection defaults to the root loader's validated startup snapshot. */
-function resolveAdapterOptions(config: ResolvedChatGptConfig): ResolvedOptions {
+function resolveAdapterOptions(
+  config: ResolvedChatGptConfig,
+  displayName: string,
+): ResolvedOptions {
   return {
+    displayName,
     baseURL: config.baseURL ?? DEFAULT_BASE_URL,
     clientVersion: config.clientVersion === '' ? undefined : config.clientVersion,
     refreshMarginMs: config.refreshMarginMs ?? DEFAULT_REFRESH_MARGIN_MS,
@@ -59,18 +67,48 @@ function resolveAdapterOptions(config: ResolvedChatGptConfig): ResolvedOptions {
 
 export interface RegisterChatGptDeps {
   channel: AuthChannel
+  displayName: string
   config: ResolvedChatGptConfig
   tokens: OAuthProvidersService
   images: ProviderImageServices
 }
 
+/** Read-only ChatGPT route facts for the providers snapshot. */
+export interface ChatGptStatus {
+  registered: boolean
+  models?: CatalogStats
+  catalogError?: string
+}
+
+/** Reads the live ChatGPT status; returned by {@link registerChatGpt}. */
+export type ChatGptStatusView = () => ChatGptStatus
+
+/** Build the read-only status view over one catalog; `registered` is true by construction. */
+export function chatGptStatus(catalog: ModelCatalog): ChatGptStatusView {
+  return () => {
+    const models = catalog.stats()
+    const catalogError = catalog.error()
+    return {
+      registered: true,
+      ...(models === undefined ? {} : { models }),
+      ...(catalogError === undefined ? {} : { catalogError }),
+    }
+  }
+}
+
+/** One mounted ChatGPT generation: the live status view plus the disposer a reload needs. */
+export interface ChatGptRegistration {
+  readonly view: ChatGptStatusView
+  dispose(): void
+}
+
 /** Wire the ChatGPT provider: LLM route, catalog, token store, sign-in. */
 export function registerChatGpt(
   ctx: Context,
-  { channel, tokens, config, images }: RegisterChatGptDeps,
-): void {
+  { channel, displayName, tokens, config, images }: RegisterChatGptDeps,
+): ChatGptRegistration {
   const log = ctx.logger(`${PACKAGE_NAME}/chatgpt`)
-  const options = resolveAdapterOptions(config)
+  const options = resolveAdapterOptions(config, displayName)
   log.info('loaded (provider=%s, baseURL=%s)', PROVIDER, options.baseURL)
 
   let fetchPromise: Promise<FetchLike> | undefined
@@ -84,7 +122,12 @@ export function registerChatGpt(
     logger: ctx.logger,
   })
   tokens.register(PROVIDER, () => tokenStore.resolve())
-  const catalog = new ModelCatalog({ fetch: fetchVia, options, logger: log })
+  const catalog = new ModelCatalog({
+    fetch: fetchVia,
+    options,
+    logger: log,
+    ...(config.filter === undefined ? {} : { filter: config.filter }),
+  })
   const adapter = new OpenAiOauthAdapter({
     options,
     tokenStore,
@@ -103,17 +146,25 @@ export function registerChatGpt(
       ? fiber.entry.options.id
       : undefined
   const settingsNs = entryId ?? SETTINGS_NAMESPACE
-  ctx.llm.registerAdapter([PROVIDER], adapter)
-  ctx.llm.registerModelDiscovery(
+  const disposeAdapter = ctx.llm.registerAdapter([PROVIDER], adapter)
+  const disposeDiscovery = ctx.llm.registerModelDiscovery(
     settingsNs,
     createDiscovery({ refreshMarginMs: options.refreshMarginMs, tokenStore, catalog }),
   )
-
-  registerChatGptSignIn(ctx, {
+  const disposeSignIn = registerChatGptSignIn(ctx, {
     key: CREDENTIAL_KEY,
     fetch: fetchVia,
     channel,
     settingsNs,
     logger: log,
   })
+
+  return {
+    view: chatGptStatus(catalog),
+    dispose: () => {
+      disposeSignIn()
+      disposeDiscovery()
+      disposeAdapter()
+    },
+  }
 }

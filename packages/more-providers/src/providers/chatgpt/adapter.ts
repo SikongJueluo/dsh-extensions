@@ -51,6 +51,7 @@ interface PreparedRequestImages {
 
 /** Connection facts resolved from the startup config snapshot. */
 export interface AdapterOptions {
+  displayName: string
   baseURL: string
   defaultReasoningEffort: string
   defaultReasoningEfforts: string[]
@@ -353,7 +354,7 @@ export class OpenAiOauthAdapter extends LlmAdapter {
   }
 
   override providerInfo(provider: string): LlmProviderInfo {
-    return { id: provider, name: 'ChatGPT (OpenAI)' }
+    return { id: provider, name: this.options.displayName }
   }
 
   override async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
@@ -392,6 +393,7 @@ export class OpenAiOauthAdapter extends LlmAdapter {
 
   override async *stream(options: GenerateOptions): AsyncGenerator<StreamChunk> {
     const cfg = this.options
+    this.catalog.resolve(options.model)
     const fetchFn = await this.getFetch()
     const { access, accountId } = await this.tokenStore.resolve(cfg.refreshMarginMs)
     const controller = new AbortController()

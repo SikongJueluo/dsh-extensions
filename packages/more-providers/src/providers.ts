@@ -7,10 +7,11 @@ import {
   openAIResponsesApi,
 } from '@earendil-works/pi-ai/compat'
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all'
-import type { PiAiAdapterOptions, ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
-import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
-import type { ModelConfig, ModelDefault, ModelMetadata, ResolvedProvider } from './config.js'
+import type { ModelConfig } from './config.js'
 import { ConfigError } from './config.js'
+import type { ModelFilter } from './catalog/filter.js'
+import { finalizeCatalog } from './catalog/finalize.js'
+import type { FinalizeResult } from './catalog/finalize.js'
 import {
   DEFAULT_BASE_URL as COMMAND_CODE_BASE_URL,
   DEFAULT_CAPABILITIES_URL as COMMAND_CODE_CAPABILITIES_URL,
@@ -21,38 +22,18 @@ import {
   fetchCatalog,
   mergeCapabilities,
 } from './commandcode.js'
-import type { CommandCodeCapability } from './commandcode.js'
-import type { KeySource } from './keys.js'
-import { readKey } from './keys.js'
+import type { CommandCodeCapability, CommandCodeCatalogItem } from './commandcode.js'
 import { DEFAULT_THINKING_LEVELS, THINKING_LEVEL_SET, thinkingLevelMapOf } from './reasoning.js'
 import { isRecord } from './record.js'
-import type { ProviderImageServices } from './runtime.js'
+import type {
+  BuiltinProviderSpec,
+  CommandCodeProviderSpec,
+  CustomProviderSpec,
+} from './providers/spec.js'
 
 const FALLBACK_CONTEXT_WINDOW = 131_072
 const FALLBACK_MAX_TOKENS = 32_768
 const MODELS_TIMEOUT_MS = 10_000
-
-const DEFAULT_RETRY_POLICY = {
-  mode: 'normal' as const,
-  maxRetries: 5,
-  retryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT'],
-  initialDelayMs: 500,
-  maxDelayMs: 10_000,
-  jitterRatio: 0.1,
-}
-
-const AUTH: PiAiAdapterOptions['auth'] = {
-  credentials: {
-    read: async () => undefined,
-    list: async () => [],
-    modify: async () => undefined,
-    delete: async () => {},
-  },
-  authContext: {
-    env: async (name) => process.env[name],
-    fileExists: async () => false,
-  },
-}
 
 /** Minimal logger surface used during startup. */
 export interface ProviderLogger {
@@ -61,18 +42,39 @@ export interface ProviderLogger {
   error(message: string, ...args: unknown[]): void
 }
 
-/** Result of one provider build before it becomes an adapter profile. */
-interface BuiltProvider {
-  provider: Provider
-  models: Model<Api>[]
-  headers?: Record<string, string>
-  displayName?: string
+/** Marks a model-directory fetch failure so the build report records it as `catalogError`. */
+export class CatalogError extends Error {}
+
+/** Model counts one route's finalization produced. */
+export interface RouteModelCounts {
+  discovered: number
+  effective: number
+  excluded: string[]
+  notIncluded: string[]
 }
 
-/** Routes and key sources that survived a successful build. */
-export interface BuildResult {
-  profiles: Map<string, ResolvedPiAiProviderProfile>
-  keys: Map<string, KeySource>
+/** What happened to one configured route during startup. */
+export interface RouteBuildReport {
+  route: string
+  registered: boolean
+  models?: RouteModelCounts
+  catalogError?: string
+  error?: string
+}
+
+/** One route's built catalog: the provider to register and how the filter accounted for the rest. */
+interface FinalCatalog<M> {
+  models: M[]
+  discovered: number
+  excluded: string[]
+  notIncluded: string[]
+}
+
+/** What one provider spec built before it becomes an adapter profile. */
+export interface BuiltCatalog extends FinalCatalog<Model<Api>> {
+  provider: Provider
+  headers?: Record<string, string>
+  catalogError?: string
 }
 
 function reasoningOf(model: ModelConfig): {
@@ -86,19 +88,14 @@ function reasoningOf(model: ModelConfig): {
   }
 }
 
-function customModel(model: ModelConfig, resolved: ResolvedProvider): Model<Api> {
-  if (resolved.api === undefined || resolved.baseURL === undefined) {
-    throw new ConfigError(
-      `providers.${resolved.providerId}: custom provider is missing api/baseURL`,
-    )
-  }
+function customModel(model: ModelConfig, spec: CustomProviderSpec): Model<Api> {
   const reasoning = reasoningOf(model)
   const built: Model<Api> = {
     id: model.id,
     name: model.name ?? model.id,
-    api: resolved.api,
-    provider: resolved.route,
-    baseUrl: resolved.baseURL,
+    api: spec.api,
+    provider: spec.route,
+    baseUrl: spec.baseURL,
     input: model.input ?? ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: model.contextWindow ?? FALLBACK_CONTEXT_WINDOW,
@@ -108,7 +105,7 @@ function customModel(model: ModelConfig, resolved: ResolvedProvider): Model<Api>
       ? {}
       : { thinkingLevelMap: reasoning.thinkingLevelMap }),
   }
-  if (resolved.compat !== undefined) built.compat = resolved.compat as Model<Api>['compat']
+  if (spec.compat !== undefined) built.compat = spec.compat as Model<Api>['compat']
   return built
 }
 
@@ -199,27 +196,34 @@ async function fetchModels(url: string, key: string): Promise<ModelConfig[]> {
   return catalogModels(await response.json())
 }
 
-function profileFor(
-  route: string,
-  displayName: string,
-  piProvider: Provider,
-  headers?: Record<string, string>,
-): ResolvedPiAiProviderProfile {
+function catalogOf<M>(models: M[], finalized: FinalizeResult): FinalCatalog<M> {
   return {
-    provider: route,
-    displayName,
-    streamIdleTimeoutMs: 300_000,
-    maxRequestImageBytes: 20_971_520,
-    maxRequestImages: 50,
-    imageOffloadCountQuantum: 10,
-    requestImagePixelBudget: 4_194_304,
-    requestImageMaxBytes: 1_048_576,
-    retryPolicy: DEFAULT_RETRY_POLICY,
-    piProvider,
-    modelErrors: new Map(),
-    configuredMaxTokens: new Map(),
-    ...(headers === undefined ? {} : { headers }),
+    models,
+    discovered: models.length + finalized.excluded.length + finalized.notIncluded.length,
+    excluded: finalized.excluded,
+    notIncluded: finalized.notIncluded,
   }
+}
+
+/** The same provider with its chat catalog narrowed to the surviving models. */
+function withModels(provider: Provider, models: readonly Model<Api>[]): Provider {
+  return { ...provider, getModels: () => models }
+}
+
+/** Finalize a pi-ai catalog by id: its models keep their own metadata, so only `id` takes part. */
+function finalizePiModels(
+  models: readonly Model<Api>[],
+  filter: ModelFilter | undefined,
+): FinalCatalog<Model<Api>> {
+  const finalized = finalizeCatalog({
+    catalog: models.map((model) => ({ id: model.id })),
+    filter,
+  })
+  const kept = new Set(finalized.models.map((model) => model.id))
+  return catalogOf(
+    models.filter((model) => kept.has(model.id)),
+    finalized,
+  )
 }
 
 let builtinCache: Provider[] | undefined
@@ -229,209 +233,128 @@ function allBuiltinProviders(): Provider[] {
   return builtinCache
 }
 
-function builtinProvider(resolved: ResolvedProvider): BuiltProvider {
-  const catalog = resolved.catalog ?? resolved.providerId
-  const provider = allBuiltinProviders().find((candidate) => candidate.id === catalog)
+/** Rebuild a bundled catalog under the route's own id: the harness indexes models by pi-ai provider id, so the catalog id must not leak through. */
+export function buildBuiltinCatalog(spec: BuiltinProviderSpec): BuiltCatalog {
+  const provider = allBuiltinProviders().find((candidate) => candidate.id === spec.catalog)
   if (provider === undefined) {
     throw new ConfigError(
-      `providers.${resolved.providerId}: unknown builtin catalog provider "${catalog}"`,
+      `providers.${spec.providerId}: unknown builtin catalog provider "${spec.catalog}"`,
     )
   }
-  const models = [...provider.getModels()]
-  if (models.length === 0) {
+  const available = [...provider.getModels()]
+  if (available.length === 0) {
     throw new ConfigError(
-      `providers.${resolved.providerId}: builtin catalog provider "${catalog}" has no chat models`,
+      `providers.${spec.providerId}: builtin catalog provider "${spec.catalog}" has no chat models`,
     )
   }
-  return { provider, models }
-}
-
-function matches(pattern: RegExp, id: string): boolean {
-  pattern.lastIndex = 0
-  return pattern.test(id)
-}
-
-function modelMetadata(defaults: readonly ModelDefault[] | undefined, id: string): ModelMetadata {
-  const metadata: ModelMetadata = {}
-  for (const rule of defaults ?? []) {
-    if (!matches(rule.pattern, id)) continue
-    metadata.contextWindow ??= rule.contextWindow
-    metadata.maxTokens ??= rule.maxTokens
-    metadata.reasoning ??= rule.reasoning
+  const finalized = finalizePiModels(available, spec.filter)
+  const models = finalized.models.map((model) => ({ ...model, provider: spec.route }))
+  return {
+    provider: { ...provider, id: spec.route, name: spec.displayName, getModels: () => models },
+    ...finalized,
+    models,
   }
-  return metadata
 }
 
-function mergeModels(
-  catalog: readonly ModelConfig[],
-  staticModels: readonly ModelConfig[] | undefined,
-  defaults: readonly ModelDefault[] | undefined,
-  contextWindows: ReadonlyMap<string, number> | undefined,
-): ModelConfig[] {
-  const fromCatalog = new Map(catalog.map((model) => [model.id, model]))
-  const fromStatic = new Map((staticModels ?? []).map((model) => [model.id, model]))
-  const entries = catalog.length === 0 ? (staticModels ?? []) : catalog
-  return entries.map((entry) => {
-    const discovered = fromCatalog.get(entry.id)
-    const fallback = fromStatic.get(entry.id)
-    const metadata = catalog.length === 0 ? {} : modelMetadata(defaults, entry.id)
-    const name = discovered?.name ?? fallback?.name
-    const contextWindow =
-      discovered?.contextWindow ??
-      metadata.contextWindow ??
-      fallback?.contextWindow ??
-      contextWindows?.get(entry.id)
-    const maxTokens = discovered?.maxTokens ?? metadata.maxTokens ?? fallback?.maxTokens
-    const input = discovered?.input ?? fallback?.input
-    const reasoning = discovered?.reasoning ?? metadata.reasoning ?? fallback?.reasoning
-    const model: ModelConfig = { id: entry.id }
-    if (name !== undefined) model.name = name
-    if (contextWindow !== undefined) model.contextWindow = contextWindow
-    if (maxTokens !== undefined) model.maxTokens = maxTokens
-    if (input !== undefined) model.input = input
-    if (reasoning !== undefined) model.reasoning = reasoning
-    return model
-  })
-}
-
-async function customProvider(
-  resolved: ResolvedProvider,
+export async function fetchCustomCatalog(
+  spec: CustomProviderSpec,
   key: string,
-  log: ProviderLogger,
-): Promise<BuiltProvider> {
-  let catalog: ModelConfig[] = []
-  if (resolved.modelsURL !== undefined) {
-    try {
-      catalog = await fetchModels(resolved.modelsURL, key)
-      if (catalog.length === 0)
-        log.warn(
-          'more-providers: %s model catalog was empty; using the static fallback',
-          resolved.route,
-        )
-    } catch (error) {
-      log.warn('more-providers: %s model catalog failed: %o', resolved.route, error)
-    }
-  }
-  const models = mergeModels(
+): Promise<ModelConfig[]> {
+  if (spec.modelsURL === undefined) return []
+  return fetchModels(spec.modelsURL, key)
+}
+
+export function buildCustomCatalog(
+  spec: CustomProviderSpec,
+  catalog: readonly ModelConfig[],
+  catalogError?: string,
+): BuiltCatalog {
+  const finalized = finalizeCatalog({
     catalog,
-    resolved.models,
-    resolved.modelDefaults,
-    resolved.contextWindows,
-  )
-  if (models.length === 0) {
-    throw new Error('no models: model catalog failed and no static models were configured')
-  }
-  const api = resolved.api
-  if (api === undefined)
-    throw new ConfigError(`providers.${resolved.providerId}: custom provider is missing api`)
+    staticModels: spec.models,
+    defaults: spec.modelDefaults,
+    contextWindows: spec.contextWindows,
+    filter: spec.filter,
+  })
+  const models = finalized.models.map((model) => customModel(model, spec))
   const provider = createProvider({
-    id: resolved.route,
-    name: resolved.displayName,
+    id: spec.route,
+    name: spec.displayName,
     auth: { apiKey: envApiKeyAuth('more-providers API key', ['MORE_PROVIDERS_API_KEY']) },
-    models: models.map((model) => customModel(model, resolved)),
-    api: { [api]: apiStreams(api) },
+    models,
+    api: { [spec.api]: apiStreams(spec.api) },
   })
   return {
     provider,
-    models: [...provider.getModels()],
-    ...(resolved.headers === undefined ? {} : { headers: resolved.headers }),
+    ...catalogOf(models, finalized),
+    ...(spec.headers === undefined ? {} : { headers: spec.headers }),
+    ...(catalogError === undefined ? {} : { catalogError }),
   }
 }
 
-async function commandCodeProvider(
-  resolved: ResolvedProvider,
+/** Merge per-account catalogs into one model list: first account to supply a field wins. */
+export function unionCatalogs(catalogs: readonly (readonly ModelConfig[])[]): ModelConfig[] {
+  const merged = new Map<string, ModelConfig>()
+  for (const catalog of catalogs) {
+    for (const model of catalog) {
+      const seen = merged.get(model.id)
+      if (seen === undefined) {
+        merged.set(model.id, { ...model })
+        continue
+      }
+      if (seen.name === undefined && model.name !== undefined) seen.name = model.name
+      if (seen.contextWindow === undefined && model.contextWindow !== undefined) {
+        seen.contextWindow = model.contextWindow
+      }
+      if (seen.maxTokens === undefined && model.maxTokens !== undefined) {
+        seen.maxTokens = model.maxTokens
+      }
+      if (seen.input === undefined && model.input !== undefined) seen.input = model.input
+      if (seen.reasoning === undefined && model.reasoning !== undefined) {
+        seen.reasoning = model.reasoning
+      }
+    }
+  }
+  return [...merged.values()]
+}
+
+/** Fetch the Command Code directory, turning any failure into the marker the report understands. */
+async function fetchCatalogOrFail(modelsURL: string): Promise<CommandCodeCatalogItem[]> {
+  try {
+    return await fetchCatalog(modelsURL, MODELS_TIMEOUT_MS)
+  } catch (error) {
+    throw new CatalogError(error instanceof Error ? error.message : String(error), { cause: error })
+  }
+}
+
+export async function buildCommandCodeCatalog(
+  spec: CommandCodeProviderSpec,
   log: ProviderLogger,
-): Promise<BuiltProvider> {
-  const baseURL = resolved.baseURL ?? COMMAND_CODE_BASE_URL
-  const modelsURL = resolved.modelsURL ?? COMMAND_CODE_MODELS_URL
-  const zdr = resolved.zdr ?? process.env.CMD_ZDR === '1'
-  const items = await fetchCatalog(modelsURL, MODELS_TIMEOUT_MS)
+): Promise<BuiltCatalog> {
+  const baseURL = spec.baseURL ?? COMMAND_CODE_BASE_URL
+  const modelsURL = spec.modelsURL ?? COMMAND_CODE_MODELS_URL
+  const zdr = spec.zdr ?? process.env.CMD_ZDR === '1'
+  const items = await fetchCatalogOrFail(modelsURL)
   let capabilities: ReadonlyMap<string, CommandCodeCapability> = new Map()
   try {
     capabilities = await fetchCapabilities(COMMAND_CODE_CAPABILITIES_URL, MODELS_TIMEOUT_MS)
   } catch (error) {
     log.warn(
       'more-providers: %s model capability catalog failed; using /models metadata only: %o',
-      resolved.route,
+      spec.route,
       error,
     )
   }
-  const { provider, models } = buildCommandCodeProvider(mergeCapabilities(items, capabilities), {
-    route: resolved.route,
-    displayName: resolved.displayName,
+  const built = buildCommandCodeProvider(mergeCapabilities(items, capabilities), {
+    route: spec.route,
+    displayName: spec.displayName,
     baseURL,
     zdr,
   })
+  const finalized = finalizePiModels(built.models, spec.filter)
   return {
-    provider,
-    models,
+    provider: withModels(built.provider, finalized.models),
+    ...finalized,
     ...(zdr ? { headers: { [ZDR_HEADER]: '1' } } : {}),
   }
-}
-
-async function buildOne(
-  resolved: ResolvedProvider,
-  key: string,
-  log: ProviderLogger,
-): Promise<BuiltProvider> {
-  switch (resolved.kind) {
-    case 'builtin':
-      return builtinProvider(resolved)
-    case 'custom':
-      return customProvider(resolved, key, log)
-    case 'command-code':
-      return commandCodeProvider(resolved, log)
-    default:
-      throw new ConfigError(`more-providers: unsupported provider kind "${String(resolved.kind)}"`)
-  }
-}
-
-/** Build every configured route that has a readable key. A config error throws (the caller registers no providers); a runtime catalog failure logs and skips only that route. */
-export async function buildProviders(
-  resolved: readonly ResolvedProvider[],
-  log: ProviderLogger,
-): Promise<BuildResult> {
-  const profiles = new Map<string, ResolvedPiAiProviderProfile>()
-  const keys = new Map<string, KeySource>()
-  for (const provider of resolved) {
-    const key = readKey(provider.keySource)
-    if (key === undefined) {
-      log.warn('more-providers: %s has no readable key; route stays dormant', provider.route)
-      continue
-    }
-    try {
-      const built = await buildOne(provider, key, log)
-      profiles.set(
-        provider.route,
-        profileFor(
-          provider.route,
-          built.displayName ?? provider.displayName,
-          built.provider,
-          built.headers,
-        ),
-      )
-      keys.set(provider.route, provider.keySource)
-    } catch (error) {
-      if (error instanceof ConfigError) throw error
-      log.error('more-providers: %s could not be built: %o', provider.route, error)
-    }
-  }
-  return { profiles, keys }
-}
-
-/** Build the adapter over the profiles that survived startup. */
-export function buildAdapter(
-  profiles: ReadonlyMap<string, ResolvedPiAiProviderProfile>,
-  keyOf: (provider: string) => string | undefined,
-  images: ProviderImageServices,
-): PiAiAdapter {
-  return new PiAiAdapter({
-    ...images,
-    profiles: () => profiles,
-    resolveApiKey: async (provider) => {
-      const key = keyOf(provider)
-      return key
-    },
-    auth: AUTH,
-  })
 }

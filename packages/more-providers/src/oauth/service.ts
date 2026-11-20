@@ -27,6 +27,11 @@ export class OAuthProvidersService extends Service {
     this.resolvers.set(provider, resolve)
   }
 
+  /** Drop one provider's resolver; idempotent, so a reload can mount and unmount freely. */
+  unregister(provider: string): void {
+    this.resolvers.delete(provider)
+  }
+
   /** Every provider that can hand out a token right now. */
   providers(): string[] {
     return [...this.resolvers.keys()]

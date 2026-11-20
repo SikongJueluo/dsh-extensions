@@ -17,6 +17,7 @@ import {
 const CHATGPT_YAML = [
   'providers:',
   '  chatgpt:',
+  '    kind: chatgpt',
   '    baseURL: https://chatgpt.invalid/backend-api/codex',
   '    clientVersion: 9.9.9-test',
 ].join('\n')

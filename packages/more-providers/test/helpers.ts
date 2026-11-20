@@ -43,23 +43,84 @@ function chatgptGrant(): CredentialRecord {
   }
 }
 
+/** One adapter registration, mutable in place by the host-style `replace` handle. */
+interface AdapterEntry {
+  providers: string[]
+  adapter: unknown
+}
+
+/** A `registerAdapter` handle: the route-replacing function the host returns. */
+interface AdapterHandle {
+  (): void
+  replace(providers: string[]): void
+}
+
 /** Capture-what-the-plugin-registered view of the host `llm` service. */
 function fakeLlmService() {
-  const adapters: { providers: string[]; adapter: unknown }[] = []
+  const adapters: AdapterEntry[] = []
+  const registrations: string[][] = []
+  const replacements: string[][] = []
+  let refusals = 0
   const configurable: Record<string, unknown>[] = []
   const discoveries = new Map<string, unknown>()
+  const releasedDiscoveries: string[] = []
+  const refuseConflict = (providers: readonly string[], self?: AdapterEntry): void => {
+    for (const provider of providers) {
+      const owner = adapters.find(
+        (candidate) => candidate !== self && candidate.providers.includes(provider),
+      )
+      if (owner !== undefined) {
+        throw new Error(`provider "${provider}" is already registered by another adapter`)
+      }
+    }
+  }
   const service = {
-    registerAdapter(providers: string[], adapter: unknown): void {
-      adapters.push({ providers, adapter })
+    registerAdapter(providers: string[], adapter: unknown): AdapterHandle {
+      if (refusals > 0) {
+        refusals -= 1
+        throw new Error('simulated registration refusal')
+      }
+      refuseConflict(providers)
+      const entry: AdapterEntry = { providers: [...providers], adapter }
+      adapters.push(entry)
+      registrations.push([...providers])
+      let released = false
+      const handle = ((): void => {
+        released = true
+        const index = adapters.indexOf(entry)
+        if (index >= 0) adapters.splice(index, 1)
+      }) as AdapterHandle
+      handle.replace = (next: string[]): void => {
+        if (released) throw new Error('registration disposed')
+        refuseConflict(next, entry)
+        replacements.push([...next])
+        entry.providers = [...next]
+      }
+      return handle
     },
     registerConfigurableProviders(list: Record<string, unknown>[]): void {
       configurable.push(...list)
     },
-    registerModelDiscovery(ns: string, handler: unknown): void {
+    registerModelDiscovery(ns: string, handler: unknown): () => void {
       discoveries.set(ns, handler)
+      return () => {
+        if (discoveries.get(ns) === handler) discoveries.delete(ns)
+        releasedDiscoveries.push(ns)
+      }
     },
   }
-  return { adapters, configurable, discoveries, service }
+  return {
+    adapters,
+    registrations,
+    refuseNext(count: number): void {
+      refusals = count
+    },
+    replacements,
+    configurable,
+    discoveries,
+    releasedDiscoveries,
+    service,
+  }
 }
 
 /** Capture view of the host `webServer` service (prefix routes and resources). */
@@ -305,6 +366,15 @@ export async function cleanupYamlFiles(): Promise<void> {
   for (const directory of directories.splice(0)) {
     await rm(directory, { recursive: true, force: true })
   }
+}
+
+/** ChatGPT provider fragment for fixtures that configure the OAuth route. */
+export function chatgptYaml(options: { enabled?: boolean } = {}): string {
+  return [
+    '  chatgpt:',
+    '    kind: chatgpt',
+    ...(options.enabled === false ? ['    enabled: false'] : []),
+  ].join('\n')
 }
 
 /** Gateway YAML fragment with the env-backed static key. */

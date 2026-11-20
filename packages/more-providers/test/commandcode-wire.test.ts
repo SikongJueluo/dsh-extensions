@@ -8,6 +8,7 @@ import { DEFAULT_CAPABILITIES_URL, DEFAULT_MODELS_URL } from '../src/commandcode
 import {
   TEST_ENV_KEY,
   capturingFetch,
+  chatgptYaml,
   cleanupYamlFiles,
   collectStream,
   createHarness,
@@ -26,8 +27,7 @@ const YAML = [
   '  command:',
   '    kind: command-code',
   `    apiKeyEnv: ${TEST_ENV_KEY}`,
-  '  chatgpt:',
-  '    enabled: false',
+  chatgptYaml({ enabled: false }),
 ].join('\n')
 
 const MODELS = {

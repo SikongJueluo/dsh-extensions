@@ -1,5 +1,5 @@
 import { ConfigStatusToast, type DshClientContext } from '@dsh-extensions/ui'
-import { registerOAuthSettings } from './oauth'
+import { registerProvidersSettings } from './providers'
 import './styles.css'
 
 function apply(ctx: DshClientContext) {
@@ -20,7 +20,7 @@ function apply(ctx: DshClientContext) {
       ProvidersConfigNotice,
     )
   })
-  registerOAuthSettings(ctx)
+  registerProvidersSettings(ctx)
 }
 
 export { apply }

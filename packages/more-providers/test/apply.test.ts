@@ -9,12 +9,17 @@ import type { ConfigStatusPayload } from '@dsh-extensions/config'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RPC_CHANNEL } from '../src/identity.js'
 import { OAuthProvidersService } from '../src/oauth/service.js'
+import { resolveConfig } from '../src/config.js'
+import { buildRoutes } from '../src/providers/registry.js'
+import { toProviderSpecs } from '../src/providers/spec.js'
+import type { RouteBuildReport } from '../src/providers.js'
 import {
   TEST_API_KEY,
   TEST_ENV_KEY,
   gatewayYaml,
   adapterFor,
   cleanupYamlFiles,
+  chatgptYaml,
   createHarness,
   waitFor,
   disposeTracked,
@@ -25,6 +30,7 @@ afterEach(async () => {
   await disposeTracked()
   await cleanupYamlFiles()
   vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
 })
 
 /** Wait until the credentials-driven ChatGPT mount has happened (or not). */
@@ -93,8 +99,18 @@ async function listChannelProviders(harness: Harness): Promise<{
 }
 
 describe('apply: ChatGPT default-on and API-key routes', () => {
-  it('mounts ChatGPT with an empty providers map', async () => {
+  it('registers nothing for an empty providers map', async () => {
     const harness = await createHarness({ yaml: 'providers: {}\n' })
+    await new Promise((settle) => {
+      setTimeout(settle, 50)
+    })
+
+    expect(harness.llm.adapters).toEqual([])
+    expect(harness.ctx.get('oauthProviders')).toBeUndefined()
+  })
+
+  it('mounts ChatGPT when the document configures it', async () => {
+    const harness = await createHarness({ yaml: `providers:\n${chatgptYaml()}\n` })
     await awaitMount(harness)
 
     expect(adapterFor(harness.llm, 'chatgpt')).toBeDefined()
@@ -107,7 +123,7 @@ describe('apply: ChatGPT default-on and API-key routes', () => {
 
   it('registers the API-key route and serves its key from providerKeys', async () => {
     const harness = await createHarness({
-      yaml: `providers:\n${gatewayYaml()}\n  chatgpt:\n    enabled: false\n`,
+      yaml: `providers:\n${gatewayYaml()}\n${chatgptYaml({ enabled: false })}\n`,
     })
     await waitFor(
       () => harness.llm.adapters.some((entry) => entry.providers.includes('gateway')),
@@ -115,8 +131,7 @@ describe('apply: ChatGPT default-on and API-key routes', () => {
     )
 
     expect(adapterFor(harness.llm, 'chatgpt')).toBeUndefined()
-    expect(harness.ctx.get('oauthProviders')).toBeInstanceOf(OAuthProvidersService)
-    expect((harness.ctx.get('oauthProviders') as OAuthProvidersService).providers()).toEqual([])
+    expect(harness.ctx.get('oauthProviders')).toBeUndefined()
     const providerKeys = harness.ctx.get('providerKeys') as {
       key(route: string): string | undefined
     }
@@ -127,7 +142,7 @@ describe('apply: ChatGPT default-on and API-key routes', () => {
 
   it('leaves a keyless route dormant without blocking ChatGPT', async () => {
     const harness = await createHarness({
-      yaml: `providers:\n${gatewayYaml()}\n  chatgpt: {}\n`,
+      yaml: `providers:\n${gatewayYaml()}\n${chatgptYaml()}\n`,
       envKey: '',
     })
     await awaitMount(harness)
@@ -138,14 +153,14 @@ describe('apply: ChatGPT default-on and API-key routes', () => {
 
   it('disables ChatGPT without deleting the existing grant', async () => {
     const harness = await createHarness({
-      yaml: `providers:\n  chatgpt:\n    enabled: false\n`,
+      yaml: `providers:\n${chatgptYaml({ enabled: false })}\n`,
     })
     await new Promise((settle) => {
       setTimeout(settle, 50)
     })
 
     expect(adapterFor(harness.llm, 'chatgpt')).toBeUndefined()
-    expect((harness.ctx.get('oauthProviders') as OAuthProvidersService).providers()).toEqual([])
+    expect(harness.ctx.get('oauthProviders')).toBeUndefined()
     expect(harness.credentials.records.get('oauth-providers/chatgpt')).toMatchObject({
       kind: 'grant',
       payload: { access: 'test-access-token' },
@@ -153,7 +168,7 @@ describe('apply: ChatGPT default-on and API-key routes', () => {
   })
 
   it('serves chatgpt tokens from the preserved oauth-providers record', async () => {
-    const harness = await createHarness({ yaml: 'providers: {}\n' })
+    const harness = await createHarness({ yaml: `providers:\n${chatgptYaml()}\n` })
     await awaitMount(harness)
     const oauth = harness.ctx.get('oauthProviders') as OAuthProvidersService
 
@@ -164,7 +179,7 @@ describe('apply: ChatGPT default-on and API-key routes', () => {
 
 describe('apply: browser sign-in channel', () => {
   it('serves the signed-in ChatGPT card from the preserved grant', async () => {
-    const harness = await createHarness({ yaml: 'providers: {}\n' })
+    const harness = await createHarness({ yaml: `providers:\n${chatgptYaml()}\n` })
     await awaitMount(harness)
 
     const result = await listChannelProviders(harness)
@@ -179,7 +194,10 @@ describe('apply: browser sign-in channel', () => {
   })
 
   it('serves the ChatGPT card as signed out without a grant', async () => {
-    const harness = await createHarness({ yaml: 'providers: {}\n', chatgptGrant: false })
+    const harness = await createHarness({
+      yaml: `providers:\n${chatgptYaml()}\n`,
+      chatgptGrant: false,
+    })
     await awaitMount(harness)
 
     const result = await listChannelProviders(harness)
@@ -193,7 +211,7 @@ describe('apply: browser sign-in channel', () => {
 describe('apply: fail-closed configuration', () => {
   it('registers no routes and no services for an invalid document', async () => {
     const harness = await createHarness({
-      yaml: `providers:\n${gatewayYaml()}\n  chatgpt:\n    bogusField: 1\n`,
+      yaml: `providers:\n${gatewayYaml()}\n  chatgpt:\n    kind: chatgpt\n    bogusField: 1\n`,
     })
 
     expect(harness.llm.adapters).toEqual([])
@@ -205,7 +223,7 @@ describe('apply: fail-closed configuration', () => {
 
   it('keeps the status route serving the error to the browser half', async () => {
     const harness = await createHarness({
-      yaml: `providers:\n${gatewayYaml()}\n  chatgpt:\n    bogusField: 1\n`,
+      yaml: `providers:\n${gatewayYaml()}\n  chatgpt:\n    kind: chatgpt\n    bogusField: 1\n`,
     })
     const status = harness.web.routes.find(
       (route) => route.def.path === '/dsh-more-providers/config-status',
@@ -216,7 +234,7 @@ describe('apply: fail-closed configuration', () => {
     const response = await resource()
     const payload = (await response.json()) as ConfigStatusPayload
     const mine = payload.instances.find((instance) => instance.file === harness.file)
-    expect(mine).toMatchObject({ state: 'invalid', recovery: 'restart' })
+    expect(mine).toMatchObject({ state: 'invalid', recovery: 'auto' })
     expect(mine?.error).toContain('bogusField')
   })
 
@@ -244,7 +262,7 @@ describe('apply: fail-closed configuration', () => {
 
 describe('apply: credential-scope events survive the merge', () => {
   it('emits llm/adapters-updated for oauth-providers records', async () => {
-    const harness = await createHarness({ yaml: 'providers: {}\n' })
+    const harness = await createHarness({ yaml: `providers:\n${chatgptYaml()}\n` })
     await awaitMount(harness)
     const updates: unknown[] = []
     harness.ctx.on('llm/adapters-updated', () => {
@@ -265,7 +283,7 @@ describe('apply: credential-scope events survive the merge', () => {
   })
 
   it('ignores record updates from other scopes', async () => {
-    const harness = await createHarness({ yaml: 'providers: {}\n' })
+    const harness = await createHarness({ yaml: `providers:\n${chatgptYaml()}\n` })
     await awaitMount(harness)
     let updates = 0
     harness.ctx.on('llm/adapters-updated', () => {
@@ -283,5 +301,139 @@ describe('apply: credential-scope events survive the merge', () => {
       setTimeout(settle, 20)
     })
     expect(updates).toBe(0)
+  })
+})
+
+describe('apply: a route the filter empties', () => {
+  it('registers nothing while ChatGPT stays off', async () => {
+    const harness = await createHarness({
+      yaml: [
+        'providers:',
+        gatewayYaml(),
+        '    filter:',
+        '      include:',
+        "        - match: '^nothing$'",
+        chatgptYaml({ enabled: false }),
+      ].join('\n'),
+    })
+    await new Promise((settle) => {
+      setTimeout(settle, 50)
+    })
+
+    expect(harness.llm.adapters).toEqual([])
+    expect(harness.ctx.get('oauthProviders')).toBeUndefined()
+  })
+})
+
+/** Gateway provider document with the two static models the report tests count. */
+function gatewayDocument(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    kind: 'custom',
+    api: 'openai-responses',
+    baseURL: 'https://gateway.invalid/v1',
+    apiKeyEnv: TEST_ENV_KEY,
+    models: [{ id: 'gateway-large' }, { id: 'gateway-mini' }],
+    ...extra,
+  }
+}
+
+describe('apply: build reports', () => {
+  const LOG = { info: () => undefined, warn: () => undefined, error: () => undefined }
+  const MODELS_URL = 'https://gateway.invalid/v1/models'
+
+  async function reportsFor(
+    providers: Record<string, unknown>,
+  ): Promise<ReadonlyMap<string, RouteBuildReport>> {
+    const { reports } = await buildRoutes(toProviderSpecs(resolveConfig({ providers })), LOG)
+    return reports
+  }
+
+  it('reports the counts of a registered route', async () => {
+    vi.stubEnv(TEST_ENV_KEY, TEST_API_KEY)
+    const reports = await reportsFor({
+      gateway: gatewayDocument({ filter: { exclude: [{ match: '-mini$' }] } }),
+    })
+
+    expect(reports.get('gateway')).toStrictEqual({
+      route: 'gateway',
+      registered: true,
+      models: {
+        discovered: 2,
+        effective: 1,
+        excluded: ['gateway-mini'],
+        notIncluded: [],
+      },
+    })
+  })
+
+  it('reports a route the filter empties as unregistered', async () => {
+    vi.stubEnv(TEST_ENV_KEY, TEST_API_KEY)
+    const reports = await reportsFor({
+      gateway: gatewayDocument({ filter: { include: [{ match: '^nothing$' }] } }),
+    })
+
+    expect(reports.get('gateway')).toStrictEqual({
+      route: 'gateway',
+      registered: false,
+      models: {
+        discovered: 2,
+        effective: 0,
+        excluded: [],
+        notIncluded: ['gateway-large', 'gateway-mini'],
+      },
+      error: 'every model was filtered out',
+    })
+  })
+
+  it('keeps the catalog failure next to a successful static fallback', async () => {
+    vi.stubEnv(TEST_ENV_KEY, TEST_API_KEY)
+    vi.stubGlobal('fetch', async () => new Response('down', { status: 503 }))
+    const { profiles, reports } = await buildRoutes(
+      toProviderSpecs(
+        resolveConfig({ providers: { gateway: gatewayDocument({ modelsURL: MODELS_URL }) } }),
+      ),
+      LOG,
+    )
+
+    expect(reports.get('gateway')).toStrictEqual({
+      route: 'gateway',
+      registered: true,
+      models: {
+        discovered: 2,
+        effective: 2,
+        excluded: [],
+        notIncluded: [],
+      },
+      catalogError: 'model catalog returned 503',
+    })
+    expect(
+      profiles
+        .get('gateway')
+        ?.piProvider?.getModels()
+        .map((model) => model.id),
+    ).toEqual(['gateway-large', 'gateway-mini'])
+  })
+
+  it('reports a keyless route without running the catalog', async () => {
+    vi.stubEnv(TEST_ENV_KEY, '')
+    const reports = await reportsFor({ gateway: gatewayDocument() })
+
+    expect(reports.get('gateway')).toStrictEqual({
+      route: 'gateway',
+      registered: false,
+      error: 'no readable key',
+    })
+  })
+
+  it('reports every configured route in configuration order', async () => {
+    vi.stubEnv(TEST_ENV_KEY, TEST_API_KEY)
+    const reports = await reportsFor({
+      first: gatewayDocument(),
+      second: { kind: 'builtin', catalog: 'zai-coding-cn', apiKeyEnv: TEST_ENV_KEY },
+    })
+
+    expect([...reports.keys()]).toEqual(['first', 'second'])
+    expect(reports.get('second')?.registered).toBe(true)
+    expect(reports.get('second')?.models?.effective).toBeGreaterThan(0)
   })
 })

@@ -4,6 +4,7 @@
  */
 import type { Logger } from '@deepseek-ai/cordis'
 import { LlmError } from '@deepseek-ai/dsh-llm'
+import type { ModelFilter } from '../../catalog/filter.js'
 import { debugQuietly } from '../../diagnostics.js'
 import { readJson } from '../../oauth/transport.js'
 import type { FetchLike } from '../../oauth/transport.js'
@@ -21,6 +22,22 @@ export interface ModelEntry {
   contextWindow?: number
   reasoning: string[]
   inputModalities: readonly InputModality[]
+}
+
+/** Counts of the last successful load; the same shape the API-key build report uses. */
+export interface CatalogStats {
+  discovered: number
+  effective: number
+  excluded: string[]
+  notIncluded: string[]
+}
+
+/** The filtered catalog plus the ids the filter dropped. */
+interface CatalogView {
+  models: ModelEntry[]
+  discovered: number
+  excluded: string[]
+  notIncluded: string[]
 }
 
 const FALLBACK_CLIENT_VERSION = '0.157.1'
@@ -83,11 +100,26 @@ function parseModelsPayload(payload: unknown): ModelEntry[] {
   return out
 }
 
+/** Filter the fetched entries once, keeping catalog order for both dropped lists. */
+function viewOf(entries: readonly ModelEntry[], filter: ModelFilter | undefined): CatalogView {
+  const models: ModelEntry[] = []
+  const excluded: string[] = []
+  const notIncluded: string[] = []
+  for (const entry of entries) {
+    const reason = filter?.reason(entry.id)
+    if (reason === 'exclude-hit') excluded.push(entry.id)
+    else if (reason === 'include-miss') notIncluded.push(entry.id)
+    else models.push(entry)
+  }
+  return { models, discovered: entries.length, excluded, notIncluded }
+}
+
 export interface ModelCatalogOptions {
   fetch: FetchLike
   options: CatalogOptions
   ttlMs?: number
   logger?: Logger
+  filter?: ModelFilter
 }
 
 export class ModelCatalog {
@@ -95,43 +127,68 @@ export class ModelCatalog {
   private readonly options: CatalogOptions
   private readonly ttlMs: number
   private readonly logger: Logger | undefined
-  private live: ModelEntry[] | null = null
+  private readonly filter: ModelFilter | undefined
+  private view: CatalogView | null = null
   private liveAt = 0
   private liveVersion = ''
+  private lastError: string | undefined
   private refreshing: Promise<ModelEntry[]> | null = null
   private versionCache: { value: string; at: number } | undefined
   private versionFetching: Promise<string> | null = null
 
-  constructor({ fetch, options, ttlMs = 2 * 60 * 60 * 1000, logger }: ModelCatalogOptions) {
+  constructor({ fetch, options, ttlMs = 2 * 60 * 60 * 1000, logger, filter }: ModelCatalogOptions) {
     this.fetch = fetch
     this.options = options
     this.ttlMs = ttlMs
     this.logger = logger
+    this.filter = filter
   }
 
-  /** Last-good live catalog (empty until a fetch succeeds). Never a static list. */
+  /** Last-good filtered catalog (empty until a load succeeds). Never a static list. */
   current(): ModelEntry[] {
-    return this.live ?? []
+    return this.view?.models ?? []
   }
 
-  /** Look up one model's metadata, synthesizing a minimal entry when unknown. */
-  resolve(model: string): ModelEntry {
-    const found = this.current().find((entry) => entry.id === model)
-    return (
-      found ?? { id: model, name: model, reasoning: [], inputModalities: DEFAULT_INPUT_MODALITIES }
-    )
+  /** Filter counts of the last successful load, or `undefined` before the first one. */
+  stats(): CatalogStats | undefined {
+    const view = this.view
+    if (view === null) return undefined
+    return {
+      discovered: view.discovered,
+      effective: view.models.length,
+      excluded: view.excluded,
+      notIncluded: view.notIncluded,
+    }
+  }
+
+  /** Message of the last failed load; the next success clears it. */
+  error(): string | undefined {
+    return this.lastError
   }
 
   /**
-   * Return the live catalog, fetching when the cache is empty or stale. Throws when the live fetch fails, so callers surface the provider as offline instead of advertising a fabricated model list.
+   * Look up one model's metadata, rejecting ids the loaded catalog does not serve.
+   * @throws {LlmError} `UNKNOWN_MODEL` when a view exists and the id is absent from it.
+   */
+  resolve(model: string): ModelEntry {
+    const found = this.current().find((entry) => entry.id === model)
+    if (found !== undefined) return found
+    if (this.view !== null) {
+      throw new LlmError(`ChatGPT model catalog has no model "${model}"`, 'UNKNOWN_MODEL')
+    }
+    return { id: model, name: model, reasoning: [], inputModalities: DEFAULT_INPUT_MODALITIES }
+  }
+
+  /**
+   * Return the filtered catalog, fetching when the cache is empty or stale. Throws when the live fetch fails, so callers surface the provider as offline instead of advertising a fabricated model list.
    * @param headers - optional request headers (e.g. OAuth auth) for the fetch.
    */
   async refresh(headers?: Record<string, string>): Promise<ModelEntry[]> {
     const clientVersion = await this.resolveClientVersion()
-    if (this.live && Date.now() - this.liveAt < this.ttlMs && this.liveVersion === clientVersion)
-      return this.live
+    if (this.view && Date.now() - this.liveAt < this.ttlMs && this.liveVersion === clientVersion)
+      return this.view.models
     if (this.refreshing) return this.refreshing
-    this.refreshing = this.fetchLive(headers, clientVersion)
+    this.refreshing = this.load(headers, clientVersion)
     try {
       return await this.refreshing
     } finally {
@@ -141,7 +198,30 @@ export class ModelCatalog {
 
   /** Manual refresh: always hit the backend, bypassing the cache. */
   async forceRefresh(headers?: Record<string, string>): Promise<ModelEntry[]> {
-    return this.fetchLive(headers, await this.resolveClientVersion())
+    return this.load(headers, await this.resolveClientVersion())
+  }
+
+  /** Load, remember the failure for the status view, and publish the filtered view. */
+  private async load(headers: Record<string, string> | undefined, clientVersion: string) {
+    try {
+      const entries = await this.fetchLive(headers, clientVersion)
+      this.view = viewOf(entries, this.filter)
+      this.liveAt = Date.now()
+      this.liveVersion = clientVersion
+      this.lastError = undefined
+      if (this.view.models.length === 0) {
+        this.logger?.warn(
+          'chatgpt route: filter removed all %d models (excluded %d, not included %d); the route stays mounted with no selectable models',
+          this.view.discovered,
+          this.view.excluded.length,
+          this.view.notIncluded.length,
+        )
+      }
+      return this.view.models
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error)
+      throw error
+    }
   }
 
   /** The client version reported to the backend: explicit config, then the latest published `@openai/codex` from the npm registry (cached for the same TTL as the catalog), then the bundled fallback for offline hosts. The registry query failing never fails the catalog. */
@@ -216,9 +296,6 @@ export class ModelCatalog {
     if (parsed.length === 0) {
       throw new LlmError('ChatGPT backend returned no usable models', 'DISCOVERY_FAILED')
     }
-    this.live = parsed
-    this.liveAt = Date.now()
-    this.liveVersion = clientVersion
-    return this.live
+    return parsed
   }
 }

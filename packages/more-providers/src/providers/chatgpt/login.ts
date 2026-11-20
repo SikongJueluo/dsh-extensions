@@ -38,15 +38,16 @@ function grantRecord(grant: OAuthGrant): { kind: 'grant'; payload: OAuthGrant } 
   return { kind: 'grant', payload: { ...grant } }
 }
 
-/** Register the ChatGPT authorization flow and declare the provider on the shared browser sign-in channel. */
+/** Register the ChatGPT authorization flow and declare the provider on the shared browser sign-in channel; the returned disposer releases the flow. */
 export function registerChatGptSignIn(
   ctx: Context,
   { key, fetch, channel, settingsNs, logger }: ChatGptSignInDeps,
-): void {
+): () => void {
   channel.register({ id: PROVIDER, label: DISPLAY_NAME, settingsNs, key })
 
+  let disposeFlow: (() => void) | undefined
   ctx.inject(['authorization'], (authCtx) => {
-    authCtx.authorization.registerFlow({
+    disposeFlow = authCtx.authorization.registerFlow({
       key,
       label: 'OpenAI ChatGPT',
       methods: [{ id: 'browser', label: 'Sign in with ChatGPT (browser)' }],
@@ -107,4 +108,8 @@ export function registerChatGptSignIn(
       },
     })
   })
+  return () => {
+    disposeFlow?.()
+    disposeFlow = undefined
+  }
 }

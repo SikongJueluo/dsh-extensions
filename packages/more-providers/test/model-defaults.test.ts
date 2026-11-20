@@ -7,7 +7,8 @@
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveConfig } from '../src/config.js'
-import { buildProviders } from '../src/providers.js'
+import { buildRoutes } from '../src/providers/registry.js'
+import { toProviderSpecs } from '../src/providers/spec.js'
 
 const ENV_KEY = 'MORE_PROVIDERS_MODEL_DEFAULTS_TEST_KEY'
 const MODELS_URL = 'https://gateway.invalid/v1/models'
@@ -36,7 +37,7 @@ function stubCatalog(data: unknown[]): void {
 async function modelsOf(config: Record<string, unknown>): Promise<readonly Model<Api>[]> {
   vi.stubEnv(ENV_KEY, 'test-key')
   const resolved = resolveConfig({ providers: { gateway: config } })
-  const { profiles } = await buildProviders(resolved.providers, LOG)
+  const { profiles } = await buildRoutes(toProviderSpecs(resolved), LOG)
   return profiles.get('gateway')?.piProvider?.getModels() ?? []
 }
 

@@ -351,6 +351,10 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 `packages/more-providers/src/client/oauth.tsx`，A17 的同一处 transport 抑制迁到
 `packages/more-providers/src/oauth/transport.ts`。登记只跟随原代码移动，规则和豁免数量不变。
 
+2026-11-20 provider 统一重构：`src/client/oauth.tsx` 更名为 `src/client/providers.tsx`
+（统一 Providers 分区），A9 的同一处 hooks 抑制随文件移动登记到新路径；抑制点与规则不变，
+豁免数量不变。
+
 | # | 待批准项 | 建议 |
 | --- | --- | --- |
 | A1 | `style` 整类 off + 采纳 6 条 | 批准 |

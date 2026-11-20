@@ -15,7 +15,8 @@ import {
   toPiModels,
 } from '../src/commandcode.js'
 import { resolveConfig } from '../src/config.js'
-import { buildProviders } from '../src/providers.js'
+import { buildRoutes } from '../src/providers/registry.js'
+import { toProviderSpecs } from '../src/providers/spec.js'
 
 const ENV_KEY = 'MORE_PROVIDERS_COMMAND_CODE_TEST_KEY'
 const LOG = {
@@ -66,7 +67,7 @@ async function commandCodeModels(
       command: { kind: 'command-code', apiKeyEnv: ENV_KEY, ...extra },
     },
   })
-  const { profiles } = await buildProviders(resolved.providers, LOG)
+  const { profiles } = await buildRoutes(toProviderSpecs(resolved), LOG)
   return profiles.get('command')?.piProvider?.getModels() ?? []
 }
 
@@ -345,6 +346,46 @@ describe('Command Code provider catalogs', () => {
     const models = await commandCodeModels()
 
     expect(models[0]?.contextWindow).toBe(131072)
+  })
+
+  it('records a directory fetch failure as both error and catalogError', async () => {
+    stubRoutes({ [DEFAULT_MODELS_URL]: () => response({ error: 'down' }, 503) })
+    vi.stubEnv(ENV_KEY, 'test-key')
+    const resolved = resolveConfig({
+      providers: { command: { kind: 'command-code', apiKeyEnv: ENV_KEY } },
+    })
+
+    const { profiles, reports } = await buildRoutes(toProviderSpecs(resolved), LOG)
+
+    expect(profiles.has('command')).toBe(false)
+    const report = reports.get('command')
+    expect(report).not.toHaveProperty('models')
+    expect(report).toMatchObject({
+      registered: false,
+      error: 'Command Code /models returned 503',
+      catalogError: 'Command Code /models returned 503',
+    })
+  })
+
+  it('reports a route with no usable models as unregistered', async () => {
+    stubRoutes({
+      [DEFAULT_MODELS_URL]: () =>
+        response({ data: [{ id: 'embed', supported_endpoints: ['/embeddings'] }] }),
+      [DEFAULT_CAPABILITIES_URL]: () => response({ schemaVersion: 1, data: [] }),
+    })
+    vi.stubEnv(ENV_KEY, 'test-key')
+    const resolved = resolveConfig({
+      providers: { command: { kind: 'command-code', apiKeyEnv: ENV_KEY } },
+    })
+
+    const { profiles, reports } = await buildRoutes(toProviderSpecs(resolved), LOG)
+
+    expect(profiles.has('command')).toBe(false)
+    expect(reports.get('command')).toMatchObject({
+      registered: false,
+      models: { discovered: 0, effective: 0 },
+      error: 'the model catalog listed no usable models',
+    })
   })
 
   it('keeps ordinary reasoning levels ahead of the client view', async () => {

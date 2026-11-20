@@ -37,6 +37,7 @@ oauthFetch.current = capture.fetch as unknown as FetchLike
 const CHATGPT_YAML = [
   'providers:',
   '  chatgpt:',
+  '    kind: chatgpt',
   `    baseURL: ${CHATGPT_BASE_URL}`,
   '    clientVersion: 9.9.9-test',
 ].join('\n')
