@@ -4,19 +4,9 @@
 - id: tool-worktree
   name: '@deepseek-ai/dsh-experimental-tool-worktree'
   disabled: true
-- id: forge-worktree
-  name: '@deepseek-ai/dsh-experimental-worktree'
-  disabled: true
 
 - insert:
     - id: jj-worktree
       name: '/home/sikongjueluo/Projects/dsh-extensions/packages/jj-workspace/lib/index.js'
     - id: jj-tool-worktree
       name: '/home/sikongjueluo/Projects/dsh-extensions/packages/jj-workspace/lib/tool.js'
-
-- id: optional-forge-panel
-  insert:
-    - id: jj-forge-worktree
-      name: '/home/sikongjueluo/Projects/dsh-extensions/packages/jj-workspace/lib/index.js'
-      config:
-        statusChannel: false

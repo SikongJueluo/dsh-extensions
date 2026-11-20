@@ -18,6 +18,7 @@ import {
   isQuotaExceededError,
 } from '@deepseek-ai/dsh-llm'
 import type {
+  BuiltinLlmFailureCode,
   FinishReason,
   GenerateOptions,
   ImageAttachmentAccessResolver,
@@ -113,7 +114,10 @@ function mapUsage(usage: unknown): TokenUsage {
 }
 
 /** Map an HTTP status plus parsed error body to a stable LlmError code. */
-function httpErrorCode(status: number, detail: Record<string, unknown> | undefined): string {
+function httpErrorCode(
+  status: number,
+  detail: Record<string, unknown> | undefined,
+): BuiltinLlmFailureCode {
   if (status === 401 || status === 403) return 'AUTH'
   const text = [detail?.code, detail?.type, detail?.message, detail?.detail]
     .filter(Boolean)

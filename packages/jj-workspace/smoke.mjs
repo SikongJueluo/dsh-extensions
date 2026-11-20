@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import { Config, default as JjWorktreeService } from './lib/index.js'
 import { apply as applyTool } from './lib/tool.js'
@@ -150,7 +151,8 @@ const sandbox = { confine: async (argv) => ({ argv }) }
 const sandboxPolicy = {
   resolve: () => ({ mode: 'danger-full-access', workspaceRoot: cwd }),
 }
-const sessions = { get: (id) => (id === 'session-1' ? { id: 'session-1' } : undefined) }
+const session = Session.create(SessionId('session-1'))
+const sessions = { get: (id) => (id === 'session-1' ? session : undefined) }
 
 const ctx = new Context()
 ctx.provide('workingDirectory', workingDirectory)
@@ -162,7 +164,7 @@ ctx.provide('sessions', sessions)
 
 const service = new JjWorktreeService(ctx, Config({}))
 check('provider registers the worktrees service', ctx.get('worktrees') instanceof JjWorktreeService)
-const agent = { session: { id: 'session-1' } }
+const agent = { session }
 
 const jjRepo = join(root, 'jj-repo')
 await mkdir(jjRepo)

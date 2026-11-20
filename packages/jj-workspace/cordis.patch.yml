@@ -1,11 +1,6 @@
 - id: worktree
-  name: '@deepseek-ai/dsh-experimental-worktree'
   disabled: true
 - id: tool-worktree
-  name: '@deepseek-ai/dsh-experimental-tool-worktree'
-  disabled: true
-- id: forge-worktree
-  name: '@deepseek-ai/dsh-experimental-worktree'
   disabled: true
 
 - insert:
@@ -13,10 +8,3 @@
       name: dsh-jj-workspace
     - id: jj-tool-worktree
       name: dsh-jj-workspace/tool
-
-- id: optional-forge-panel
-  insert:
-    - id: jj-forge-worktree
-      name: dsh-jj-workspace
-      config:
-        statusChannel: false

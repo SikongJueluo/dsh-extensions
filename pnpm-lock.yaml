@@ -1327,8 +1327,8 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.19.0)(jiti@2.7.0)(jsdom@31.0.1)(lightningcss@1.33.0)(yaml@2.9.1)
       zod:
-        specifier: 4.4.3
-        version: 4.4.3
+        specifier: 4.6.6
+        version: 4.6.6
 
   packages/ui:
     dependencies:
@@ -10525,7 +10525,8 @@ snapshots:
       '@yuku-parser/binding-win32-arm64': 0.10.2
       '@yuku-parser/binding-win32-x64': 0.10.2
 
-  zod@4.4.3: {}
+  zod@4.4.3:
+    optional: true
 
   zod@4.6.6: {}
 

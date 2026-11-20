@@ -12,7 +12,6 @@ import {
   IconCheckOutlineRegular,
   IconChevronDownOutlineRegular,
   MenuSurface,
-  useAnchoredPosition,
   useDismissOnOutsidePointer,
   PermissionIconWorkspaceWriteRegular,
 } from '@dsh-extensions/ui/host'
@@ -288,7 +287,7 @@ function WorkspaceMenu({ sessionId, sessions, t }: WorkspaceMenuProps) {
           anchorRef.current = node
         }}
         type="button"
-        className={controlClass}
+        className={cn(controlClass, 'dsh-swa-anchor')}
         aria-label={t('panel')}
         aria-haspopup="menu"
         aria-controls={shared.open ? 'session-write-access-menu' : undefined}
@@ -340,15 +339,6 @@ function WorkspaceList({
     () => workspaceSource.getSnapshot(),
   )
   const open = shared.open && (shared.mode ?? shared.view?.defaultMode) === 'workspace-write'
-  const position = useAnchoredPosition({
-    open,
-    anchorRef,
-    panelRef,
-    side: 'top',
-    align: 'start',
-    gap: 4,
-    margin: 12,
-  })
   useDismissOnOutsidePointer(anchorRef, open, close, panelRef)
   useEffect(() => {
     if (open && shared.keyboardOpen)
@@ -395,39 +385,40 @@ function WorkspaceList({
         aria-label={t('title')}
         aria-busy={shared.busy}
         className="dsh-swa-menu"
-        style={position ?? { visibility: 'hidden' }}
         onKeyDown={keydown}
       >
         <div className="dsh-swa-heading">{t('title')}</div>
-        {options.map((option) => (
-          <button
-            key={option.path}
-            type="button"
-            role="menuitemcheckbox"
-            aria-checked={option.checked}
-            disabled={shared.busy || option.fixed || (option.checked && !option.grant)}
-            className="dsh-swa-option"
-            onClick={() => {
-              void mutate(option.grant ? 'remove' : 'add', { path: option.path })
-            }}
-          >
-            <span className="dsh-swa-option-copy">
-              <span className="dsh-swa-option-title">
-                <span>{option.title ?? option.path}</span>
-                {option.fixed ? (
-                  <span className="dsh-swa-note">
-                    {t(option.path === view?.workspaceRoot ? 'current' : 'fixed')}
-                  </span>
+        <div className="dsh-swa-viewport" role="presentation">
+          {options.map((option) => (
+            <button
+              key={option.path}
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={option.checked}
+              disabled={shared.busy || option.fixed || (option.checked && !option.grant)}
+              className="dsh-swa-option"
+              onClick={() => {
+                void mutate(option.grant ? 'remove' : 'add', { path: option.path })
+              }}
+            >
+              <span className="dsh-swa-option-copy">
+                <span className="dsh-swa-option-title">
+                  <span>{option.title ?? option.path}</span>
+                  {option.fixed ? (
+                    <span className="dsh-swa-note">
+                      {t(option.path === view?.workspaceRoot ? 'current' : 'fixed')}
+                    </span>
+                  ) : null}
+                </span>
+                {option.title ? <span className="dsh-swa-note">{option.path}</span> : null}
+                {option.coveredBy ? (
+                  <span className="dsh-swa-note">{t('coveredBy', { path: option.coveredBy })}</span>
                 ) : null}
               </span>
-              {option.title ? <span className="dsh-swa-note">{option.path}</span> : null}
-              {option.coveredBy ? (
-                <span className="dsh-swa-note">{t('coveredBy', { path: option.coveredBy })}</span>
-              ) : null}
-            </span>
-            {option.checked ? <IconCheckOutlineRegular size={16} /> : null}
-          </button>
-        ))}
+              {option.checked ? <IconCheckOutlineRegular size={16} /> : null}
+            </button>
+          ))}
+        </div>
         {shared.busy && !view ? <output className="dsh-swa-heading">{t('loading')}</output> : null}
         {shared.error ? (
           <div className="dsh-swa-error">

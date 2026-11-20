@@ -191,7 +191,7 @@ export class ModelCatalog {
         `ChatGPT backend unreachable at ${baseURL}: ${
           error instanceof Error ? error.message : String(error)
         }`,
-        'CATALOG_UNREACHABLE',
+        'DISCOVERY_FAILED',
         { cause: error },
       )
     }
@@ -208,13 +208,13 @@ export class ModelCatalog {
     } catch (error) {
       throw new LlmError(
         error instanceof Error ? error.message : String(error),
-        'CATALOG_INVALID_RESPONSE',
+        'DISCOVERY_FAILED',
         { cause: error },
       )
     }
     const parsed = parseModelsPayload(payload)
     if (parsed.length === 0) {
-      throw new LlmError('ChatGPT backend returned no usable models', 'EMPTY_CATALOG')
+      throw new LlmError('ChatGPT backend returned no usable models', 'DISCOVERY_FAILED')
     }
     this.live = parsed
     this.liveAt = Date.now()

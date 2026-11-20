@@ -4,7 +4,7 @@
  */
 import { Service } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import {
   generatedWorktreeName,
   WorktreeService,
@@ -46,6 +46,7 @@ import { appendTaskRecord, prepareJjDirectory, runJj, validateProcessConfig } fr
 
 /** Worktree row configuration: the stock Git fields plus the jj arm's two choices. */
 export interface Config {
+  retainOnArchive: Volatile<boolean>
   directory: string
   namePrefix: string
   gitCommand: string
@@ -59,6 +60,13 @@ export interface Config {
 }
 
 export const Config = z.object({
+  retainOnArchive: z
+    .boolean()
+    .default(false)
+    .volatile()
+    .description(
+      'Keep Git-fallback checkouts when their Session is archived; jj workspaces are always retained because their task records are not the Git checkout projection.',
+    ),
   directory: z
     .string()
     .default('.agents/worktrees')

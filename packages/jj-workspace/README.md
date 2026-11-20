@@ -17,29 +17,29 @@
 
 ## 宿主契约
 
-替换两层 `worktrees` 提供者：
+只替换一套 `worktrees` 提供者：`0.2.2-rc.5` 把 Forge 面板移到顶层，由它消费顶层 `worktrees`，所以工具、Forge 与本包共用同一条服务，不再有隔离组里的第二个实例。
 
-以下三行由本 bundle 置为 `disabled`（带包名 guard，找不到就跳过而不是误禁用别家）：
+以下两行由本 bundle 置为 `disabled`（带包名 guard，找不到就跳过而不是误禁用别家）：
 
 | 原行 | 作用域 |
 |---|---|
 | `worktree` (`@deepseek-ai/dsh-experimental-worktree`) | 工具作用域 |
 | `tool-worktree` (`@deepseek-ai/dsh-experimental-tool-worktree`) | 工具 |
-| `forge-worktree`（`optional-forge-panel` 隔离组内） | 新会话 UI / Forge 创建 |
 
 替换为：
 
 | 新行 | 包入口 | 作用 |
 |---|---|---|
-| `jj-worktree` | `dsh-jj-workspace` | 根作用域 `worktrees`；同时挂 `/dsh-jj-workspace/status` 与 `/dsh-jj-workspace/tasks` 只读通道 |
+| `jj-worktree` | `dsh-jj-workspace` | 唯一的 `worktrees`；同时挂 `/dsh-jj-workspace/status` 与 `/dsh-jj-workspace/tasks` 只读通道 |
 | `jj-tool-worktree` | `dsh-jj-workspace/tool` | 注册 `create_worktree` |
-| `jj-forge-worktree` | `dsh-jj-workspace`（`statusChannel: false`） | Forge 隔离组内的 `worktrees` |
 
-Git 实现不是复制：本提供者在 `ctx.isolate('worktrees')` 的私有 realm 里构造**原 `WorktreeService`**，Git 请求原样委托。这样 Git 的 behavior/config/卸载都还是 stock 实现，只有 jj 分支是本包的。
+rc.1 的 `forge-worktree`、`optional-forge-panel` 与 `jj-forge-worktree` 已随候选组合消失：`forge-panel` 现在原地消费顶层 `worktrees`，不需要第二个 provider，也不再需要 `statusChannel: false`。
+
+Git 实现不是复制：本提供者在 `ctx.isolate('worktrees')` 的私有 realm 里构造**原 `WorktreeService`**，Git 请求原样委托。这样 Git 的 behavior/config/卸载都还是 stock 实现，只有 jj 分支是本包的。该 stock 实例的归档清理只作用于 Git checkout（`plugin:worktree/created` 投影）；jj 任务记录写在池内 JSONL，因此在归档时始终保留。
 
 浏览器半（`src/client/index.tsx`）同样通过官方 slot 覆盖原控件：`conversation.hero.options` 的 `forge-panel.worktree` cell 用 priority `-1` 占据，jj（colocated 与非 colocated）默认请求 `null`（服务端解释为 `@`），用户从基准菜单显式选择 bookmark 时才传名字；该菜单复用钉版宿主 `Menu` / `Tooltip`，菜单内容原地渲染在 slot 内，按可用空间开在上/下并限制高度，列表在宿主菜单自己的 viewport 内滚动；宿主组件会自带一个 `aria-hidden` 的 `data-menu-backing` 装饰节点挂到 body（仅 macOS vibrancy 可见，关闭即移除，已批准的窄例外）；纯 Git 沿用「当前分支」请求。请求仍走 Forge 的 `forgePanel.requestWorktree/cancelWorktree/follow`，首条消息等待、进度卡、重试/撤回都是 Forge 原有生命周期。Session / 目录 / 权限变化时先丢弃旧 status（并清空 Git 分支缓存）再重取，失败每 2 秒重试；未确认前不渲染、也不按旧 VCS 语义发请求，不把未确认的 jj 当 Git 回退。Session header 的 `jj-workspace.task` pill 显示统一任务状态；它只读、无操作入口。
 
-## 配置（`jj-worktree` / `jj-forge-worktree` 行）
+## 配置（`jj-worktree` 行）
 
 ```yaml
 - id: jj-worktree
@@ -54,10 +54,11 @@ Git 实现不是复制：本提供者在 `ctx.isolate('worktrees')` 的私有 re
     timeoutMs: 60000
     graceMs: 3000
     maxOutputBytes: 65536
+    retainOnArchive: false                   # 只影响 Git fallback 的 checkout
     statusChannel: true                      # 只有根 provider 需要
 ```
 
-`jj-forge-worktree` 必须保持 `statusChannel: false`（一个进程只挂一条状态路由），且 `workspaceDirectory` / `jjCommand` 应与 `jj-worktree` 一致（默认相同）。配置整体替换而非深合并；覆盖任一行的池或命令时，请在另一行也重述。
+`retainOnArchive` 与宿主 `worktree` 行同名同义：置 `true` 时归档 Session 不再回收它创建的干净 Git checkout。jj 任务记录写在池内 JSONL，不在该投影里，因此 jj workspace 无论取值都保留。
 
 ## 安装 / 启用
 
@@ -76,7 +77,7 @@ dsh --profile web --patch $PWD/packages/jj-workspace/dev.patch.yml --no-open --p
 ```fish
 pnpm --filter dsh-jj-workspace build
 dsh plugin --profile web add ./packages/jj-workspace
-dsh --profile web --dump-config   # 应能看到 jj-worktree / jj-tool-worktree / jj-forge-worktree
+dsh --profile web --dump-config   # 应能看到 jj-worktree / jj-tool-worktree
 ```
 
 bundle 层必须排在 `@deepseek-ai/dsh-experimental-forge-bundle` **之后**（`dsh plugin add` 默认追加）；否则禁用/插入的 id 尚不存在，patch 会被跳过。

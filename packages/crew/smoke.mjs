@@ -533,7 +533,13 @@ async function executeTool(tool, args) {
   check('a first-candidate run has no notice', foreground.notice === undefined)
   check(
     'the child receives the pinned agent options',
-    foregroundApp.starts[0]?.request.agentOptions.provider === 'provider-a',
+    foregroundApp.starts[0]?.agentOptions.provider === 'provider-a',
+  )
+  check(
+    'the activation spec carries prompt, parent, and agent options at its top level',
+    foregroundApp.starts[0]?.request === undefined &&
+      Array.isArray(foregroundApp.starts[0]?.prompt) &&
+      foregroundApp.starts[0]?.parent?.id === 'parent-agent',
   )
   check('a finished foreground child is disposed', foregroundApp.disposals.length === 1)
 
@@ -556,7 +562,7 @@ async function executeTool(tool, args) {
   check('a background delegation returns its subagent id', background.kind === 'continuable')
   check(
     'an omitted effort is materialized as the model default',
-    backgroundApp.starts[0]?.request.agentOptions.reasoningEffort === MODEL_DEFAULT_EFFORT,
+    backgroundApp.starts[0]?.agentOptions.reasoningEffort === MODEL_DEFAULT_EFFORT,
   )
   check(
     'a materialized default needs no child selection override',
@@ -589,7 +595,7 @@ async function executeTool(tool, args) {
       }),
     },
   }
-  const merged = resolveChildAgentOptions(parent, backgroundApp.starts[0]?.request.agentOptions, 1)
+  const merged = resolveChildAgentOptions(parent, backgroundApp.starts[0]?.agentOptions, 1)
   check(
     'an explicit default effort wins over parent inheritance on the same route',
     merged.reasoningEffort === MODEL_DEFAULT_EFFORT,
@@ -674,7 +680,7 @@ async function executeTool(tool, args) {
       }),
     },
   }
-  const merged = resolveChildAgentOptions(parent, app.starts[0]?.request.agentOptions, 1)
+  const merged = resolveChildAgentOptions(parent, app.starts[0]?.agentOptions, 1)
   check(
     'the SDK merge alone still inherits the parent effort on an identical route',
     merged.reasoningEffort === 'high',
@@ -725,9 +731,9 @@ async function executeTool(tool, args) {
   })
   check(
     'the real resolver returns no effort when the model has no default',
-    app.starts[0]?.request.agentOptions.provider === 'provider-a' &&
-      app.starts[0]?.request.agentOptions.model === 'model-a' &&
-      app.starts[0]?.request.agentOptions.reasoningEffort === undefined,
+    app.starts[0]?.agentOptions.provider === 'provider-a' &&
+      app.starts[0]?.agentOptions.model === 'model-a' &&
+      app.starts[0]?.agentOptions.reasoningEffort === undefined,
   )
   check(
     'the real-resolver child selection also carries no effort',

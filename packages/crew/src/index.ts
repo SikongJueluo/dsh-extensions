@@ -436,7 +436,7 @@ async function startChild(
       'crew: the delegation route policy changed while preparing this delegation; retry it',
     )
   const maxDepth = ctx.subagents.resolveMaxDepth()
-  const request = {
+  const startRequest = {
     prompt: [{ type: 'text' as const, text: spec.promptText }],
     parent,
     agentOptions,
@@ -462,7 +462,7 @@ async function startChild(
       provider: config.provider,
       ...(childId === undefined ? {} : { childId }),
       label: spec.label,
-      request,
+      ...startRequest,
       signal: exec.signal,
       delivery: spec.runInForeground ? 'caller' : 'parent',
     })

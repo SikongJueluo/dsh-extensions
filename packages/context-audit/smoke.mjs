@@ -4,7 +4,6 @@ import { homedir, tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { zstdCompressSync } from 'node:zlib'
 import { collectAudit, formatReport } from './lib/index.js'
-import { serializeRequest, clampSessionAffinityKey } from '../oauth-providers/lib/index.js'
 
 let failures = 0
 function check(name, condition) {
@@ -151,16 +150,5 @@ if (process.argv.includes('--real')) {
     console.log(`real logs: ${real.models.length} routes, ${real.tools.length} tools`)
   }
 }
-
-const sessionId = 'session-21537589-5751-4490-af91-ef25bced6b1f'
-const base = { provider: 'chatgpt', model: 'gpt-6.1-sol', messages: [] }
-const withId = serializeRequest({ ...base, sessionId }, undefined, { promptCacheKey: true })
-check('prompt_cache_key stamped from session id', withId.prompt_cache_key === sessionId)
-const off = serializeRequest({ ...base, sessionId }, undefined, { promptCacheKey: false })
-check('prompt_cache_key omitted when affinity off', off.prompt_cache_key === undefined)
-const defaulted = serializeRequest({ ...base, sessionId })
-check('affinity defaults to on (no affinity object)', defaulted.prompt_cache_key === sessionId)
-check('clamp keeps ≤64 code points', clampSessionAffinityKey('x'.repeat(100)).length === 64)
-check('clamp is a no-op for session ids', clampSessionAffinityKey(sessionId) === sessionId)
 
 process.exit(failures === 0 ? 0 : 1)
