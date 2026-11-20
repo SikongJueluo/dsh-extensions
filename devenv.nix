@@ -13,26 +13,25 @@
     corepack.enable = true;
   };
 
-  integrations.gitnr.".gitignore".content = [
-    "node_modules/"
-    ".pnpm-store/"
-    "/packages/*/lib/"
-    "*.tsbuildinfo"
-    "*.tgz"
-    ".smoke-dsh-home/"
-    ".DS_Store"
-    ".dsh/"
-    ".pnpm-run/"
-    ".pnpm-state/"
-    ".dsmoke/"
-    ".bw-fixture/"
-    ".tca-runtime-*/"
-    "storybook-static/"
-    ".tmp/"
-    ".devenv*"
-    "devenv.local.nix"
-    "devenv.local.yaml"
-    ".direnv"
-    ".pre-commit-config.yaml"
-  ];
+  integrations.gitnr.".gitignore" = {
+    templates = [
+      "gh:Node"
+      "gh:Nix"
+    ];
+    content = [
+      "*.tsbuildinfo"
+      "*.tgz"
+      ".DS_Store"
+      "packages/**/lib"
+      "storybook-static/"
+      ".devenv*"
+      "devenv.local.nix"
+      "devenv.local.yaml"
+      ".direnv"
+      ".pi/"
+      ".dsh/"
+      ".tmp/"
+      ".tca-runtime-*/"
+    ];
+  };
 }

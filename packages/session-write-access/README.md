@@ -116,7 +116,7 @@ composer 左侧的「写入范围」按钮仅在 `workspace-write` 模式下显�
 
 ## 真实环境验收（2026-11-14）
 
-在隔离 `DSH_HOME`（仓库内 `.smoke-dsh-home/`，已忽略）、独立 Web 端口 3181、测试项目 A/B/C 中启动真实 Web profile，加载 `dev.patch.yml`（`workspace-write`，与 profile 既有 `toolchain-access` 行共存），会话 cwd 为 A。结果：
+在隔离 `DSH_HOME`（仓库外的临时目录，如 `/tmp/dsh-smoke-home`）、独立 Web 端口 3181、测试项目 A/B/C 中启动真实 Web profile，加载 `dev.patch.yml`（`workspace-write`，与 profile 既有 `toolchain-access` 行共存），会话 cwd 为 A。结果：
 
 - 初始：文件工具写 A 成功，写 B 被拒绝，错误为 `[sandbox: file access denied under workspace-write mode]`。
 - 面板 `add B` 后 revision=2；文件工具写 B 成功，写 C 仍拒绝。普通 bash 命令写 A、B 成功，写 C 报 `Read-only file system`。
