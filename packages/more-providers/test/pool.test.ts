@@ -310,6 +310,16 @@ async function buildPooled(extra: Record<string, unknown> = {}) {
   return { built, urls }
 }
 
+/** Every account the pool would offer for one model, in priority order. */
+function candidatesOf(pool: AccountPool, model: string): string[] {
+  const tried: string[] = []
+  for (;;) {
+    const member = pool.acquire({ model, exclude: tried })
+    if (member === undefined) return tried
+    tried.push(member.id)
+  }
+}
+
 describe('registry: pooled catalogs', () => {
   afterEach(() => {
     vi.unstubAllEnvs()
@@ -359,6 +369,24 @@ describe('registry: pooled catalogs', () => {
     expect(pool.acquire({ model: 'b-only', exclude: ['cheap'] })).toBeUndefined()
   })
 
+  it('offers both accounts for a model they both list, and fails over between them', async () => {
+    const { built } = await buildPooled()
+    const pool = built.accounts.get('mdkj')?.pool
+    if (pool === undefined) throw new Error('the route did not build a pool')
+
+    expect(candidatesOf(pool, 'shared-model')).toEqual(['stable', 'cheap'])
+    expect(pool.acquire({ model: 'shared-model', exclude: ['stable'] })?.id).toBe('cheap')
+  })
+
+  it('offers exactly one account for a model only one of them lists', async () => {
+    const { built } = await buildPooled()
+    const pool = built.accounts.get('mdkj')?.pool
+    if (pool === undefined) throw new Error('the route did not build a pool')
+
+    expect(candidatesOf(pool, 'a-only')).toEqual(['stable'])
+    expect(candidatesOf(pool, 'b-only')).toEqual(['cheap'])
+  })
+
   it('drops an account whose catalog failed and has no static fallback', async () => {
     vi.stubEnv(ENV_A, 'key-a')
     vi.stubEnv(ENV_B, 'key-b')
@@ -391,6 +419,103 @@ describe('registry: pooled catalogs', () => {
         ?.pool?.snapshot()
         .accounts.map((entry) => entry.id),
     ).toEqual(['stable'])
+  })
+
+  it('keeps a failed account out of coverage instead of lending it another account', async () => {
+    vi.stubEnv(ENV_A, 'key-a')
+    vi.stubEnv(ENV_B, 'key-b')
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get('authorization')
+      if (authorization?.endsWith('key-b') === true) return new Response('down', { status: 503 })
+      return new Response(JSON.stringify({ data: [{ id: 'a-only' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+    const resolved = resolveConfig({
+      providers: {
+        mdkj: {
+          kind: 'custom',
+          api: 'openai-responses',
+          baseURL: 'https://pool.invalid/v1',
+          modelsURL: MODELS_URL,
+          accounts: { stable: { apiKeyEnv: ENV_A }, cheap: { apiKeyEnv: ENV_B } },
+        },
+      },
+    })
+    const built = await buildRoutes(toProviderSpecs(resolved), LOG)
+    const pool = built.accounts.get('mdkj')?.pool
+    if (pool === undefined) throw new Error('the route did not build a pool')
+
+    expect(candidatesOf(pool, 'a-only')).toEqual(['stable'])
+    expect(pool.acquire({ model: 'b-only' })).toBeUndefined()
+    expect(
+      built.profiles
+        .get('mdkj')
+        ?.piProvider?.getModels()
+        .map((model) => model.id),
+    ).toEqual(['a-only'])
+  })
+
+  it('never lends a static-only model to the pool when the catalogs succeeded', async () => {
+    vi.stubEnv(ENV_A, 'key-a')
+    vi.stubEnv(ENV_B, 'key-b')
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(JSON.stringify({ data: [{ id: 'discovered-model' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    )
+    const resolved = resolveConfig({
+      providers: {
+        mdkj: {
+          kind: 'custom',
+          api: 'openai-responses',
+          baseURL: 'https://pool.invalid/v1',
+          modelsURL: MODELS_URL,
+          models: [{ id: 'static-only' }],
+          accounts: { stable: { apiKeyEnv: ENV_A }, cheap: { apiKeyEnv: ENV_B } },
+        },
+      },
+    })
+    const built = await buildRoutes(toProviderSpecs(resolved), LOG)
+    const pool = built.accounts.get('mdkj')?.pool
+    if (pool === undefined) throw new Error('the route did not build a pool')
+
+    expect(candidatesOf(pool, 'discovered-model')).toEqual(['stable', 'cheap'])
+    expect(pool.acquire({ model: 'static-only' })).toBeUndefined()
+    expect(
+      built.profiles
+        .get('mdkj')
+        ?.piProvider?.getModels()
+        .map((model) => model.id),
+    ).toEqual(['discovered-model'])
+  })
+
+  it('serves every static model from the whole pool when no catalog answers', async () => {
+    vi.stubEnv(ENV_A, 'key-a')
+    vi.stubEnv(ENV_B, 'key-b')
+    vi.stubGlobal('fetch', async () => new Response('down', { status: 503 }))
+    const resolved = resolveConfig({
+      providers: {
+        mdkj: {
+          kind: 'custom',
+          api: 'openai-responses',
+          baseURL: 'https://pool.invalid/v1',
+          modelsURL: MODELS_URL,
+          models: [{ id: 'static-only', contextWindow: 128000 }],
+          accounts: { stable: { apiKeyEnv: ENV_A }, cheap: { apiKeyEnv: ENV_B } },
+        },
+      },
+    })
+    const built = await buildRoutes(toProviderSpecs(resolved), LOG)
+    const pool = built.accounts.get('mdkj')?.pool
+    if (pool === undefined) throw new Error('the route did not build a pool')
+
+    expect(built.reports.get('mdkj')?.registered).toBe(true)
+    expect(candidatesOf(pool, 'static-only')).toEqual(['stable', 'cheap'])
   })
 
   it('keeps a failed account in the pool when static models cover it', async () => {

@@ -200,18 +200,25 @@ async function customContributions(
   )
 }
 
-/** Each effective model to the accounts that serve it, in pool priority order. */
+/**
+ * Each effective model to the accounts that serve it, in pool priority order. `staticIds` names
+ * the models every account shares through `models`, which is the only case an id has no
+ * discovered owner; anything else without a serving account keeps an empty list.
+ */
 function coverageOf(
   members: readonly Contribution[],
   effectiveIds: readonly string[],
   poolIds: readonly string[],
+  staticIds: ReadonlySet<string>,
 ): ReadonlyMap<string, readonly string[]> {
   const coverage = new Map<string, readonly string[]>()
   for (const id of effectiveIds) {
-    const serving = members.flatMap((member) =>
-      member.served?.includes(id) === true ? [member.account.id] : [],
+    const serving = poolIds.filter((poolId) =>
+      members.some(
+        (member) => member.account.id === poolId && member.served?.includes(id) === true,
+      ),
     )
-    coverage.set(id, serving.length === 0 ? poolIds : serving)
+    coverage.set(id, serving.length > 0 ? serving : staticIds.has(id) ? poolIds : [])
   }
   return coverage
 }
@@ -307,6 +314,7 @@ export async function buildRoutes(
           servable,
           built.models.map((model) => model.id),
           members.map((account) => account.id),
+          new Set((spec.models ?? []).map((model) => model.id)),
         )
       } else {
         built =

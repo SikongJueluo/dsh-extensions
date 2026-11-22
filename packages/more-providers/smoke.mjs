@@ -414,6 +414,47 @@ check(
     (filtered.reports.get('zai-filtered')?.models?.excluded.length ?? 0) > 0,
 )
 
+const defaultsPath = join(root, 'defaults.yaml')
+writeFileSync(
+  defaultsPath,
+  JSON.stringify({
+    secretDir: root,
+    defaults: {
+      contextWindows: { 'gpt-6.1-sol': 272000, shared: 128000 },
+      modelDefaults: [{ match: '-sol$', reasoning: ['low', 'high'] }],
+      filter: { exclude: [{ match: '-free$' }] },
+    },
+    providers: {
+      p: {
+        kind: 'custom',
+        api: 'openai-responses',
+        baseURL: 'https://x.test/v1',
+        models: [{ id: 'gpt-6.1-sol' }, { id: 'gpt-6.1-sol-thinking' }, { id: 'gpt-6.1-sol-free' }],
+        contextWindows: { 'gpt-6.1-sol': 500000 },
+        modelDefaults: [{ match: '-sol$', contextWindow: 1000000 }],
+        filter: { exclude: [{ match: '-thinking$' }] },
+        apiKeyFile: keyFile,
+      },
+    },
+  }),
+)
+const defaulted = await buildOf(defaultsPath)
+const defaultedModels = defaulted.profiles.get('p')?.piProvider.getModels() ?? []
+check(
+  'defaults filter and provider filter both apply',
+  defaultedModels.map((model) => model.id).join(',') === 'gpt-6.1-sol',
+)
+const defaultSpec = (await loadConfig(defaultsPath)).providers[0]
+check(
+  'provider model defaults come first, global ones follow',
+  JSON.stringify(defaultSpec.modelDefaults?.map((rule) => rule.pattern.source)) ===
+    '["-sol$","-sol$"]',
+)
+check(
+  'provider context windows beat global ones by id',
+  defaultSpec.contextWindows?.get('gpt-6.1-sol') === 500000 &&
+    defaultSpec.contextWindows?.get('shared') === 128000,
+)
 throwsConfig(
   () =>
     resolveConfig({
@@ -427,6 +468,14 @@ throwsConfig(
       },
     }),
   'invalid filter pattern rejected',
+)
+throwsConfig(
+  () =>
+    resolveConfig({
+      defaults: { filter: { include: [{ match: '(' }] } },
+      providers: { p: { kind: 'builtin', catalog: 'zai-coding-cn', apiKeyFile: keyFile } },
+    }),
+  'invalid defaults pattern rejected with the defaults path',
 )
 throwsConfig(
   () =>

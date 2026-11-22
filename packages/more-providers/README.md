@@ -117,8 +117,53 @@ providers:
 
 - `providers` **必填**；空对象合法（此时什么都不注册，包括 ChatGPT）。
 - `secretDir` 可选，必须是绝对路径。
-- 整份文档只认 `providers` / `providers.<id>` 这些键，未知键直接判定整份无效
+- `defaults` 可选，给所有 provider 的模型元数据与过滤提供兜底（见[全局兜底](#全局兜底defaults)）；
+  写了就必须至少给 `modelDefaults` / `contextWindows` / `filter` 之一，空节判定整份无效。
+- 整份文档只认 `providers` / `providers.<id>` / `defaults` 这些键，未知键直接判定整份无效
   （见[校验与运行时](#校验与运行时)）。
+
+### 全局兜底（`defaults`）
+
+多个 provider 暴露同一批模型（比如都中转 GPT-6 系列）时，窗口与思考档位的规则会重复。写一次就够：
+
+```yaml
+defaults:
+  modelDefaults:
+    - { match: '-astra$', contextWindow: 272000 }
+    - { match: '-sol$', contextWindow: 500000 }
+    - { match: '-(astra|sol|terra)$', reasoning: [low, medium, high, xhigh, max] }
+  contextWindows:
+    gpt-6.2-sol: 272000
+  filter:
+    exclude:
+      - { match: '-(free|preview)$' }    # 兜底：任何 provider 都不显示这两类
+
+providers:
+  mdkj-gpt:
+    kind: custom
+    baseURL: https://mdkj.lol/v1
+    modelsURL: https://mdkj.lol/v1/models
+    modelDefaults:
+      - { match: '-sol$', contextWindow: 1000000 }   # 覆盖全局那条
+    filter:
+      exclude:
+        - { match: '-thinking$' }                     # 只在这条 provider 上再收窄
+```
+
+合并规则：
+
+| 字段 | 与 provider 级的关系 |
+|---|---|
+| `modelDefaults` | 拼接，**provider 的规则在前**；逐字段 first-match-wins 因此让 provider 优先，`defaults` 只补 provider 没声明的字段 |
+| `contextWindows` | 按模型 id 合并，**provider 的同 id 值胜出** |
+| `filter` | **叠加（AND），不是覆盖**：`include` 取交集、`exclude` 取并集，provider 只能**收窄**、不能放大 |
+
+filter 的叠加是刻意的：`defaults.filter` 是兜底，若按"provider 覆盖"处理，某个 provider 随手写一条
+`exclude` 就会把整体兜底击穿。要放开某个模型，改 `defaults`，不要指望在 provider 上做减法。
+
+作用范围：`defaults.modelDefaults` 与 `defaults.contextWindows` **只作用于 `custom` provider**
+（`builtin` 的元数据来自 pi-ai 目录，`chatgpt` 来自 Codex 后端，硬塞会覆盖它们自己的真值）；
+`defaults.filter` 作用于**所有** provider，包括 `builtin` 与 `chatgpt`。
 
 ### `providers.chatgpt`
 

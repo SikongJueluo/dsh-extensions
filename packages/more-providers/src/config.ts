@@ -9,7 +9,7 @@ import { ConfigError, readConfigFile, resolveConfigFile } from '@dsh-extensions/
 import { isRecord } from './record.js'
 import type { KeySource } from './keys.js'
 import type { ModelFilter, ModelPattern } from './catalog/filter.js'
-import { compileModelFilter } from './catalog/filter.js'
+import { combineFilters, compileModelFilter } from './catalog/filter.js'
 import type { AccountSpec, ApiKeyProviderSpec, ChatGptProviderSpec } from './providers/spec.js'
 
 export { ConfigError }
@@ -548,6 +548,7 @@ function parseApiKeyProvider(
   secretDir: string,
   filter: ModelFilter | undefined,
   enabled: boolean,
+  defaults: ResolvedDefaults | undefined,
 ): ApiKeyProviderSpec {
   const routeId = optionalString(raw, 'routeId', path)
   if (routeId !== undefined) {
@@ -622,8 +623,14 @@ function parseApiKeyProvider(
       const baseURL = optionalUrl(raw, 'baseURL', path, true)
       const modelsURL = optionalUrl(raw, 'modelsURL', path, false)
       const models = parseModels(raw, path)
-      const contextWindows = parseContextWindows(raw, path)
-      const modelDefaults = parseModelDefaults(raw, path)
+      const contextWindows = mergeContextWindows(
+        parseContextWindows(raw, path),
+        defaults?.contextWindows,
+      )
+      const modelDefaults = mergeModelDefaults(
+        parseModelDefaults(raw, path),
+        defaults?.modelDefaults,
+      )
       if (modelsURL === undefined && models === undefined) {
         fail(path, 'custom provider needs modelsURL or models')
       }
@@ -681,10 +688,60 @@ function parseChatGptProvider(
   }
 }
 
+const DEFAULTS_KEYS = new Set(['modelDefaults', 'contextWindows', 'filter'])
+
+/** The root `defaults` section: fallbacks every provider inherits before its own settings. */
+interface ResolvedDefaults {
+  modelDefaults?: readonly ModelDefault[]
+  contextWindows?: ReadonlyMap<string, number>
+  filter?: ModelFilter
+}
+
+/** Parse the root `defaults` block; its paths must read `defaults.*`, never `providers.defaults.*`. */
+function parseDefaults(raw: Record<string, unknown>): ResolvedDefaults | undefined {
+  const value = raw.defaults
+  if (value === undefined || value === null) return undefined
+  const path = 'defaults'
+  const record = asRecord(value, path)
+  rejectUnknown(record, DEFAULTS_KEYS, path)
+  const modelDefaults = parseModelDefaults(record, path)
+  const contextWindows = parseContextWindows(record, path)
+  const filter = parseFilter(record, path)
+  if (modelDefaults === undefined && contextWindows === undefined && filter === undefined) {
+    fail(path, 'set at least one of modelDefaults, contextWindows, filter')
+  }
+  return {
+    ...(modelDefaults === undefined ? {} : { modelDefaults }),
+    ...(contextWindows === undefined ? {} : { contextWindows }),
+    ...(filter === undefined ? {} : { filter }),
+  }
+}
+
+/** Provider rules first, then the global ones, so first-match-wins still prefers the provider. */
+function mergeModelDefaults(
+  provider: ModelDefault[] | undefined,
+  global: readonly ModelDefault[] | undefined,
+): ModelDefault[] | undefined {
+  if (global === undefined) return provider
+  if (provider === undefined) return [...global]
+  return [...provider, ...global]
+}
+
+/** Provider entries win for the same model id. */
+function mergeContextWindows(
+  provider: ReadonlyMap<string, number> | undefined,
+  global: ReadonlyMap<string, number> | undefined,
+): ReadonlyMap<string, number> | undefined {
+  if (global === undefined) return provider
+  if (provider === undefined) return global
+  return new Map([...global, ...provider])
+}
+
 function parseProvider(
   providerId: string,
   value: unknown,
   secretDir: string,
+  defaults: ResolvedDefaults | undefined,
 ): ApiKeyProviderSpec | ChatGptProviderSpec {
   const path = `providers.${providerId}`
   if (!PROVIDER_ID.test(providerId))
@@ -692,16 +749,16 @@ function parseProvider(
   const raw = asRecord(value, path)
   rejectUnknown(raw, PROVIDER_KEYS, path)
   const kind = parseKind(raw, path, providerId)
-  const filter = parseFilter(raw, path)
+  const filter = combineFilters(defaults?.filter, parseFilter(raw, path))
   const enabled = optionalBoolean(raw, 'enabled', path) !== false
   if (kind === 'chatgpt') return parseChatGptProvider(raw, path, filter, enabled)
-  return parseApiKeyProvider(providerId, raw, path, kind, secretDir, filter, enabled)
+  return parseApiKeyProvider(providerId, raw, path, kind, secretDir, filter, enabled, defaults)
 }
 
 /** Resolve the API-key routes and the configured OAuth provider from one strict document. */
 export function resolveConfig(value: unknown): ResolvedConfig {
   const raw = asRecord(value, 'config')
-  rejectUnknown(raw, new Set(['secretDir', 'providers']), 'config')
+  rejectUnknown(raw, new Set(['secretDir', 'defaults', 'providers']), 'config')
   const secretDir = optionalString(raw, 'secretDir', 'config')
   if (secretDir !== undefined && !isAbsolute(secretDir))
     fail('config.secretDir', 'expected an absolute path')
@@ -709,11 +766,12 @@ export function resolveConfig(value: unknown): ResolvedConfig {
   const providersRaw = raw.providers
   if (providersRaw === undefined || providersRaw === null) fail('config.providers', 'is required')
   const providers = asRecord(providersRaw, 'config.providers')
+  const defaults = parseDefaults(raw)
   const routes = new Set<string>()
   const result: ApiKeyProviderSpec[] = []
   let chatgpt: ChatGptProviderSpec | undefined
   for (const [providerId, provider] of Object.entries(providers)) {
-    const parsed = parseProvider(providerId, provider, effectiveSecretDir)
+    const parsed = parseProvider(providerId, provider, effectiveSecretDir, defaults)
     if (parsed.kind === 'chatgpt') {
       chatgpt = parsed
       continue

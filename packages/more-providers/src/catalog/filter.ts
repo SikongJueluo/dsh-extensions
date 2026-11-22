@@ -57,3 +57,25 @@ export function compileModelFilter(config: ModelFilterConfig | undefined): Model
   }
   return { keeps: (id) => reason(id) === undefined, reason }
 }
+
+/**
+ * Combine a global filter with a provider filter, keeping only ids both of them keep. A deny
+ * hit on either side wins over an allow-list miss on the other, matching one filter's order.
+ */
+export function combineFilters(
+  global: ModelFilter | undefined,
+  provider: ModelFilter | undefined,
+): ModelFilter | undefined {
+  if (global === undefined) return provider
+  if (provider === undefined) return global
+  const outer = global
+  const inner = provider
+  function reason(id: string): 'include-miss' | 'exclude-hit' | undefined {
+    const first = outer.reason(id)
+    const second = inner.reason(id)
+    if (first === 'exclude-hit' || second === 'exclude-hit') return 'exclude-hit'
+    if (first === 'include-miss' || second === 'include-miss') return 'include-miss'
+    return undefined
+  }
+  return { keeps: (id) => reason(id) === undefined, reason }
+}

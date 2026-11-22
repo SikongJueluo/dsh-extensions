@@ -1,3 +1,10 @@
+defaults:
+  filter:
+    exclude:
+      - { match: '-(free|preview)$' }
+  modelDefaults:
+    - { match: '-sol$', contextWindow: 500000 }
+
 providers:
   zai-coding-cn:
     kind: builtin
