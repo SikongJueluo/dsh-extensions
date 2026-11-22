@@ -22,7 +22,7 @@
       "*.tsbuildinfo"
       "*.tgz"
       ".DS_Store"
-      "packages/**/lib"
+      "/packages/*/lib/"
       "storybook-static/"
       ".devenv*"
       "devenv.local.nix"
