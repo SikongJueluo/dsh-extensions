@@ -1009,6 +1009,11 @@ if (fishBinary === '') {
   await fixtureChecks(fishBinary)
 }
 
+/**
+ * Builds the fake remote tree and runs the real-script fixtures against it.
+ * `REMOTE_EXEC_FIXTURE_PATH` restores the stub PATH that distro fish startup scripts drop.
+ * Each env must name its own stubs, or a fail case would pick up the success stub.
+ */
 async function fixtureChecks(fishPath) {
   const root = await mkdtemp(join(tmpdir(), 'remote-exec-fixture-'))
   const bin = join(root, 'bin')
@@ -1029,7 +1034,14 @@ async function fixtureChecks(fishPath) {
   await mkdir(join(home, '.config', 'fish'), { recursive: true })
   await mkdir(project, { recursive: true })
   await mkdir(envProject, { recursive: true })
-  await writeFile(join(home, '.config', 'fish', 'config.fish'), "echo 'LOGIN BANNER' >&2\n")
+  await writeFile(
+    join(home, '.config', 'fish', 'config.fish'),
+    `echo 'LOGIN BANNER' >&2
+if set -q REMOTE_EXEC_FIXTURE_PATH
+    fish_add_path -g --prepend $REMOTE_EXEC_FIXTURE_PATH
+end
+`,
+  )
   await writeFile(join(bin, 'ssh'), '#!/bin/sh\nexec bash -s --\n')
   await writeFile(
     join(bin, 'docker'),
@@ -1114,12 +1126,29 @@ esac
     ...process.env,
     HOME: home,
     XDG_CONFIG_HOME: join(home, '.config'),
+    REMOTE_EXEC_FIXTURE_PATH: fakebin,
     PATH: `${fakebin}:${bin}:${process.env.PATH}`,
   }
-  const envSuccessEnv = { ...fixtureEnv, PATH: `${envbin}:${bin}:${process.env.PATH}` }
-  const exportFailEnv = { ...fixtureEnv, PATH: `${exportfailbin}:${bin}:${process.env.PATH}` }
-  const evalFailEnv = { ...fixtureEnv, PATH: `${evalfailbin}:${bin}:${process.env.PATH}` }
-  const catFailEnv = { ...fixtureEnv, PATH: `${catfailbin}:${envbin}:${bin}:${process.env.PATH}` }
+  const envSuccessEnv = {
+    ...fixtureEnv,
+    REMOTE_EXEC_FIXTURE_PATH: envbin,
+    PATH: `${envbin}:${bin}:${process.env.PATH}`,
+  }
+  const exportFailEnv = {
+    ...fixtureEnv,
+    REMOTE_EXEC_FIXTURE_PATH: exportfailbin,
+    PATH: `${exportfailbin}:${bin}:${process.env.PATH}`,
+  }
+  const evalFailEnv = {
+    ...fixtureEnv,
+    REMOTE_EXEC_FIXTURE_PATH: evalfailbin,
+    PATH: `${evalfailbin}:${bin}:${process.env.PATH}`,
+  }
+  const catFailEnv = {
+    ...fixtureEnv,
+    REMOTE_EXEC_FIXTURE_PATH: `${catfailbin}:${envbin}`,
+    PATH: `${catfailbin}:${envbin}:${bin}:${process.env.PATH}`,
+  }
   const statusFailEnv = { ...fixtureEnv, FAKE_STATUS_READ_FAIL: '1' }
   const statusLongEnv = { ...fixtureEnv, FAKE_STATUS_READ_FAIL: 'long' }
   const fixtureSpill = stubSpillStore()
