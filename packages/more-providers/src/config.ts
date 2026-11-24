@@ -28,6 +28,7 @@ export interface ModelConfig {
 export interface ModelMetadata {
   contextWindow?: number
   maxTokens?: number
+  input?: ('text' | 'image')[]
   reasoning?: false | string[]
 }
 
@@ -108,7 +109,14 @@ const CHATGPT_REJECTED = new Map([
 ])
 const CHATGPT_ONLY = ['clientVersion', 'refreshMarginMs', 'defaultContextWindow', 'promptCacheKey']
 const MODEL_KEYS = new Set(['id', 'name', 'contextWindow', 'maxTokens', 'input', 'reasoning'])
-const MODEL_DEFAULT_KEYS = new Set(['match', 'flags', 'contextWindow', 'maxTokens', 'reasoning'])
+const MODEL_DEFAULT_KEYS = new Set([
+  'match',
+  'flags',
+  'contextWindow',
+  'maxTokens',
+  'input',
+  'reasoning',
+])
 const FILTER_KEYS = new Set(['include', 'exclude'])
 const PATTERN_KEYS = new Set(['match', 'flags'])
 const API_VALUES = new Set<Api>(['openai-completions', 'openai-responses', 'anthropic-messages'])
@@ -204,6 +212,24 @@ function optionalStringArray(
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+}
+
+/** Declared input modalities; `text` and `image` are the only values the harness understands. */
+function optionalInput(
+  raw: Record<string, unknown>,
+  key: string,
+  path: string,
+): ('text' | 'image')[] | undefined {
+  const modes = optionalStringArray(raw, key, path)
+  if (modes === undefined) return undefined
+  if (modes.length === 0) fail(`${path}.${key}`, 'expected at least one modality')
+  const input: ('text' | 'image')[] = []
+  for (const mode of modes) {
+    if (mode !== 'text' && mode !== 'image')
+      fail(`${path}.${key}`, 'only "text" and "image" are supported')
+    input.push(mode)
+  }
+  return input
 }
 
 function optionalHeaderRecord(
@@ -340,12 +366,7 @@ function parseModels(raw: Record<string, unknown>, path: string): ModelConfig[] 
     const name = optionalString(record, 'name', modelPath)
     const contextWindow = optionalPositiveInteger(record, 'contextWindow', modelPath)
     const maxTokens = optionalPositiveInteger(record, 'maxTokens', modelPath)
-    const inputRaw = optionalStringArray(record, 'input', modelPath)
-    const input = inputRaw?.map((mode) => {
-      if (mode !== 'text' && mode !== 'image')
-        fail(`${modelPath}.input`, 'only "text" and "image" are supported')
-      return mode
-    })
+    const input = optionalInput(record, 'input', modelPath)
     const reasoning = optionalReasoning(record, 'reasoning', modelPath)
     const model: ModelConfig = { id }
     if (name !== undefined) model.name = name
@@ -384,13 +405,20 @@ function parseModelDefaults(
     const pattern = compilePattern(record, rulePath)
     const contextWindow = optionalPositiveInteger(record, 'contextWindow', rulePath)
     const maxTokens = optionalPositiveInteger(record, 'maxTokens', rulePath)
+    const input = optionalInput(record, 'input', rulePath)
     const reasoning = optionalReasoning(record, 'reasoning', rulePath)
-    if (contextWindow === undefined && maxTokens === undefined && reasoning === undefined) {
-      fail(rulePath, 'set at least one of contextWindow, maxTokens, reasoning')
+    if (
+      contextWindow === undefined &&
+      maxTokens === undefined &&
+      input === undefined &&
+      reasoning === undefined
+    ) {
+      fail(rulePath, 'set at least one of contextWindow, maxTokens, input, reasoning')
     }
     const rule: ModelDefault = { pattern }
     if (contextWindow !== undefined) rule.contextWindow = contextWindow
     if (maxTokens !== undefined) rule.maxTokens = maxTokens
+    if (input !== undefined) rule.input = input
     if (reasoning !== undefined) rule.reasoning = reasoning
     return rule
   })

@@ -259,10 +259,16 @@ modelDefaults:
   - match: '^gpt-6'          # 标准 JS 正则，不自动加锚点
     contextWindow: 272000
     reasoning: [low, medium, high]
+    input: [text, image]     # 目录没声明模态时，补上图片支持
   - match: 'astra$'
     flags: i                 # 可选；默认区分大小写
     maxTokens: 64000
 ```
+
+`input` 这个字段值得单独说：很多网关的 `/models` 只回 `id`，不声明模态，插件只能按
+`[text]` 处理，于是发图片时会被上层**静默转成文本占位符**（不是报错，是图丢了）。用规则
+显式声明 `input: [text, image]` 可以让该路由真正走图片。前提是**上游确实支持**——网关不支持
+时它自己会拒，别拿规则去骗一个不支持视觉的模型。
 
 规则按顺序排列；每个字段由**第一条命中且设置了该字段**的规则决定，不同字段可以由不同规则
 补齐。逐字段取值优先级：目录返回值 > 规则 > `models[].contextWindow` / `contextWindows`

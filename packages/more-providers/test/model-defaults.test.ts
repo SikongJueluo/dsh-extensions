@@ -34,9 +34,15 @@ function stubCatalog(data: unknown[]): void {
   )
 }
 
-async function modelsOf(config: Record<string, unknown>): Promise<readonly Model<Api>[]> {
+async function modelsOf(
+  config: Record<string, unknown>,
+  defaults?: Record<string, unknown>,
+): Promise<readonly Model<Api>[]> {
   vi.stubEnv(ENV_KEY, 'test-key')
-  const resolved = resolveConfig({ providers: { gateway: config } })
+  const resolved = resolveConfig({
+    ...(defaults === undefined ? {} : { defaults }),
+    providers: { gateway: config },
+  })
   const { profiles } = await buildRoutes(toProviderSpecs(resolved), LOG)
   return profiles.get('gateway')?.piProvider?.getModels() ?? []
 }
@@ -159,5 +165,49 @@ describe('model defaults', () => {
 
     expect(byId(models, 'gpt-6.2-sol')?.contextWindow).toBe(272000)
     expect(byId(models, 'gpt-6.2-astra')?.contextWindow).toBe(272000)
+  })
+})
+
+describe('model defaults: input modalities', () => {
+  it('supplies image input when the catalog declares no modalities', async () => {
+    stubCatalog([{ id: 'gpt-6.2-sol' }, { id: 'gpt-image-1' }])
+    const models = await modelsOf(
+      gateway({ modelDefaults: [{ match: '^gpt-6', input: ['text', 'image'] }] }),
+    )
+
+    expect(byId(models, 'gpt-6.2-sol')?.input).toEqual(['text', 'image'])
+    expect(byId(models, 'gpt-image-1')?.input).toEqual(['text'])
+  })
+
+  it('keeps catalog-declared modalities ahead of the rule', async () => {
+    stubCatalog([
+      { id: 'text-only', modalities: { input: ['text'] } },
+      { id: 'with-image', modalities: { input: ['text', 'image'] } },
+    ])
+    const models = await modelsOf(
+      gateway({ modelDefaults: [{ match: '.*', input: ['text', 'image'] }] }),
+    )
+
+    expect(byId(models, 'text-only')?.input).toEqual(['text'])
+    expect(byId(models, 'with-image')?.input).toEqual(['text', 'image'])
+  })
+
+  it('lets the provider rule win the field over the global rule', async () => {
+    stubCatalog([{ id: 'gpt-6.2-sol' }])
+    const models = await modelsOf(
+      gateway({ modelDefaults: [{ match: '^gpt-6', input: ['text'] }] }),
+      { modelDefaults: [{ match: '^gpt-6', input: ['text', 'image'] }] },
+    )
+
+    expect(byId(models, 'gpt-6.2-sol')?.input).toEqual(['text'])
+  })
+
+  it('inherits the global rule when the provider declares none', async () => {
+    stubCatalog([{ id: 'gpt-6.2-sol' }])
+    const models = await modelsOf(gateway({}), {
+      modelDefaults: [{ match: '^gpt-6', input: ['text', 'image'] }],
+    })
+
+    expect(byId(models, 'gpt-6.2-sol')?.input).toEqual(['text', 'image'])
   })
 })

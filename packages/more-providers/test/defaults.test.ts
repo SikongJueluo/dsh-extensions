@@ -233,6 +233,18 @@ describe('defaults: fail-closed validation', () => {
     )
   })
 
+  it('rejects an input modality the harness cannot use', () => {
+    expect(() =>
+      resolveConfig({
+        defaults: { modelDefaults: [{ match: 'm', input: ['audio'] }] },
+        providers,
+      }),
+    ).toThrow(/defaults\.modelDefaults\[0\]\.input: only "text" and "image" are supported/u)
+    expect(() =>
+      resolveConfig({ defaults: { modelDefaults: [{ match: 'm', input: [] }] }, providers }),
+    ).toThrow(/defaults\.modelDefaults\[0\]\.input: expected at least one modality/u)
+  })
+
   it('rejects a bad context window and an unknown defaults key', () => {
     expect(() => resolveConfig({ defaults: { contextWindows: { m: 0 } }, providers })).toThrow(
       /defaults\.contextWindows\.m: expected a positive integer/u,

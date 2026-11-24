@@ -4,6 +4,7 @@ defaults:
       - { match: '-(free|preview)$' }
   modelDefaults:
     - { match: '-sol$', contextWindow: 500000 }
+    - { match: '^gpt-6', input: [text, image] }
 
 providers:
   zai-coding-cn:

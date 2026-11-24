@@ -33,6 +33,7 @@ function modelMetadata(defaults: readonly ModelDefault[] | undefined, id: string
     if (!matches(rule.pattern, id)) continue
     metadata.contextWindow ??= rule.contextWindow
     metadata.maxTokens ??= rule.maxTokens
+    metadata.input ??= rule.input
     metadata.reasoning ??= rule.reasoning
   }
   return metadata
@@ -58,7 +59,7 @@ function mergeModels(
       fallback?.contextWindow ??
       contextWindows?.get(entry.id)
     const maxTokens = discovered?.maxTokens ?? metadata.maxTokens ?? fallback?.maxTokens
-    const input = discovered?.input ?? fallback?.input
+    const input = discovered?.input ?? metadata.input ?? fallback?.input
     const reasoning = discovered?.reasoning ?? metadata.reasoning ?? fallback?.reasoning
     const model: ModelConfig = { id: entry.id }
     if (name !== undefined) model.name = name
