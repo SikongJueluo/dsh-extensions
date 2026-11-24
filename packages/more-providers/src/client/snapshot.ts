@@ -1,6 +1,6 @@
 /**
  * The providers snapshot wire shape and the derivations the settings cards share: the route index,
- * the counts a registered route may show, and the model ids its filter dropped.
+ * per-account health, cooldown parts, and which revision is serving.
  * @module dsh-more-providers/client/snapshot
  */
 import { isRecord } from '../record.js'
@@ -125,17 +125,6 @@ export function routesById(instances: readonly SnapshotInstance[]): Map<string, 
   return routes
 }
 
-/** The counts to show: an unregistered route reports no catalog at all. */
-export function visibleModels(provider: SnapshotProvider): SnapshotModels | undefined {
-  return provider.registered ? provider.models : undefined
-}
-
-/** Every model id the filter dropped, excluded first; empty without visible counts. */
-export function filteredModelIds(provider: SnapshotProvider): string[] {
-  const models = visibleModels(provider)
-  return models === undefined ? [] : [...models.excluded, ...models.notIncluded]
-}
-
 /** The health one account row reports: usable, cooling down, or without a readable key. */
 export type AccountHealth = 'ready' | 'cooling' | 'unavailable'
 
@@ -155,24 +144,6 @@ export function accountHealth(account: SnapshotAccount, now: number): AccountHea
   if (!account.ready) return 'unavailable'
   if (account.healthy === false || cooldownParts(account, now) !== undefined) return 'cooling'
   return 'ready'
-}
-
-/** The account a request would start on: the first ready one that is not cooling. */
-export function preferredAccount(
-  accounts: readonly SnapshotAccount[],
-  now: number,
-): SnapshotAccount | undefined {
-  return accounts.find((account) => accountHealth(account, now) === 'ready')
-}
-
-/** Whether the counts still add up: a mismatch means the host reported broken statistics. */
-export function statsConsistent(models: SnapshotModels): boolean {
-  return models.discovered === models.effective + models.excluded.length + models.notIncluded.length
-}
-
-/** Whether a revision came from a hot reload rather than the initial load. */
-export function wasReloaded(revision: number): boolean {
-  return revision > 1
 }
 
 /** The revision still serving while the file moved on; absent when both name the same revision. */

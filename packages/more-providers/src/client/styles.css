@@ -4,4 +4,5 @@
 @import '@dsh-extensions/ui/theme.css';
 
 @source "./**/*.tsx";
+@source not "./**/*.stories.tsx";
 @source "../../../ui/src/**/*.tsx";

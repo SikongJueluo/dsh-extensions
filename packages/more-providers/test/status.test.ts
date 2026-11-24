@@ -15,14 +15,9 @@ import { apply, inject, name } from '../src/index.js'
 import {
   accountHealth,
   cooldownParts,
-  filteredModelIds,
   parseSnapshot,
-  preferredAccount,
   routesById,
   servingRevision,
-  statsConsistent,
-  visibleModels,
-  wasReloaded,
   type SnapshotAccount,
   type SnapshotProvider,
 } from '../src/client/snapshot.js'
@@ -582,18 +577,6 @@ async function applyStatus(harness: {
 }
 
 describe('providers snapshot client view', () => {
-  it('shows catalog counts only for a registered route with a finalized catalog', () => {
-    expect(visibleModels(viewProvider())?.effective).toBe(2)
-    expect(visibleModels(viewProvider({ registered: false }))).toBeUndefined()
-    expect(visibleModels(viewProvider({ models: undefined }))).toBeUndefined()
-  })
-
-  it('lists dropped model ids excluded-first and nothing without visible counts', () => {
-    expect(filteredModelIds(viewProvider())).toEqual(['excluded-model', 'not-included-model'])
-    expect(filteredModelIds(viewProvider({ registered: false }))).toEqual([])
-    expect(filteredModelIds(viewProvider({ models: undefined }))).toEqual([])
-  })
-
   it('indexes routes across instances, keeping the first row for a repeated route', () => {
     const routes = routesById([
       {
@@ -708,18 +691,6 @@ describe('providers snapshot pool view', () => {
     expect(cooldownParts(poolAccount({ cooldownUntil: NOW - 5 }), NOW)).toBeUndefined()
     expect(cooldownParts(poolAccount(), NOW)).toBeUndefined()
   })
-
-  it('prefers the first ready account in priority order', () => {
-    const accounts = [
-      poolAccount({ id: 'first', ready: false }),
-      poolAccount({ id: 'second', cooldownUntil: NOW + 60_000 }),
-      poolAccount({ id: 'third' }),
-      poolAccount({ id: 'fourth' }),
-    ]
-    expect(preferredAccount(accounts, NOW)?.id).toBe('third')
-    expect(preferredAccount([poolAccount({ ready: false })], NOW)).toBeUndefined()
-    expect(preferredAccount([], NOW)).toBeUndefined()
-  })
 })
 
 describe('providers snapshot live payload', () => {
@@ -782,34 +753,17 @@ describe('providers snapshot live payload', () => {
     expect([...routes.keys()]).toEqual(['zai-coding-cn', 'mdkj', 'chatgpt'])
     const mdkj = routes.get('mdkj')
     expect(mdkj?.displayName).toBe('MDKJ')
-    expect(visibleModels(mdkj ?? viewProvider())?.effective).toBe(5)
-    expect(filteredModelIds(mdkj ?? viewProvider())).toEqual(['gpt-6.1-terra'])
-    expect(preferredAccount(mdkj?.accounts ?? [], Date.now())?.displayName).toBe('MDKJ Stable')
-    expect(routes.get('chatgpt')?.displayName).toBe('ChatGPT (OpenAI)')
-    expect(visibleModels(routes.get('chatgpt') ?? viewProvider())).toBeUndefined()
-  })
-})
-
-describe('providers snapshot statistics consistency', () => {
-  it('accepts counts that add up and flags the ones that do not', () => {
-    expect(
-      statsConsistent({ discovered: 4, effective: 2, excluded: ['a'], notIncluded: ['b'] }),
-    ).toBe(true)
-    expect(statsConsistent({ discovered: 0, effective: 0, excluded: [], notIncluded: [] })).toBe(
+    expect(mdkj?.registered).toBe(true)
+    expect(mdkj?.models?.effective).toBe(5)
+    expect(mdkj?.accounts.map((account) => account.displayName)).toEqual([
+      'MDKJ Stable',
+      'MDKJ Cheap',
+    ])
+    expect(mdkj?.accounts.every((account) => accountHealth(account, Date.now()) === 'ready')).toBe(
       true,
     )
-    expect(statsConsistent({ discovered: 5, effective: 2, excluded: [], notIncluded: [] })).toBe(
-      false,
-    )
-    expect(statsConsistent({ discovered: 2, effective: 3, excluded: [], notIncluded: [] })).toBe(
-      false,
-    )
-  })
-
-  it('only calls a revision reloaded after the initial load', () => {
-    expect(wasReloaded(1)).toBe(false)
-    expect(wasReloaded(2)).toBe(true)
-    expect(wasReloaded(7)).toBe(true)
+    expect(routes.get('chatgpt')?.displayName).toBe('ChatGPT (OpenAI)')
+    expect(routes.get('chatgpt')?.models).toBeUndefined()
   })
 })
 

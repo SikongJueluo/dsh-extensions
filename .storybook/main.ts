@@ -6,6 +6,7 @@ const config: StorybookConfig = {
   stories: [
     '../packages/ui/src/**/*.stories.@(ts|tsx)',
     '../packages/jj-workspace/src/client/**/*.stories.@(ts|tsx)',
+    '../packages/more-providers/src/client/**/*.stories.@(ts|tsx)',
   ],
   addons: [],
   framework: {

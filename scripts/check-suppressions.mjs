@@ -47,7 +47,6 @@ const APPROVED = [
   ['packages/jj-workspace/src/client/worktree-option.tsx', ['react/set-state-in-effect']],
 
   ['packages/more-providers/src/oauth/transport.ts', ['typescript/strict-void-return']],
-  ['packages/more-providers/src/client/providers.tsx', ['react-hooks/exhaustive-deps']],
   ['packages/plan-usage/src/client/index.tsx', ['react-hooks/exhaustive-deps']],
 
   ['packages/remote-exec/src/display.ts', ['eslint/no-control-regex']],

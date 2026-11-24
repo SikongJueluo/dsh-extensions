@@ -355,6 +355,10 @@ warn 级：`duplicate-export-aliases` 5（`export class X` + `export default X` 
 （统一 Providers 分区），A9 的同一处 hooks 抑制随文件移动登记到新路径；抑制点与规则不变，
 豁免数量不变。
 
+2026-11-24 provider 卡片极简化：重写 Providers 分区时删掉了 `checkStatus` 那个
+`useEffect(…, [])`，`providers.tsx` 的 `react-hooks/exhaustive-deps` 抑制随之消失；A9 登记与
+豁免数量同步减一（收紧，不是放宽）。
+
 | # | 待批准项 | 建议 |
 | --- | --- | --- |
 | A1 | `style` 整类 off + 采纳 6 条 | 批准 |

@@ -6,6 +6,7 @@
 @source "../packages/ui/src/**/*.tsx";
 @source "./**/*.tsx";
 @source "../packages/jj-workspace/src/**/*.tsx";
+@source "../packages/more-providers/src/**/*.tsx";
 
 .storybook-canvas[data-theme='light'] {
   --dsw-alias-bg-base: #ffffff;

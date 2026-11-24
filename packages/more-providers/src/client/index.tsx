@@ -24,4 +24,4 @@ function apply(ctx: DshClientContext) {
 }
 
 export { apply }
-export const inject = ['slots', 'locale', 'remote', 'remote.llm', 'remote.session']
+export const inject = ['slots', 'locale', 'remote', 'remote.llm']
