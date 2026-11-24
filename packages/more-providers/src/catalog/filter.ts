@@ -16,10 +16,15 @@ export interface ModelFilterConfig {
   exclude?: readonly ModelPattern[]
 }
 
-/** Compiled filter: a deny hit wins, and an empty allow list admits every id. */
+/** Compiled filter: a deny hit wins, and an empty allow list admits every id.
+ * `patterns` keeps the source entries so configuration change detection compares them. */
 export interface ModelFilter {
   keeps(id: string): boolean
   reason(id: string): 'include-miss' | 'exclude-hit' | undefined
+  readonly patterns: {
+    readonly include: readonly ModelPattern[]
+    readonly exclude: readonly ModelPattern[]
+  }
 }
 
 function compileGroup(group: 'include' | 'exclude', patterns: readonly ModelPattern[]): RegExp[] {
@@ -55,7 +60,11 @@ export function compileModelFilter(config: ModelFilterConfig | undefined): Model
     if (matchesAny(exclude, id)) return 'exclude-hit'
     return include.length > 0 && !matchesAny(include, id) ? 'include-miss' : undefined
   }
-  return { keeps: (id) => reason(id) === undefined, reason }
+  return {
+    keeps: (id) => reason(id) === undefined,
+    reason,
+    patterns: { include: config?.include ?? [], exclude: config?.exclude ?? [] },
+  }
 }
 
 /**
@@ -77,5 +86,12 @@ export function combineFilters(
     if (first === 'include-miss' || second === 'include-miss') return 'include-miss'
     return undefined
   }
-  return { keeps: (id) => reason(id) === undefined, reason }
+  return {
+    keeps: (id) => reason(id) === undefined,
+    reason,
+    patterns: {
+      include: [...outer.patterns.include, ...inner.patterns.include],
+      exclude: [...outer.patterns.exclude, ...inner.patterns.exclude],
+    },
+  }
 }

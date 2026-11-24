@@ -28,6 +28,25 @@ function validateName(value: unknown): NamePolicy {
   return { name }
 }
 
+/** A policy carrying the values change detection has to see through the fields it holds. */
+interface PatternPolicy {
+  name: string
+  match: RegExp
+  tags: Map<string, string>
+}
+
+function validatePatternPolicy(value: unknown): PatternPolicy {
+  const policy = validateName(value)
+  const record =
+    typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
+  const match = typeof record.match === 'string' ? record.match : '.*'
+  const tags = new Map<string, string>()
+  if (typeof record.tags === 'object' && record.tags !== null) {
+    for (const [key, entry] of Object.entries(record.tags)) tags.set(key, String(entry))
+  }
+  return { ...policy, match: new RegExp(match, 'u'), tags }
+}
+
 function fakeContext() {
   const ctx = {
     effect(callback: () => unknown) {
@@ -60,8 +79,10 @@ async function tempDirectory(): Promise<string> {
 }
 
 const stores: ConfigStore<NamePolicy>[] = []
+const patternStores: ConfigStore<PatternPolicy>[] = []
 afterEach(async () => {
   for (const store of stores.splice(0)) await store.dispose()
+  for (const store of patternStores.splice(0)) await store.dispose()
   for (const directory of directories.splice(0))
     await rm(directory, { recursive: true, force: true })
 })
@@ -177,6 +198,35 @@ describe('config store', () => {
     await writeFile(file, '# a comment-only edit\nname: same\n')
     await sleep(300)
     expect(store.state().revision).toBe(revision)
+  })
+
+  it('publishes an edit that only retargets a RegExp or a Map entry', async () => {
+    const directory = await tempDirectory()
+    const file = join(directory, 'test.yaml')
+    await writeFile(file, 'name: same\nmatch: "^gpt"\n')
+    const { ctx } = fakeContext()
+    const store = registerConfig(ctx, {
+      filename: 'test.yaml',
+      configFile: file,
+      validate: validatePatternPolicy,
+      watch: true,
+    })
+    patternStores.push(store)
+    const initial = await store.ready
+    expect(initial.value?.match.source).toBe('^gpt')
+    const revision = initial.revision
+
+    await writeFile(file, 'name: same\nmatch: "^gpt"\n')
+    await sleep(300)
+    expect(store.state().revision).toBe(revision)
+
+    await writeFile(file, 'name: same\nmatch: "^claude"\n')
+    await waitFor(() => store.get()?.match.source === '^claude', 'the regexp-only edit')
+    expect(store.state().revision).toBe(revision + 1)
+
+    await writeFile(file, 'name: same\nmatch: "^claude"\ntags:\n  tier: stable\n')
+    await waitFor(() => store.get()?.tags.get('tier') === 'stable', 'the map-only edit')
+    expect(store.state().revision).toBe(revision + 2)
   })
 
   it('notifies subscribers and stops after dispose', async () => {

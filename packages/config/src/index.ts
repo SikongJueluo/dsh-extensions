@@ -76,6 +76,15 @@ export interface ConfigOptions<T> extends ConfigFileOptions {
 
 const RELOAD_DEBOUNCE_MS = 80
 
+/** Change-detection key: JSON plus the values plain serialization drops or flattens to `{}`. */
+function fingerprintOf(value: unknown): string {
+  return JSON.stringify(value, (_key, entry: unknown) => {
+    if (entry instanceof RegExp) return { regexp: entry.source, flags: entry.flags }
+    if (entry instanceof Map) return { map: [...entry.entries()] }
+    return entry
+  })
+}
+
 export function resolveConfigFile(options: ConfigFileOptions): string {
   const explicit = options.configFile?.trim()
   if (explicit !== undefined && explicit !== '') {
@@ -135,7 +144,7 @@ export function registerConfig<T>(ctx: Context, options: ConfigOptions<T>): Conf
     reason?: ConfigFailure,
   ): void => {
     const next =
-      value === undefined ? `!${reason ?? ''}:${error ?? ''}` : `=${JSON.stringify(value)}`
+      value === undefined ? `!${reason ?? ''}:${error ?? ''}` : `=${fingerprintOf(value)}`
     if (current.loaded && next === fingerprint) return
     fingerprint = next
     current = {

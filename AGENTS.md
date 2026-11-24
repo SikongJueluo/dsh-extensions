@@ -83,7 +83,7 @@ dsh 本体与 `$DSH_HOME`（`~/.dsh` 下 profiles、patch 层、bin 等运行时
 
 ## 共享 UI 与构建
 
-- [`packages/config`](packages/config/) 是 Host 侧共享外部配置库（私有 workspace 包，构建时打进各插件）：负责 `$DSH_HOME` 路径解析、YAML 读取、插件 validator、fail-closed 状态、可选 watch 与只读 `…/config-status` 路由。当前使用方是 crew（热加载）与 more-providers（仅启动读取）。业务 schema 仍留在各插件。
+- [`packages/config`](packages/config/) 是 Host 侧共享外部配置库（私有 workspace 包，构建时打进各插件）：负责 `$DSH_HOME` 路径解析、YAML 读取、插件 validator、fail-closed 状态、可选 watch 与只读 `…/config-status` 路由。当前使用方是 crew 与 more-providers，两者都热加载（more-providers 重载后经 `llm/adapters-updated` 让模型选择器就地刷新）。业务 schema 仍留在各插件。
 - [`packages/ui`](packages/ui/) 是私有 workspace 包（不单独安装/启用）：shadcn 组合 API + Base UI 原语 + Tailwind CSS v4，颜色只映射公开的 `--dsw-alias-*` token。各插件构建时把用到的组件打进自己的 `lib/client.js`。
 - `tooling/host` 是共享 tsdown 预设；`tooling/client` 是共享 Vite→DSH factory 构建（含样式内联）。包内配置只写入口与真实差异。
 - `packages/ui/src/host/` 是有意接受的宿主耦合：把钉版 `@deepseek-ai/dsh-client-ui-primitives` 作为 `@dsh-extensions/ui/host` 子路径导出（不进 barrel），供需要原生控件观感的插件复用；`MenuPanel`（`@dsh-extensions/ui/host/menu-panel`）封装宿主 `MenuSurface` 的锚定卡片骨架——卡片不滚、只滚内部 `.dshx-menu-panel-viewport`，避免 material 背景随内容滚走；它随宿主 release 精确钉版，升级 dsh 时核对组件类型/样式/行为，见 [docs/client-ui-migration.md](docs/client-ui-migration.md)。宿主 `Menu` 会自带一个 `aria-hidden` 的 `data-menu-backing` 装饰节点到 body（已批准的窄例外，关闭即移除）；业务代码仍不得向 body 挂载。

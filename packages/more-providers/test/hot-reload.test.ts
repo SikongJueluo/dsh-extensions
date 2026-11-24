@@ -58,6 +58,42 @@ function pooledDocument(accounts: Record<string, string>): string {
   ].join('\n')
 }
 
+/** A route whose served models are decided by one exclude pattern. */
+function filteredDocument(exclude: string): string {
+  return [
+    'providers:',
+    '  mdkj:',
+    '    kind: custom',
+    '    api: openai-responses',
+    '    baseURL: https://reload.invalid/v1',
+    `    apiKeyEnv: ${TEST_ENV_KEY}`,
+    '    models:',
+    '      - id: alpha',
+    '      - id: beta',
+    '    filter:',
+    '      exclude:',
+    `        - { match: '${exclude}' }`,
+    '  chatgpt: { kind: chatgpt, enabled: false }',
+  ].join('\n')
+}
+
+/** A fetched catalog plus one global defaults rule, so an edit can move metadata only. */
+function defaultsDocument(match: string, input: string): string {
+  return [
+    'defaults:',
+    '  modelDefaults:',
+    `    - { match: '${match}', input: [${input}] }`,
+    'providers:',
+    '  mdkj:',
+    '    kind: custom',
+    '    api: openai-responses',
+    '    baseURL: https://reload.invalid/v1',
+    `    apiKeyEnv: ${TEST_ENV_KEY}`,
+    '    modelsURL: https://reload.invalid/v1/models',
+    '  chatgpt: { kind: chatgpt, enabled: false }',
+  ].join('\n')
+}
+
 async function settleWatch(): Promise<void> {
   await new Promise<void>((resolve) => {
     setTimeout(resolve, 50)
@@ -81,7 +117,7 @@ async function readSnapshot(harness: Harness): Promise<SnapshotInstance | undefi
 
 /** The model-listing face of a registered adapter. */
 interface ModelListing {
-  listModels(provider: string): Promise<readonly { id: string }[]>
+  listModels(provider: string): Promise<readonly { id: string; inputModalities?: string[] }[]>
 }
 
 async function listIds(adapter: unknown): Promise<string[]> {
@@ -91,6 +127,16 @@ async function listIds(adapter: unknown): Promise<string[]> {
 
 async function modelIds(harness: Harness): Promise<string[]> {
   return listIds(registeredAdapter(harness.llm, 'mdkj'))
+}
+
+/** The modalities the served catalog advertises for one id; absent when the route no longer serves it. */
+async function inputModalities(
+  harness: Harness,
+  id: string,
+): Promise<readonly string[] | undefined> {
+  const listing = registeredAdapter(harness.llm, 'mdkj') as ModelListing
+  const models = await listing.listModels('mdkj')
+  return models.find((model) => model.id === id)?.inputModalities
 }
 
 /** Poll an async condition, since reading the status route is async. */
@@ -142,6 +188,48 @@ describe('hot reload: a valid edit rebuilds the registration', () => {
     expect(instance?.state).toBe('ok')
     expect(instance?.appliedRevision).toBe(instance?.revision)
     expect(instance?.providers[0]?.models?.effective).toBe(2)
+  })
+})
+
+describe('hot reload: an edit that only moves a pattern still re-registers', () => {
+  it('re-serves the filtered model set when only an exclude pattern changes', async () => {
+    vi.stubEnv(TEST_ENV_KEY, 'reload-key')
+    const harness = await createHarness({ yaml: filteredDocument('^beta$') })
+    await waitFor(
+      () => harness.llm.adapters.some((entry) => entry.providers.includes('mdkj')),
+      'the initial registration',
+    )
+    expect(await modelIds(harness)).toEqual(['alpha'])
+    await settleWatch()
+
+    await writeFile(harness.file, filteredDocument('^alpha$'))
+
+    await waitFor(() => harness.llm.registrations.length === 2, 'the pattern-only reload')
+    expect(await modelIds(harness)).toEqual(['beta'])
+  })
+
+  it('re-serves model metadata when only a defaults pattern changes', async () => {
+    vi.stubEnv(TEST_ENV_KEY, 'reload-key')
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(JSON.stringify({ data: [{ id: 'm-one' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    )
+    const harness = await createHarness({ yaml: defaultsDocument('^m', 'text') })
+    await waitFor(
+      () => harness.llm.adapters.some((entry) => entry.providers.includes('mdkj')),
+      'the initial registration',
+    )
+    expect(await inputModalities(harness, 'm-one')).toEqual(['text'])
+    await settleWatch()
+
+    await writeFile(harness.file, defaultsDocument('^m', 'text, image'))
+
+    await waitFor(() => harness.llm.registrations.length === 2, 'the metadata-only reload')
+    expect(await inputModalities(harness, 'm-one')).toEqual(['text', 'image'])
   })
 })
 
