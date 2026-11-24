@@ -95,6 +95,7 @@ export class FailoverPiAiAdapter extends PiAiAdapter {
       }
       const tier = classifyFailure(outcome.failure)
       if (tier === 'account') pool.markFailure(account.id, outcome.failure)
+      if (tier === 'policy') throw sessionBlockedError(options.provider, outcome.error)
       if (tier === 'terminal') throw outcome.error
       last = outcome
     }
@@ -164,6 +165,15 @@ export class FailoverPiAiAdapter extends PiAiAdapter {
       }
     }
   }
+}
+
+/** Report a session-policy refusal as the session's problem: no account was cooled and no other account was tried. */
+function sessionBlockedError(provider: string, cause: LlmError): LlmError {
+  return new LlmError(
+    `more-providers: 上游安全策略拦截了该会话（${provider}），请新建会话或换模型后重试；原始错误：${cause.message}`,
+    'AUTH',
+    { cause },
+  )
 }
 
 function closedFailure(): AttemptOutcome {

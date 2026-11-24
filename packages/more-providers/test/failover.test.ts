@@ -154,6 +154,52 @@ describe('FailoverPiAiAdapter: account-level failures', () => {
   })
 })
 
+const SESSION_BLOCKED =
+  'mdkj-gpt API error (403): {"code":"session_blocked_by_cyber_policy","message":"该会话已被网络安全策略屏蔽，请开启新会话 / This session is blocked by cyber-security policy, please start a new session","type":"permission_error"}'
+
+describe('FailoverPiAiAdapter: session-policy refusals', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('reports the block without cooling the account or trying the next one', async () => {
+    const pool = twoAccountPool()
+    const { adapter, calls } = scriptedAdapter([new LlmError(SESSION_BLOCKED, 'AUTH')], pool)
+
+    const { chunks, error } = await collectStream(adapter.stream(OPTIONS))
+
+    expect(calls).toEqual(['stable'])
+    expect(chunks).toEqual([])
+    expect((error as Error).message).toContain('session_blocked_by_cyber_policy')
+    expect((error as Error).message).toContain('新建会话或换模型')
+    expect(pool.snapshot().accounts).toStrictEqual([
+      expect.objectContaining({ id: 'stable', healthy: true }),
+      expect.objectContaining({ id: 'cheap', healthy: true }),
+    ])
+  })
+
+  it('forwards a policy refusal that arrives after content without cooling the account', async () => {
+    const pool = twoAccountPool()
+    const blocked = {
+      type: 'finish' as const,
+      reason: {
+        kind: 'error' as const,
+        failure: { message: SESSION_BLOCKED, code: 'AUTH' },
+      },
+    }
+    const { adapter, calls } = scriptedAdapter([[textChunk('partial'), blocked]], pool)
+
+    const { chunks } = await collectStream(adapter.stream(OPTIONS))
+
+    expect(calls).toEqual(['stable'])
+    expect(chunks).toStrictEqual([textChunk('partial'), blocked])
+    expect(pool.snapshot().accounts).toStrictEqual([
+      expect.objectContaining({ id: 'stable', healthy: true }),
+      expect.objectContaining({ id: 'cheap', healthy: true }),
+    ])
+  })
+})
+
 describe('FailoverPiAiAdapter: no failover after the first chunk', () => {
   afterEach(() => {
     vi.restoreAllMocks()
