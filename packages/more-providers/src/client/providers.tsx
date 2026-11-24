@@ -43,6 +43,7 @@ import {
 const LOCALE_NS = 'oauth-providers'
 const RPC_BASE = '/dsh-oauth-providers'
 const STATUS_URL = '/dsh-more-providers/providers'
+const REFRESH_URL = '/dsh-more-providers/refresh'
 const SNAPSHOT_POLL_MS = 10_000
 
 type Translate = (key: string, params?: Record<string, unknown>) => string
@@ -65,6 +66,9 @@ const en: Record<string, string> = {
   configVersion: 'config v{n}',
   autoReloaded: 'reloaded automatically',
   statsMismatch: 'Model statistics do not match the catalog (host bug — please report it).',
+  refetchModels: 'Re-fetch model catalog',
+  refetching: 'Re-fetching…',
+  refetchFailed: 'Could not re-fetch the model catalog: {detail}',
   routeDisabled: 'disabled',
   routeDormant: 'not registered',
   routeLabel: 'route {route}',
@@ -129,6 +133,9 @@ const zh: Record<string, string> = {
   configVersion: '配置第 {n} 版',
   autoReloaded: '已自动重载',
   statsMismatch: '模型统计与目录不一致（宿主 bug，请报 issue）。',
+  refetchModels: '重新拉取模型目录',
+  refetching: '正在拉取…',
+  refetchFailed: '重新拉取模型目录失败：{detail}',
   routeDisabled: '已禁用',
   routeDormant: '未注册',
   routeLabel: 'route {route}',
@@ -350,11 +357,42 @@ type SnapshotState =
 
 function ProvidersSection({ operations, t }: SectionProps) {
   const [snapshot, setSnapshot] = useState<SnapshotState>({ status: 'loading' })
+  const [refetch, setRefetch] = useState<RefetchState>({ status: 'idle' })
   const aliveRef = useRef(true)
 
   const reload = useCallback(() => {
     void loadSnapshot(setSnapshot, () => aliveRef.current, t)
   }, [t])
+
+  const appliedKey =
+    snapshot.status === 'ready'
+      ? snapshot.instances
+          .map((instance) => instance.appliedRevision ?? instance.revision)
+          .join(',')
+      : undefined
+
+  const onRefetch = useCallback(() => {
+    setRefetch({ status: 'busy' })
+    void refetchCatalog()
+      .then(
+        () => {
+          if (aliveRef.current) setRefetch({ status: 'idle' })
+          return undefined
+        },
+        (error: unknown) => {
+          if (!aliveRef.current) return undefined
+          setRefetch({
+            status: 'failed',
+            detail: error instanceof Error ? error.message : String(error),
+            appliedKey,
+          })
+          return undefined
+        },
+      )
+      .finally(() => {
+        if (aliveRef.current) reload()
+      })
+  }, [appliedKey, reload])
 
   useEffect(() => {
     aliveRef.current = true
@@ -367,6 +405,9 @@ function ProvidersSection({ operations, t }: SectionProps) {
       clearInterval(timer)
     }
   }, [reload, t])
+
+  const visibleRefetch: RefetchState =
+    refetch.status === 'failed' && refetch.appliedKey !== appliedKey ? { status: 'idle' } : refetch
 
   const routes = snapshot.status === 'ready' ? routesById(snapshot.instances) : undefined
   const now = snapshot.status === 'ready' ? snapshot.readAt : 0
@@ -381,6 +422,8 @@ function ProvidersSection({ operations, t }: SectionProps) {
         state={snapshot}
         t={t}
         now={now}
+        refetch={visibleRefetch}
+        onRefetch={onRefetch}
         onRetry={() => {
           setSnapshot({ status: 'loading' })
           reload()
@@ -472,16 +515,46 @@ function loadSnapshot(
   )
 }
 
+/** The catalog re-fetch request: idle, in flight, or failed with the reason and the serving revision it was reported against. */
+type RefetchState =
+  | { status: 'idle' }
+  | { status: 'busy' }
+  | { status: 'failed'; detail: string; appliedKey: string | undefined }
+
+/** Ask the host to re-read every provider's `modelsURL`; a failed discovery rejects with its reason and leaves the previous registration serving. */
+async function refetchCatalog(): Promise<void> {
+  const response = await fetch(REFRESH_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  })
+  if (!response.ok) throw new Error(`HTTP ${String(response.status)}`)
+  const payload: unknown = await response.json()
+  if (!isRecord(payload) || !Array.isArray(payload.instances)) {
+    throw new TypeError('malformed refresh response')
+  }
+  const failures = payload.instances.flatMap((entry) =>
+    isRecord(entry) && entry.ok !== true
+      ? [typeof entry.error === 'string' ? entry.error : 'unknown error']
+      : [],
+  )
+  if (failures.length > 0) throw new Error(failures.join('; '))
+}
+
 function SnapshotCards({
   state,
   t,
   now,
   onRetry,
+  refetch,
+  onRefetch,
 }: {
   state: SnapshotState
   t: Translate
   now: number
   onRetry: () => void
+  refetch: RefetchState
+  onRefetch: () => void
 }) {
   if (state.status === 'loading') {
     return (
@@ -514,9 +587,38 @@ function SnapshotCards({
 
   return (
     <div className="dshx:flex dshx:flex-col dshx:gap-3.5">
-      {state.instances.map((instance) => (
-        <ConfigVersionLine key={instance.id} instance={instance} t={t} />
-      ))}
+      <div className="dshx:flex dshx:flex-wrap dshx:items-center dshx:justify-between dshx:gap-2">
+        <div className="dshx:flex dshx:flex-col dshx:gap-0.5">
+          {state.instances.map((instance) => (
+            <ConfigVersionLine key={instance.id} instance={instance} t={t} />
+          ))}
+        </div>
+        <Button
+          size="md"
+          variant="secondary"
+          disabled={refetch.status === 'busy'}
+          onClick={onRefetch}
+        >
+          {refetch.status === 'busy' ? (
+            <>
+              <Spinner label={t('refetching')} />
+              {t('refetching')}
+            </>
+          ) : (
+            t('refetchModels')
+          )}
+        </Button>
+      </div>
+      {refetch.status !== 'failed' ? null : (
+        <Alert variant="error" className="dshx:flex dshx:items-center dshx:gap-2">
+          <span className="dshx:flex-1">
+            {t('refetchFailed', { detail: shorten(refetch.detail) })}
+          </span>
+          <Button size="sm" variant="secondary" onClick={onRefetch}>
+            {t('retry')}
+          </Button>
+        </Alert>
+      )}
       <InstanceNotices instances={state.instances} t={t} />
       {routes.length === 0 && !failed ? (
         <p className="dshx:text-sm dshx:text-fg-muted">{t('snapshotEmpty')}</p>

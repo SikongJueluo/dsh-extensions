@@ -334,7 +334,8 @@ providers:
 - 能力目录里多出来的模型（隐藏/免费等）不会加入选择器。
 - 请求失败、`schemaVersion` 不是 `1`、或单行/单字段格式不对时只丢弃对应字段并回退现有默认
   （上下文 `131072`、思考 `low/medium/high`），不影响该路由的普通模型清单。
-- 该能力地址不随 `modelsURL` 覆盖而变化；每次 DSH 启动拉取一次，不做运行期刷新。
+- 该能力地址不随 `modelsURL` 覆盖而变化；每次构建（启动、YAML 重载或手动「重新拉取模型目录」）
+  拉取一次，不做周期刷新。
 
 ## ChatGPT 订阅（OAuth）
 
@@ -378,8 +379,14 @@ providers:
   运行快照（route、kind、auth、是否启用/注册、账号与健康态、模型计数「目录 N → 生效 M」、
   被过滤的 id、目录失败原因）。设置页「Providers」分区把它渲染成只读卡片；数据只读，不在这里
   编辑配置。
+- **手动重新拉取目录**：Host 另有 `POST /dsh-more-providers/refresh`，重跑一次目录发现
+  （重新请求每个 `modelsURL`）并原子替换注册，**不读文件、不推进 revision**；设置页
+  「Providers」顶部的「重新拉取模型目录」按钮就是它。请求结束立刻重读快照，成功后宿主发
+  `llm/adapters-updated`，模型选择器随之刷新；仍有 route 拿不到目录时按钮下列出 route 与原因，
+  上一版注册继续服务。
 - **运行时目录失败按 provider 隔离**：`modelsURL` 超时/非 2xx/坏 JSON/空列表时用静态 `models`
   fallback（状态页记 `catalogError`）；没有 fallback 才不注册该 provider，其他 provider 照常。
+  网络或上游恢复后不用重启：点「重新拉取模型目录」重跑发现即可。
 - **被 `filter` 滤空**：该 provider 整条路由不注册并 log warn，状态页给出原因。
 - **key 缺失**是正常休眠，不算配置错误；**未登录**只影响 `chatgpt` 路由。
 - **改完 YAML 自动生效**：插件监听 `$DSH_HOME` 里那份文件（目录级监听，原子替换与 Nix

@@ -10,6 +10,7 @@ import { readKey } from './keys.js'
 import type { RouteBuildReport } from './providers.js'
 import { buildRoutes, createRegistry, type BuildOutcome } from './providers/registry.js'
 import { toProviderSpecs } from './providers/spec.js'
+import { registerProvidersRefreshRoute } from './refresh.js'
 import {
   registerProvidersStatusRoute,
   type ProviderAccountStatus,
@@ -99,25 +100,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     built?: BuildOutcome
     appliedRevision?: number
   } = {}
-  const state = await store.ready
-  registerProvidersStatusRoute(ctx, {
-    prefix: '/dsh-more-providers',
-    title: 'more-providers',
-    store,
-    applied: () => live.appliedRevision,
-    source: () =>
-      live.resolved === undefined || live.built === undefined
-        ? []
-        : routeStatuses(
-            live.resolved,
-            live.built.accounts,
-            live.built.reports,
-            registry.chatGptView(),
-          ),
-  })
-
   let running: Promise<void> | undefined
   let pending: ConfigState<ResolvedConfig> | undefined
+  let rescans = 0
+  let rescanWaiters: ((error: string | undefined) => void)[] = []
 
   const install = async (next: ConfigState<ResolvedConfig>): Promise<void> => {
     const resolved = next.value
@@ -165,23 +151,94 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     )
   }
 
+  /** Rebuild from the last applied configuration, re-reading every `modelsURL`; a manual retry never touches the file or its revision, keeps the working routes, and reports the ones still without a catalog. */
+  const rescan = async (): Promise<void> => {
+    const resolved = live.resolved ?? store.get()
+    if (resolved === undefined) {
+      throw new Error('no usable configuration has been applied yet')
+    }
+    const built = await buildRoutes(toProviderSpecs(resolved), log)
+    const failures = rebuildFailures(built)
+    const next = retainFailedRoutes(built, live.built)
+    registry.apply(next)
+    live.built = next
+    log.info(
+      'more-providers: re-fetched the model catalog (%d API-key route(s))',
+      built.profiles.size,
+    )
+    if (failures.length > 0) throw new Error(failures.join('; '))
+  }
+
+  /** One queue for both edit-driven reloads and manual re-fetches, so a stale rebuild never replaces a newer one. */
+  const drain = async (): Promise<void> => {
+    for (;;) {
+      if (pending !== undefined) {
+        const target = pending
+        pending = undefined
+        await install(target)
+        continue
+      }
+      if (rescans === 0) return
+      rescans = 0
+      const waiters = rescanWaiters
+      rescanWaiters = []
+      let error: string | undefined
+      try {
+        await rescan()
+      } catch (failure) {
+        error = failure instanceof Error ? failure.message : String(failure)
+        log.error('more-providers: catalog re-fetch failed: %s', error)
+      }
+      for (const waiter of waiters) waiter(error)
+    }
+  }
+
+  const start = (): void => {
+    if (running !== undefined) return
+    const task = drain()
+    running = task
+    void task.finally(() => {
+      if (running === task) running = undefined
+    })
+  }
+
   const rebuild = (next: ConfigState<ResolvedConfig>): void => {
     pending = next
-    if (running !== undefined) return
-    running = (async () => {
-      try {
-        while (pending !== undefined) {
-          const target = pending
-          pending = undefined
-          await install(target)
-        }
-      } catch (error) {
-        log.error('more-providers: reload failed: %o', error)
-      } finally {
-        running = undefined
-      }
-    })()
+    start()
   }
+
+  /** Queue one catalog re-fetch, coalesced with clicks already waiting; resolves with the failure text or `undefined`. */
+  const retryCatalog = (): Promise<string | undefined> =>
+    new Promise((resolve) => {
+      rescanWaiters.push(resolve)
+      rescans += 1
+      start()
+    })
+
+  const state = await store.ready
+  registerProvidersStatusRoute(ctx, {
+    prefix: '/dsh-more-providers',
+    title: 'more-providers',
+    store,
+    applied: () => live.appliedRevision,
+    source: () =>
+      live.resolved === undefined || live.built === undefined
+        ? []
+        : routeStatuses(
+            live.resolved,
+            live.built.accounts,
+            live.built.reports,
+            registry.chatGptView(),
+          ),
+  })
+  registerProvidersRefreshRoute(ctx, {
+    prefix: '/dsh-more-providers',
+    title: 'more-providers',
+    rescan: async () => {
+      const error = await retryCatalog()
+      if (error !== undefined) throw new Error(error)
+    },
+  })
 
   store.subscribe((next) => {
     rebuild(next)
@@ -196,6 +253,39 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     return
   }
   await install(state)
+}
+
+/** The routes a rebuild could not serve: a failed catalog, or nothing registerable left. */
+function rebuildFailures(outcome: BuildOutcome): string[] {
+  return [...outcome.reports.values()].flatMap((report) =>
+    report.catalogError !== undefined
+      ? [`${report.route}: ${report.catalogError}`]
+      : report.registered
+        ? []
+        : [`${report.route}: ${report.error ?? 'no usable models'}`],
+  )
+}
+
+/** Put the still-serving registration back for every failed route, so a re-fetch that fails again never drops a working route. */
+function retainFailedRoutes(
+  outcome: BuildOutcome,
+  previous: BuildOutcome | undefined,
+): BuildOutcome {
+  if (previous === undefined) return outcome
+  const profiles = new Map(outcome.profiles)
+  const accounts = new Map(outcome.accounts)
+  const reports = new Map(outcome.reports)
+  for (const [route, report] of outcome.reports) {
+    if (report.registered && report.catalogError === undefined) continue
+    const kept = previous.reports.get(route)
+    if (kept === undefined || !kept.registered) continue
+    const profile = previous.profiles.get(route)
+    if (profile !== undefined) profiles.set(route, profile)
+    const keptAccounts = previous.accounts.get(route)
+    if (keptAccounts !== undefined) accounts.set(route, keptAccounts)
+    reports.set(route, kept)
+  }
+  return { ...outcome, profiles, accounts, reports }
 }
 
 /** The settings page's route snapshot: configuration facts from the resolved config, catalog outcome from the build reports. */
