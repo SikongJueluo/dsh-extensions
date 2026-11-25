@@ -276,79 +276,56 @@ function InstanceNotices({ instances, t }: { instances: SnapshotInstance[]; t: T
   )
 }
 
-function AccountRow({ account, t, now }: { account: SnapshotAccount; t: Translate; now: number }) {
-  const health = accountHealth(account, now)
-  const cooling = cooldownParts(account, now)
-  return (
-    <li className="dshx:flex dshx:flex-col dshx:gap-0.5">
-      <div className="dshx:flex dshx:items-center dshx:gap-2 dshx:text-sm">
-        <span
-          aria-hidden="true"
-          className={cn('dshx:size-2.5 dshx:shrink-0 dshx:rounded-full', healthDotClass(health))}
-        />
-        <span className="dshx:sr-only">{healthLabel(t, health)}</span>
-        <span className="dshx:min-w-0 dshx:flex-1 dshx:break-all dshx:text-fg-secondary">
-          {account.displayName}
-        </span>
-      </div>
-      {cooling === undefined ? null : (
-        <span className="dshx:pl-6 dshx:text-2xs dshx:text-warn">
-          {cooling.minutes > 0
-            ? t('coolingForMinutes', cooling)
-            : t('coolingForSeconds', { seconds: cooling.seconds })}
-        </span>
-      )}
-    </li>
-  )
-}
-
-/** The body of one configured API-key route: what you can select, or why nothing is selectable. */
-function RouteBody({
-  provider,
+function AccountRow({
+  account,
   t,
   now,
-  onRetry,
+  first,
 }: {
-  provider: SnapshotProvider
+  account: SnapshotAccount
   t: Translate
   now: number
-  onRetry: () => void
+  first: boolean
 }) {
-  if (!provider.registered) {
-    return (
-      <div className="dshx:mt-2 dshx:flex dshx:flex-col dshx:items-start dshx:gap-2">
-        <Alert variant="error" className="dshx:self-stretch">
-          {reasonText(t, provider)}
-        </Alert>
-        <Button size="sm" variant="secondary" onClick={onRetry}>
-          {t('retry')}
-        </Button>
-      </div>
-    )
-  }
-  const models = provider.models
+  const health = accountHealth(account, now)
+  const cooling = cooldownParts(account, now)
+  const status =
+    cooling === undefined
+      ? health === 'cooling'
+        ? t('accountCooling')
+        : health === 'unavailable'
+          ? t('accountNotReady')
+          : undefined
+      : cooling.minutes > 0
+        ? t('coolingForMinutes', cooling)
+        : t('coolingForSeconds', { seconds: cooling.seconds })
   return (
-    <>
-      {models === undefined ? null : (
-        <p className="dshx:mt-1.5 dshx:text-sm dshx:text-fg-secondary">
-          {models.effective === 0 ? t('noModels') : t('modelCount', { n: models.effective })}
-        </p>
+    <div
+      className={cn(
+        'dshx:flex dshx:items-center dshx:justify-between dshx:gap-2 dshx:px-2.5 dshx:py-1.5',
+        first ? undefined : 'dshx:border-t dshx:border-border',
       )}
-      {provider.catalogError === undefined ? null : (
-        <p className="dshx:mt-0.5 dshx:text-xs dshx:text-fg-muted">{t('catalogDegraded')}</p>
+    >
+      <span className="dshx:flex dshx:min-w-0 dshx:items-center dshx:gap-2">
+        <span
+          aria-hidden="true"
+          className={cn('dshx:size-1.5 dshx:shrink-0 dshx:rounded-full', healthDotClass(health))}
+        />
+        {status === undefined ? (
+          <span className="dshx:sr-only">{healthLabel(t, health)}</span>
+        ) : null}
+        <span className="dshx:truncate dshx:text-sm dshx:text-fg-secondary">
+          {account.displayName}
+        </span>
+      </span>
+      {status === undefined ? null : (
+        <Badge variant={health === 'cooling' ? 'warn' : 'danger'}>{status}</Badge>
       )}
-      {provider.accounts.length === 0 ? null : (
-        <ul className="dshx:mt-2 dshx:flex dshx:flex-col dshx:gap-1">
-          {provider.accounts.map((account) => (
-            <AccountRow key={account.id} account={account} t={t} now={now} />
-          ))}
-        </ul>
-      )}
-    </>
+    </div>
   )
 }
 
-/** One configured API-key route; a disabled one keeps its name only. */
+/** One enabled API-key route as a grid card: header badge, optional callout, then the account inset. */
 function RouteCard({
   provider,
   t,
@@ -360,34 +337,137 @@ function RouteCard({
   now: number
   onRetry: () => void
 }) {
+  const models = provider.registered ? provider.models : undefined
   return (
-    <Card className="dshx:px-3.5 dshx:py-3">
-      <div className="dshx:flex dshx:flex-wrap dshx:items-center dshx:gap-1.5">
-        <CardTitle className="dshx:min-w-0 dshx:break-all">{provider.displayName}</CardTitle>
-        {provider.enabled ? null : <Badge variant="danger">{t('routeDisabled')}</Badge>}
+    <Card className="dshx:flex dshx:flex-col dshx:gap-2.5 dshx:p-3">
+      <div className="dshx:flex dshx:items-center dshx:justify-between dshx:gap-2">
+        <CardTitle
+          title={provider.displayName}
+          className="dshx:min-w-0 dshx:truncate dshx:text-sm dshx:leading-5"
+        >
+          {provider.displayName}
+        </CardTitle>
+        {models === undefined ? null : (
+          <Badge variant="neutral" className="dshx:font-mono">
+            {t('modelsBadge', { n: models.effective })}
+          </Badge>
+        )}
       </div>
-      {provider.enabled ? (
-        <RouteBody provider={provider} t={t} now={now} onRetry={onRetry} />
-      ) : null}
+      {provider.registered ? (
+        <>
+          {provider.catalogError === undefined ? null : (
+            <Alert variant="warn">{t('catalogDegraded')}</Alert>
+          )}
+          {provider.accounts.length === 0 ? null : (
+            <div className="dshx:mt-auto dshx:flex dshx:flex-col dshx:overflow-hidden dshx:rounded-control dshx:border dshx:border-border dshx:bg-bg">
+              {provider.accounts.map((account, index) => (
+                <AccountRow
+                  key={account.id}
+                  account={account}
+                  t={t}
+                  now={now}
+                  first={index === 0}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="dshx:flex dshx:flex-1 dshx:flex-col dshx:justify-between dshx:gap-3">
+          <Alert variant="error">{reasonText(t, provider)}</Alert>
+          <div className="dshx:flex dshx:justify-end">
+            <Button size="sm" variant="danger" onClick={onRetry}>
+              {t('retry')}
+            </Button>
+          </div>
+        </div>
+      )}
     </Card>
   )
 }
 
-/** The configured API-key routes as cards, with the section's re-fetch control above them. */
+/** One disabled route as a de-emphasised full-width row below the grid. */
+function DisabledRow({ provider, t }: { provider: SnapshotProvider; t: Translate }) {
+  return (
+    <div className="dshx:flex dshx:items-center dshx:justify-between dshx:gap-3 dshx:rounded-control dshx:border dshx:border-border dshx:bg-surface dshx:px-3 dshx:py-1.5">
+      <span className="dshx:flex dshx:min-w-0 dshx:items-center dshx:gap-2">
+        <span
+          aria-hidden="true"
+          className="dshx:size-1.5 dshx:shrink-0 dshx:rounded-full dshx:bg-fg-dimmed"
+        />
+        <span className="dshx:truncate dshx:text-sm dshx:text-fg-muted">
+          {provider.displayName}
+        </span>
+      </span>
+      <Badge variant="outline">{t('routeDisabled')}</Badge>
+    </div>
+  )
+}
+
+/** The header totals: enabled routes, their accounts, and how many routes are disabled. */
+function summarize(instances: readonly SnapshotInstance[]): {
+  providers: number
+  accounts: number
+  disabled: number
+} {
+  let providers = 0
+  let accounts = 0
+  let disabled = 0
+  for (const instance of instances) {
+    for (const provider of instance.providers) {
+      if (provider.auth !== 'api-key') continue
+      if (!provider.enabled) {
+        disabled += 1
+        continue
+      }
+      providers += 1
+      accounts += provider.accounts.length
+    }
+  }
+  return { providers, accounts, disabled }
+}
+
+/** The muted one-line summary under the page subtitle. */
+function SummaryStrip({
+  summary,
+  t,
+}: {
+  summary: { providers: number; accounts: number; disabled: number }
+  t: Translate
+}) {
+  const separator = (
+    <span aria-hidden="true" className="dshx:text-fg-dimmed">
+      ·
+    </span>
+  )
+  return (
+    <div className="dshx:flex dshx:flex-wrap dshx:items-center dshx:gap-x-2.5 dshx:gap-y-1 dshx:text-xs dshx:text-fg-muted">
+      <span>{t('summaryProviders', { n: summary.providers })}</span>
+      {separator}
+      <span>{t('summaryAccounts', { n: summary.accounts })}</span>
+      {summary.disabled === 0 ? null : (
+        <>
+          {separator}
+          <span>{t('summaryDisabled', { n: summary.disabled })}</span>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** The configured API-key routes: enabled ones as cards, disabled ones as de-emphasised rows. */
 export function SnapshotCards({
   state,
   t,
   now,
   onRetry,
   refetch,
-  onRefetch,
 }: {
   state: SnapshotState
   t: Translate
   now: number
   onRetry: () => void
   refetch: RefetchState
-  onRefetch: () => void
 }) {
   if (state.status === 'loading') {
     return (
@@ -411,49 +491,45 @@ export function SnapshotCards({
     )
   }
 
-  const routes = state.instances.flatMap((instance) =>
+  const providers = state.instances.flatMap((instance) =>
     instance.providers
       .filter((provider) => provider.auth === 'api-key')
       .map((provider) => ({ key: `${instance.id}:${provider.route}`, provider })),
   )
+  const enabled = providers.filter(({ provider }) => provider.enabled)
+  const disabled = providers.filter(({ provider }) => !provider.enabled)
   const failed = state.instances.some((instance) => instance.state !== 'ok')
 
   return (
-    <div className="dshx:flex dshx:flex-col dshx:gap-3.5">
-      <div className="dshx:flex dshx:flex-wrap dshx:items-center dshx:justify-end dshx:gap-2">
-        <Button
-          size="md"
-          variant="secondary"
-          disabled={refetch.status === 'busy'}
-          onClick={onRefetch}
-        >
-          {refetch.status === 'busy' ? (
-            <>
-              <Spinner label={t('refetching')} />
-              {t('refetching')}
-            </>
-          ) : (
-            t('refetchModels')
-          )}
-        </Button>
-      </div>
+    <div className="dshx:flex dshx:flex-col dshx:gap-2">
       {refetch.status !== 'failed' ? null : (
         <p className="dshx:text-xs dshx:text-danger">
           {t('refetchFailed', { detail: shorten(refetch.detail) })}
         </p>
       )}
       <InstanceNotices instances={state.instances} t={t} />
-      {routes.length === 0 && !failed ? (
+      {providers.length === 0 && !failed ? (
         <p className="dshx:text-sm dshx:text-fg-muted">{t('snapshotEmpty')}</p>
       ) : null}
-      {routes.map(({ key, provider }) => (
-        <RouteCard key={key} provider={provider} t={t} now={now} onRetry={onRefetch} />
-      ))}
+      {enabled.length === 0 ? null : (
+        <div className="dshx:grid dshx:grid-cols-1 dshx:items-stretch dshx:gap-3.5 dshx:sm:grid-cols-2">
+          {enabled.map(({ key, provider }) => (
+            <RouteCard key={key} provider={provider} t={t} now={now} onRetry={onRetry} />
+          ))}
+        </div>
+      )}
+      {disabled.length === 0 ? null : (
+        <div className="dshx:mt-0.5 dshx:flex dshx:flex-col dshx:gap-1">
+          {disabled.map(({ key, provider }) => (
+            <DisabledRow key={key} provider={provider} t={t} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-/** The OAuth card's visuals: name, sign-in state (which carries the failure reason), model count. */
+/** The OAuth card's visuals: name with a sign-in badge, the model count, and the sign-in actions. */
 export function OAuthCardView({
   provider,
   signedIn,
@@ -485,10 +561,45 @@ export function OAuthCardView({
         : 'dshx:bg-danger'
   const label = provider.label === undefined || provider.label === '' ? provider.id : provider.label
   return (
-    <Card className="dshx:px-3.5 dshx:py-3">
-      <div className="dshx:flex dshx:flex-wrap dshx:items-center dshx:justify-between dshx:gap-2">
-        <CardTitle className="dshx:min-w-0 dshx:break-all">{label}</CardTitle>
-        <div className="dshx:flex dshx:items-center dshx:gap-1.5">
+    <Card className="dshx:flex dshx:flex-col dshx:gap-2 dshx:p-3">
+      <div className="dshx:flex dshx:flex-wrap dshx:items-center dshx:justify-between dshx:gap-3">
+        <div className="dshx:flex dshx:min-w-0 dshx:flex-col dshx:gap-1">
+          <div className="dshx:flex dshx:min-w-0 dshx:flex-wrap dshx:items-center dshx:gap-2">
+            <CardTitle
+              title={label}
+              className="dshx:min-w-0 dshx:truncate dshx:text-sm dshx:leading-5"
+            >
+              {label}
+            </CardTitle>
+            {status.kind === 'ok' ? (
+              <Badge variant="success">
+                <span
+                  aria-hidden="true"
+                  className={cn('dshx:size-1.5 dshx:rounded-full', dotClass)}
+                />
+                {t('statusOk')}
+              </Badge>
+            ) : null}
+            {status.kind === 'yellow' ? (
+              <Badge variant="warn">{statusText(t, status)}</Badge>
+            ) : null}
+          </div>
+          {status.kind === 'red' ? (
+            <p className="dshx:flex dshx:items-center dshx:gap-1.5 dshx:text-xs dshx:text-danger">
+              <span
+                aria-hidden="true"
+                className={cn('dshx:size-1.5 dshx:shrink-0 dshx:rounded-full', dotClass)}
+              />
+              <span>{statusText(t, status)}</span>
+            </p>
+          ) : null}
+          {status.kind !== 'ok' || models === undefined ? null : (
+            <p className="dshx:text-xs dshx:text-fg-muted">
+              {models.effective === 0 ? t('noModels') : t('modelCount', { n: models.effective })}
+            </p>
+          )}
+        </div>
+        <div className="dshx:flex dshx:shrink-0 dshx:items-center dshx:gap-1.5">
           {signedIn ? (
             <Button size="sm" variant="secondary" onClick={onSignOut}>
               {t('signOut')}
@@ -505,20 +616,6 @@ export function OAuthCardView({
           )}
         </div>
       </div>
-      <div className="dshx:mt-2 dshx:flex dshx:items-center dshx:gap-2">
-        <span
-          aria-hidden="true"
-          className={cn('dshx:size-2.5 dshx:shrink-0 dshx:rounded-full', dotClass)}
-        />
-        <span className="dshx:flex-1 dshx:text-sm dshx:text-fg-secondary">
-          {statusText(t, status)}
-        </span>
-      </div>
-      {status.kind !== 'ok' || models === undefined ? null : (
-        <p className="dshx:mt-1.5 dshx:text-sm dshx:text-fg-secondary">
-          {models.effective === 0 ? t('noModels') : t('modelCount', { n: models.effective })}
-        </p>
-      )}
       {children}
     </Card>
   )
@@ -566,7 +663,7 @@ function OAuthCards({ operations, t, routes, onRouteChanged }: OAuthCardsProps) 
   }, [refreshChannelProviders])
 
   return (
-    <div className="dshx:flex dshx:flex-col dshx:gap-3.5">
+    <div className="dshx:flex dshx:flex-col dshx:gap-2">
       {list.status === 'failed' ? (
         <Alert variant="error" className="dshx:flex dshx:items-center dshx:gap-2">
           <span className="dshx:flex-1">
@@ -847,7 +944,8 @@ function isRemoteLike(value: unknown): value is RemoteLike {
   return isRecord(value) && isRecord(value.llm) && typeof value.llm.discoverModels === 'function'
 }
 
-function ProvidersSection({ operations, t }: { operations: Operations; t: Translate }) {
+/** The whole section: page copy, the re-fetch control, the API-key cards and the OAuth cards. */
+export function ProvidersSection({ operations, t }: { operations: Operations; t: Translate }) {
   const [snapshot, setSnapshot] = useState<SnapshotState>({ status: 'loading' })
   const [refetch, setRefetch] = useState<RefetchState>({ status: 'idle' })
   const aliveRef = useRef(true)
@@ -904,27 +1002,49 @@ function ProvidersSection({ operations, t }: { operations: Operations; t: Transl
   const routes = snapshot.status === 'ready' ? routesById(snapshot.instances) : undefined
   const now = snapshot.status === 'ready' ? snapshot.readAt : 0
 
+  const summary = snapshot.status === 'ready' ? summarize(snapshot.instances) : undefined
+
   return (
     <Root className="dshx:flex dshx:w-full dshx:max-w-[min(720px,100vw)] dshx:flex-col dshx:px-6 dshx:pb-6 dshx:pt-1">
-      <h2 className="dshx:text-base dshx:font-semibold dshx:leading-[22px] dshx:text-fg">
-        {t('title')}
-      </h2>
-      <div className="dshx:mb-3 dshx:mt-1">
-        <SnapshotCards
-          state={snapshot}
-          t={t}
-          now={now}
-          refetch={visibleRefetch}
-          onRefetch={onRefetch}
-          onRetry={() => {
-            setSnapshot({ status: 'loading' })
-            reload()
-          }}
-        />
-      </div>
-      <h3 className="dshx:mb-2 dshx:mt-2 dshx:text-sm dshx:font-semibold dshx:text-fg">
-        {t('oauthTitle')}
-      </h3>
+      <header className="dshx:mb-4 dshx:flex dshx:flex-col dshx:gap-2">
+        <div className="dshx:flex dshx:items-center dshx:justify-between dshx:gap-3">
+          <h2 className="dshx:text-base dshx:font-semibold dshx:leading-[22px] dshx:text-fg">
+            {t('title')}
+          </h2>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={visibleRefetch.status === 'busy'}
+            onClick={onRefetch}
+          >
+            {visibleRefetch.status === 'busy' ? (
+              <>
+                <Spinner label={t('refetching')} />
+                {t('refetching')}
+              </>
+            ) : (
+              t('refetchModels')
+            )}
+          </Button>
+        </div>
+        <p className="dshx:text-sm dshx:leading-[20px] dshx:text-fg-muted">{t('intro')}</p>
+        {summary === undefined ? null : <SummaryStrip summary={summary} t={t} />}
+      </header>
+      <SnapshotCards
+        state={snapshot}
+        t={t}
+        now={now}
+        refetch={visibleRefetch}
+        onRetry={() => {
+          setSnapshot({ status: 'loading' })
+          reload()
+        }}
+      />
+      <div aria-hidden="true" className="dshx:my-4 dshx:h-px dshx:bg-border" />
+      <h3 className="dshx:text-sm dshx:font-semibold dshx:text-fg">{t('oauthTitle')}</h3>
+      <p className="dshx:mb-2 dshx:mt-1 dshx:text-xs dshx:leading-[18px] dshx:text-fg-muted">
+        {t('oauthIntro')}
+      </p>
       <OAuthCards operations={operations} t={t} routes={routes} onRouteChanged={reload} />
     </Root>
   )

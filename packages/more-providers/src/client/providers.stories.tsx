@@ -3,7 +3,7 @@
  * @module dsh-more-providers/client/providers.stories
  */
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { SnapshotCards } from './providers'
+import { ProvidersSection, SnapshotCards } from './providers'
 import { en, translator } from './messages'
 import type { SnapshotInstance, SnapshotProvider } from './snapshot'
 
@@ -35,7 +35,6 @@ function Cards({
         t={t}
         now={now}
         refetch={{ status: 'idle' }}
-        onRefetch={() => {}}
         onRetry={() => {}}
       />
     </div>
@@ -133,5 +132,51 @@ export const ConfigInvalid: Story = {
         },
       ]}
     />
+  ),
+}
+
+const chatgpt: SnapshotProvider = {
+  route: 'chatgpt',
+  kind: 'chatgpt',
+  auth: 'oauth',
+  displayName: 'ChatGPT (OpenAI)',
+  enabled: true,
+  registered: true,
+  accounts: [],
+  models: { discovered: 12, effective: 12, excluded: [], notIncluded: [] },
+}
+
+const originalFetch = globalThis.fetch
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+}
+
+/** Answer the section's snapshot and sign-in reads, so the page story renders without a Host. */
+async function stubbedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+  if (url === '/dsh-more-providers/providers') {
+    return jsonResponse({
+      instances: [instance([healthy, cooling, degraded, failed, disabled, chatgpt])],
+    })
+  }
+  if (url.startsWith('/dsh-oauth-providers/')) {
+    return jsonResponse({
+      result: {
+        ok: true,
+        value: { providers: [{ id: 'chatgpt', label: 'ChatGPT (OpenAI)', signedIn: true }] },
+      },
+    })
+  }
+  return originalFetch(input, init)
+}
+
+globalThis.fetch = stubbedFetch
+
+export const Section: Story = {
+  render: () => (
+    <div className="dshx:w-[720px] dshx:max-w-full">
+      <ProvidersSection operations={{ discoverModels: async () => ({ ok: true }) }} t={t} />
+    </div>
   ),
 }
