@@ -57,8 +57,15 @@ they serve Storybook and the jsdom tests and never reach a production bundle.
 5. **Interactive controls are Base UI by default.** `Switch`, `Select`, and
    `Dialog` are the shared wrappers. Their popups portal into a container inside
    the component subtree, not `document.body`, so theme inheritance and slot DOM
-   ownership stay intact. Dialogs keep Base UI's focus trap, Escape handling,
-   and focus return. `Select` defaults to an `align="start"` popup and offers
+   ownership stay intact. That container also joins the browser **top layer**
+   (`popover="manual"` + `showPopover`, see `src/lib/top-layer.ts`) while the
+   popup is open: a top-layer box paints above every stacking context and
+   ignores ancestor `transform` / `filter` / `contain` / `overflow`, so a host
+   surface that is animated, blurred or scroll-clipped cannot cover or cut the
+   popup — the failure mode the fixed-position portal had before. Any new
+   component that portals a popup must use `useTopLayer` on its anchor, keep the
+   anchor zero-sized, and rely on `z-index` only as the pre-top-layer fallback.
+   Dialogs keep Base UI's focus trap, Escape handling, and focus return. `Select` defaults to an `align="start"` popup and offers
    `variant="ghost"` for DSH inline selectors; it stays the shared control for
    ordinary selects. Pass `align="end"` when the control sits at the right edge
    so the popup keeps its right edge fixed and expands left.

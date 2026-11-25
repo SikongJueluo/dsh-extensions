@@ -2,6 +2,7 @@ import * as React from 'react'
 import { Select as BaseSelect } from '@base-ui/react/select'
 import { Check, ChevronDown } from 'lucide-react'
 import { cn } from '../lib/cn'
+import { useTopLayer } from '../lib/top-layer'
 
 export interface SelectOption {
   value: string
@@ -51,7 +52,11 @@ const renderItem = (option: SelectOption) => (
   </BaseSelect.Item>
 )
 
-/** Base UI select styled as the shadcn trigger/popup pair. The popup portals into a container inside this component's own subtree, not into `document.body`, so it inherits the host theme and stays inside the slot's DOM ownership. */
+/**
+ * Base UI select styled as the shadcn trigger/popup pair. The popup portals into a container
+ * inside this component's subtree, never `document.body`, so it keeps the host theme and slot
+ * ownership; that container joins the top layer while open.
+ */
 export function Select({
   value,
   onValueChange,
@@ -67,18 +72,28 @@ export function Select({
   align = 'start',
 }: SelectProps) {
   const [container, setContainer] = React.useState<HTMLDivElement | null>(null)
+  const [open, setOpen] = React.useState(false)
+  const containerRef = React.useRef<HTMLDivElement | null>(null)
   const flat = groups ? groups.flatMap((group) => group.options) : options
+  useTopLayer(containerRef, open && container !== null)
 
   return (
     <div className={cn('dshx:relative', variant === 'ghost' && 'dshx:inline-flex', className)}>
-      {}
-      <div ref={setContainer} className="dshx:fixed dshx:left-0 dshx:top-0 dshx:h-0 dshx:w-0" />
+      <div
+        ref={(element) => {
+          containerRef.current = element
+          setContainer(element)
+        }}
+        className="dshx:fixed dshx:left-0 dshx:top-0 dshx:h-0 dshx:w-0"
+      />
       <BaseSelect.Root
         value={value === '' ? null : value}
         onValueChange={(next) => onValueChange(next ?? '')}
         items={flat.map((option) => ({ label: option.label, value: option.value }))}
         disabled={disabled}
         name={name}
+        open={open}
+        onOpenChange={setOpen}
       >
         <BaseSelect.Trigger
           id={id}
@@ -111,7 +126,7 @@ export function Select({
             >
               <BaseSelect.Popup
                 className={cn(
-                  'dshx:max-h-[min(360px,calc(100vh-96px))] dshx:w-max dshx:min-w-[min(240px,calc(100vw-32px))] dshx:max-w-[min(420px,calc(100vw-32px))] dshx:overflow-y-auto',
+                  'dshx:max-h-[min(360px,var(--available-height,calc(100vh-96px)))] dshx:w-max dshx:min-w-[min(240px,calc(100vw-32px))] dshx:max-w-[min(420px,calc(100vw-32px))] dshx:overflow-y-auto',
                   'dshx:rounded-[10px] dshx:border dshx:border-border dshx:bg-surface-2 dshx:p-1 dshx:shadow-xl',
                   'dshx:text-fg dshx:shadow-lg dshx:outline-none',
                 )}

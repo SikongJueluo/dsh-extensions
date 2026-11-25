@@ -201,3 +201,64 @@ describe('Select', () => {
     expect(trigger.textContent).toContain('Model B')
   })
 })
+
+/** Minimal stand-in for the browser top layer, which jsdom does not implement. */
+function installTopLayer(): void {
+  Object.defineProperty(HTMLElement.prototype, 'showPopover', {
+    configurable: true,
+    value(this: HTMLElement) {
+      this.dataset.open = ''
+    },
+  })
+  Object.defineProperty(HTMLElement.prototype, 'hidePopover', {
+    configurable: true,
+    value(this: HTMLElement) {
+      delete this.dataset.open
+    },
+  })
+}
+
+describe('portal anchor', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(HTMLElement.prototype, 'showPopover')
+    Reflect.deleteProperty(HTMLElement.prototype, 'hidePopover')
+  })
+
+  it('promotes the anchor while open and releases it when the popup closes', async () => {
+    installTopLayer()
+    setup()
+    await act(async () => {
+      root.render(<SelectDemo />)
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0)
+      })
+    })
+    const anchor = requireFound(container.querySelector<HTMLDivElement>('[popover]'), 'anchor')
+    expect(anchor.getAttribute('popover')).toBe('manual')
+    expect(Object.hasOwn(anchor.dataset, 'open')).toBe(false)
+    expect(anchor.style.width).toBe('0px')
+    expect(anchor.style.backgroundColor).toBe('transparent')
+
+    const trigger = requireFound(
+      container.querySelector<HTMLButtonElement>('[role="combobox"]'),
+      '[role="combobox"]',
+    )
+    await act(async () => {
+      trigger.click()
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0)
+      })
+    })
+    expect(Object.hasOwn(anchor.dataset, 'open')).toBe(true)
+
+    const options = [...container.querySelectorAll<HTMLElement>('[role="option"]')]
+    await act(async () => {
+      requireFound(options[1], 'second option').click()
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0)
+      })
+    })
+    expect(Object.hasOwn(anchor.dataset, 'open')).toBe(false)
+    expect(trigger.textContent).toContain('Model B')
+  })
+})

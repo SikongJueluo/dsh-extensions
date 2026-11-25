@@ -2,6 +2,7 @@ import * as React from 'react'
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
 import { cn } from '../lib/cn'
+import { useTopLayer } from '../lib/top-layer'
 
 export interface DialogProps {
   open: boolean
@@ -14,7 +15,11 @@ export interface DialogProps {
   className?: string
 }
 
-/** Modal dialog on Base UI. Focus trapping, Escape, and focus return are Base UI's contract; the portal targets a container inside the slot subtree so the popup keeps the host's theme variables and never becomes a second app root. */
+/**
+ * Modal dialog on Base UI. Focus trapping, Escape, and focus return are Base UI's contract; the
+ * portal stays inside the slot subtree for the host theme, and joins the top layer while open so
+ * a transformed or overflowing host surface cannot clip or cover it.
+ */
 export function Dialog({
   open,
   onOpenChange,
@@ -26,9 +31,16 @@ export function Dialog({
   className,
 }: DialogProps) {
   const [container, setContainer] = React.useState<HTMLDivElement | null>(null)
+  const containerRef = React.useRef<HTMLDivElement | null>(null)
+  useTopLayer(containerRef, open && container !== null)
 
   return (
-    <div ref={setContainer}>
+    <div
+      ref={(element) => {
+        containerRef.current = element
+        setContainer(element)
+      }}
+    >
       <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
         {container ? (
           <BaseDialog.Portal container={container}>
