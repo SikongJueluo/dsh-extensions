@@ -15,9 +15,11 @@ export const buttonVariants = cva(
         default: 'dshx:bg-brand dshx:text-on-brand dshx:hover:opacity-90',
         secondary:
           'dshx:border dshx:border-border dshx:bg-surface-2 dshx:text-fg dshx:hover:bg-brand/10',
-        ghost: 'dshx:text-fg-secondary dshx:hover:bg-surface-2 dshx:hover:text-fg',
-        danger: 'dshx:border dshx:border-danger/40 dshx:text-danger dshx:hover:bg-danger/10',
-        link: 'dshx:text-brand dshx:underline-offset-4 dshx:hover:underline',
+        ghost:
+          'dshx:bg-transparent dshx:text-fg-secondary dshx:hover:bg-surface-2 dshx:hover:text-fg',
+        danger:
+          'dshx:bg-transparent dshx:border dshx:border-danger/40 dshx:text-danger dshx:hover:bg-danger/10',
+        link: 'dshx:bg-transparent dshx:text-brand dshx:underline-offset-4 dshx:hover:underline',
       },
       size: {
         sm: 'dshx:h-7 dshx:px-2.5 dshx:text-xs dshx:pointer-coarse:min-h-11',
